@@ -89,11 +89,9 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // --- Root redirect ---
+  // --- Root path: tampilkan landing page publik Wiramart ---
   if (pathname === '/') {
-    if (adminSession) return NextResponse.redirect(new URL('/admin/dashboard', request.url));
-    if (kasirSession) return NextResponse.redirect(new URL('/kasir/pos', request.url));
-    return NextResponse.redirect(new URL('/login', request.url));
+    return NextResponse.next();
   }
 
   // --- Auth routes (login pages): redirect jika sudah login ---

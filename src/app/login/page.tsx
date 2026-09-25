@@ -114,15 +114,15 @@ export default function LoginPage() {
           <div style={{ width: 72, height: 72, position: 'relative', flexShrink: 0 }}>
             <Image
               src="/logo.png"
-              alt="Logo Smartkasir Perwira"
+              alt="Logo Wiramart UNPERBA"
               fill
               style={{ objectFit: 'contain' }}
               priority
             />
           </div>
           <div>
-            <div className="auth-logo-name">SMARTKASIR PERWIRA</div>
-            <div className="auth-logo-sub">Sistem Kasir Digital UNPERBA</div>
+            <div className="auth-logo-name">WIRAMART UNPERBA</div>
+            <div className="auth-logo-sub">Unit Kegiatan Mahasiswa Kewirausahaan</div>
           </div>
         </div>
 

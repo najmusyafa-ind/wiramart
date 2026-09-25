@@ -125,7 +125,7 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
         <div style={{ width: 36, height: 36, position: 'relative', flexShrink: 0 }}>
           <Image
             src="/logo.png"
-            alt="Logo Smartkasir Perwira"
+            alt="Logo Wiramart UNPERBA"
             fill
             sizes="36px"
             style={{ objectFit: 'contain' }}
@@ -133,8 +133,8 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
           />
         </div>
         <div className="sidebar-logo-text">
-          <span className="sidebar-logo-name">Smartkasir</span>
-          <span className="sidebar-logo-subtitle">Perwira UNPERBA</span>
+          <span className="sidebar-logo-name">Wiramart</span>
+          <span className="sidebar-logo-subtitle">UKM Kewirausahaan UNPERBA</span>
         </div>
         {/* Close button — mobile only */}
         {isMobileOpen && (

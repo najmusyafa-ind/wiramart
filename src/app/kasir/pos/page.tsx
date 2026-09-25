@@ -608,10 +608,10 @@ export default function PosPage() {
               color: 'var(--color-text-inverse)', fontWeight: 'var(--weight-bold)',
               fontSize: 'var(--text-sm)', letterSpacing: 'var(--tracking-wide)',
             }}>
-              🏪 SMARTKASIR
+              🏪 WIRAMART
             </span>
             <span style={{ color: 'var(--color-sidebar-muted)', fontSize: 'var(--text-xs)' }}>
-              Perwira UNPERBA
+              UKM Kewirausahaan UNPERBA
             </span>
           </div>
         </div>

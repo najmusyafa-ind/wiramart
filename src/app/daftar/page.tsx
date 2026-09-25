@@ -4,6 +4,7 @@
 // =============================================================
 
 import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
   GraduationCap, Users, KeyRound, Search, CheckCircle,
@@ -445,12 +446,20 @@ export default function DaftarPage() {
       <div style={{ width: '100%', maxWidth: 480 }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 'var(--space-6)' }}>
-          <div style={{ fontSize: 28, marginBottom: 'var(--space-2)' }}>🏪</div>
-          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
-            SmartKasir Perwira
+          <div style={{ width: 64, height: 64, position: 'relative', margin: '0 auto var(--space-2)' }}>
+            <Image
+              src="/logo.png"
+              alt="Logo Wiramart UNPERBA"
+              fill
+              style={{ objectFit: 'contain' }}
+              priority
+            />
+          </div>
+          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
+            Wiramart UNPERBA
           </h1>
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-            {mode === 'choose' ? 'Aktivasi akun atau daftar shift' : mode === 'dosen' ? 'Portal Dosen' : 'Portal Mahasiswa'}
+            {mode === 'choose' ? 'Aktivasi akun atau daftar shift' : mode === 'dosen' ? 'Portal Dosen / Admin' : 'Portal Mahasiswa Kasir'}
           </p>
         </div>
 
