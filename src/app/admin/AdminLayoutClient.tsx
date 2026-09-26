@@ -330,19 +330,13 @@ export default function AdminLayoutClient({
   return (
     <div className="layout-admin">
 
-      {/* Backdrop overlay — visible on mobile when sidebar open */}
+      {/* Backdrop overlay — mobile only, saat sidebar terbuka */}
       {isMobileOpen && (
         <div
+          className="admin-backdrop"
           aria-hidden="true"
           onClick={() => setIsMobileOpen(false)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.55)',
-            zIndex: 399,
-            backdropFilter: 'blur(2px)',
-            animation: 'fade-in 0.2s ease',
-          }}
+          onTouchStart={() => setIsMobileOpen(false)}
         />
       )}
 
@@ -360,21 +354,11 @@ export default function AdminLayoutClient({
             {/* Hamburger button */}
             <button
               id="btn-mobile-menu"
+              className="btn-hamburger"
               onClick={() => setIsMobileOpen((v) => !v)}
               aria-label={isMobileOpen ? 'Tutup menu' : 'Buka menu navigasi'}
               aria-expanded={isMobileOpen}
               aria-controls="admin-sidebar"
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--color-text-secondary)',
-                display: 'flex',
-                alignItems: 'center',
-                padding: 'var(--space-2)',
-                borderRadius: 'var(--radius-sm)',
-                minHeight: 0,
-              }}
             >
               <Menu size={22} aria-hidden="true" />
             </button>

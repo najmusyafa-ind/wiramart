@@ -166,7 +166,26 @@
   --z-tooltip: 600;
 }
 
+/* ---------- KEYFRAME ANIMATIONS ---------- */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
 /* ==========================================================
+
    RESET & BASE STYLES
    ========================================================== */
 
@@ -746,6 +765,41 @@ p, h1, h2, h3, h4, h5, h6 {
   top: 0;
   z-index: var(--z-sticky);
 }
+
+/* Backdrop gelap saat sidebar mobile terbuka.
+   React hanya me-render elemen ini ketika isMobileOpen=true,
+   jadi cukup pakai display:block langsung. */
+.admin-backdrop {
+  display: block;
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.55);
+  z-index: 399;
+  animation: fade-in var(--duration-base) var(--ease-out-expo);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+}
+
+/* Hamburger button — hanya tampil di mobile */
+.btn-hamburger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  min-height: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-hamburger:hover {
+  background-color: var(--color-surface-hover);
+}
+
+/* Di desktop (>= 1024px), hamburger tidak perlu disembunyikan
+   karena sidebar sudah tampil permanen via grid */
 
 .layout-content {
   flex: 1;
@@ -1759,14 +1813,21 @@ p, h1, h2, h3, h4, h5, h6 {
   }
 
   .layout-sidebar {
+    /* Reset grid placement — sidebar keluar dari grid flow di mobile */
+    grid-row: unset;
+    grid-column: unset;
     display: none;
     position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
-    width: 280px;
+    width: min(280px, 85vw);
     z-index: 400;
     height: 100dvh;
+    /* Ruang ekstra agar tombol Logout tidak tertutup bottom nav */
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    /* Cegah scroll keluar dari sidebar */
+    overscroll-behavior-y: contain;
   }
 
   .layout-sidebar.mobile-open {
