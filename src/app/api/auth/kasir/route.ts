@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { employees, shifts } from '@/lib/db/schema';
+import { employees, shifts, shiftSchedules, attendances } from '@/lib/db/schema';
 import { NextResponse } from 'next/server';
 import { signAccessToken, signRefreshToken } from '@/lib/utils/auth';
 import { apiError } from '@/lib/utils/helpers';
@@ -112,6 +112,61 @@ export async function POST(request: Request): Promise<Response> {
   if (!newShift) {
     return apiError('Gagal membuat sesi kerja. Coba lagi.', 'SHIFT_CREATE_FAILED', 500);
   }
+
+  // 5b. Auto-record attendance (HADIR / TELAT) — fire and forget
+  // Tidak blocking login jika gagal (jadwal mungkin belum disetup admin)
+  void (async () => {
+    try {
+      const nowWib = new Date();
+      // Nama hari dalam Bahasa Indonesia (sesuai enum day_of_week)
+      const hariMap: Record<number, string> = {
+        0: 'MINGGU', 1: 'SENIN', 2: 'SELASA', 3: 'RABU',
+        4: 'KAMIS',  5: 'JUMAT', 6: 'SABTU',
+      };
+      const hariIni = hariMap[nowWib.getDay()] as
+        'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU';
+      const tanggalHari = nowWib.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+      const jamMenitSekarang = nowWib.toLocaleTimeString('en-GB', {
+        timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
+      }); // 'HH:MM'
+
+      // Cari jadwal hari ini yang di-assign ke karyawan ini
+      const jadwalHariIni = await db.query.shiftSchedules.findFirst({
+        where: and(
+          eq(shiftSchedules.employeeId, employee.id),
+          eq(shiftSchedules.dayOfWeek, hariIni),
+          eq(shiftSchedules.isActive, true),
+        ),
+      });
+
+      if (!jadwalHariIni) return; // Tidak ada jadwal hari ini — skip
+
+      // Hitung keterlambatan (toleransi 15 menit)
+      const TOLERANSI_MENIT = 15;
+      const [jamJadwal, menitJadwal] = jadwalHariIni.slotStart.split(':').map(Number);
+      const [jamAktual, menitAktual] = jamMenitSekarang.split(':').map(Number);
+      const menitJadwalTotal = jamJadwal * 60 + menitJadwal;
+      const menitAktualTotal = jamAktual * 60 + menitAktual;
+      const selisihMenit     = menitAktualTotal - menitJadwalTotal;
+      const isTelat          = selisihMenit > TOLERANSI_MENIT;
+      const lateMinutes      = isTelat ? selisihMenit : 0;
+
+      await db
+        .insert(attendances)
+        .values({
+          employeeId:     employee.id,
+          scheduleId:     jadwalHariIni.id,
+          attendanceDate: tanggalHari,
+          status:         isTelat ? 'TELAT' : 'HADIR',
+          shiftId:        newShift.id,
+          clockInActual:  nowWib,
+          lateMinutes,
+        })
+        .onConflictDoNothing(); // Jika sudah ada record (mis. re-login) → skip
+    } catch {
+      // Gagal catat absensi tidak boleh block login kasir
+    }
+  })();
 
   // 6. Generate tokens
   const accessToken = await signAccessToken({
