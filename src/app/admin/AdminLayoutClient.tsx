@@ -18,6 +18,8 @@ import {
   Download,
   ScanLine,
   CalendarDays,
+  ClipboardList,
+  ArrowLeftRight,
 } from 'lucide-react';
 
 type NavItem = {
@@ -56,6 +58,18 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Jadwal Shift',
     href: '/admin/jadwal',
     icon: <CalendarDays size={18} aria-hidden="true" />,
+    section: 'Menu Utama',
+  },
+  {
+    label: 'Absensi',
+    href: '/admin/absensi',
+    icon: <ClipboardList size={18} aria-hidden="true" />,
+    section: 'Menu Utama',
+  },
+  {
+    label: 'Pengajuan Swap',
+    href: '/admin/swap-request',
+    icon: <ArrowLeftRight size={18} aria-hidden="true" />,
     section: 'Menu Utama',
   },
   {
