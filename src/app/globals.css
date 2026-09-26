@@ -1,14 +1,14 @@
-/* ==========================================================
-   SMARTKASIR PERWIRA — Global Design System v1.1
+﻿/* ==========================================================
+   SMARTKASIR PERWIRA â€” Global Design System v1.1
    Vanilla CSS + CSS Custom Properties (Token-First)
    Font: next/font/google (Inter + JetBrains Mono)
    Font variables --font-sans & --font-mono diinjeksi oleh layout.tsx
-   via next/font — tidak perlu @import di sini.
+   via next/font â€” tidak perlu @import di sini.
    ========================================================== */
 
-/* ---------- COLOR TOKENS (HSL — Primary: Forest Green from Logo) ---------- */
+/* ---------- COLOR TOKENS (HSL â€” Primary: Forest Green from Logo) ---------- */
 :root {
-  /* Primary — Forest Green (from Smartkasir shield logo) */
+  /* Primary â€” Forest Green (from Smartkasir shield logo) */
   --color-primary-h: 145;
   --color-primary-s: 63%;
   --color-primary-l: 32%;
@@ -18,11 +18,11 @@
   --color-primary-light:   hsl(var(--color-primary-h), 40%, 92%);
   --color-primary-subtle:  hsl(var(--color-primary-h), 30%, 97%);
 
-  /* Secondary — Medium Green */
+  /* Secondary â€” Medium Green */
   --color-secondary:       hsl(145, 45%, 48%);
   --color-secondary-hover: hsl(145, 45%, 40%);
 
-  /* Accent — Warm Amber (for revenue/money highlights) */
+  /* Accent â€” Warm Amber (for revenue/money highlights) */
   --color-accent:          hsl(40, 96%, 50%);
   --color-accent-light:    hsl(40, 96%, 93%);
   --color-accent-text:     hsl(30, 80%, 30%);
@@ -65,10 +65,10 @@
   --color-skeleton:        hsl(145, 15%, 90%);
   --color-skeleton-shine:  hsl(145, 15%, 96%);
 
-  /* Extended surface tokens — dipakai di file-upload, drag-drop, state highlight */
+  /* Extended surface tokens â€” dipakai di file-upload, drag-drop, state highlight */
   /* --color-primary-surface: warna latar sangat terang saat elemen dipilih/aktif */
   --color-primary-surface: hsl(145, 40%, 93%);
-  /* --color-surface-alt: permukaan alternatif — lebih gelap dari surface, lebih terang dari muted */
+  /* --color-surface-alt: permukaan alternatif â€” lebih gelap dari surface, lebih terang dari muted */
   --color-surface-alt:     hsl(145, 10%, 95%);
   /* --color-backdrop-blur: untuk modal overlay dengan glassmorphism */
   --color-backdrop-blur:   hsla(145, 30%, 8%, 0.6);
@@ -99,7 +99,7 @@
 
   --text-xs:   0.75rem;    /* 12px */
   --text-sm:   0.875rem;   /* 14px */
-  --text-base: 1rem;       /* 16px — never less on mobile (iOS zoom prevention) */
+  --text-base: 1rem;       /* 16px â€” never less on mobile (iOS zoom prevention) */
   --text-lg:   1.125rem;   /* 18px */
   --text-xl:   1.25rem;    /* 20px */
   --text-2xl:  1.5rem;     /* 24px */
@@ -170,7 +170,7 @@
    RESET & BASE STYLES
    ========================================================== */
 
-/* prefers-reduced-motion — MANDATORY WCAG 2.1 AA 2.3.3 */
+/* prefers-reduced-motion â€” MANDATORY WCAG 2.1 AA 2.3.3 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -218,14 +218,14 @@ p, h1, h2, h3, h4, h5, h6 {
   overflow-wrap: break-word;
 }
 
-/* Focus visible — WCAG AA: visible ring, no outline: none */
+/* Focus visible â€” WCAG AA: visible ring, no outline: none */
 :focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 
-/* Scrollbar — subtle green tint */
+/* Scrollbar â€” subtle green tint */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--color-surface-muted); }
 ::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: var(--radius-full); }
@@ -1644,7 +1644,7 @@ p, h1, h2, h3, h4, h5, h6 {
    RESPONSIVE BREAKPOINTS (Mobile-First)
    ========================================================== */
 
-/* xs: 375px — base mobile, no media query needed */
+/* xs: 375px â€” base mobile, no media query needed */
 
 /* sm: 640px */
 @media (min-width: 640px) {
@@ -1659,7 +1659,7 @@ p, h1, h2, h3, h4, h5, h6 {
   .modal { margin: var(--space-6); }
 }
 
-/* lg: 1024px — desktop sidebar layout */
+/* lg: 1024px â€” desktop sidebar layout */
 @media (min-width: 1024px) {
   .layout-admin { grid-template-columns: 260px 1fr; }
   .grid-3 { grid-template-columns: repeat(3, 1fr); }
@@ -1738,7 +1738,7 @@ p, h1, h2, h3, h4, h5, h6 {
     display: block;
   }
 
-  /* POS products grid — smaller cards */
+  /* POS products grid â€” smaller cards */
   .pos-products-grid {
     grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr));
     gap: var(--space-2);
@@ -1777,18 +1777,18 @@ p, h1, h2, h3, h4, h5, h6 {
 
 
 /* ==========================================================
-   LANDING PAGE — Complete Design System v2.0
+   LANDING PAGE â€” Complete Design System v2.0
    Cinematic campus photo hero + Mobile floating pill nav
    ========================================================== */
 
-/* ── ROOT WRAPPER ──────────────────────────────────────────── */
+/* â”€â”€ ROOT WRAPPER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-root {
   min-height: 100svh;
   background: var(--color-bg);
   color: var(--color-text);
 }
 
-/* ── SKIP LINK (a11y) ─────────────────────────────────────── */
+/* â”€â”€ SKIP LINK (a11y) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-skip-link {
   position: absolute;
   top: -100px;
@@ -1807,7 +1807,7 @@ p, h1, h2, h3, h4, h5, h6 {
   top: var(--space-4);
 }
 
-/* ── ANNOUNCEMENT BAR ─────────────────────────────────────── */
+/* â”€â”€ ANNOUNCEMENT BAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-announcement {
   display: flex;
   align-items: center;
@@ -1837,7 +1837,7 @@ p, h1, h2, h3, h4, h5, h6 {
   flex-shrink: 0;
 }
 
-/* ── STICKY HEADER ───────────────────────────────────────── */
+/* â”€â”€ STICKY HEADER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-header {
   position: sticky;
   top: 0;
@@ -1946,7 +1946,7 @@ p, h1, h2, h3, h4, h5, h6 {
 }
 .lp-nav__admin:hover { color: var(--color-text); }
 
-/* ── HERO SECTION ─────────────────────────────────────────── */
+/* â”€â”€ HERO SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-hero {
   position: relative;
   min-height: clamp(560px, 90svh, 820px);
@@ -2098,7 +2098,7 @@ p, h1, h2, h3, h4, h5, h6 {
   50% { transform: translateX(-50%) translateY(6px); opacity: 1; }
 }
 
-/* ── STATS BAR ────────────────────────────────────────────── */
+/* â”€â”€ STATS BAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-stats {
   background: var(--color-sidebar-bg);
   border-bottom: 1px solid hsl(145, 55%, 22%);
@@ -2136,7 +2136,7 @@ p, h1, h2, h3, h4, h5, h6 {
   margin-top: 2px;
 }
 
-/* ── SHARED SECTION UTILITIES ─────────────────────────────── */
+/* â”€â”€ SHARED SECTION UTILITIES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-section-badge {
   display: inline-flex;
   align-items: center;
@@ -2176,7 +2176,7 @@ p, h1, h2, h3, h4, h5, h6 {
   color: var(--color-primary);
 }
 
-/* ── ABOUT SECTION ────────────────────────────────────────── */
+/* â”€â”€ ABOUT SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-about {
   padding: clamp(4rem, 8vw, 6rem) var(--space-6);
   background: var(--color-bg);
@@ -2292,7 +2292,7 @@ p, h1, h2, h3, h4, h5, h6 {
   gap: var(--space-3);
 }
 
-/* ── ECOSYSTEM SECTION ────────────────────────────────────── */
+/* â”€â”€ ECOSYSTEM SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-ecosystem {
   padding: clamp(4rem, 8vw, 6rem) var(--space-6);
   background: var(--color-surface);
@@ -2372,7 +2372,7 @@ p, h1, h2, h3, h4, h5, h6 {
   transform: scaleX(1);
 }
 
-/* ── DIVISIONS SECTION ────────────────────────────────────── */
+/* â”€â”€ DIVISIONS SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-divisions {
   padding: clamp(4rem, 8vw, 6rem) var(--space-6);
   background: var(--color-bg);
@@ -2487,7 +2487,7 @@ p, h1, h2, h3, h4, h5, h6 {
   line-height: 1.55;
 }
 
-/* ── CTA SECTION ──────────────────────────────────────────── */
+/* â”€â”€ CTA SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-cta {
   position: relative;
   overflow: hidden;
@@ -2583,7 +2583,7 @@ p, h1, h2, h3, h4, h5, h6 {
 }
 .lp-cta__btn-outline:active { transform: translateY(0) scale(0.97); }
 
-/* ── FOOTER ───────────────────────────────────────────────── */
+/* â”€â”€ FOOTER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .lp-footer {
   background: var(--color-sidebar-bg);
   border-top: 1px solid hsl(145, 45%, 22%);
@@ -2722,11 +2722,10 @@ p, h1, h2, h3, h4, h5, h6 {
   .lp-section-header { margin-bottom: var(--space-8); }
   .lp-about__badge { flex-direction: column; text-align: center; gap: var(--space-2); }
 }
-}
 
 /* ==========================================================
    ADMIN MOBILE BOTTOM NAVIGATION BAR
-   Hanya muncul di layar < 768px — desktop tetap pakai sidebar
+   Hanya muncul di layar < 768px â€” desktop tetap pakai sidebar
    ========================================================== */
 
 .mobile-bottom-nav {
