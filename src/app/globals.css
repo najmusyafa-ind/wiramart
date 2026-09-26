@@ -1,14 +1,14 @@
-﻿/* ==========================================================
-   SMARTKASIR PERWIRA â€” Global Design System v1.1
+/* ==========================================================
+   SMARTKASIR PERWIRA — Global Design System v1.1
    Vanilla CSS + CSS Custom Properties (Token-First)
    Font: next/font/google (Inter + JetBrains Mono)
    Font variables --font-sans & --font-mono diinjeksi oleh layout.tsx
-   via next/font â€” tidak perlu @import di sini.
+   via next/font — tidak perlu @import di sini.
    ========================================================== */
 
-/* ---------- COLOR TOKENS (HSL â€” Primary: Forest Green from Logo) ---------- */
+/* ---------- COLOR TOKENS (HSL — Primary: Forest Green from Logo) ---------- */
 :root {
-  /* Primary â€” Forest Green (from Smartkasir shield logo) */
+  /* Primary — Forest Green (from Smartkasir shield logo) */
   --color-primary-h: 145;
   --color-primary-s: 63%;
   --color-primary-l: 32%;
@@ -18,11 +18,11 @@
   --color-primary-light:   hsl(var(--color-primary-h), 40%, 92%);
   --color-primary-subtle:  hsl(var(--color-primary-h), 30%, 97%);
 
-  /* Secondary â€” Medium Green */
+  /* Secondary — Medium Green */
   --color-secondary:       hsl(145, 45%, 48%);
   --color-secondary-hover: hsl(145, 45%, 40%);
 
-  /* Accent â€” Warm Amber (for revenue/money highlights) */
+  /* Accent — Warm Amber (for revenue/money highlights) */
   --color-accent:          hsl(40, 96%, 50%);
   --color-accent-light:    hsl(40, 96%, 93%);
   --color-accent-text:     hsl(30, 80%, 30%);
@@ -65,10 +65,10 @@
   --color-skeleton:        hsl(145, 15%, 90%);
   --color-skeleton-shine:  hsl(145, 15%, 96%);
 
-  /* Extended surface tokens â€” dipakai di file-upload, drag-drop, state highlight */
+  /* Extended surface tokens — dipakai di file-upload, drag-drop, state highlight */
   /* --color-primary-surface: warna latar sangat terang saat elemen dipilih/aktif */
   --color-primary-surface: hsl(145, 40%, 93%);
-  /* --color-surface-alt: permukaan alternatif â€” lebih gelap dari surface, lebih terang dari muted */
+  /* --color-surface-alt: permukaan alternatif — lebih gelap dari surface, lebih terang dari muted */
   --color-surface-alt:     hsl(145, 10%, 95%);
   /* --color-backdrop-blur: untuk modal overlay dengan glassmorphism */
   --color-backdrop-blur:   hsla(145, 30%, 8%, 0.6);
@@ -99,7 +99,7 @@
 
   --text-xs:   0.75rem;    /* 12px */
   --text-sm:   0.875rem;   /* 14px */
-  --text-base: 1rem;       /* 16px â€” never less on mobile (iOS zoom prevention) */
+  --text-base: 1rem;       /* 16px — never less on mobile (iOS zoom prevention) */
   --text-lg:   1.125rem;   /* 18px */
   --text-xl:   1.25rem;    /* 20px */
   --text-2xl:  1.5rem;     /* 24px */
@@ -170,7 +170,7 @@
    RESET & BASE STYLES
    ========================================================== */
 
-/* prefers-reduced-motion â€” MANDATORY WCAG 2.1 AA 2.3.3 */
+/* prefers-reduced-motion — MANDATORY WCAG 2.1 AA 2.3.3 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -218,14 +218,14 @@ p, h1, h2, h3, h4, h5, h6 {
   overflow-wrap: break-word;
 }
 
-/* Focus visible â€” WCAG AA: visible ring, no outline: none */
+/* Focus visible — WCAG AA: visible ring, no outline: none */
 :focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 
-/* Scrollbar â€” subtle green tint */
+/* Scrollbar — subtle green tint */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--color-surface-muted); }
 ::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: var(--radius-full); }
@@ -1644,7 +1644,7 @@ p, h1, h2, h3, h4, h5, h6 {
    RESPONSIVE BREAKPOINTS (Mobile-First)
    ========================================================== */
 
-/* xs: 375px â€” base mobile, no media query needed */
+/* xs: 375px — base mobile, no media query needed */
 
 /* sm: 640px */
 @media (min-width: 640px) {
@@ -1659,7 +1659,7 @@ p, h1, h2, h3, h4, h5, h6 {
   .modal { margin: var(--space-6); }
 }
 
-/* lg: 1024px â€” desktop sidebar layout */
+/* lg: 1024px — desktop sidebar layout */
 @media (min-width: 1024px) {
   .layout-admin { grid-template-columns: 260px 1fr; }
   .grid-3 { grid-template-columns: repeat(3, 1fr); }
@@ -1738,7 +1738,7 @@ p, h1, h2, h3, h4, h5, h6 {
     display: block;
   }
 
-  /* POS products grid â€” smaller cards */
+  /* POS products grid — smaller cards */
   .pos-products-grid {
     grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr));
     gap: var(--space-2);
@@ -1777,18 +1777,18 @@ p, h1, h2, h3, h4, h5, h6 {
 
 
 /* ==========================================================
-   LANDING PAGE â€” Complete Design System v2.0
+   LANDING PAGE — Complete Design System v2.0
    Cinematic campus photo hero + Mobile floating pill nav
    ========================================================== */
 
-/* â”€â”€ ROOT WRAPPER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── ROOT WRAPPER ──────────────────────────────────────────── */
 .lp-root {
   min-height: 100svh;
   background: var(--color-bg);
   color: var(--color-text);
 }
 
-/* â”€â”€ SKIP LINK (a11y) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── SKIP LINK (a11y) ─────────────────────────────────────── */
 .lp-skip-link {
   position: absolute;
   top: -100px;
@@ -1807,7 +1807,7 @@ p, h1, h2, h3, h4, h5, h6 {
   top: var(--space-4);
 }
 
-/* â”€â”€ ANNOUNCEMENT BAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── ANNOUNCEMENT BAR ─────────────────────────────────────── */
 .lp-announcement {
   display: flex;
   align-items: center;
@@ -1837,7 +1837,7 @@ p, h1, h2, h3, h4, h5, h6 {
   flex-shrink: 0;
 }
 
-/* â”€â”€ STICKY HEADER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── STICKY HEADER ───────────────────────────────────────── */
 .lp-header {
   position: sticky;
   top: 0;
@@ -1946,7 +1946,7 @@ p, h1, h2, h3, h4, h5, h6 {
 }
 .lp-nav__admin:hover { color: var(--color-text); }
 
-/* â”€â”€ HERO SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── HERO SECTION ─────────────────────────────────────────── */
 .lp-hero {
   position: relative;
   min-height: clamp(560px, 90svh, 820px);
@@ -2098,7 +2098,7 @@ p, h1, h2, h3, h4, h5, h6 {
   50% { transform: translateX(-50%) translateY(6px); opacity: 1; }
 }
 
-/* â”€â”€ STATS BAR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── STATS BAR ────────────────────────────────────────────── */
 .lp-stats {
   background: var(--color-sidebar-bg);
   border-bottom: 1px solid hsl(145, 55%, 22%);
@@ -2136,7 +2136,7 @@ p, h1, h2, h3, h4, h5, h6 {
   margin-top: 2px;
 }
 
-/* â”€â”€ SHARED SECTION UTILITIES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── SHARED SECTION UTILITIES ─────────────────────────────── */
 .lp-section-badge {
   display: inline-flex;
   align-items: center;
@@ -2176,7 +2176,7 @@ p, h1, h2, h3, h4, h5, h6 {
   color: var(--color-primary);
 }
 
-/* â”€â”€ ABOUT SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── ABOUT SECTION ────────────────────────────────────────── */
 .lp-about {
   padding: clamp(4rem, 8vw, 6rem) var(--space-6);
   background: var(--color-bg);
@@ -2292,7 +2292,7 @@ p, h1, h2, h3, h4, h5, h6 {
   gap: var(--space-3);
 }
 
-/* â”€â”€ ECOSYSTEM SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── ECOSYSTEM SECTION ────────────────────────────────────── */
 .lp-ecosystem {
   padding: clamp(4rem, 8vw, 6rem) var(--space-6);
   background: var(--color-surface);
@@ -2372,7 +2372,7 @@ p, h1, h2, h3, h4, h5, h6 {
   transform: scaleX(1);
 }
 
-/* â”€â”€ DIVISIONS SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── DIVISIONS SECTION ────────────────────────────────────── */
 .lp-divisions {
   padding: clamp(4rem, 8vw, 6rem) var(--space-6);
   background: var(--color-bg);
@@ -2487,7 +2487,7 @@ p, h1, h2, h3, h4, h5, h6 {
   line-height: 1.55;
 }
 
-/* â”€â”€ CTA SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── CTA SECTION ──────────────────────────────────────────── */
 .lp-cta {
   position: relative;
   overflow: hidden;
@@ -2583,7 +2583,7 @@ p, h1, h2, h3, h4, h5, h6 {
 }
 .lp-cta__btn-outline:active { transform: translateY(0) scale(0.97); }
 
-/* â”€â”€ FOOTER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── FOOTER ───────────────────────────────────────────────── */
 .lp-footer {
   background: var(--color-sidebar-bg);
   border-top: 1px solid hsl(145, 45%, 22%);
@@ -2685,90 +2685,235 @@ p, h1, h2, h3, h4, h5, h6 {
   color: var(--color-sidebar-muted);
 }
 
+/* ══════════════════════════════════════════════════════════
+   MOBILE BOTTOM NAVIGATION — Floating Pill Design
+   ══════════════════════════════════════════════════════════ */
+.lp-mobile-nav {
+  display: none; /* Hidden on desktop */
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: var(--z-overlay);
+  padding: var(--space-3) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom));
+  pointer-events: none; /* Allow click-through to content outside the pill */
+}
+.lp-mobile-nav__pill {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  background: hsla(0, 0%, 100%, 0.92);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: var(--radius-full);
+  border: 1px solid hsla(145, 30%, 80%, 0.4);
+  box-shadow:
+    0 -2px 0 hsla(145, 63%, 32%, 0.08),
+    0 8px 32px hsla(145, 30%, 10%, 0.16),
+    0 2px 8px hsla(145, 30%, 10%, 0.08);
+  padding: var(--space-2) var(--space-3);
+  max-width: 420px;
+  margin: 0 auto;
+  position: relative;
+}
 
-/* -- RESPONSIVE: Landing Page ------------------------------- */
+/* Nav Item */
+.lp-mobile-nav__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: var(--space-2) var(--space-3);
+  min-width: 56px;
+  min-height: 52px; /* WCAG touch target */
+  border-radius: var(--radius-xl);
+  text-decoration: none;
+  color: var(--color-text-muted);
+  transition:
+    color var(--duration-fast) var(--ease-spring),
+    background-color var(--duration-fast) var(--ease-spring),
+    transform var(--duration-fast) var(--ease-spring);
+}
+.lp-mobile-nav__item:hover {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+.lp-mobile-nav__item:active {
+  transform: scale(0.9);
+}
+.lp-mobile-nav__item:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Active State */
+.lp-mobile-nav__item--active {
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+.lp-mobile-nav__item--active .lp-mobile-nav__icon-wrap {
+  transform: translateY(-2px);
+}
+
+/* Icon Wrap — for animation */
+.lp-mobile-nav__icon-wrap {
+  transition: transform var(--duration-fast) var(--ease-spring);
+}
+.lp-mobile-nav__item:hover .lp-mobile-nav__icon-wrap {
+  transform: translateY(-2px);
+}
+
+/* Label */
+.lp-mobile-nav__label {
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+/* CENTER CTA — Prominent elevated Kasir Button */
+.lp-mobile-nav__cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 64px;
+  min-height: 64px;
+  border-radius: var(--radius-full);
+  text-decoration: none;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  box-shadow:
+    0 4px 16px hsla(145, 63%, 32%, 0.40),
+    0 2px 4px hsla(145, 63%, 32%, 0.20);
+  transform: translateY(-10px); /* Elevated above pill */
+  position: relative;
+  transition:
+    transform var(--duration-fast) var(--ease-spring),
+    background-color var(--duration-fast) var(--ease-spring),
+    box-shadow var(--duration-fast) var(--ease-spring);
+}
+.lp-mobile-nav__cta:hover {
+  background: var(--color-primary-hover);
+  transform: translateY(-14px);
+  box-shadow:
+    0 8px 24px hsla(145, 63%, 32%, 0.55),
+    0 4px 8px hsla(145, 63%, 32%, 0.25);
+}
+.lp-mobile-nav__cta:active {
+  transform: translateY(-8px) scale(0.93);
+}
+.lp-mobile-nav__cta:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+/* Pulse ring animation on CTA */
+.lp-mobile-nav__cta-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: var(--radius-full);
+  border: 2px solid hsla(145, 63%, 32%, 0.35);
+  animation: navCtaPulse 2.5s ease-in-out infinite;
+}
+@keyframes navCtaPulse {
+  0%, 100% { opacity: 0; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* ── RESPONSIVE: Hide desktop nav, show mobile nav ─────────── */
 @media (max-width: 768px) {
-  .lp-nav { display: none; }
-  .lp-header__inner { padding: var(--space-3) var(--space-4); }
-  .lp-brand__sub { display: none; }
-  .lp-hero__content { padding: 5rem var(--space-5) 4rem; gap: var(--space-4); }
+  /* Hide desktop nav items */
+  .lp-nav {
+    display: none;
+  }
+
+  /* Show mobile bottom nav */
+  .lp-mobile-nav {
+    display: block;
+  }
+
+  /* Header inner on mobile */
+  .lp-header__inner {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  /* Hide brand sub on mobile */
+  .lp-brand__sub {
+    display: none;
+  }
+
+  /* Hero adjustments */
+  .lp-hero__content {
+    padding: 5rem var(--space-5) 7rem;
+    gap: var(--space-4);
+  }
   .lp-hero__title { text-align: center; }
   .lp-hero__ctas { flex-direction: column; align-items: center; width: 100%; }
   .lp-hero__ctas .btn { width: 100%; max-width: 340px; justify-content: center; }
   .lp-hero__chips { gap: var(--space-2); }
+
+  /* Stats: 2 columns */
   .lp-stats__inner { grid-template-columns: repeat(2, 1fr); }
   .lp-stats__item:nth-child(2) { border-right: none; }
   .lp-stats__item { border-bottom: 1px solid hsl(145, 45%, 24%); }
-  .lp-stats__item:nth-child(3), .lp-stats__item:last-child { border-bottom: none; }
-  .lp-about__inner { grid-template-columns: 1fr; gap: var(--space-8); }
+  .lp-stats__item:nth-child(3),
+  .lp-stats__item:last-child { border-bottom: none; }
+
+  /* About: stack */
+  .lp-about__inner {
+    grid-template-columns: 1fr;
+    gap: var(--space-8);
+  }
   .lp-about__visual { height: 280px; }
   .lp-about__actions { flex-direction: column; }
   .lp-about__actions .btn { width: 100%; justify-content: center; }
-  .lp-ecosystem__grid { grid-template-columns: 1fr; }
-  .lp-divisions__grid { grid-template-columns: 1fr; }
+
+  /* Ecosystem grid */
+  .lp-ecosystem__grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Divisions grid */
+  .lp-divisions__grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* CTA */
   .lp-cta { padding: 3rem var(--space-4); }
   .lp-cta__content { padding: 2.5rem var(--space-4); }
   .lp-cta__actions { flex-direction: column; align-items: stretch; }
   .lp-cta__actions .btn { justify-content: center; }
   .lp-cta__bg { inset: -5%; border-radius: var(--radius-xl); }
+
+  /* Footer: single column */
   .lp-footer__grid { grid-template-columns: 1fr; gap: var(--space-8); }
   .lp-footer__links { grid-template-columns: 1fr 1fr; }
-  .lp-footer { padding-bottom: var(--space-8); }
+  .lp-footer { padding-bottom: calc(88px + env(safe-area-inset-bottom) + var(--space-4)); }
+
+  /* Announcement: shorter */
   .lp-announcement { font-size: 10px; padding: var(--space-1) var(--space-3); }
 }
+
 @media (max-width: 480px) {
   .lp-stats__inner { grid-template-columns: 1fr 1fr; }
   .lp-footer__links { grid-template-columns: 1fr; }
   .lp-section-header { margin-bottom: var(--space-8); }
   .lp-about__badge { flex-direction: column; text-align: center; gap: var(--space-2); }
+  .lp-mobile-nav__pill { max-width: 100%; border-radius: var(--radius-2xl); }
 }
 
-/* ==========================================================
-   ADMIN MOBILE BOTTOM NAVIGATION BAR
-   Hanya muncul di layar < 768px â€” desktop tetap pakai sidebar
-   ========================================================== */
-
-.mobile-bottom-nav {
-  /* Default: tersembunyi (ditampilkan oleh media query di bawah) */
-  display: none;
-}
-
-@media (max-width: 767px) {
-  /* Tampilkan bottom nav */
-  .mobile-bottom-nav {
-    display: flex;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 500;
-
-    /* Glassmorphism */
-    background: hsl(0 0% 8% / 0.88);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border-top: 1px solid hsl(0 0% 100% / 0.08);
-
-    /* Safe area untuk iPhone notch / home indicator */
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-
-    box-shadow: 0 -8px 32px -4px hsl(0 0% 0% / 0.4);
-  }
-
-  /* Konten utama diberi padding bawah agar tidak tertutup bottom nav */
-  .layout-content {
-    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
-  }
-
-  /* Sembunyikan hamburger menu di mobile (digantikan bottom nav) */
-  #btn-mobile-menu {
-    display: none;
-  }
-}
-
-/* Desktop: pastikan bottom nav benar-benar tersembunyi */
-@media (min-width: 768px) {
-  .mobile-bottom-nav {
+/* ── DESKTOP: Ensure bottom nav completely hidden ─────────── */
+@media (min-width: 769px) {
+  .lp-mobile-nav {
     display: none !important;
   }
+  /* Desktop: no extra footer padding for mobile nav */
+  .lp-footer {
+    padding-bottom: var(--space-8);
+  }
 }
+
