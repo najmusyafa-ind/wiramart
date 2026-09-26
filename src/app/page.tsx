@@ -1,5 +1,8 @@
+'use client';
+
 import Image from 'next/image';
 import Link from 'next/link';
+import { useState, useEffect } from 'react';
 import {
   Store,
   Users,
@@ -18,10 +21,15 @@ import {
   Handshake,
   Camera,
   Layers,
-  ChevronRight,
-  ExternalLink,
+  Home,
+  LogIn,
+  ChevronDown,
+  MapPin,
+  Phone,
+  Star,
 } from 'lucide-react';
 
+/* ── TYPE DEFINITIONS ───────────────────────────────────────── */
 interface DivisionItem {
   id: string;
   number: number;
@@ -29,9 +37,9 @@ interface DivisionItem {
   role: string;
   icon: typeof Users;
   duties: string[];
-  badgeColor?: string;
 }
 
+/* ── DATA ───────────────────────────────────────────────────── */
 const DIVISIONS: DivisionItem[] = [
   {
     id: 'ketua',
@@ -84,7 +92,7 @@ const DIVISIONS: DivisionItem[] = [
   {
     id: 'pelatihan-inkubasi',
     number: 5,
-    name: 'Divisi Pelatihan dan Inkubasi',
+    name: 'Divisi Pelatihan & Inkubasi',
     role: 'Pengembangan Talenta Bisnis',
     icon: GraduationCap,
     duties: [
@@ -96,7 +104,7 @@ const DIVISIONS: DivisionItem[] = [
   {
     id: 'kreativitas-produksi',
     number: 6,
-    name: 'Divisi Kreativitas dan Produksi',
+    name: 'Divisi Kreativitas & Produksi',
     role: 'Inovasi & R&D Produk',
     icon: Sparkles,
     duties: [
@@ -108,11 +116,11 @@ const DIVISIONS: DivisionItem[] = [
   {
     id: 'pemasaran-branding',
     number: 7,
-    name: 'Divisi Pemasaran dan Branding',
+    name: 'Divisi Pemasaran & Branding',
     role: 'Strategi Penjualan & Citra',
     icon: Megaphone,
     duties: [
-      'Menyusun dan mengeksekusi strategi promosi terukur baik online maupun offline.',
+      'Menyusun dan mengeksekusi strategi promosi terukur online & offline.',
       'Mengelola media sosial resmi dan kanal pemasaran digital kampus.',
       'Membangun serta menjaga reputasi citra merek Wiramart UNPERBA.',
     ],
@@ -120,7 +128,7 @@ const DIVISIONS: DivisionItem[] = [
   {
     id: 'kemitraan-eksternal',
     number: 8,
-    name: 'Divisi Kemitraan dan Eksternal',
+    name: 'Divisi Kemitraan & Eksternal',
     role: 'Hubungan Kerjasama & Stakeholder',
     icon: Handshake,
     duties: [
@@ -132,7 +140,7 @@ const DIVISIONS: DivisionItem[] = [
   {
     id: 'humas-dokumentasi',
     number: 9,
-    name: 'Divisi Humas dan Dokumentasi',
+    name: 'Divisi Humas & Dokumentasi',
     role: 'Komunikasi Publik & Media',
     icon: Camera,
     duties: [
@@ -162,674 +170,334 @@ const ECOSYSTEM_FEATURES = [
   {
     icon: Briefcase,
     title: 'Laboratorium Praktik Bisnis Riil',
-    desc: 'Bukan sekadar kasir, Wiramart adalah inkubator langsung bagi mahasiswa untuk belajar manajemen stok, akuntansi ritel, dan kepemimpinan tim.',
+    desc: 'Bukan sekadar kasir — Wiramart adalah inkubator langsung bagi mahasiswa untuk belajar manajemen stok, akuntansi ritel, dan kepemimpinan tim.',
   },
 ];
 
-export default function Home() {
+const STATS = [
+  { value: '9', label: 'Divisi Aktif', sub: 'Struktur Organisasi UKM' },
+  { value: 'POS', label: 'Realtime Kasir', sub: 'Barcode & Multi-Payment' },
+  { value: 'QRIS', label: 'Pembayaran Digital', sub: 'Tanpa Ribet, Langsung Bayar' },
+  { value: '24/7', label: 'Monitoring', sub: 'Laporan & Dashboard Admin' },
+];
+
+/* ── COMPONENT ──────────────────────────────────────────────── */
+export default function LandingPage() {
+  const [scrolled, setScrolled] = useState(false);
+  const [mobileNavActive, setMobileNavActive] = useState<string>('home');
+
+  useEffect(() => {
+    const handleScroll = () => setScrolled(window.scrollY > 60);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--color-bg)', color: 'var(--color-text)' }}>
-      {/* ── TOP ANNOUNCEMENT BAR ─────────────────────────────────────── */}
-      <aside
-        style={{
-          background: 'var(--color-sidebar-bg)',
-          color: 'var(--color-sidebar-text)',
-          fontSize: 'var(--text-xs)',
-          padding: 'var(--space-2) var(--space-4)',
-          textAlign: 'center',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: 'var(--space-2)',
-          borderBottom: '1px solid hsl(145, 55%, 22%)',
-        }}
-        aria-label="Informasi Kampus"
-      >
-        <span
-          style={{
-            background: 'var(--color-accent)',
-            color: 'var(--color-accent-text)',
-            padding: '1px 6px',
-            borderRadius: 'var(--radius-sm)',
-            fontWeight: 'var(--weight-bold)',
-          }}
-        >
-          RESMI
-        </span>
+    <div className="lp-root">
+      {/* ── SKIP TO CONTENT (a11y) ─── */}
+      <a href="#main-content" className="lp-skip-link">
+        Lewati ke konten utama
+      </a>
+
+      {/* ── ANNOUNCEMENT BAR ─────────────────────────────────── */}
+      <aside className="lp-announcement" aria-label="Informasi resmi kampus">
+        <span className="lp-announcement__badge">RESMI</span>
         <span>Unit Kegiatan Mahasiswa Kewirausahaan — Universitas Perwira M. Purbalingga (UNPERBA)</span>
+        <Star size={12} aria-hidden="true" className="lp-announcement__star" />
       </aside>
 
-      {/* ── HEADER NAVIGATION ────────────────────────────────────────── */}
-      <header
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 100,
-          background: 'hsla(0, 0%, 100%, 0.88)',
-          backdropFilter: 'blur(12px)',
-          borderBottom: '1px solid var(--color-border)',
-        }}
-      >
-        <div
-          style={{
-            maxWidth: '1200px',
-            margin: '0 auto',
-            padding: 'var(--space-3) var(--space-5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 'var(--space-4)',
-          }}
-        >
-          {/* Logo & Brand Identity */}
-          <Link
-            href="/"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-3)',
-              textDecoration: 'none',
-              color: 'inherit',
-            }}
-          >
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                position: 'relative',
-                borderRadius: 'var(--radius-md)',
-                overflow: 'hidden',
-                background: 'var(--color-surface)',
-                boxShadow: '0 2px 8px hsla(145, 63%, 32%, 0.12)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
+      {/* ── STICKY HEADER ─────────────────────────────────────── */}
+      <header className={`lp-header${scrolled ? ' lp-header--scrolled' : ''}`} role="banner">
+        <div className="lp-header__inner">
+          {/* Logo & Brand */}
+          <Link href="/" className="lp-brand" aria-label="Wiramart UNPERBA — Beranda">
+            <div className="lp-brand__logo">
               <Image
                 src="/logo.png"
                 alt="Logo Wiramart UNPERBA"
                 fill
-                sizes="44px"
-                style={{ objectFit: 'contain', padding: '2px' }}
+                sizes="40px"
+                style={{ objectFit: 'contain', padding: '3px' }}
                 priority
               />
             </div>
-            <div>
-              <div
-                style={{
-                  fontSize: 'var(--text-lg)',
-                  fontWeight: 'var(--weight-bold)',
-                  letterSpacing: '0.04em',
-                  color: 'var(--color-primary)',
-                  lineHeight: 1.1,
-                }}
-              >
-                WIRAMART
-              </div>
-              <div
-                style={{
-                  fontSize: 'var(--text-xs)',
-                  color: 'var(--color-text-secondary)',
-                  fontWeight: 'var(--weight-medium)',
-                }}
-              >
-                UKM Kewirausahaan UNPERBA
-              </div>
+            <div className="lp-brand__text">
+              <span className="lp-brand__name">WIRAMART</span>
+              <span className="lp-brand__sub">UKM Kewirausahaan UNPERBA</span>
             </div>
           </Link>
 
-          {/* Quick Actions */}
-          <nav
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-            }}
-            aria-label="Menu Utama"
-          >
-            <Link
-              href="#divisi"
-              className="btn btn-ghost"
-              style={{
-                fontSize: 'var(--text-sm)',
-                padding: 'var(--space-2) var(--space-3)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
-              }}
-            >
-              <Users size={16} aria-hidden="true" />
-              <span>9 Divisi</span>
-            </Link>
-
-            <Link
-              href="/daftar"
-              className="btn btn-secondary"
-              style={{
-                fontSize: 'var(--text-sm)',
-                padding: 'var(--space-2) var(--space-3)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
-              }}
-            >
+          {/* Desktop Nav */}
+          <nav className="lp-nav" aria-label="Navigasi utama">
+            <Link href="#tentang" className="lp-nav__link">Tentang</Link>
+            <Link href="#divisi" className="lp-nav__link">9 Divisi</Link>
+            <Link href="#ekosistem" className="lp-nav__link">Ekosistem</Link>
+            <Link href="/daftar" className="btn btn-secondary btn-sm">
+              <Calendar size={15} aria-hidden="true" />
               <span>Daftar Shift</span>
             </Link>
-
-            <Link
-              href="/kasir/pos"
-              className="btn btn-primary"
-              style={{
-                fontSize: 'var(--text-sm)',
-                padding: 'var(--space-2) var(--space-4)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-2)',
-                boxShadow: '0 4px 14px hsla(145, 63%, 32%, 0.25)',
-              }}
-            >
-              <ShoppingBag size={16} aria-hidden="true" />
+            <Link href="/kasir/pos" className="btn btn-primary btn-sm lp-nav__cta">
+              <ShoppingBag size={15} aria-hidden="true" />
               <span>Buka Kasir</span>
             </Link>
-
-            <Link
-              href="/login"
-              className="btn btn-ghost"
-              style={{
-                fontSize: 'var(--text-xs)',
-                padding: 'var(--space-2) var(--space-2)',
-                color: 'var(--color-text-muted)',
-              }}
-              title="Portal Dosen / Admin"
-            >
+            <Link href="/login" className="lp-nav__admin" title="Portal Admin / Dosen">
+              <LogIn size={14} aria-hidden="true" />
               <span>Admin</span>
             </Link>
           </nav>
         </div>
       </header>
 
-      <main>
-        {/* ── HERO SECTION ───────────────────────────────────────────── */}
-        <section
-          style={{
-            position: 'relative',
-            overflow: 'hidden',
-            padding: 'clamp(3rem, 7vw, 6rem) var(--space-5)',
-            background: 'linear-gradient(180deg, hsla(145, 30%, 96%, 0.9) 0%, var(--color-bg) 100%)',
-            borderBottom: '1px solid var(--color-border)',
-          }}
-        >
-          {/* Subtle Background Glows */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '-15%',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: '650px',
-              height: '350px',
-              background: 'radial-gradient(circle, hsla(145, 63%, 32%, 0.08) 0%, transparent 70%)',
-              pointerEvents: 'none',
-            }}
-            aria-hidden="true"
-          />
+      {/* ── MAIN CONTENT ──────────────────────────────────────── */}
+      <main id="main-content">
 
-          <div
-            style={{
-              maxWidth: '1100px',
-              margin: '0 auto',
-              textAlign: 'center',
-              position: 'relative',
-            }}
-          >
+        {/* ═══════════════════════════════════════════════════════
+            HERO — CINEMATIC CAMPUS PHOTO SECTION
+            ═══════════════════════════════════════════════════════ */}
+        <section className="lp-hero" aria-label="Selamat datang di Wiramart UNPERBA">
+          {/* Campus Background Image */}
+          <div className="lp-hero__bg" aria-hidden="true">
+            <Image
+              src="/unperba_campus.jpg"
+              alt="Gedung kampus Universitas Perwira Purbalingga (UNPERBA) — tampak depan dengan tulisan besar kuning UNIVERSITAS PERWIRA PURBALINGGA"
+              fill
+              sizes="100vw"
+              style={{ objectFit: 'cover', objectPosition: 'center 60%' }}
+              priority
+              loading="eager"
+              quality={75}
+            />
+            {/* Multi-layer gradient overlay for text legibility */}
+            <div className="lp-hero__overlay" />
+          </div>
+
+          {/* Hero Content */}
+          <div className="lp-hero__content">
             {/* Pill Badge */}
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-2)',
-                padding: 'var(--space-1) var(--space-3)',
-                borderRadius: 'var(--radius-full)',
-                background: 'var(--color-primary-light)',
-                border: '1px solid hsla(145, 63%, 32%, 0.2)',
-                color: 'var(--color-primary)',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-semibold)',
-                marginBottom: 'var(--space-4)',
-              }}
-            >
-              <Sparkles size={14} aria-hidden="true" />
-              <span>Inkubator Bisnis & Digital POS Kampus</span>
+            <div className="lp-hero__badge" aria-hidden="true">
+              <Sparkles size={13} />
+              <span>Inkubator Bisnis & Sistem POS Digital Kampus</span>
             </div>
 
             {/* Main Headline */}
-            <h1
-              style={{
-                fontSize: 'clamp(2.1rem, 5vw, 3.75rem)',
-                fontWeight: 800,
-                lineHeight: 1.15,
-                color: 'var(--color-text)',
-                letterSpacing: '-0.02em',
-                marginBottom: 'var(--space-4)',
-              }}
-            >
-              Pusat Wirausaha Mahasiswa &amp; Kasir Cerdas{' '}
-              <span
-                style={{
-                  color: 'var(--color-primary)',
-                  position: 'relative',
-                  display: 'inline-block',
-                }}
-              >
-                WIRAMART
-              </span>
+            <h1 className="lp-hero__title">
+              Pusat Wirausaha{' '}
+              <span className="lp-hero__title-highlight">Mahasiswa</span>
+              {' & '}
+              <span className="lp-hero__title-accent">Kasir Cerdas</span>
+              {' '}WIRAMART
             </h1>
 
-            {/* Sub-headline */}
-            <p
-              style={{
-                fontSize: 'clamp(1rem, 2vw, 1.25rem)',
-                color: 'var(--color-text-secondary)',
-                lineHeight: 1.6,
-                maxWidth: '780px',
-                margin: '0 auto var(--space-8)',
-              }}
-            >
-              Wiramart adalah wadah inkubasi bisnis resmi di bawah <strong>Unit Kegiatan Mahasiswa Kewirausahaan UNPERBA</strong>. 
-              Mengintegrasikan operasional minimarket kampus dengan sistem kasir digital modern, absensi shift cerdas, dan pembinaan bisnis dari hulu ke hilir.
+            {/* Sub Headline */}
+            <p className="lp-hero__desc">
+              Wiramart adalah wadah inkubasi bisnis resmi di bawah{' '}
+              <strong>UKM Kewirausahaan UNPERBA</strong>. Mengintegrasikan operasional
+              minimarket kampus dengan sistem kasir digital modern, absensi shift cerdas,
+              dan pembinaan bisnis dari hulu ke hilir.
             </p>
 
-            {/* Hero CTA Buttons */}
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                justifyContent: 'center',
-                gap: 'var(--space-3)',
-                marginBottom: 'var(--space-8)',
-              }}
-            >
-              <Link
-                href="/kasir/pos"
-                className="btn btn-primary btn-lg"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  padding: 'var(--space-4) var(--space-6)',
-                  borderRadius: 'var(--radius-lg)',
-                  fontSize: 'var(--text-base)',
-                  boxShadow: '0 8px 20px hsla(145, 63%, 32%, 0.28)',
-                }}
-              >
+            {/* CTA Buttons */}
+            <div className="lp-hero__ctas">
+              <Link href="/kasir/pos" className="btn btn-primary btn-lg lp-hero__cta-primary">
                 <Store size={20} aria-hidden="true" />
                 <span>Masuk Terminal Kasir POS</span>
                 <ArrowRight size={18} aria-hidden="true" />
               </Link>
-
-              <Link
-                href="/daftar"
-                className="btn btn-secondary btn-lg"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  padding: 'var(--space-4) var(--space-6)',
-                  borderRadius: 'var(--radius-lg)',
-                  fontSize: 'var(--text-base)',
-                }}
-              >
+              <Link href="/daftar" className="btn lp-hero__cta-secondary btn-lg">
                 <Calendar size={18} aria-hidden="true" />
                 <span>Daftar / Pilih Shift Kasir</span>
               </Link>
             </div>
 
-            {/* Quick Metrics Bar */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                gap: 'var(--space-4)',
-                maxWidth: '920px',
-                margin: '0 auto',
-                padding: 'var(--space-5)',
-                background: 'var(--color-surface)',
-                borderRadius: 'var(--radius-xl)',
-                border: '1px solid var(--color-border)',
-                boxShadow: '0 4px 16px hsla(145, 15%, 12%, 0.04)',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 800, color: 'var(--color-primary)' }}>
-                  9 Divisi
+            {/* Campus Info Chips */}
+            <div className="lp-hero__chips">
+              <span className="lp-hero__chip">
+                <MapPin size={12} aria-hidden="true" />
+                Purbalingga, Jawa Tengah
+              </span>
+              <span className="lp-hero__chip">
+                <GraduationCap size={12} aria-hidden="true" />
+                Universitas Perwira M. Purbalingga
+              </span>
+              <span className="lp-hero__chip">
+                <Users size={12} aria-hidden="true" />
+                UKM Kewirausahaan Aktif
+              </span>
+            </div>
+          </div>
+
+          {/* Scroll indicator */}
+          <div className="lp-hero__scroll" aria-hidden="true">
+            <ChevronDown size={20} />
+          </div>
+        </section>
+
+        {/* ═══════════════════════════════════════════════════════
+            STAT BAR — Key Metrics
+            ═══════════════════════════════════════════════════════ */}
+        <section className="lp-stats" aria-label="Statistik Wiramart">
+          <div className="lp-stats__inner">
+            {STATS.map((stat, idx) => (
+              <div key={idx} className="lp-stats__item">
+                <div className="lp-stats__value">{stat.value}</div>
+                <div className="lp-stats__label">{stat.label}</div>
+                <div className="lp-stats__sub">{stat.sub}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ═══════════════════════════════════════════════════════
+            TENTANG SECTION — Campus Identity Block
+            ═══════════════════════════════════════════════════════ */}
+        <section id="tentang" className="lp-about" aria-labelledby="about-heading">
+          <div className="lp-about__inner">
+            {/* Left: Campus Photo */}
+            <div className="lp-about__visual">
+              <div className="lp-about__img-frame">
+                <Image
+                  src="/unperba_campus.jpg"
+                  alt="Gedung kampus Universitas Perwira Purbalingga (UNPERBA) — tulisan kuning besar UNIVERSITAS PERWIRA PURBALINGGA di depan gedung"
+                  fill
+                  sizes="(max-width: 768px) 100vw, 50vw"
+                  style={{ objectFit: 'cover', objectPosition: 'center 55%' }}
+                />
+              </div>
+              {/* Floating Badge */}
+              <div className="lp-about__badge" aria-hidden="true">
+                <div className="lp-about__badge-icon">
+                  <GraduationCap size={22} />
                 </div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Struktur Organisasi UKM Terintegrasi
+                <div>
+                  <div className="lp-about__badge-title">UNPERBA</div>
+                  <div className="lp-about__badge-sub">Universitas Perwira M. Purbalingga</div>
                 </div>
               </div>
-              <div style={{ borderLeft: '1px solid var(--color-border)' }}>
-                <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 800, color: 'var(--color-accent)' }}>
-                  Realtime POS
-                </div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Barcode Scanner &amp; Multi-Payment
-                </div>
+            </div>
+
+            {/* Right: Content */}
+            <div className="lp-about__content">
+              <div className="lp-section-badge">
+                <Star size={13} aria-hidden="true" />
+                <span>Tentang Kami</span>
               </div>
-              <div style={{ borderLeft: '1px solid var(--color-border)' }}>
-                <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 800, color: 'var(--color-primary)' }}>
-                  Anti-Bentrok
-                </div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Slot Shift Terkunci Otomatis
-                </div>
+              <h2 id="about-heading" className="lp-about__title">
+                Dari Kampus UNPERBA,<br />
+                untuk <span className="lp-text-primary">Wirausahawan Muda</span> Indonesia
+              </h2>
+              <p className="lp-about__desc">
+                Berlokasi di jantung kota Purbalingga, <strong>Universitas Perwira M. Purbalingga (UNPERBA)</strong> adalah kampus yang berkomitmen mencetak lulusan unggul dan berjiwa wirausaha.
+              </p>
+              <p className="lp-about__desc">
+                Wiramart hadir sebagai unit bisnis riil di dalam kampus — sebuah ekosistem di mana mahasiswa bukan hanya belajar teori, melainkan langsung mempraktikkan manajemen ritel, keuangan digital, dan kepemimpinan organisasi.
+              </p>
+
+              <div className="lp-about__features">
+                {[
+                  { icon: MapPin, text: 'Jl. Letnan Kusni No. 52, Purbalingga Lor, Jawa Tengah' },
+                  { icon: GraduationCap, text: 'Di bawah naungan resmi UKM Kewirausahaan UNPERBA' },
+                  { icon: ShieldCheck, text: 'Sistem kasir digital terintegrasi & terverifikasi' },
+                ].map(({ icon: Icon, text }, idx) => (
+                  <div key={idx} className="lp-about__feature">
+                    <div className="lp-about__feature-icon">
+                      <Icon size={16} aria-hidden="true" />
+                    </div>
+                    <span>{text}</span>
+                  </div>
+                ))}
               </div>
-              <div style={{ borderLeft: '1px solid var(--color-border)' }}>
-                <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 800, color: 'var(--color-text)' }}>
-                  UNPERBA
-                </div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Universitas Perwira M. Purbalingga
-                </div>
+
+              <div className="lp-about__actions">
+                <Link href="/daftar" className="btn btn-primary">
+                  <Calendar size={16} aria-hidden="true" />
+                  <span>Daftar Jadi Kasir</span>
+                </Link>
+                <Link href="#divisi" className="btn btn-secondary">
+                  <Users size={16} aria-hidden="true" />
+                  <span>Lihat 9 Divisi</span>
+                </Link>
               </div>
             </div>
           </div>
         </section>
 
-        {/* ── EKOSISTEM WIRAMART ─────────────────────────────────────── */}
-        <section
-          style={{
-            padding: 'clamp(3rem, 6vw, 5rem) var(--space-5)',
-            maxWidth: '1200px',
-            margin: '0 auto',
-          }}
-        >
-          <div style={{ textAlign: 'center', marginBottom: 'var(--space-8)' }}>
-            <span
-              style={{
-                fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-bold)',
-                color: 'var(--color-primary)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-              }}
-            >
-              Ekosistem Terintegrasi
-            </span>
-            <h2
-              style={{
-                fontSize: 'clamp(1.75rem, 3.5vw, 2.5rem)',
-                fontWeight: 700,
-                color: 'var(--color-text)',
-                marginTop: 'var(--space-1)',
-              }}
-            >
-              Solusi Terpadu Retail &amp; Pembinaan Kampus
-            </h2>
-            <p
-              style={{
-                color: 'var(--color-text-secondary)',
-                fontSize: 'var(--text-base)',
-                maxWidth: '640px',
-                margin: 'var(--space-2) auto 0',
-              }}
-            >
-              Dirancang untuk memfasilitasi kebutuhan seluruh sivitas akademika Universitas Perwira M. Purbalingga.
-            </p>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-              gap: 'var(--space-5)',
-            }}
-          >
-            {ECOSYSTEM_FEATURES.map((item, idx) => {
-              const IconComp = item.icon;
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    background: 'var(--color-surface)',
-                    padding: 'var(--space-6)',
-                    borderRadius: 'var(--radius-lg)',
-                    border: '1px solid var(--color-border)',
-                    boxShadow: '0 2px 10px hsla(145, 15%, 12%, 0.03)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 'var(--space-3)',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: 'var(--radius-md)',
-                      background: 'var(--color-primary-light)',
-                      color: 'var(--color-primary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <IconComp size={24} aria-hidden="true" />
-                  </div>
-                  <h3
-                    style={{
-                      fontSize: 'var(--text-lg)',
-                      fontWeight: 'var(--weight-semibold)',
-                      color: 'var(--color-text)',
-                      marginTop: 'var(--space-1)',
-                    }}
-                  >
-                    {item.title}
-                  </h3>
-                  <p
-                    style={{
-                      fontSize: 'var(--text-sm)',
-                      color: 'var(--color-text-secondary)',
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    {item.desc}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* ── 9 DIVISI UKM KEWIRAUSAHAAN ─────────────────────────────── */}
-        <section
-          id="divisi"
-          style={{
-            padding: 'clamp(3.5rem, 7vw, 6rem) var(--space-5)',
-            background: 'var(--color-surface)',
-            borderTop: '1px solid var(--color-border)',
-            borderBottom: '1px solid var(--color-border)',
-          }}
-        >
-          <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-            <div style={{ textAlign: 'center', marginBottom: 'var(--space-10)' }}>
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  padding: 'var(--space-1) var(--space-3)',
-                  borderRadius: 'var(--radius-full)',
-                  background: 'var(--color-primary-light)',
-                  color: 'var(--color-primary)',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 'var(--weight-bold)',
-                  marginBottom: 'var(--space-2)',
-                }}
-              >
-                <Layers size={14} aria-hidden="true" />
-                <span>Struktur Organisasi</span>
+        {/* ═══════════════════════════════════════════════════════
+            EKOSISTEM SECTION — Feature Cards
+            ═══════════════════════════════════════════════════════ */}
+        <section id="ekosistem" className="lp-ecosystem" aria-labelledby="ecosystem-heading">
+          <div className="lp-ecosystem__inner">
+            <div className="lp-section-header">
+              <div className="lp-section-badge">
+                <Layers size={13} aria-hidden="true" />
+                <span>Ekosistem Terintegrasi</span>
               </div>
-              <h2
-                style={{
-                  fontSize: 'clamp(1.75rem, 3.5vw, 2.5rem)',
-                  fontWeight: 800,
-                  color: 'var(--color-text)',
-                  letterSpacing: '-0.01em',
-                }}
-              >
-                9 Divisi Unit Kegiatan Mahasiswa Kewirausahaan
+              <h2 id="ecosystem-heading" className="lp-section-title">
+                Solusi Terpadu Retail &amp; Pembinaan Kampus
               </h2>
-              <p
-                style={{
-                  color: 'var(--color-text-secondary)',
-                  fontSize: 'var(--text-base)',
-                  maxWidth: '720px',
-                  margin: 'var(--space-2) auto 0',
-                  lineHeight: 1.6,
-                }}
-              >
-                Setiap divisi memegang peranan krusial dalam menggerakkan ekosistem bisnis Wiramart serta 
-                mencetak wirausahawan muda yang tangguh, adaptif, dan berdaya saing dari kampus UNPERBA.
+              <p className="lp-section-desc">
+                Dirancang untuk memfasilitasi kebutuhan seluruh sivitas akademika Universitas Perwira M. Purbalingga.
               </p>
             </div>
 
-            {/* Grid 9 Divisi */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-                gap: 'var(--space-5)',
-              }}
-            >
+            <div className="lp-ecosystem__grid">
+              {ECOSYSTEM_FEATURES.map((item, idx) => {
+                const IconComp = item.icon;
+                return (
+                  <article key={idx} className="lp-feature-card">
+                    <div className="lp-feature-card__icon">
+                      <IconComp size={26} aria-hidden="true" />
+                    </div>
+                    <h3 className="lp-feature-card__title">{item.title}</h3>
+                    <p className="lp-feature-card__desc">{item.desc}</p>
+                    <div className="lp-feature-card__accent" aria-hidden="true" />
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        {/* ═══════════════════════════════════════════════════════
+            9 DIVISI SECTION
+            ═══════════════════════════════════════════════════════ */}
+        <section id="divisi" className="lp-divisions" aria-labelledby="divisions-heading">
+          <div className="lp-divisions__inner">
+            <div className="lp-section-header">
+              <div className="lp-section-badge">
+                <Layers size={13} aria-hidden="true" />
+                <span>Struktur Organisasi</span>
+              </div>
+              <h2 id="divisions-heading" className="lp-section-title">
+                9 Divisi Unit Kegiatan Mahasiswa Kewirausahaan
+              </h2>
+              <p className="lp-section-desc">
+                Setiap divisi memegang peranan krusial dalam menggerakkan ekosistem bisnis Wiramart serta mencetak wirausahawan muda yang tangguh, adaptif, dan berdaya saing dari kampus UNPERBA.
+              </p>
+            </div>
+
+            <div className="lp-divisions__grid">
               {DIVISIONS.map((divisi) => {
                 const IconComp = divisi.icon;
                 return (
-                  <article
-                    key={divisi.id}
-                    style={{
-                      background: 'var(--color-bg)',
-                      border: '1.5px solid var(--color-border)',
-                      borderRadius: 'var(--radius-xl)',
-                      padding: 'var(--space-6)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      position: 'relative',
-                      boxShadow: '0 2px 8px hsla(145, 15%, 12%, 0.03)',
-                    }}
-                  >
-                    {/* Header Divisi */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: 'var(--space-3)',
-                        marginBottom: 'var(--space-4)',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 44,
-                          height: 44,
-                          borderRadius: 'var(--radius-md)',
-                          background: 'var(--color-surface)',
-                          border: '1px solid var(--color-border)',
-                          color: 'var(--color-primary)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                          boxShadow: '0 2px 6px hsla(145, 15%, 12%, 0.04)',
-                        }}
-                      >
+                  <article key={divisi.id} className="lp-division-card">
+                    <div className="lp-division-card__header">
+                      <div className="lp-division-card__icon">
                         <IconComp size={22} aria-hidden="true" />
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 'var(--space-2)',
-                            marginBottom: '2px',
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: 'var(--text-xs)',
-                              fontWeight: 'var(--weight-bold)',
-                              color: 'var(--color-primary)',
-                              background: 'var(--color-primary-light)',
-                              padding: '1px 7px',
-                              borderRadius: 'var(--radius-sm)',
-                            }}
-                          >
-                            #{divisi.number}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 'var(--text-xs)',
-                              color: 'var(--color-text-muted)',
-                            }}
-                          >
-                            {divisi.role}
-                          </span>
+                      <div className="lp-division-card__meta">
+                        <div className="lp-division-card__badges">
+                          <span className="lp-division-card__num">#{divisi.number}</span>
+                          <span className="lp-division-card__role">{divisi.role}</span>
                         </div>
-                        <h3
-                          style={{
-                            fontSize: 'var(--text-lg)',
-                            fontWeight: 700,
-                            color: 'var(--color-text)',
-                            lineHeight: 1.25,
-                          }}
-                        >
-                          {divisi.name}
-                        </h3>
+                        <h3 className="lp-division-card__name">{divisi.name}</h3>
                       </div>
                     </div>
-
-                    {/* Pembatas halus */}
-                    <div
-                      style={{
-                        height: '1px',
-                        background: 'var(--color-border)',
-                        marginBottom: 'var(--space-4)',
-                      }}
-                      aria-hidden="true"
-                    />
-
-                    {/* Deskripsi Tugas */}
-                    <div style={{ flex: 1 }}>
-                      <p
-                        style={{
-                          fontSize: 'var(--text-xs)',
-                          fontWeight: 'var(--weight-bold)',
-                          color: 'var(--color-text-secondary)',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.06em',
-                          marginBottom: 'var(--space-2)',
-                        }}
-                      >
-                        Fokus &amp; Tanggung Jawab:
-                      </p>
-                      <ul
-                        style={{
-                          margin: 0,
-                          paddingLeft: 'var(--space-4)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 'var(--space-2)',
-                        }}
-                      >
+                    <div className="lp-division-card__divider" aria-hidden="true" />
+                    <div className="lp-division-card__body">
+                      <p className="lp-division-card__duties-label">Fokus &amp; Tanggung Jawab:</p>
+                      <ul className="lp-division-card__duties">
                         {divisi.duties.map((duty, idx) => (
-                          <li
-                            key={idx}
-                            style={{
-                              fontSize: 'var(--text-sm)',
-                              color: 'var(--color-text-secondary)',
-                              lineHeight: 1.5,
-                            }}
-                          >
-                            {duty}
-                          </li>
+                          <li key={idx}>{duty}</li>
                         ))}
                       </ul>
                     </div>
@@ -840,255 +508,183 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ── PORTAL AKSES KAMPUS / CALL TO ACTION ──────────────────── */}
-        <section
-          style={{
-            padding: 'clamp(3rem, 6vw, 5rem) var(--space-5)',
-            maxWidth: '1000px',
-            margin: '0 auto',
-            textAlign: 'center',
-          }}
-        >
-          <div
-            style={{
-              background: 'linear-gradient(135deg, hsl(145, 63%, 28%) 0%, hsl(145, 55%, 18%) 100%)',
-              color: 'var(--color-text-inverse)',
-              borderRadius: 'var(--radius-xl)',
-              padding: 'clamp(2.5rem, 5vw, 4rem) var(--space-6)',
-              boxShadow: '0 12px 36px hsla(145, 63%, 20%, 0.3)',
-              position: 'relative',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                position: 'absolute',
-                top: '-30%',
-                right: '-10%',
-                width: '300px',
-                height: '300px',
-                borderRadius: '50%',
-                background: 'radial-gradient(circle, hsla(40, 96%, 50%, 0.15) 0%, transparent 70%)',
-                pointerEvents: 'none',
-              }}
-              aria-hidden="true"
-            />
+        {/* ═══════════════════════════════════════════════════════
+            CTA SECTION — Final Call to Action
+            ═══════════════════════════════════════════════════════ */}
+        <section className="lp-cta" aria-labelledby="cta-heading">
+          <div className="lp-cta__inner">
+            {/* Background Image with overlay */}
+            <div className="lp-cta__bg" aria-hidden="true">
+              <Image
+                src="/wiramart_showcase.jpg"
+                alt=""
+                fill
+                sizes="100vw"
+                style={{ objectFit: 'cover', objectPosition: 'center 40%' }}
+              />
+              <div className="lp-cta__overlay" />
+            </div>
 
-            <h2
-              style={{
-                fontSize: 'clamp(1.75rem, 3vw, 2.35rem)',
-                fontWeight: 800,
-                marginBottom: 'var(--space-3)',
-                lineHeight: 1.2,
-              }}
-            >
-              Mulai Terlibat di Ekosistem Wiramart Sekarang
-            </h2>
-            <p
-              style={{
-                fontSize: 'var(--text-base)',
-                color: 'hsla(0, 0%, 100%, 0.82)',
-                maxWidth: '620px',
-                margin: '0 auto var(--space-6)',
-                lineHeight: 1.6,
-              }}
-            >
-              Baik Anda mahasiswa yang ingin mendaftar jadwal shift kasir, anggota UKM yang menjalankan proyek bisnis, ataupun dosen pembimbing yang memantau laporan.
-            </p>
+            <div className="lp-cta__content">
+              <div className="lp-section-badge lp-cta__badge">
+                <Sparkles size={13} aria-hidden="true" />
+                <span>Bergabung Sekarang</span>
+              </div>
+              <h2 id="cta-heading" className="lp-cta__title">
+                Mulai Terlibat di Ekosistem<br />
+                Wiramart UNPERBA Sekarang
+              </h2>
+              <p className="lp-cta__desc">
+                Baik Anda mahasiswa yang ingin mendaftar jadwal shift kasir, anggota UKM yang menjalankan proyek bisnis, ataupun dosen pembimbing yang memantau laporan.
+              </p>
 
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                justifyContent: 'center',
-                gap: 'var(--space-3)',
-              }}
-            >
-              <Link
-                href="/kasir/pos"
-                className="btn btn-lg"
-                style={{
-                  background: 'var(--color-accent)',
-                  color: 'var(--color-accent-text)',
-                  fontWeight: 'var(--weight-bold)',
-                  padding: 'var(--space-3) var(--space-6)',
-                  borderRadius: 'var(--radius-md)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  border: 'none',
-                }}
-              >
-                <Store size={18} aria-hidden="true" />
-                <span>Buka Terminal Kasir</span>
-              </Link>
-
-              <Link
-                href="/daftar"
-                className="btn btn-lg"
-                style={{
-                  background: 'hsla(0, 0%, 100%, 0.15)',
-                  color: 'var(--color-text-inverse)',
-                  border: '1px solid hsla(0, 0%, 100%, 0.3)',
-                  padding: 'var(--space-3) var(--space-6)',
-                  borderRadius: 'var(--radius-md)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                }}
-              >
-                <Calendar size={18} aria-hidden="true" />
-                <span>Registrasi &amp; Shift Mahasiswa</span>
-              </Link>
-
-              <Link
-                href="/login"
-                className="btn btn-lg"
-                style={{
-                  background: 'transparent',
-                  color: 'hsla(0, 0%, 100%, 0.9)',
-                  border: '1px solid hsla(0, 0%, 100%, 0.2)',
-                  padding: 'var(--space-3) var(--space-5)',
-                  borderRadius: 'var(--radius-md)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                }}
-              >
-                <ShieldCheck size={18} aria-hidden="true" />
-                <span>Portal Dosen / Admin</span>
-              </Link>
+              <div className="lp-cta__actions">
+                <Link href="/kasir/pos" className="btn btn-lg lp-cta__btn-primary">
+                  <Store size={18} aria-hidden="true" />
+                  <span>Buka Terminal Kasir</span>
+                </Link>
+                <Link href="/daftar" className="btn btn-lg lp-cta__btn-glass">
+                  <Calendar size={18} aria-hidden="true" />
+                  <span>Registrasi &amp; Shift Mahasiswa</span>
+                </Link>
+                <Link href="/login" className="btn btn-lg lp-cta__btn-outline">
+                  <ShieldCheck size={18} aria-hidden="true" />
+                  <span>Portal Dosen / Admin</span>
+                </Link>
+              </div>
             </div>
           </div>
         </section>
+
       </main>
 
-      {/* ── FOOTER ─────────────────────────────────────────────────── */}
-      <footer
-        style={{
-          background: 'var(--color-surface)',
-          borderTop: '1px solid var(--color-border)',
-          padding: 'var(--space-8) var(--space-5) var(--space-6)',
-          fontSize: 'var(--text-sm)',
-          color: 'var(--color-text-secondary)',
-        }}
-      >
-        <div
-          style={{
-            maxWidth: '1200px',
-            margin: '0 auto',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-            gap: 'var(--space-8)',
-            marginBottom: 'var(--space-8)',
-          }}
-        >
-          {/* Identity */}
-          <div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--space-2)',
-                marginBottom: 'var(--space-3)',
-              }}
-            >
-              <div style={{ width: 32, height: 32, position: 'relative' }}>
-                <Image
-                  src="/logo.png"
-                  alt="Logo Wiramart"
-                  fill
-                  sizes="32px"
-                  style={{ objectFit: 'contain' }}
-                />
+      {/* ── FOOTER ───────────────────────────────────────────── */}
+      <footer className="lp-footer" role="contentinfo">
+        <div className="lp-footer__inner">
+          <div className="lp-footer__grid">
+            {/* Identity */}
+            <div className="lp-footer__brand">
+              <div className="lp-footer__logo">
+                <div className="lp-footer__logo-img">
+                  <Image
+                    src="/logo.png"
+                    alt="Logo Wiramart UNPERBA"
+                    fill
+                    sizes="36px"
+                    style={{ objectFit: 'contain' }}
+                  />
+                </div>
+                <span className="lp-footer__logo-text">WIRAMART UNPERBA</span>
               </div>
-              <span
-                style={{
-                  fontWeight: 'var(--weight-bold)',
-                  fontSize: 'var(--text-base)',
-                  color: 'var(--color-primary)',
-                }}
-              >
-                WIRAMART UNPERBA
-              </span>
+              <p className="lp-footer__brand-desc">
+                Unit Kegiatan Mahasiswa Kewirausahaan & Sistem Kasir Retail Digital Universitas Perwira M. Purbalingga.
+              </p>
+              <div className="lp-footer__location">
+                <MapPin size={14} aria-hidden="true" />
+                <span>Jl. Letnan Kusni No. 52, Purbalingga Lor, Jawa Tengah</span>
+              </div>
             </div>
-            <p style={{ lineHeight: 1.6, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-              Unit Kegiatan Mahasiswa Kewirausahaan &amp; Sistem Kasir Retail Digital Universitas Perwira M. Purbalingga.
-            </p>
+
+            {/* Links */}
+            <div className="lp-footer__links">
+              <div className="lp-footer__link-group">
+                <div className="lp-footer__link-title">Layanan Utama</div>
+                <ul>
+                  <li><Link href="/kasir/pos">Terminal Kasir POS</Link></li>
+                  <li><Link href="/daftar">Pendaftaran &amp; Jadwal Shift</Link></li>
+                  <li><Link href="/login">Masuk Portal Dosen / Admin</Link></li>
+                </ul>
+              </div>
+              <div className="lp-footer__link-group">
+                <div className="lp-footer__link-title">Navigasi</div>
+                <ul>
+                  <li><Link href="#tentang">Tentang Wiramart</Link></li>
+                  <li><Link href="#ekosistem">Ekosistem & Fitur</Link></li>
+                  <li><Link href="#divisi">9 Divisi UKM</Link></li>
+                </ul>
+              </div>
+            </div>
           </div>
 
-          {/* Akses Cepat */}
-          <div>
-            <div
-              style={{
-                fontWeight: 'var(--weight-bold)',
-                color: 'var(--color-text)',
-                marginBottom: 'var(--space-3)',
-              }}
-            >
-              Layanan Utama
-            </div>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              <li>
-                <Link href="/kasir/pos" style={{ color: 'inherit', textDecoration: 'none' }}>
-                  Terminal Kasir POS
-                </Link>
-              </li>
-              <li>
-                <Link href="/daftar" style={{ color: 'inherit', textDecoration: 'none' }}>
-                  Pendaftaran &amp; Jadwal Shift
-                </Link>
-              </li>
-              <li>
-                <Link href="/login" style={{ color: 'inherit', textDecoration: 'none' }}>
-                  Masuk Portal Dosen / Admin
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          {/* Kontak & Lokasi */}
-          <div>
-            <div
-              style={{
-                fontWeight: 'var(--weight-bold)',
-                color: 'var(--color-text)',
-                marginBottom: 'var(--space-3)',
-              }}
-            >
-              Kampus UNPERBA
-            </div>
-            <p style={{ lineHeight: 1.6, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-              Universitas Perwira M. Purbalingga (UNPERBA)<br />
-              Jl. Letnan Kusni No. 52, Purbalingga Lor, Jawa Tengah<br />
-              Kantin &amp; Koperasi Kampus Wiramart
-            </p>
-          </div>
-        </div>
-
-        <div
-          style={{
-            maxWidth: '1200px',
-            margin: '0 auto',
-            paddingTop: 'var(--space-4)',
-            borderTop: '1px solid var(--color-border)',
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            fontSize: 'var(--text-xs)',
-            color: 'var(--color-text-muted)',
-            gap: 'var(--space-2)',
-          }}
-        >
-          <div>
-            &copy; {new Date().getFullYear()} WIRAMART — Unit Kegiatan Mahasiswa Kewirausahaan UNPERBA. All rights reserved.
-          </div>
-          <div>
-            Sistem Kasir Digital Terintegrasi
+          <div className="lp-footer__bottom">
+            <div>&copy; {new Date().getFullYear()} WIRAMART — UKM Kewirausahaan UNPERBA. All rights reserved.</div>
+            <div>Sistem Kasir Digital Terintegrasi</div>
           </div>
         </div>
       </footer>
+
+      {/* ═══════════════════════════════════════════════════════
+          MOBILE BOTTOM NAVIGATION — Floating Pill
+          ═══════════════════════════════════════════════════════ */}
+      <nav className="lp-mobile-nav" aria-label="Navigasi mobile" role="navigation">
+        <div className="lp-mobile-nav__pill">
+          <Link
+            href="/"
+            id="mobile-nav-home"
+            className={`lp-mobile-nav__item${mobileNavActive === 'home' ? ' lp-mobile-nav__item--active' : ''}`}
+            onClick={() => setMobileNavActive('home')}
+            aria-label="Beranda"
+            aria-current={mobileNavActive === 'home' ? 'page' : undefined}
+          >
+            <div className="lp-mobile-nav__icon-wrap">
+              <Home size={20} aria-hidden="true" />
+            </div>
+            <span className="lp-mobile-nav__label">Beranda</span>
+          </Link>
+
+          <Link
+            href="#divisi"
+            id="mobile-nav-divisi"
+            className={`lp-mobile-nav__item${mobileNavActive === 'divisi' ? ' lp-mobile-nav__item--active' : ''}`}
+            onClick={() => setMobileNavActive('divisi')}
+            aria-label="Lihat 9 Divisi"
+          >
+            <div className="lp-mobile-nav__icon-wrap">
+              <Users size={20} aria-hidden="true" />
+            </div>
+            <span className="lp-mobile-nav__label">9 Divisi</span>
+          </Link>
+
+          {/* CENTER CTA — Prominent Kasir Button */}
+          <Link
+            href="/kasir/pos"
+            id="mobile-nav-kasir"
+            className="lp-mobile-nav__cta"
+            aria-label="Buka Terminal Kasir POS"
+            onClick={() => setMobileNavActive('kasir')}
+          >
+            <div className="lp-mobile-nav__cta-ring" aria-hidden="true" />
+            <Store size={24} aria-hidden="true" />
+            <span className="lp-mobile-nav__label">Kasir</span>
+          </Link>
+
+          <Link
+            href="/daftar"
+            id="mobile-nav-shift"
+            className={`lp-mobile-nav__item${mobileNavActive === 'shift' ? ' lp-mobile-nav__item--active' : ''}`}
+            onClick={() => setMobileNavActive('shift')}
+            aria-label="Daftar Shift Kasir"
+          >
+            <div className="lp-mobile-nav__icon-wrap">
+              <Calendar size={20} aria-hidden="true" />
+            </div>
+            <span className="lp-mobile-nav__label">Shift</span>
+          </Link>
+
+          <Link
+            href="/login"
+            id="mobile-nav-admin"
+            className={`lp-mobile-nav__item${mobileNavActive === 'admin' ? ' lp-mobile-nav__item--active' : ''}`}
+            onClick={() => setMobileNavActive('admin')}
+            aria-label="Portal Admin atau Dosen"
+          >
+            <div className="lp-mobile-nav__icon-wrap">
+              <LogIn size={20} aria-hidden="true" />
+            </div>
+            <span className="lp-mobile-nav__label">Admin</span>
+          </Link>
+        </div>
+      </nav>
     </div>
   );
 }
