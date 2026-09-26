@@ -232,15 +232,19 @@ export default function LoginPage() {
                 </label>
                 <input
                   id={`${uid}-nidn`}
+                  name="admin_nidn_login"
                   type="text"
                   className="form-input"
                   placeholder="Nomor Induk Dosen"
                   value={nidn}
                   onChange={(e) => setNidn(e.target.value)}
-                  autoComplete="username"
+                  autoComplete="off"
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck="false"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
                   required
                   aria-required="true"
                   disabled={isLoading}
@@ -255,12 +259,16 @@ export default function LoginPage() {
                 <div style={{ position: 'relative' }}>
                   <input
                     id={`${uid}-password`}
+                    name="admin_password_auth"
                     type={showPassword ? 'text' : 'password'}
                     className="form-input"
                     placeholder="Password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="current-password"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     required
                     aria-required="true"
                     disabled={isLoading}
@@ -295,13 +303,17 @@ export default function LoginPage() {
                   <User size={15} aria-hidden="true" style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
                   <input
                     id={`${uid}-name`}
+                    name="staff_name"
                     type="text"
                     className="form-input"
                     placeholder="Sesuai data yang terdaftar"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    autoComplete="name"
+                    autoComplete="off"
                     autoCapitalize="words"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     required
                     aria-required="true"
                     disabled={isLoading}

@@ -453,6 +453,15 @@ p, h1, h2, h3, h4, h5, h6 {
   border-color: var(--color-success);
 }
 
+.form-input:-webkit-autofill,
+.form-input:-webkit-autofill:hover,
+.form-input:-webkit-autofill:focus,
+.form-input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--color-surface) inset !important;
+  -webkit-text-fill-color: var(--color-text) !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 .form-error {
   display: flex;
   align-items: center;
