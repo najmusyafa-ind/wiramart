@@ -1,9 +1,14 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
+
+// MobileBottomNav diimport dengan ssr:false â€” WAJIB untuk mencegah hydration mismatch.
+// usePathname() di dalam komponen itu menggeser useId() counter semua sibling jika di-SSR.
+const MobileBottomNav = dynamic(() => import('./MobileBottomNav'), { ssr: false });
 import {
   LayoutDashboard,
   Package,
@@ -29,7 +34,7 @@ type NavItem = {
   section?: string;
 };
 
-// 5 item paling sering diakses — bottom nav mobile
+// 5 item paling sering diakses â€” bottom nav mobile
 // Sisanya (Restock, Swap, Export, Pengaturan) tetap via hamburger
 const BOTTOM_NAV_ITEMS = [
   { label: 'Dashboard', href: '/admin/dashboard',  icon: (s: number) => <LayoutDashboard size={s} aria-hidden="true" /> },
@@ -102,82 +107,6 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
-// ── Mobile Bottom Navigation Bar ─────────────────────────────
-// Muncul HANYA di mobile (< 768px). Desktop tetap pakai sidebar.
-// PENTING: mounted guard diperlukan untuk mencegah hydration mismatch.
-// usePathname() menghasilkan value berbeda saat SSR vs client,
-// yang menggeser semua useId() counter di bawahnya.
-function MobileBottomNav() {
-  const pathname = usePathname();
-  const [mounted, setMounted] = useState(false);
-
-  // Render null saat SSR & client initial render → tree konsisten
-  // Setelah mount (client only) → tampilkan nav
-  useEffect(() => { setMounted(true); }, []);
-  if (!mounted) return null;
-
-  return (
-    <nav
-      aria-label="Navigasi bawah"
-      className="mobile-bottom-nav"
-    >
-      {BOTTOM_NAV_ITEMS.map((item) => {
-        const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
-        return (
-          <a
-            key={item.href}
-            href={item.href}
-            aria-label={item.label}
-            aria-current={isActive ? 'page' : undefined}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '3px',
-              flex: 1,
-              padding: '8px 4px 10px',
-              textDecoration: 'none',
-              color: isActive ? 'var(--color-primary)' : 'var(--color-text-muted)',
-              position: 'relative',
-              transition: 'color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
-            }}
-          >
-            {/* Active pill indicator */}
-            {isActive && (
-              <span
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  top: '6px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '10px',
-                  background: 'var(--color-primary)',
-                  opacity: 0.12,
-                  pointerEvents: 'none',
-                }}
-              />
-            )}
-            <span style={{ position: 'relative', zIndex: 1 }}>
-              {item.icon(isActive ? 22 : 20)}
-            </span>
-            <span style={{
-              fontSize: '0.62rem',
-              fontWeight: isActive ? 700 : 500,
-              letterSpacing: isActive ? '0.01em' : '0',
-              lineHeight: 1,
-            }}>
-              {item.label}
-            </span>
-          </a>
-        );
-      })}
-    </nav>
-  );
-}
-
 type AdminSidebarProps = {
   adminName: string;
   isMobileOpen: boolean;
@@ -193,7 +122,7 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
     setIsLoggingOut(true);
     try {
       // role: 'admin' agar hanya cookie sk_admin yang dihapus
-      // — tidak mengganggu sesi kasir yang aktif di tab lain
+      // â€” tidak mengganggu sesi kasir yang aktif di tab lain
       await fetch('/api/auth/logout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -236,7 +165,7 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
           <span className="sidebar-logo-name">Wiramart</span>
           <span className="sidebar-logo-subtitle">UKM Kewirausahaan UNPERBA</span>
         </div>
-        {/* Close button — mobile only */}
+        {/* Close button â€” mobile only */}
         {isMobileOpen && (
           <button
             onClick={onClose}
@@ -267,7 +196,7 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
                 item.href === '/admin/dashboard'
                   ? pathname === '/admin/dashboard'
                   : pathname.startsWith(item.href);
-              // Item yang mengarah ke API route → gunakan <a> native untuk trigger download
+              // Item yang mengarah ke API route â†’ gunakan <a> native untuk trigger download
               if (item.href.startsWith('/api/')) {
                 return (
                   <a
@@ -275,7 +204,7 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
                     href={item.href}
                     className="sidebar-nav-item"
                     role="listitem"
-                    aria-label={`${item.label} — download file`}
+                    aria-label={`${item.label} â€” download file`}
                     onClick={onClose}
                     style={{ textDecoration: 'none' }}
                   >
@@ -311,7 +240,7 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
         ))}
       </div>
 
-      {/* Footer — Admin info + logout */}
+      {/* Footer â€” Admin info + logout */}
       <div className="sidebar-footer">
         <div
           style={{
@@ -413,7 +342,7 @@ export default function AdminLayoutClient({
   return (
     <div className="layout-admin">
 
-      {/* Backdrop overlay — visible on mobile when sidebar open */}
+      {/* Backdrop overlay â€” visible on mobile when sidebar open */}
       {isMobileOpen && (
         <div
           aria-hidden="true"
@@ -429,7 +358,7 @@ export default function AdminLayoutClient({
         />
       )}
 
-      {/* Single sidebar — .mobile-open class makes it visible on mobile */}
+      {/* Single sidebar â€” .mobile-open class makes it visible on mobile */}
       <AdminSidebar
         adminName={adminName}
         isMobileOpen={isMobileOpen}
@@ -506,7 +435,7 @@ export default function AdminLayoutClient({
         </main>
       </div>
 
-      {/* Mobile Bottom Nav — only visible on < 768px (CSS controlled) */}
+      {/* Mobile Bottom Nav â€” only visible on < 768px (CSS controlled) */}
       <MobileBottomNav />
     </div>
   );
