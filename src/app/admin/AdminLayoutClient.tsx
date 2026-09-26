@@ -104,8 +104,17 @@ const NAV_ITEMS: NavItem[] = [
 
 // ── Mobile Bottom Navigation Bar ─────────────────────────────
 // Muncul HANYA di mobile (< 768px). Desktop tetap pakai sidebar.
+// PENTING: mounted guard diperlukan untuk mencegah hydration mismatch.
+// usePathname() menghasilkan value berbeda saat SSR vs client,
+// yang menggeser semua useId() counter di bawahnya.
 function MobileBottomNav() {
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
+
+  // Render null saat SSR & client initial render → tree konsisten
+  // Setelah mount (client only) → tampilkan nav
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
 
   return (
     <nav
