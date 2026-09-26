@@ -2685,236 +2685,43 @@ p, h1, h2, h3, h4, h5, h6 {
   color: var(--color-sidebar-muted);
 }
 
-/* ══════════════════════════════════════════════════════════
-   MOBILE BOTTOM NAVIGATION — Floating Pill Design
-   ══════════════════════════════════════════════════════════ */
-.lp-mobile-nav {
-  display: none; /* Hidden on desktop */
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: var(--z-overlay);
-  padding: var(--space-3) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom));
-  pointer-events: none; /* Allow click-through to content outside the pill */
-}
-.lp-mobile-nav__pill {
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  background: hsla(0, 0%, 100%, 0.92);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border-radius: var(--radius-full);
-  border: 1px solid hsla(145, 30%, 80%, 0.4);
-  box-shadow:
-    0 -2px 0 hsla(145, 63%, 32%, 0.08),
-    0 8px 32px hsla(145, 30%, 10%, 0.16),
-    0 2px 8px hsla(145, 30%, 10%, 0.08);
-  padding: var(--space-2) var(--space-3);
-  max-width: 420px;
-  margin: 0 auto;
-  position: relative;
-}
 
-/* Nav Item */
-.lp-mobile-nav__item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: var(--space-2) var(--space-3);
-  min-width: 56px;
-  min-height: 52px; /* WCAG touch target */
-  border-radius: var(--radius-xl);
-  text-decoration: none;
-  color: var(--color-text-muted);
-  transition:
-    color var(--duration-fast) var(--ease-spring),
-    background-color var(--duration-fast) var(--ease-spring),
-    transform var(--duration-fast) var(--ease-spring);
-}
-.lp-mobile-nav__item:hover {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-}
-.lp-mobile-nav__item:active {
-  transform: scale(0.9);
-}
-.lp-mobile-nav__item:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-
-/* Active State */
-.lp-mobile-nav__item--active {
-  color: var(--color-primary);
-  background: var(--color-primary-light);
-}
-.lp-mobile-nav__item--active .lp-mobile-nav__icon-wrap {
-  transform: translateY(-2px);
-}
-
-/* Icon Wrap — for animation */
-.lp-mobile-nav__icon-wrap {
-  transition: transform var(--duration-fast) var(--ease-spring);
-}
-.lp-mobile-nav__item:hover .lp-mobile-nav__icon-wrap {
-  transform: translateY(-2px);
-}
-
-/* Label */
-.lp-mobile-nav__label {
-  font-size: 10px;
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.02em;
-  line-height: 1;
-}
-
-/* CENTER CTA — Prominent elevated Kasir Button */
-.lp-mobile-nav__cta {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  min-width: 64px;
-  min-height: 64px;
-  border-radius: var(--radius-full);
-  text-decoration: none;
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
-  box-shadow:
-    0 4px 16px hsla(145, 63%, 32%, 0.40),
-    0 2px 4px hsla(145, 63%, 32%, 0.20);
-  transform: translateY(-10px); /* Elevated above pill */
-  position: relative;
-  transition:
-    transform var(--duration-fast) var(--ease-spring),
-    background-color var(--duration-fast) var(--ease-spring),
-    box-shadow var(--duration-fast) var(--ease-spring);
-}
-.lp-mobile-nav__cta:hover {
-  background: var(--color-primary-hover);
-  transform: translateY(-14px);
-  box-shadow:
-    0 8px 24px hsla(145, 63%, 32%, 0.55),
-    0 4px 8px hsla(145, 63%, 32%, 0.25);
-}
-.lp-mobile-nav__cta:active {
-  transform: translateY(-8px) scale(0.93);
-}
-.lp-mobile-nav__cta:focus-visible {
-  outline: 3px solid var(--color-accent);
-  outline-offset: 3px;
-}
-
-/* Pulse ring animation on CTA */
-.lp-mobile-nav__cta-ring {
-  position: absolute;
-  inset: -4px;
-  border-radius: var(--radius-full);
-  border: 2px solid hsla(145, 63%, 32%, 0.35);
-  animation: navCtaPulse 2.5s ease-in-out infinite;
-}
-@keyframes navCtaPulse {
-  0%, 100% { opacity: 0; transform: scale(0.92); }
-  50% { opacity: 1; transform: scale(1); }
-}
-
-/* ── RESPONSIVE: Hide desktop nav, show mobile nav ─────────── */
+/* -- RESPONSIVE: Landing Page ------------------------------- */
 @media (max-width: 768px) {
-  /* Hide desktop nav items */
-  .lp-nav {
-    display: none;
-  }
-
-  /* Show mobile bottom nav */
-  .lp-mobile-nav {
-    display: block;
-  }
-
-  /* Header inner on mobile */
-  .lp-header__inner {
-    padding: var(--space-3) var(--space-4);
-  }
-
-  /* Hide brand sub on mobile */
-  .lp-brand__sub {
-    display: none;
-  }
-
-  /* Hero adjustments */
-  .lp-hero__content {
-    padding: 5rem var(--space-5) 7rem;
-    gap: var(--space-4);
-  }
+  .lp-nav { display: none; }
+  .lp-header__inner { padding: var(--space-3) var(--space-4); }
+  .lp-brand__sub { display: none; }
+  .lp-hero__content { padding: 5rem var(--space-5) 4rem; gap: var(--space-4); }
   .lp-hero__title { text-align: center; }
   .lp-hero__ctas { flex-direction: column; align-items: center; width: 100%; }
   .lp-hero__ctas .btn { width: 100%; max-width: 340px; justify-content: center; }
   .lp-hero__chips { gap: var(--space-2); }
-
-  /* Stats: 2 columns */
   .lp-stats__inner { grid-template-columns: repeat(2, 1fr); }
   .lp-stats__item:nth-child(2) { border-right: none; }
   .lp-stats__item { border-bottom: 1px solid hsl(145, 45%, 24%); }
-  .lp-stats__item:nth-child(3),
-  .lp-stats__item:last-child { border-bottom: none; }
-
-  /* About: stack */
-  .lp-about__inner {
-    grid-template-columns: 1fr;
-    gap: var(--space-8);
-  }
+  .lp-stats__item:nth-child(3), .lp-stats__item:last-child { border-bottom: none; }
+  .lp-about__inner { grid-template-columns: 1fr; gap: var(--space-8); }
   .lp-about__visual { height: 280px; }
   .lp-about__actions { flex-direction: column; }
   .lp-about__actions .btn { width: 100%; justify-content: center; }
-
-  /* Ecosystem grid */
-  .lp-ecosystem__grid {
-    grid-template-columns: 1fr;
-  }
-
-  /* Divisions grid */
-  .lp-divisions__grid {
-    grid-template-columns: 1fr;
-  }
-
-  /* CTA */
+  .lp-ecosystem__grid { grid-template-columns: 1fr; }
+  .lp-divisions__grid { grid-template-columns: 1fr; }
   .lp-cta { padding: 3rem var(--space-4); }
   .lp-cta__content { padding: 2.5rem var(--space-4); }
   .lp-cta__actions { flex-direction: column; align-items: stretch; }
   .lp-cta__actions .btn { justify-content: center; }
   .lp-cta__bg { inset: -5%; border-radius: var(--radius-xl); }
-
-  /* Footer: single column */
   .lp-footer__grid { grid-template-columns: 1fr; gap: var(--space-8); }
   .lp-footer__links { grid-template-columns: 1fr 1fr; }
-  .lp-footer { padding-bottom: calc(88px + env(safe-area-inset-bottom) + var(--space-4)); }
-
-  /* Announcement: shorter */
+  .lp-footer { padding-bottom: var(--space-8); }
   .lp-announcement { font-size: 10px; padding: var(--space-1) var(--space-3); }
 }
-
 @media (max-width: 480px) {
   .lp-stats__inner { grid-template-columns: 1fr 1fr; }
   .lp-footer__links { grid-template-columns: 1fr; }
   .lp-section-header { margin-bottom: var(--space-8); }
   .lp-about__badge { flex-direction: column; text-align: center; gap: var(--space-2); }
-  .lp-mobile-nav__pill { max-width: 100%; border-radius: var(--radius-2xl); }
 }
-
-/* ── DESKTOP: Ensure bottom nav completely hidden ─────────── */
-@media (min-width: 769px) {
-  .lp-mobile-nav {
-    display: none !important;
-  }
-  /* Desktop: no extra footer padding for mobile nav */
-  .lp-footer {
-    padding-bottom: var(--space-8);
-  }
 }
 
 /* ==========================================================
