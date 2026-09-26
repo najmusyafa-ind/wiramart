@@ -110,9 +110,6 @@ function MobileBottomNav() {
   return (
     <nav
       aria-label="Navigasi bawah"
-      style={{
-        display: 'none', // CSS override via media query di globals.css
-      }}
       className="mobile-bottom-nav"
     >
       {BOTTOM_NAV_ITEMS.map((item) => {
