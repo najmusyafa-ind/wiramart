@@ -11,6 +11,16 @@ export const metadata: Metadata = {
   keywords: ['Wiramart', 'UKM Kewirausahaan', 'UNPERBA', 'kasir', 'POS', 'sistem kasir'],
   authors: [{ name: 'Wiramart UNPERBA' }],
   robots: { index: false, follow: false },
+  icons: {
+    icon: [
+      { url: '/favicon.ico' },
+      { url: '/icon.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/apple-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+    shortcut: '/favicon.ico',
+  },
 };
 
 export default function RootLayout({
