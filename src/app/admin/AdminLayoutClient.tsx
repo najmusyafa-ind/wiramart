@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
 import Image from 'next/image';
@@ -196,7 +196,7 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
                 item.href === '/admin/dashboard'
                   ? pathname === '/admin/dashboard'
                   : pathname.startsWith(item.href);
-              // Item yang mengarah ke API route â†’ gunakan <a> native untuk trigger download
+              // Item yang mengarah ke API route -> gunakan <a> native untuk trigger download
               if (item.href.startsWith('/api/')) {
                 return (
                   <a
@@ -204,7 +204,7 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
                     href={item.href}
                     className="sidebar-nav-item"
                     role="listitem"
-                    aria-label={`${item.label} â€” download file`}
+                    aria-label={`${item.label} - download file`}
                     onClick={onClose}
                     style={{ textDecoration: 'none' }}
                   >
