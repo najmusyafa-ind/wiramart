@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import { signAccessToken, signRefreshToken } from '@/lib/utils/auth';
 import { apiError } from '@/lib/utils/helpers';
 import { sql } from 'drizzle-orm';
+import { kasirAuthLimiter } from '@/lib/utils/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -20,28 +21,6 @@ const kasirLoginSchema = z.object({
   nim: z.string().min(1, 'NIM wajib diisi').max(20).trim(),
   programStudi: z.string().min(2, 'Program studi wajib diisi').max(100).trim(),
 });
-
-// Rate limiting per NIM (prevent brute force enumeration)
-const failedAttempts = new Map<string, { count: number; resetAt: number }>();
-const MAX_ATTEMPTS = 10;
-const WINDOW_MS = 60 * 60 * 1000; // 1 hour
-
-function checkRateLimit(key: string): boolean {
-  const now = Date.now();
-  const record = failedAttempts.get(key);
-  if (!record || now > record.resetAt) return true;
-  return record.count < MAX_ATTEMPTS;
-}
-
-function recordFailed(key: string): void {
-  const now = Date.now();
-  const record = failedAttempts.get(key);
-  if (!record || now > record.resetAt) {
-    failedAttempts.set(key, { count: 1, resetAt: now + WINDOW_MS });
-  } else {
-    record.count += 1;
-  }
-}
 
 export async function POST(request: Request): Promise<Response> {
   // 1. Parse + validate
@@ -59,11 +38,13 @@ export async function POST(request: Request): Promise<Response> {
 
   const { fullName, nim, programStudi } = parsed.data;
 
-  // 2. Rate limit per NIM
+  // Rate limit per NIM — via centralized sliding window limiter (25x / 30 menit)
   const rateKey = `kasir:${nim}`;
-  if (!checkRateLimit(rateKey)) {
+  const checkResult = kasirAuthLimiter.check(rateKey, false);
+  if (!checkResult.allowed) {
+    const menitLagi = Math.ceil(checkResult.retryAfterSeconds / 60);
     return apiError(
-      'Terlalu banyak percobaan. Coba lagi dalam 1 jam atau hubungi Admin.',
+      `Terlalu banyak percobaan login. Tunggu ±${menitLagi} menit lagi, atau minta Admin untuk mereset akses Anda.`,
       'RATE_LIMITED',
       429,
     );
@@ -84,7 +65,8 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   if (!employee) {
-    recordFailed(rateKey);
+    // Consume rate limit slot pada setiap percobaan gagal
+    kasirAuthLimiter.check(rateKey, true);
     // SECURITY: Generic error message
     return apiError(
       'Data tidak ditemukan. Pastikan Nama, NIM, dan Program Studi sudah benar.',

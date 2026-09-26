@@ -1,5 +1,24 @@
 import type { Metadata } from 'next';
+import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
+
+// next/font: self-hosted, zero FOIT, tidak blokir render
+// font-display: swap otomatis diaplikasikan oleh next/font
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-sans',
+  display: 'swap',
+  preload: true,
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500'],
+  variable: '--font-mono',
+  display: 'swap',
+  preload: false, // hanya dipakai untuk kode/barcode — tidak perlu preload
+});
 
 export const metadata: Metadata = {
   title: {
@@ -29,11 +48,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id">
+    // Terapkan font variable di <html> sehingga SEMUA elemen turunan mewarisi
+    // h1, h2, p, span, button, a, input — semua inherit via var(--font-sans)
+    <html lang="id" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body>{children}</body>
     </html>

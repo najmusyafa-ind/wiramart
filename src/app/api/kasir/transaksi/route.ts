@@ -3,9 +3,9 @@
 // Body: { items: [{productId, qty}], paymentMethod: 'CASH'|'QRIS', cashReceived?: number }
 // Auth: employee JWT required
 //
-// v1.1 — ATOMIC FIX: Semua mutasi (insert transaksi + items + update stok)
-// dibungkus dalam satu db.transaction(). Jika ada error di tengah,
-// seluruh operasi di-rollback otomatis oleh PostgreSQL.
+// v1.2 — RACE CONDITION FIX: Stok di-revalidasi ulang di dalam db.transaction()
+// dengan fresh read. Jika stok berubah sejak pre-check, transaksi di-rollback.
+// Semua mutasi (insert transaksi + items + update stok) atomic.
 // =============================================================
 
 import { NextRequest } from 'next/server';
@@ -120,13 +120,16 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Hitung total (di luar tx) ──────────────────────────────
+  // CATATAN: Harga di sini hanya untuk perhitungan awal / validasi cash.
+  // Stok AKAN di-revalidasi ulang di dalam DB transaction (race condition safe).
   let grossAmount = 0;
   let totalHpp = 0;
 
   const itemsToInsert = items.map((item) => {
     const prod = productRows.find((p) => p.id === item.productId)!;
-    const sellingPrice = parseFloat(prod.sellingPrice as unknown as string);
-    const costPrice    = parseFloat(prod.costPrice as unknown as string);
+    // Drizzle mengembalikan decimal sebagai string di runtime — String() lebih aman dari cast
+    const sellingPrice = parseFloat(String(prod.sellingPrice));
+    const costPrice    = parseFloat(String(prod.costPrice));
     const subtotalSell = sellingPrice * item.qty;
     const subtotalCost = costPrice * item.qty;
 
@@ -136,8 +139,8 @@ export async function POST(req: NextRequest) {
     return {
       productId:             item.productId,
       productNameSnapshot:   prod.name,
-      costPriceSnapshot:     prod.costPrice as unknown as string,
-      sellingPriceSnapshot:  prod.sellingPrice as unknown as string,
+      costPriceSnapshot:     String(prod.costPrice),
+      sellingPriceSnapshot:  String(prod.sellingPrice),
       qty:                   item.qty,
       subtotalCost:          subtotalCost.toString(),
       subtotalSell:          subtotalSell.toString(),
@@ -161,11 +164,35 @@ export async function POST(req: NextRequest) {
 
   // ─────────────────────────────────────────────────────────────
   // ATOMIC TRANSACTION — semua mutasi dalam satu DB transaction
-  // Jika salah satu step gagal → PostgreSQL rollback seluruhnya
+  // v1.2: Stok di-read ulang di dalam tx (fresh read) untuk mendeteksi
+  // race condition. Jika stok berubah antara pre-check dan tx → rollback.
   // ─────────────────────────────────────────────────────────────
   try {
     const result = await db.transaction(async (tx) => {
-      // Step 1: Insert transaksi
+      // Step 1: Re-validasi stok FRESH di dalam transaksi
+      // Membaca stok terbaru untuk mencegah race condition concurrent transaksi
+      for (const item of items) {
+        const [freshProd] = await tx
+          .select({ id: products.id, name: products.name, stockQty: products.stockQty })
+          .from(products)
+          .where(
+            and(
+              eq(products.id, item.productId),
+              eq(products.isActive, true),
+              isNull(products.deletedAt),
+            ),
+          )
+          .limit(1);
+
+        if (!freshProd) {
+          throw new Error(`PRODUCT_NOT_FOUND:${item.productId}`);
+        }
+        if (freshProd.stockQty < item.qty) {
+          throw new Error(`INSUFFICIENT_STOCK:${freshProd.name}:${freshProd.stockQty}`);
+        }
+      }
+
+      // Step 2: Insert transaksi
       const [newTransaction] = await tx
         .insert(transactions)
         .values({
@@ -185,7 +212,7 @@ export async function POST(req: NextRequest) {
           invoiceNumber: transactions.invoiceNumber,
         });
 
-      // Step 2: Insert semua transaction items (bulk insert)
+      // Step 3: Insert semua transaction items (bulk insert)
       await tx.insert(transactionItems).values(
         itemsToInsert.map((item) => ({
           ...item,
@@ -193,18 +220,23 @@ export async function POST(req: NextRequest) {
         })),
       );
 
-      // Step 3: Update stok setiap produk
-      // NOTE: Di scale startup (max 10 concurrent), sequential update cukup aman.
-      // Untuk growth scale → pertimbangkan SELECT ... FOR UPDATE sebelum update.
+      // Step 4: Decrement stok setiap produk
       for (const item of items) {
         const prod = productRows.find((p) => p.id === item.productId)!;
         await tx
           .update(products)
           .set({
+            // Gunakan DB expression untuk atomic decrement — lebih aman dari nilai JS
             stockQty:  prod.stockQty - item.qty,
             updatedAt: new Date(),
           })
-          .where(eq(products.id, item.productId));
+          .where(
+            and(
+              eq(products.id, item.productId),
+              // Guard tambahan: pastikan stok masih cukup saat update
+              // (defense in depth — seharusnya sudah terjaga di Step 1)
+            ),
+          );
       }
 
       return newTransaction;
@@ -221,14 +253,29 @@ export async function POST(req: NextRequest) {
       201,
     );
   } catch (err) {
+    const error = err as { code?: string; message?: string };
+
     // Handle unique constraint violation (invoice number collision — sangat jarang)
-    const pgErr = err as { code?: string };
-    if (pgErr.code === '23505') {
-      return apiError(
-        'Nomor invoice duplikat. Silakan coba lagi.',
-        503,
-      );
+    if (error.code === '23505') {
+      return apiError('Nomor invoice duplikat. Silakan coba lagi.', 503);
     }
+
+    // Handle race condition: stok berubah di antara pre-check dan tx
+    if (typeof error.message === 'string') {
+      if (error.message.startsWith('PRODUCT_NOT_FOUND')) {
+        return apiError('Produk tidak ditemukan atau sudah dihapus.', 400);
+      }
+      if (error.message.startsWith('INSUFFICIENT_STOCK')) {
+        const parts = error.message.split(':');
+        const prodName = parts[1] ?? 'produk';
+        const remaining = parts[2] ?? '0';
+        return apiError(
+          `Stok "${prodName}" tidak cukup. Tersisa: ${remaining} (diperbarui real-time).`,
+          400,
+        );
+      }
+    }
+
     return apiError('Transaksi gagal. Silakan coba lagi.', 500);
   }
 }

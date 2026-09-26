@@ -11,6 +11,7 @@ import { admins } from '@/lib/db/schema';
 import { NextResponse } from 'next/server';
 import { verifyPassword, signAccessToken, signRefreshToken } from '@/lib/utils/auth';
 import { apiError } from '@/lib/utils/helpers';
+import { adminAuthLimiter } from '@/lib/utils/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -18,26 +19,6 @@ const loginSchema = z.object({
   nidn: z.string().min(1, 'NIDN/NIDK wajib diisi').max(20).trim(),
   password: z.string().min(1, 'Password wajib diisi').max(200),
 });
-
-// Rate limiting (in-memory — production: gunakan Redis)
-const failedAttempts = new Map<string, { count: number; resetAt: number }>();
-const MAX_ATTEMPTS = 10;
-const WINDOW_MS = 60 * 60 * 1000; // 1 jam
-
-function checkRateLimit(key: string): boolean {
-  const now = Date.now();
-  const record = failedAttempts.get(key);
-  if (!record || now > record.resetAt) return true;
-  return record.count < MAX_ATTEMPTS;
-}
-function recordFailedAttempt(key: string): void {
-  const now = Date.now();
-  const record = failedAttempts.get(key);
-  if (!record || now > record.resetAt) {
-    failedAttempts.set(key, { count: 1, resetAt: now + WINDOW_MS });
-  } else { record.count += 1; }
-}
-function clearAttempts(key: string): void { failedAttempts.delete(key); }
 
 export async function POST(request: Request): Promise<Response> {
   let body: unknown;
@@ -50,9 +31,17 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const { nidn, password } = parsed.data;
+  const rateKey = `admin:${nidn}`;
 
-  if (!checkRateLimit(nidn)) {
-    return apiError('Terlalu banyak percobaan. Coba lagi dalam 1 jam.', 'RATE_LIMITED', 429);
+  // Rate limiting via centralized limiter (sliding window)
+  // Consume = false saat check, consume = true saat terjadi kegagalan
+  const checkResult = adminAuthLimiter.check(rateKey, false);
+  if (!checkResult.allowed) {
+    return apiError(
+      `Terlalu banyak percobaan. Coba lagi dalam ${checkResult.retryAfterSeconds} detik.`,
+      'RATE_LIMITED',
+      429,
+    );
   }
 
   // Cari admin berdasarkan NIDN atau NIDK (salah satu cocok)
@@ -82,11 +71,13 @@ export async function POST(request: Request): Promise<Response> {
   const isValid = await verifyPassword(password, admin?.passwordHash ?? DUMMY_HASH);
 
   if (!admin || !isValid || !admin.isActive) {
-    recordFailedAttempt(nidn);
+    // Consume 1 slot dari rate limiter setiap login gagal
+    adminAuthLimiter.check(rateKey, true);
     return apiError('NIDN/NIDK atau password salah.', 'INVALID_CREDENTIALS', 401);
   }
 
-  clearAttempts(nidn);
+  // Login sukses — reset counter
+  adminAuthLimiter.reset(rateKey);
 
   const accessToken = await signAccessToken({ sub: admin.id, role: 'admin', username: admin.nidn });
   const refreshToken = await signRefreshToken(admin.id, 'admin');

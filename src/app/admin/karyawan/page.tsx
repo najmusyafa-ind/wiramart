@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useId } from 'react';
-import { Plus, Search, UserCheck, UserX, Trash2, Edit2, X, Loader2, Users } from 'lucide-react';
+import { useState, useEffect, useId, useCallback } from 'react';
+import { Plus, Search, UserCheck, UserX, Trash2, Edit2, X, Loader2, Users, AlertTriangle } from 'lucide-react';
 
 type Employee = {
   id: string;
@@ -182,9 +182,11 @@ export default function KaryawanPage() {
   const [showModal, setShowModal] = useState(false);
   const [editData, setEditData] = useState<Employee | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
   const uid = useId();
 
-  async function fetchEmployees(q = '') {
+  const fetchEmployees = useCallback(async (q = '') => {
     setLoading(true);
     try {
       const res = await fetch(`/api/admin/karyawan?q=${encodeURIComponent(q)}`);
@@ -193,15 +195,13 @@ export default function KaryawanPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { fetchEmployees(); }, []);
-
-  // Debounce search
+  // FIXED: satu useEffect debounced menggantikan double fetch
   useEffect(() => {
     const t = setTimeout(() => fetchEmployees(search), 350);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [search, fetchEmployees]);
 
   async function handleToggleActive(emp: Employee) {
     await fetch(`/api/admin/karyawan/${emp.id}`, {
@@ -212,16 +212,85 @@ export default function KaryawanPage() {
     fetchEmployees(search);
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Yakin hapus karyawan ini? Data shift & transaksi tetap tersimpan.')) return;
+  // FIXED: ganti confirm() dengan state-based dialog
+  function handleDelete(id: string, name: string) {
+    setConfirmDelete({ id, name });
+  }
+
+  async function executeDelete(id: string) {
     setDeletingId(id);
-    await fetch(`/api/admin/karyawan/${id}`, { method: 'DELETE' });
-    setDeletingId(null);
-    fetchEmployees(search);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/admin/karyawan/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json() as { error?: string };
+        setDeleteError(json.error ?? 'Gagal menghapus karyawan.');
+        return;
+      }
+      fetchEmployees(search);
+    } catch {
+      setDeleteError('Gagal menghapus karyawan. Periksa koneksi.');
+    } finally {
+      setDeletingId(null);
+      setConfirmDelete(null);
+    }
   }
 
   return (
-    <div>
+    <>
+      {/* ── Confirm Delete Dialog ──────────────────────────── */}
+      {confirmDelete && (
+        <div
+          role="alertdialog" aria-modal="true"
+          aria-labelledby="confirm-del-karyawan-title"
+          aria-describedby="confirm-del-karyawan-desc"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 'var(--space-4)',
+            backgroundColor: 'var(--color-backdrop-blur)',
+            backdropFilter: 'blur(8px)',
+            animation: 'fade-in 0.15s ease',
+          }}
+        >
+          <div className="card" style={{ maxWidth: 400, width: '100%', boxShadow: 'var(--shadow-xl)' }}>
+            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', padding: 'var(--space-6)' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+                <AlertTriangle size={22} style={{ color: 'var(--color-error)', flexShrink: 0, marginTop: 2 }} aria-hidden="true" />
+                <div>
+                  <p id="confirm-del-karyawan-title" style={{ fontWeight: 'var(--weight-semibold)', marginBottom: 'var(--space-1)' }}>
+                    Hapus Karyawan?
+                  </p>
+                  <p id="confirm-del-karyawan-desc" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
+                    Karyawan <strong>&ldquo;{confirmDelete.name}&rdquo;</strong> akan dihapus.
+                    Data shift &amp; transaksi tetap tersimpan.
+                  </p>
+                </div>
+              </div>
+              {deleteError && (
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-error)', background: 'var(--color-error-light)', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-sm)' }}>
+                  {deleteError}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => { setConfirmDelete(null); setDeleteError(null); }}
+                  className="btn btn-secondary" disabled={!!deletingId} autoFocus
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={() => executeDelete(confirmDelete.id)}
+                  className="btn btn-danger" disabled={!!deletingId}
+                >
+                  {deletingId ? <><Loader2 size={14} className="spin-icon" aria-hidden="true" /> Menghapus...</> : 'Ya, Hapus'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      <div>
       {/* Header */}
       <div className="page-header">
         <div>
@@ -318,7 +387,7 @@ export default function KaryawanPage() {
                         </button>
                         {/* Hapus */}
                         <button
-                          onClick={() => handleDelete(emp.id)}
+                          onClick={() => handleDelete(emp.id, emp.fullName)}
                           className="btn btn-ghost btn-sm"
                           title="Hapus karyawan"
                           aria-label={`Hapus ${emp.fullName}`}
@@ -346,5 +415,6 @@ export default function KaryawanPage() {
         />
       )}
     </div>
+    </>
   );
 }

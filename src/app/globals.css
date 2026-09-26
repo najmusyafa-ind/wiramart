@@ -1,10 +1,10 @@
 /* ==========================================================
-   SMARTKASIR PERWIRA — Global Design System v1.0
+   SMARTKASIR PERWIRA — Global Design System v1.1
    Vanilla CSS + CSS Custom Properties (Token-First)
+   Font: next/font/google (Inter + JetBrains Mono)
+   Font variables --font-sans & --font-mono diinjeksi oleh layout.tsx
+   via next/font — tidak perlu @import di sini.
    ========================================================== */
-
-/* ---------- GOOGLE FONTS ---------- */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* ---------- COLOR TOKENS (HSL — Primary: Forest Green from Logo) ---------- */
 :root {
@@ -64,6 +64,14 @@
   --color-overlay:         hsla(145, 30%, 8%, 0.55);
   --color-skeleton:        hsl(145, 15%, 90%);
   --color-skeleton-shine:  hsl(145, 15%, 96%);
+
+  /* Extended surface tokens — dipakai di file-upload, drag-drop, state highlight */
+  /* --color-primary-surface: warna latar sangat terang saat elemen dipilih/aktif */
+  --color-primary-surface: hsl(145, 40%, 93%);
+  /* --color-surface-alt: permukaan alternatif — lebih gelap dari surface, lebih terang dari muted */
+  --color-surface-alt:     hsl(145, 10%, 95%);
+  /* --color-backdrop-blur: untuk modal overlay dengan glassmorphism */
+  --color-backdrop-blur:   hsla(145, 30%, 8%, 0.6);
 }
 
 /* ---------- SPACING TOKENS (8dp Grid) ---------- */
@@ -84,8 +92,10 @@
 
 /* ---------- TYPOGRAPHY TOKENS ---------- */
 :root {
-  --font-sans:  'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono:  'JetBrains Mono', 'Courier New', monospace;
+  /* next/font injeksi CSS var --font-sans dan --font-mono via <html className="...">.
+     Fallback chain tetap ada untuk SSR flash atau jika next/font gagal load. */
+  --font-sans:  var(--font-inter, 'Inter'), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono:  var(--font-jetbrains-mono, 'JetBrains Mono'), 'Courier New', monospace;
 
   --text-xs:   0.75rem;    /* 12px */
   --text-sm:   0.875rem;   /* 14px */
@@ -1267,7 +1277,12 @@ p, h1, h2, h3, h4, h5, h6 {
   font-weight: var(--weight-medium);
   cursor: pointer;
   white-space: nowrap;
-  transition: all var(--duration-fast) var(--ease-spring);
+  transition:
+    background-color var(--duration-fast) var(--ease-spring),
+    border-color var(--duration-fast) var(--ease-spring),
+    color var(--duration-fast) var(--ease-spring),
+    box-shadow var(--duration-fast) var(--ease-spring),
+    transform var(--duration-fast) var(--ease-spring);
   min-height: 36px;
   -webkit-tap-highlight-color: transparent;
 }
@@ -1486,7 +1501,10 @@ p, h1, h2, h3, h4, h5, h6 {
   align-items: center;
   justify-content: center;
   color: var(--color-text-secondary);
-  transition: all var(--duration-fast) var(--ease-spring);
+  transition:
+    background-color var(--duration-fast) var(--ease-spring),
+    border-color var(--duration-fast) var(--ease-spring),
+    color var(--duration-fast) var(--ease-spring);
   min-height: 0;
 }
 .pos-qty-btn:hover:not(:disabled) {
@@ -1515,7 +1533,11 @@ p, h1, h2, h3, h4, h5, h6 {
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-spring);
+  transition:
+    background-color var(--duration-fast) var(--ease-spring),
+    border-color var(--duration-fast) var(--ease-spring),
+    color var(--duration-fast) var(--ease-spring),
+    box-shadow var(--duration-fast) var(--ease-spring);
   min-height: 40px;
   -webkit-tap-highlight-color: transparent;
 }

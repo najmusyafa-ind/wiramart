@@ -31,7 +31,7 @@ import {
 import {
   Plus, Search, Package, Edit2, Trash2, Loader2, X, Tag,
   ScanLine, Camera, CameraOff, CheckCircle, AlertCircle,
-  ClipboardList, ImageIcon, RefreshCw,
+  ClipboardList, ImageIcon, RefreshCw, AlertTriangle,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────
@@ -796,6 +796,10 @@ export default function ProdukPage() {
   const [showModal, setShowModal] = useState(false);
   const [editData, setEditData] = useState<Product | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // ── Confirm Dialog state (mengganti browser confirm()) ────
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
 
   // ── Scanner state ────────────────────────────────────────
   const [showScanner, setShowScanner] = useState(false);
@@ -823,19 +827,37 @@ export default function ProdukPage() {
     }
   }, []);
 
-  useEffect(() => { fetchProducts(); }, [fetchProducts]);
-
+  // FIXED: satu useEffect dengan debounce 350ms menggantikan double fetch.
+  // search='' + filterCat='' saat mount → initial load dengan debounce singkat.
+  // Tidak ada lagi 2x fetch saat komponen pertama kali render.
   useEffect(() => {
     const t = setTimeout(() => fetchProducts(search, filterCat), 350);
     return () => clearTimeout(t);
   }, [search, filterCat, fetchProducts]);
 
   async function handleDelete(id: string, name: string) {
-    if (!confirm(`Hapus produk "${name}"? Produk tidak akan muncul di kasir.`)) return;
+    // FIXED: gunakan state-based confirm dialog (menggantikan browser confirm())
+    // Browser confirm() tidak aksesibel, tidak bisa di-style, tidak support screen reader.
+    setConfirmDelete({ id, name });
+  }
+
+  async function executeDelete(id: string) {
     setDeletingId(id);
-    await fetch(`/api/admin/produk/${id}`, { method: 'DELETE' });
-    setDeletingId(null);
-    fetchProducts(search, filterCat);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/admin/produk/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json() as { error?: string };
+        setDeleteError(json.error ?? 'Gagal menghapus produk. Coba lagi.');
+        return;
+      }
+      fetchProducts(search, filterCat);
+    } catch {
+      setDeleteError('Gagal menghapus produk. Periksa koneksi dan coba lagi.');
+    } finally {
+      setDeletingId(null);
+      setConfirmDelete(null);
+    }
   }
 
   // ── Scanner callback ────────────────────────────────────
@@ -851,6 +873,66 @@ export default function ProdukPage() {
 
   return (
     <>
+      {/* ── Confirm Delete Dialog (a11y: mengganti browser confirm()) */}
+      {confirmDelete && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="confirm-delete-title"
+          aria-describedby="confirm-delete-desc"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 'var(--space-4)',
+            backgroundColor: 'var(--color-backdrop-blur)',
+            backdropFilter: 'blur(8px)',
+            animation: 'fade-in 0.15s ease',
+          }}
+        >
+          <div className="card" style={{ maxWidth: 420, width: '100%', boxShadow: 'var(--shadow-xl)' }}>
+            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', padding: 'var(--space-6)' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+                <AlertTriangle size={24} style={{ color: 'var(--color-error)', flexShrink: 0, marginTop: 2 }} aria-hidden="true" />
+                <div>
+                  <p id="confirm-delete-title" style={{ fontWeight: 'var(--weight-semibold)', marginBottom: 'var(--space-1)' }}>
+                    Hapus Produk?
+                  </p>
+                  <p id="confirm-delete-desc" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
+                    Produk <strong>&ldquo;{confirmDelete.name}&rdquo;</strong> akan disembunyikan dari kasir.
+                    Data histori transaksi tetap tersimpan.
+                  </p>
+                </div>
+              </div>
+              {deleteError && (
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-error)', background: 'var(--color-error-light)', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-sm)' }}>
+                  {deleteError}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => { setConfirmDelete(null); setDeleteError(null); }}
+                  className="btn btn-secondary"
+                  disabled={deletingId === confirmDelete.id}
+                  autoFocus
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={() => executeDelete(confirmDelete.id)}
+                  className="btn btn-danger"
+                  disabled={deletingId === confirmDelete.id}
+                >
+                  {deletingId === confirmDelete.id
+                    ? <><Loader2 size={15} className="spin-icon" aria-hidden="true" /> Menghapus...</>
+                    : 'Ya, Hapus'
+                  }
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Scanner Modal */}
       {showScanner && (
         <BarcodeScanner
@@ -947,10 +1029,12 @@ export default function ProdukPage() {
         </div>
 
         {/* Products table */}
-        <div className="card">
+        {/* aria-live="polite": screen reader announce saat konten berubah (loading → hasil) */}
+        <div className="card" aria-live="polite" aria-busy={loading}>
           {loading ? (
             <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
-              <Loader2 size={32} className="spin-icon" style={{ margin: '0 auto' }} aria-label="Memuat produk..." />
+              <Loader2 size={32} className="spin-icon" style={{ margin: '0 auto' }} aria-hidden="true" />
+              <p style={{ fontSize: 'var(--text-sm)', marginTop: 'var(--space-3)' }} role="status">Memuat produk...</p>
             </div>
           ) : products.length === 0 ? (
             <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
@@ -999,8 +1083,20 @@ export default function ProdukPage() {
                         <span style={{
                           color: p.stockQty <= 5 ? 'var(--color-error)' : 'inherit',
                           fontWeight: p.stockQty <= 5 ? 'var(--weight-bold)' : undefined,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 'var(--space-1)',
                         }}>
+                          {/* FIXED: ikon + teks sebagai indikator — tidak hanya warna (WCAG color-contrast) */}
+                          {p.stockQty <= 5 && (
+                            <AlertTriangle size={12} aria-hidden="true" />
+                          )}
                           {p.stockQty} {p.unit}
+                          {p.stockQty <= 5 && (
+                            <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-normal)', marginLeft: 2 }}>
+                              (Rendah)
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td>

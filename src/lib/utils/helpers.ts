@@ -50,15 +50,10 @@ export function formatTime(date: Date | string | null | undefined): string {
 }
 
 // --- Invoice Number Generator ---
-// Format: INV-YYYYMMDD-XXXX (sequence per hari)
-export function generateInvoiceNumber(sequence: number): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const seq = String(sequence).padStart(4, '0');
-  return `INV-${year}${month}${day}-${seq}`;
-}
+// DEPRECATED: generateInvoiceNumber(sequence) sudah tidak dipakai.
+// Implementasi baru ada di src/app/api/kasir/transaksi/route.ts
+// menggunakan format INV{date}{time}{random} yang collision-resistant.
+// Hapus jika ada yang masih import fungsi ini.
 
 // --- Decimal / Number helpers ---
 export function toDecimal(value: string | number | null | undefined): number {

@@ -1,7 +1,7 @@
 // =============================================================
-// Smartkasir Perwira — Drizzle ORM Schema v1.0
+// Smartkasir Perwira — Drizzle ORM Schema v1.1
 // Database: PostgreSQL (Supabase)
-// Matches ERD v1.0 exactly — 11 tables
+// Tables: 13 (ditambah shift_swap_requests, attendances)
 // =============================================================
 
 import {
@@ -24,12 +24,29 @@ import { sql } from 'drizzle-orm';
 // ENUM TYPES
 // =============================================================
 
-export const paymentMethodEnum = pgEnum('payment_method', ['CASH', 'QRIS']);
+export const paymentMethodEnum    = pgEnum('payment_method',    ['CASH', 'QRIS']);
 export const transactionStatusEnum = pgEnum('transaction_status', ['COMPLETED', 'VOID']);
-export const shiftStatusEnum = pgEnum('shift_status', ['ACTIVE', 'CLOSED']);
-export const stockActionEnum = pgEnum('stock_action', ['INSERT', 'UPDATE', 'SOFT_DELETE']);
-export const actorTypeEnum = pgEnum('actor_type', ['ADMIN', 'EMPLOYEE', 'SYSTEM']);
-export const periodTypeEnum = pgEnum('period_type', ['DAILY', 'WEEKLY', 'MONTHLY', 'SEMI_ANNUAL']);
+export const shiftStatusEnum       = pgEnum('shift_status',       ['ACTIVE', 'CLOSED']);
+export const stockActionEnum       = pgEnum('stock_action',       ['INSERT', 'UPDATE', 'SOFT_DELETE']);
+export const actorTypeEnum         = pgEnum('actor_type',         ['ADMIN', 'EMPLOYEE', 'SYSTEM']);
+export const periodTypeEnum        = pgEnum('period_type',        ['DAILY', 'WEEKLY', 'MONTHLY', 'SEMI_ANNUAL']);
+
+// Status pengajuan pindah shift oleh mahasiswa
+export const swapStatusEnum = pgEnum('swap_status', [
+  'PENDING',    // Baru diajukan, menunggu review dosen
+  'APPROVED',   // Dosen approve — jadwal dipertukarkan
+  'REJECTED',   // Dosen tolak — jadwal tetap
+  'CANCELLED',  // Mahasiswa batalkan sebelum di-review
+]);
+
+// Status kehadiran per slot jadwal
+export const attendanceStatusEnum = pgEnum('attendance_status', [
+  'HADIR',        // Login tepat waktu (dalam window toleransi)
+  'TELAT',        // Login terlambat > toleransi (default 15 menit)
+  'IJIN',         // Ijin resmi disetujui dosen
+  'TIDAK_HADIR',  // Tidak masuk tanpa keterangan (bolos)
+  'PENGGANTI',    // Masuk sebagai pengganti slot swap yang disetujui
+]);
 
 // =============================================================
 // 1. ADMINS
@@ -474,4 +491,129 @@ export const transactionItemsRelations = relations(transactionItems, ({ one }) =
     fields: [transactionItems.productId],
     references: [products.id],
   }),
+}));
+
+// =============================================================
+// 13. SHIFT_SWAP_REQUESTS (Pengajuan Pindah Shift oleh Mahasiswa)
+// =============================================================
+// ALUR:
+//   1. Mahasiswa ajukan swap: from_schedule (slot miliknya) → to_schedule (slot lain)
+//   2. Dosen review: APPROVE atau REJECT
+//   3. Jika APPROVE → employeeId di kedua schedule dipertukarkan
+//   4. Attendance record diupdate: requester dapat PENGGANTI di slot baru
+// RATE LIMIT: max 3 pengajuan per 7 hari per mahasiswa (lihat rate-limit.ts)
+// =============================================================
+
+export const shiftSwapRequests = pgTable(
+  'shift_swap_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Mahasiswa yang mengajukan pindah
+    requesterId: uuid('requester_id')
+      .notNull()
+      .references(() => employees.id),
+    // Slot jadwal asal milik requester (misal: Senin 08:00)
+    fromScheduleId: uuid('from_schedule_id')
+      .notNull()
+      .references(() => shiftSchedules.id),
+    // Slot jadwal tujuan yang ingin diambil (misal: Selasa 08:00)
+    toScheduleId: uuid('to_schedule_id')
+      .notNull()
+      .references(() => shiftSchedules.id),
+    // Alasan wajib diisi — memudahkan dosen evaluasi
+    reason: text('reason').notNull(),
+    status: swapStatusEnum('status').notNull().default('PENDING'),
+    // Dosen yang review (nullable sampai ada keputusan)
+    reviewedByAdminId: uuid('reviewed_by_admin_id').references(() => admins.id),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    // Catatan dosen (opsional, bisa berisi alasan tolak)
+    adminNote: text('admin_note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Query pending requests untuk dashboard admin
+    index('idx_swap_status_created').on(table.status, table.createdAt),
+    // History swap per mahasiswa
+    index('idx_swap_requester').on(table.requesterId, table.createdAt),
+  ],
+);
+
+export type ShiftSwapRequest    = typeof shiftSwapRequests.$inferSelect;
+export type NewShiftSwapRequest = typeof shiftSwapRequests.$inferInsert;
+
+export const shiftSwapRequestsRelations = relations(shiftSwapRequests, ({ one }) => ({
+  requester:     one(employees,      { fields: [shiftSwapRequests.requesterId],       references: [employees.id] }),
+  fromSchedule:  one(shiftSchedules, { fields: [shiftSwapRequests.fromScheduleId],    references: [shiftSchedules.id] }),
+  toSchedule:    one(shiftSchedules, { fields: [shiftSwapRequests.toScheduleId],      references: [shiftSchedules.id] }),
+  reviewedByAdmin: one(admins,       { fields: [shiftSwapRequests.reviewedByAdminId], references: [admins.id] }),
+}));
+
+// =============================================================
+// 14. ATTENDANCES (Rekap Kehadiran per Slot Jadwal per Tanggal)
+// Dikelola DOSEN — mahasiswa tidak bisa edit sendiri
+// =============================================================
+// FILOSOFI:
+//   - 1 row = 1 mahasiswa × 1 slot jadwal × 1 tanggal spesifik
+//   - HADIR: auto-created saat mahasiswa berhasil login (clock-in)
+//   - TELAT: auto-detected saat clock-in > slotStart + toleransiMenit
+//   - TIDAK_HADIR/IJIN: dosen input manual
+//   - PENGGANTI: otomatis saat swap disetujui
+// =============================================================
+
+export const attendances = pgTable(
+  'attendances',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    employeeId: uuid('employee_id')
+      .notNull()
+      .references(() => employees.id),
+    // Referensi ke template jadwal (Senin 08:00-11:00)
+    scheduleId: uuid('schedule_id')
+      .notNull()
+      .references(() => shiftSchedules.id),
+    // Tanggal SPESIFIK — bukan hanya hari. Krusial untuk laporan bulanan.
+    // Contoh: 2026-09-29 (Senin minggu ke-4 September)
+    attendanceDate: date('attendance_date').notNull(),
+    status: attendanceStatusEnum('status').notNull(),
+    // Terhubung ke sesi login aktual (nullable untuk TIDAK_HADIR/IJIN)
+    shiftId: uuid('shift_id').references(() => shifts.id),
+    // Snapshot waktu aktual dari sesi login
+    clockInActual:  timestamp('clock_in_actual',  { withTimezone: true }),
+    clockOutActual: timestamp('clock_out_actual', { withTimezone: true }),
+    // Keterlambatan dalam menit (0 jika tepat waktu / HADIR)
+    lateMinutes: integer('late_minutes').notNull().default(0),
+    // Catatan dosen: alasan ijin, keterangan khusus
+    notes: text('notes'),
+    // Dosen yang mencatat (nullable jika auto-generated saat login)
+    recordedByAdminId: uuid('recorded_by_admin_id').references(() => admins.id),
+    // Jika status = PENGGANTI, ini referensi swap yang menyebabkannya
+    fromSwapRequestId: uuid('from_swap_request_id').references(() => shiftSwapRequests.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // 1 mahasiswa hanya bisa punya 1 record per jadwal per tanggal
+    // (mencegah duplikat absensi)
+    uniqueIndex('idx_attendance_unique').on(
+      table.employeeId,
+      table.scheduleId,
+      table.attendanceDate,
+    ),
+    // Query laporan per tanggal — paling sering dipakai dosen
+    index('idx_attendance_date').on(table.attendanceDate, table.status),
+    // Query riwayat per mahasiswa
+    index('idx_attendance_employee').on(table.employeeId, table.attendanceDate),
+  ],
+);
+
+export type Attendance    = typeof attendances.$inferSelect;
+export type NewAttendance = typeof attendances.$inferInsert;
+
+export const attendancesRelations = relations(attendances, ({ one }) => ({
+  employee:        one(employees,        { fields: [attendances.employeeId],         references: [employees.id] }),
+  schedule:        one(shiftSchedules,   { fields: [attendances.scheduleId],         references: [shiftSchedules.id] }),
+  shift:           one(shifts,           { fields: [attendances.shiftId],            references: [shifts.id] }),
+  recordedByAdmin: one(admins,           { fields: [attendances.recordedByAdminId],  references: [admins.id] }),
+  fromSwapRequest: one(shiftSwapRequests,{ fields: [attendances.fromSwapRequestId],  references: [shiftSwapRequests.id] }),
 }));
