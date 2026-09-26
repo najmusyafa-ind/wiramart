@@ -754,6 +754,91 @@ p, h1, h2, h3, h4, h5, h6 {
 }
 
 /* ==========================================================
+   ADMIN MOBILE BOTTOM NAV
+   Hanya muncul di layar < 1024px (dikontrol via CSS display)
+   ========================================================== */
+
+.admin-bottom-nav {
+  display: none; /* hidden by default — shown via mobile @media */
+}
+
+@media (max-width: 1023px) {
+  /* Beri ruang untuk bottom nav di content area */
+  .layout-content {
+    padding-bottom: calc(var(--space-4) + 64px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .admin-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: var(--z-sticky);
+    background-color: #ffffff;
+    border-top: 1.5px solid var(--color-border);
+    box-shadow: 0 -4px 20px hsla(145, 30%, 10%, 0.10);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .admin-bottom-nav__item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 10px 4px 8px;
+    text-decoration: none;
+    color: hsl(145, 8%, 52%);
+    transition:
+      color var(--duration-fast) var(--ease-in-out),
+      background-color var(--duration-fast) var(--ease-in-out);
+    min-height: 64px;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+  }
+
+  .admin-bottom-nav__item:active {
+    background-color: hsl(145, 40%, 95%);
+  }
+
+  .admin-bottom-nav__item.active {
+    color: var(--color-primary);
+  }
+
+  /* Active indicator — garis hijau di atas item aktif */
+  .admin-bottom-nav__item.active::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 28px;
+    height: 3px;
+    background-color: var(--color-primary);
+    border-radius: 0 0 var(--radius-full) var(--radius-full);
+  }
+
+  .admin-bottom-nav__icon {
+    display: block;
+    flex-shrink: 0;
+  }
+
+  .admin-bottom-nav__label {
+    font-size: 10px;
+    font-weight: var(--weight-medium);
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+
+  .admin-bottom-nav__item.active .admin-bottom-nav__label {
+    font-weight: var(--weight-semibold);
+  }
+}
+
+/* ==========================================================
    SIDEBAR NAVIGATION
    ========================================================== */
 

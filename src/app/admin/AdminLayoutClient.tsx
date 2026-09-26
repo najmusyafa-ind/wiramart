@@ -4,6 +4,9 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
+
+const MobileBottomNav = dynamic(() => import('./MobileBottomNav'), { ssr: false });
 import {
   LayoutDashboard,
   Package,
@@ -419,6 +422,9 @@ export default function AdminLayoutClient({
           {children}
         </main>
       </div>
+
+      {/* Mobile bottom nav — hanya tampil di layar < 1024px via CSS */}
+      <MobileBottomNav />
     </div>
   );
 }
