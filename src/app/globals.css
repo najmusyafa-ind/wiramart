@@ -2917,3 +2917,52 @@ p, h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* ==========================================================
+   ADMIN MOBILE BOTTOM NAVIGATION BAR
+   Hanya muncul di layar < 768px — desktop tetap pakai sidebar
+   ========================================================== */
+
+.mobile-bottom-nav {
+  /* Default: tersembunyi (ditampilkan oleh media query di bawah) */
+  display: none;
+}
+
+@media (max-width: 767px) {
+  /* Tampilkan bottom nav */
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 500;
+
+    /* Glassmorphism */
+    background: hsl(0 0% 8% / 0.88);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-top: 1px solid hsl(0 0% 100% / 0.08);
+
+    /* Safe area untuk iPhone notch / home indicator */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+
+    box-shadow: 0 -8px 32px -4px hsl(0 0% 0% / 0.4);
+  }
+
+  /* Konten utama diberi padding bawah agar tidak tertutup bottom nav */
+  .layout-content {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Sembunyikan hamburger menu di mobile (digantikan bottom nav) */
+  #btn-mobile-menu {
+    display: none;
+  }
+}
+
+/* Desktop: pastikan bottom nav benar-benar tersembunyi */
+@media (min-width: 768px) {
+  .mobile-bottom-nav {
+    display: none !important;
+  }
+}
