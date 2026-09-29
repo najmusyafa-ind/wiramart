@@ -4,9 +4,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
-import dynamic from 'next/dynamic';
-
-const MobileBottomNav = dynamic(() => import('./MobileBottomNav'), { ssr: false });
+import MobileBottomNav from './MobileBottomNav';
 import {
   LayoutDashboard,
   Package,
@@ -313,6 +311,9 @@ export default function AdminLayoutClient({
 }: AdminLayoutClientProps) {
   const router = useRouter();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
 
   // ── Idle session timeout (30 menit) ──────────────────────
   // Tidak ada JSX baru — zero impact ke SSR tree
@@ -489,8 +490,9 @@ export default function AdminLayoutClient({
         </main>
       </div>
 
-      {/* Mobile bottom nav — hanya tampil di layar < 1024px via CSS */}
-      <MobileBottomNav />
+      {/* Mobile bottom nav — hanya tampil di layar < 1024px.
+          Dibungkus mounted guard agar tidak ada hydration mismatch. */}
+      {mounted && <MobileBottomNav />}
     </div>
   );
 }

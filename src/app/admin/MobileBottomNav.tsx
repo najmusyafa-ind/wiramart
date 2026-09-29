@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard,
   Package,
@@ -18,8 +19,24 @@ const BOTTOM_NAV = [
   { label: 'Laporan',   href: '/admin/laporan',   icon: BarChart3 },
 ];
 
+// matchMedia — identik dengan cara CSS @media query bekerja,
+// tidak terpengaruh lebar scrollbar seperti window.innerWidth
+const MOBILE_MQ = '(max-width: 1023px)';
+
 export default function MobileBottomNav() {
   const pathname = usePathname();
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_MQ);
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  // Jika sidebar desktop tampil (≥ 1024px CSS width), nav ini tidak di-render sama sekali
+  if (!isMobile) return null;
 
   return (
     <nav

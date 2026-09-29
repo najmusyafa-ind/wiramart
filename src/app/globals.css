@@ -892,6 +892,14 @@ p, h1, h2, h3, h4, h5, h6 {
   }
 }
 
+/* Desktop guard — pastikan admin bottom nav TIDAK pernah muncul
+   di layar >= 1024px, tanpa exception, bahkan saat ada CSS conflict */
+@media (min-width: 1024px) {
+  .admin-bottom-nav {
+    display: none !important;
+  }
+}
+
 /* ==========================================================
    SIDEBAR NAVIGATION
    ========================================================== */
