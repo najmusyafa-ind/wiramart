@@ -86,12 +86,20 @@ export async function POST(request: Request): Promise<Response> {
         },
       });
 
-    return apiOk({
+    // Set cookie 'sk_maintenance' agar middleware bisa cek tanpa fetch internal
+    const response = apiOk({
       isMaintenance,
       message: isMaintenance
         ? 'Maintenance mode diaktifkan'
         : 'Maintenance mode dinonaktifkan',
     });
+
+    const cookieHeader = isMaintenance
+      ? `sk_maintenance=1; Path=/; HttpOnly; SameSite=Lax`
+      : `sk_maintenance=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+
+    response.headers.append('Set-Cookie', cookieHeader);
+    return response;
   } catch (err) {
     if (err instanceof AppError) {
       return apiError(err.message, err.code, err.statusCode);
@@ -99,3 +107,4 @@ export async function POST(request: Request): Promise<Response> {
     return apiError('Terjadi kesalahan server', 'INTERNAL_ERROR', 500);
   }
 }
+

@@ -300,7 +300,6 @@ export default function LaporanPage() {
     if (!data) return;
     setExportLoading(true);
     try {
-      // Dynamic import agar exceljs tidak masuk initial bundle
       const ExcelJS = (await import('exceljs')).default;
       const wb = new ExcelJS.Workbook();
       wb.creator = 'Smartkasir Perwira';
@@ -309,19 +308,55 @@ export default function LaporanPage() {
       // ── Sheet 1: Ringkasan ───────────────────────────────
       const ws1 = wb.addWorksheet('Ringkasan');
       ws1.columns = [
-        { header: 'Keterangan', key: 'label', width: 28 },
-        { header: 'Nilai', key: 'value', width: 20 },
+        { header: 'Keterangan', key: 'label', width: 30 },
+        { header: 'Nilai', key: 'value', width: 22 },
       ];
-      ws1.addRow({ label: 'Periode', value: data.label });
-      ws1.addRow({ label: 'Total Omzet', value: data.summary.grossAmount });
-      ws1.addRow({ label: 'Laba Kotor', value: data.summary.grossProfit });
-      ws1.addRow({ label: 'Total HPP', value: data.summary.totalHpp });
-      ws1.addRow({ label: 'Omzet Cash', value: data.summary.amountCash });
-      ws1.addRow({ label: 'Omzet QRIS', value: data.summary.amountQris });
-      ws1.addRow({ label: 'Jumlah Transaksi', value: data.summary.totalCount });
-      ws1.addRow({ label: 'Transaksi Cash', value: data.summary.countCash });
-      ws1.addRow({ label: 'Transaksi QRIS', value: data.summary.countQris });
-      ws1.addRow({ label: 'Transaksi Void', value: data.summary.countVoid });
+
+      // Style header row
+      const hRow1 = ws1.getRow(1);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hRow1.eachCell((cell: any) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
+        cell.alignment = { vertical: 'middle' };
+      });
+      hRow1.height = 22;
+
+      const summaryRows: { label: string; value: number | string; isCurrency?: boolean }[] = [
+        { label: 'Periode',          value: data.label },
+        { label: 'Total Omzet',      value: data.summary.grossAmount,  isCurrency: true },
+        { label: 'Total HPP',        value: data.summary.totalHpp,     isCurrency: true },
+        { label: 'Laba Kotor',       value: data.summary.grossProfit,  isCurrency: true },
+        { label: 'Laba Bersih',      value: data.summary.grossProfit,  isCurrency: true }, // sama dengan laba kotor (belum ada biaya op)
+        { label: 'Omzet Cash',       value: data.summary.amountCash,   isCurrency: true },
+        { label: 'Omzet QRIS',       value: data.summary.amountQris,   isCurrency: true },
+        { label: 'Jumlah Transaksi', value: data.summary.totalCount },
+        { label: 'Transaksi Cash',   value: data.summary.countCash },
+        { label: 'Transaksi QRIS',   value: data.summary.countQris },
+        { label: 'Transaksi Void',   value: data.summary.countVoid },
+      ];
+
+      summaryRows.forEach(({ label, value, isCurrency }) => {
+        const row = ws1.addRow({ label, value });
+        if (isCurrency && typeof value === 'number') {
+          row.getCell('value').numFmt = '"Rp "#,##0';
+        }
+        // Zebra striping
+        const rowIdx = row.number;
+        if (rowIdx % 2 === 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          row.eachCell((cell: any) => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
+          });
+        }
+        // Bold untuk Laba Bersih
+        if (label === 'Laba Bersih') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          row.eachCell((cell: any) => {
+            cell.font = { bold: true, color: { argb: 'FF166534' } };
+          });
+        }
+      });
 
       // ── Sheet 2: Detail Transaksi ────────────────────────
       const ws2 = wb.addWorksheet('Detail Transaksi');
@@ -330,12 +365,22 @@ export default function LaporanPage() {
         { header: 'Tanggal', key: 'tanggal', width: 20 },
         { header: 'Kasir', key: 'kasir', width: 24 },
         { header: 'Metode', key: 'metode', width: 10 },
-        { header: 'Total (Rp)', key: 'total', width: 16 },
+        { header: 'Total (Rp)', key: 'total', width: 18 },
         { header: 'Status', key: 'status', width: 12 },
         { header: 'Alasan Void', key: 'alasan', width: 30 },
       ];
+
+      const hRow2 = ws2.getRow(1);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hRow2.eachCell((cell: any) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
+        cell.alignment = { vertical: 'middle' };
+      });
+      hRow2.height = 22;
+
       for (const t of data.recentTransactions) {
-        ws2.addRow({
+        const row = ws2.addRow({
           invoice: t.invoiceNumber,
           tanggal: formatDateTime(t.createdAt),
           kasir:   t.employeeName,
@@ -344,6 +389,14 @@ export default function LaporanPage() {
           status:  t.status,
           alasan:  t.voidReason ?? '',
         });
+        row.getCell('total').numFmt = '"Rp "#,##0';
+        // Warna baris void
+        if (t.status === 'VOID') {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          row.eachCell((cell: any) => {
+            cell.font = { color: { argb: 'FFDC2626' } };
+          });
+        }
       }
 
       // ── Sheet 3: Top Produk ──────────────────────────────
@@ -351,10 +404,21 @@ export default function LaporanPage() {
       ws3.columns = [
         { header: 'Nama Produk', key: 'nama', width: 32 },
         { header: 'Qty Terjual', key: 'qty', width: 14 },
-        { header: 'Total Omzet (Rp)', key: 'omzet', width: 18 },
+        { header: 'Total Omzet (Rp)', key: 'omzet', width: 20 },
       ];
+
+      const hRow3 = ws3.getRow(1);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hRow3.eachCell((cell: any) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
+        cell.alignment = { vertical: 'middle' };
+      });
+      hRow3.height = 22;
+
       for (const p of data.topProducts) {
-        ws3.addRow({ nama: p.productName, qty: p.totalQty, omzet: parseFloat(p.totalRevenue) });
+        const row = ws3.addRow({ nama: p.productName, qty: p.totalQty, omzet: parseFloat(p.totalRevenue) });
+        row.getCell('omzet').numFmt = '"Rp "#,##0';
       }
 
       // Generate dan download
@@ -366,7 +430,7 @@ export default function LaporanPage() {
       a.download = `laporan-smartkasir-${period}-${new Date().toISOString().slice(0, 10)}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch {
+    } catch (_e) {
       // Fallback — tidak crash halaman
     } finally {
       setExportLoading(false);

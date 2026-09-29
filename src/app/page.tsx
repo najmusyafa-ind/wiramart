@@ -21,7 +21,6 @@ import {
   Handshake,
   Camera,
   Layers,
-  Home,
   LogIn,
   ChevronDown,
   MapPin,
@@ -184,7 +183,6 @@ const STATS = [
 /* ── COMPONENT ──────────────────────────────────────────────── */
 export default function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
-  const [mobileNavActive, setMobileNavActive] = useState<string>('home');
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 60);
@@ -236,7 +234,7 @@ export default function LandingPage() {
               <Calendar size={15} aria-hidden="true" />
               <span>Daftar Shift</span>
             </Link>
-            <Link href="/kasir/pos" className="btn btn-primary btn-sm lp-nav__cta">
+            <Link href="/kasir/pos" prefetch={false} className="btn btn-primary btn-sm lp-nav__cta">
               <ShoppingBag size={15} aria-hidden="true" />
               <span>Buka Kasir</span>
             </Link>
@@ -298,7 +296,7 @@ export default function LandingPage() {
 
             {/* CTA Buttons */}
             <div className="lp-hero__ctas">
-              <Link href="/kasir/pos" className="btn btn-primary btn-lg lp-hero__cta-primary">
+              <Link href="/kasir/pos" prefetch={false} className="btn btn-primary btn-lg lp-hero__cta-primary">
                 <Store size={20} aria-hidden="true" />
                 <span>Masuk Terminal Kasir POS</span>
                 <ArrowRight size={18} aria-hidden="true" />
@@ -539,7 +537,7 @@ export default function LandingPage() {
               </p>
 
               <div className="lp-cta__actions">
-                <Link href="/kasir/pos" className="btn btn-lg lp-cta__btn-primary">
+                <Link href="/kasir/pos" prefetch={false} className="btn btn-lg lp-cta__btn-primary">
                   <Store size={18} aria-hidden="true" />
                   <span>Buka Terminal Kasir</span>
                 </Link>
@@ -590,7 +588,7 @@ export default function LandingPage() {
               <div className="lp-footer__link-group">
                 <div className="lp-footer__link-title">Layanan Utama</div>
                 <ul>
-                  <li><Link href="/kasir/pos">Terminal Kasir POS</Link></li>
+                  <li><Link href="/kasir/pos" prefetch={false}>Terminal Kasir POS</Link></li>
                   <li><Link href="/daftar">Pendaftaran &amp; Jadwal Shift</Link></li>
                   <li><Link href="/login">Masuk Portal Dosen / Admin</Link></li>
                 </ul>
@@ -607,84 +605,11 @@ export default function LandingPage() {
           </div>
 
           <div className="lp-footer__bottom">
-            <div>&copy; {new Date().getFullYear()} WIRAMART — UKM Kewirausahaan UNPERBA. All rights reserved.</div>
+            <div suppressHydrationWarning>&copy; {new Date().getFullYear()} WIRAMART — UKM Kewirausahaan UNPERBA. All rights reserved.</div>
             <div>Sistem Kasir Digital Terintegrasi</div>
           </div>
         </div>
       </footer>
-
-      {/* ═══════════════════════════════════════════════════════
-          MOBILE BOTTOM NAVIGATION — Floating Pill
-          ═══════════════════════════════════════════════════════ */}
-      <nav className="lp-mobile-nav" aria-label="Navigasi mobile" role="navigation">
-        <div className="lp-mobile-nav__pill">
-          <Link
-            href="/"
-            id="mobile-nav-home"
-            className={`lp-mobile-nav__item${mobileNavActive === 'home' ? ' lp-mobile-nav__item--active' : ''}`}
-            onClick={() => setMobileNavActive('home')}
-            aria-label="Beranda"
-            aria-current={mobileNavActive === 'home' ? 'page' : undefined}
-          >
-            <div className="lp-mobile-nav__icon-wrap">
-              <Home size={20} aria-hidden="true" />
-            </div>
-            <span className="lp-mobile-nav__label">Beranda</span>
-          </Link>
-
-          <Link
-            href="#divisi"
-            id="mobile-nav-divisi"
-            className={`lp-mobile-nav__item${mobileNavActive === 'divisi' ? ' lp-mobile-nav__item--active' : ''}`}
-            onClick={() => setMobileNavActive('divisi')}
-            aria-label="Lihat 9 Divisi"
-          >
-            <div className="lp-mobile-nav__icon-wrap">
-              <Users size={20} aria-hidden="true" />
-            </div>
-            <span className="lp-mobile-nav__label">9 Divisi</span>
-          </Link>
-
-          {/* CENTER CTA — Prominent Kasir Button */}
-          <Link
-            href="/kasir/pos"
-            id="mobile-nav-kasir"
-            className="lp-mobile-nav__cta"
-            aria-label="Buka Terminal Kasir POS"
-            onClick={() => setMobileNavActive('kasir')}
-          >
-            <div className="lp-mobile-nav__cta-ring" aria-hidden="true" />
-            <Store size={24} aria-hidden="true" />
-            <span className="lp-mobile-nav__label">Kasir</span>
-          </Link>
-
-          <Link
-            href="/daftar"
-            id="mobile-nav-shift"
-            className={`lp-mobile-nav__item${mobileNavActive === 'shift' ? ' lp-mobile-nav__item--active' : ''}`}
-            onClick={() => setMobileNavActive('shift')}
-            aria-label="Daftar Shift Kasir"
-          >
-            <div className="lp-mobile-nav__icon-wrap">
-              <Calendar size={20} aria-hidden="true" />
-            </div>
-            <span className="lp-mobile-nav__label">Shift</span>
-          </Link>
-
-          <Link
-            href="/login"
-            id="mobile-nav-admin"
-            className={`lp-mobile-nav__item${mobileNavActive === 'admin' ? ' lp-mobile-nav__item--active' : ''}`}
-            onClick={() => setMobileNavActive('admin')}
-            aria-label="Portal Admin atau Dosen"
-          >
-            <div className="lp-mobile-nav__icon-wrap">
-              <LogIn size={20} aria-hidden="true" />
-            </div>
-            <span className="lp-mobile-nav__label">Admin</span>
-          </Link>
-        </div>
-      </nav>
     </div>
   );
 }

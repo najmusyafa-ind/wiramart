@@ -34,7 +34,7 @@ type PaymentMethod = 'CASH' | 'QRIS';
 type SessionInfo = {
   employee: { id: string; fullName: string; jabatan: string; nim: string };
   shift: { id: string; clockIn: string } | null;
-  qris: { qrImageUrl: string | null; bankName: string | null; accountName: string | null } | null;
+  qris: { qrImageUrl: string | null; bankName: string | null; accountName: string | null; isActive: boolean } | null;
 };
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -264,8 +264,8 @@ function PaymentModal({
               style={{ flex: 2 }}
               disabled={
                 loading ||
-                (method === 'CASH' && (!cashInput || cashAmount < total)) ||
-                (method === 'QRIS' && !qrisInfo?.qrImageUrl)
+                (method === 'CASH' && (!cashInput || cashAmount < total))
+                // QRIS: selalu bisa konfirmasi (kasir konfirmasi manual setelah cek notif HP)
               }
             >
               {loading
@@ -279,13 +279,50 @@ function PaymentModal({
   );
 }
 
-// ── Success Modal ─────────────────────────────────────────────
+// ── Success Modal (Struk) ──────────────────────────────
 function SuccessModal({
-  invoiceNumber, total, change, method, onClose,
+  invoiceNumber, total, change, method, kasirName, items, onClose,
 }: {
-  invoiceNumber: string; total: number; change: number | null; method: PaymentMethod; onClose: () => void;
+  invoiceNumber: string;
+  total: number;
+  change: number | null;
+  method: PaymentMethod;
+  kasirName: string;
+  items: { name: string; qty: number; price: number }[];
+  onClose: () => void;
 }) {
   const uid = useId();
+  const now = new Date().toLocaleString('id-ID', {
+    day: '2-digit', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  });
+
+  function handlePrint() {
+    const printContent = document.getElementById(`${uid}-struk`);
+    if (!printContent) return;
+    const w = window.open('', '_blank', 'width=400,height=600');
+    if (!w) return;
+    w.document.write(`
+      <html><head><title>Struk ${invoiceNumber}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Courier New', monospace; font-size: 12px; width: 80mm; padding: 8px; color: #000; }
+        .center { text-align: center; }
+        .bold { font-weight: bold; }
+        .divider { border-top: 1px dashed #000; margin: 6px 0; }
+        .row { display: flex; justify-content: space-between; margin: 2px 0; }
+        .total-row { display: flex; justify-content: space-between; font-size: 14px; font-weight: bold; margin: 4px 0; }
+        .footer { text-align: center; margin-top: 8px; font-size: 11px; }
+      </style></head><body>
+      ${printContent.innerHTML}
+      </body></html>
+    `);
+    w.document.close();
+    w.focus();
+    w.print();
+    w.close();
+  }
+
   return (
     <div
       role="dialog" aria-modal="true" aria-labelledby={`${uid}-title`}
@@ -297,54 +334,118 @@ function SuccessModal({
         animation: 'fade-in 0.15s ease',
       }}
     >
-      <div className="card" style={{ width: '100%', maxWidth: 360, margin: 0, textAlign: 'center', boxShadow: 'var(--shadow-xl)' }}>
-        <div className="card-body" style={{
-          padding: 'var(--space-8)', display: 'flex',
-          flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)',
-        }}>
-          <div style={{
-            width: 80, height: 80, borderRadius: '50%',
-            background: 'var(--color-success-light)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            animation: 'check-in 0.35s cubic-bezier(0.16, 1, 0.3, 1)',
-          }}>
-            <CheckCircle size={40} style={{ color: 'var(--color-success)' }} />
-          </div>
-          <div>
-            <h2 id={`${uid}-title`} style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)', marginBottom: 'var(--space-1)' }}>
+      <div className="card" style={{ width: '100%', maxWidth: 400, margin: 0, boxShadow: 'var(--shadow-xl)', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="card-body" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+
+          {/* Sukses badge */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <div style={{
+              width: 64, height: 64, borderRadius: '50%',
+              background: 'var(--color-success-light)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              animation: 'check-in 0.35s cubic-bezier(0.16, 1, 0.3, 1)',
+            }}>
+              <CheckCircle size={34} style={{ color: 'var(--color-success)' }} />
+            </div>
+            <h2 id={`${uid}-title`} style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)' }}>
               Transaksi Berhasil!
             </h2>
-            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-              {method === 'CASH' ? 'Pembayaran tunai diterima' : 'Pembayaran QRIS dikonfirmasi'}
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              {method === 'CASH' ? '💵 Pembayaran Tunai' : '📱 Pembayaran QRIS'}
             </p>
           </div>
 
-          <div style={{
-            width: '100%', padding: 'var(--space-4)',
-            background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)',
-            display: 'flex', flexDirection: 'column', gap: 'var(--space-2)',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No. Invoice</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
-                {invoiceNumber}
-              </span>
+          {/* ── STRUK / RECEIPT ─────────────────── */}
+          <div
+            id={`${uid}-struk`}
+            style={{
+              background: '#fff',
+              border: '1px dashed var(--color-border)',
+              borderRadius: 'var(--radius-md)',
+              padding: 'var(--space-4)',
+              fontFamily: '"Courier New", monospace',
+              fontSize: 'var(--text-xs)',
+              color: '#000',
+              lineHeight: 1.7,
+            }}
+          >
+            {/* Header struk */}
+            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+              <div style={{ fontWeight: 'bold', fontSize: 14 }}>🏪 WIRAMART UNPERBA</div>
+              <div>UKM Kewirausahaan Universitas Perwira</div>
+              <div style={{ borderTop: '1px dashed #000', marginTop: 6, paddingTop: 4, fontSize: 11, color: '#555' }}>
+                {now}
+              </div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Total</span>
-              <span style={{ fontWeight: 'var(--weight-bold)' }}>{rp(total)}</span>
+
+            {/* Info invoice */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span>Invoice</span>
+              <span style={{ fontWeight: 'bold' }}>{invoiceNumber}</span>
             </div>
-            {change !== null && change > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Kembalian</span>
-                <span style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-success)' }}>{rp(change)}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span>Kasir</span>
+              <span>{kasirName}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span>Metode</span>
+              <span style={{ fontWeight: 'bold' }}>{method}</span>
+            </div>
+
+            {/* Divider */}
+            <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
+
+            {/* Item list */}
+            {items.map((item, i) => (
+              <div key={i} style={{ marginBottom: 4 }}>
+                <div style={{ fontWeight: 'bold', fontSize: 11 }}>{item.name}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 8 }}>
+                  <span>{item.qty} x {rp(item.price)}</span>
+                  <span>{rp(item.qty * item.price)}</span>
+                </div>
+              </div>
+            ))}
+
+            {/* Divider */}
+            <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
+
+            {/* Total */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: 14 }}>
+              <span>TOTAL</span>
+              <span>{rp(total)}</span>
+            </div>
+
+            {change !== null && change >= 0 && method === 'CASH' && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+                <span>Kembalian</span>
+                <span style={{ fontWeight: 'bold', color: '#166534' }}>{rp(change)}</span>
               </div>
             )}
+
+            {/* Footer */}
+            <div style={{ borderTop: '1px dashed #000', marginTop: 10, paddingTop: 6, textAlign: 'center', fontSize: 11, color: '#555' }}>
+              Terima kasih sudah berbelanja! 🙏
+            </div>
           </div>
 
-          <button id={`${uid}-close`} onClick={onClose} className="btn btn-primary" style={{ width: '100%' }}>
-            Transaksi Berikutnya
-          </button>
+          {/* Action buttons */}
+          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+            <button
+              onClick={handlePrint}
+              className="btn btn-secondary"
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-1)' }}
+            >
+              🖨️ Cetak Struk
+            </button>
+            <button
+              id={`${uid}-close`}
+              onClick={onClose}
+              className="btn btn-primary"
+              style={{ flex: 1 }}
+            >
+              Transaksi Berikutnya
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -371,7 +472,12 @@ export default function PosPage() {
   const [processingTx, setProcessingTx] = useState(false);
   const [showCart, setShowCart] = useState(false); // mobile cart toggle
   const [lastTx, setLastTx] = useState<{
-    invoiceNumber: string; total: number; change: number | null; method: PaymentMethod;
+    invoiceNumber: string;
+    total: number;
+    change: number | null;
+    method: PaymentMethod;
+    items: { name: string; qty: number; price: number }[];
+    kasirName: string;
   } | null>(null);
   const [shiftDuration, setShiftDuration] = useState('');
   const [showPosScanner, setShowPosScanner] = useState(false);
@@ -534,6 +640,8 @@ export default function PosPage() {
         total: json.data.grossAmount,
         change: json.data.changeAmount,
         method: paymentMethod,
+        items: cart.map((i) => ({ name: i.name, qty: i.qty, price: parseFloat(i.sellingPrice) })),
+        kasirName: session?.employee?.fullName ?? 'Kasir',
       });
       setShowPayment(false);
       setShowSuccess(true);
@@ -981,6 +1089,8 @@ export default function PosPage() {
           total={lastTx.total}
           change={lastTx.change}
           method={lastTx.method}
+          kasirName={lastTx.kasirName}
+          items={lastTx.items}
           onClose={() => setShowSuccess(false)}
         />
       )}

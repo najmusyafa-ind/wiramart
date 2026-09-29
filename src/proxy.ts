@@ -72,17 +72,13 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const adminSession = await getAdminPayload(request);
   const kasirSession = await getKasirPayload(request);
 
-  // --- Check Maintenance Mode (hanya untuk non-admin) ---
+  // --- Check Maintenance Mode ---
+  // CATATAN: fetch internal di Edge middleware (proxy.ts) menyebabkan "Failed to fetch".
+  // Maintenance check dilakukan via cookie 'sk_maintenance' yang di-set oleh admin,
+  // sehingga tidak perlu HTTP round-trip ke API route internal.
   if (!adminSession) {
-    const maintenanceRes = await fetch(
-      `${request.nextUrl.origin}/api/maintenance/status`,
-      { headers: { 'x-proxy-check': '1' } }
-    ).catch(() => null);
-
-    const isMaintenance = maintenanceRes?.ok
-      ? ((await maintenanceRes.json().catch(() => ({}))) as { isMaintenance?: boolean })
-          .isMaintenance ?? false
-      : false;
+    const maintenanceCookie = request.cookies.get('sk_maintenance')?.value;
+    const isMaintenance = maintenanceCookie === '1';
 
     if (isMaintenance && pathname !== '/maintenance') {
       return NextResponse.redirect(new URL('/maintenance', request.url));

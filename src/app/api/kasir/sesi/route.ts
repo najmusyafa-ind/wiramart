@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
 
   const employeeId = payload.sub as string;
 
-  // Ambil data karyawan + shift aktif
+  // Ambil data karyawan + shift aktif + QRIS settings
   const [employee, activeShift, qris] = await Promise.all([
     db.query.employees.findFirst({
       where: eq(employees.id, employeeId),
@@ -31,9 +31,10 @@ export async function GET(req: NextRequest) {
       where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
       columns: { id: true, clockIn: true },
     }),
+    // Ambil QRIS tanpa filter isActive — kasir tetap bisa konfirmasi QRIS manual
+    // QR image hanya ditampilkan jika sudah diupload admin
     db.query.qrisSettings.findFirst({
-      where: eq(qrisSettings.isActive, true),
-      columns: { qrImageUrl: true, bankName: true, accountName: true },
+      columns: { qrImageUrl: true, bankName: true, accountName: true, isActive: true },
     }),
   ]);
 

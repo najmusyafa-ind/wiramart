@@ -1121,9 +1121,10 @@ p, h1, h2, h3, h4, h5, h6 {
 }
 
 .auth-card {
-  background-color: var(--color-surface);
+  background-color: #ffffff;
   border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-xl);
+  box-shadow: 0 25px 60px hsla(145, 50%, 5%, 0.35), 0 8px 24px hsla(145, 50%, 5%, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.8);
   padding: var(--space-8);
   width: 100%;
   max-width: 420px;

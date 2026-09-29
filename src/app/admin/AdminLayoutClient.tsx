@@ -153,11 +153,12 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
           <span className="sidebar-logo-name">Wiramart</span>
           <span className="sidebar-logo-subtitle">UKM Kewirausahaan UNPERBA</span>
         </div>
-        {/* Close button — mobile only */}
+        {/* Close button — conditional render to avoid SSR mismatch */}
         {isMobileOpen && (
           <button
             onClick={onClose}
             aria-label="Tutup menu"
+            suppressHydrationWarning
             style={{
               marginLeft: 'auto',
               background: 'none',
@@ -310,25 +311,95 @@ export default function AdminLayoutClient({
   adminName,
   pageTitle,
 }: AdminLayoutClientProps) {
+  const router = useRouter();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
-  // Lock body scroll when mobile menu is open
+  // ── Idle session timeout (30 menit) ──────────────────────
+  // Tidak ada JSX baru — zero impact ke SSR tree
+  useEffect(() => {
+    const WARN_MS   = 29 * 60 * 1000;
+    const LOGOUT_MS = 30 * 60 * 1000;
+    const EVENTS    = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'] as const;
+    let warnTimer: ReturnType<typeof setTimeout>;
+    let logoutTimer: ReturnType<typeof setTimeout>;
+    let banner: HTMLDivElement | null = null;
+
+    function removeBanner() {
+      if (banner && document.body.contains(banner)) document.body.removeChild(banner);
+      banner = null;
+    }
+
+    async function doLogout() {
+      removeBanner();
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'admin' }),
+      }).catch(() => {});
+      window.location.href = '/login?reason=idle';
+    }
+
+    function showWarning() {
+      removeBanner();
+      banner = document.createElement('div');
+      banner.id = 'idle-warn-banner';
+      Object.assign(banner.style, {
+        position: 'fixed', bottom: '24px', right: '24px', zIndex: '9999',
+        background: 'var(--color-surface, #fff)', borderRadius: '12px',
+        padding: '16px 20px', boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+        display: 'flex', alignItems: 'center', gap: '12px',
+        fontSize: '14px', fontFamily: 'inherit',
+        border: '1px solid var(--color-border, #e5e7eb)',
+        animation: 'slideIn .3s ease',
+        maxWidth: '320px',
+      });
+      banner.innerHTML = `
+        <span style="font-size:20px">&#9200;</span>
+        <div style="flex:1">
+          <div style="font-weight:600;color:var(--color-text,#111);margin-bottom:2px">Sesi hampir berakhir</div>
+          <div style="color:var(--color-text-muted,#6b7280);font-size:12px">Anda tidak aktif. Logout otomatis dalam 1 menit.</div>
+        </div>
+        <button id="idle-stay-btn" style="background:var(--color-primary,#16a34a);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600;flex-shrink:0">
+          Tetap Login
+        </button>
+      `;
+      document.body.appendChild(banner);
+      banner.querySelector('#idle-stay-btn')?.addEventListener('click', reset);
+    }
+
+    function reset() {
+      removeBanner();
+      clearTimeout(warnTimer);
+      clearTimeout(logoutTimer);
+      warnTimer   = setTimeout(showWarning, WARN_MS);
+      logoutTimer = setTimeout(doLogout, LOGOUT_MS);
+    }
+
+    EVENTS.forEach((ev) => window.addEventListener(ev, reset, { passive: true }));
+    reset(); // mulai timer
+
+    return () => {
+      removeBanner();
+      clearTimeout(warnTimer);
+      clearTimeout(logoutTimer);
+      EVENTS.forEach((ev) => window.removeEventListener(ev, reset));
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     document.body.style.overflow = isMobileOpen ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
   }, [isMobileOpen]);
 
-  // Close on Escape key
+  // Close sidebar on Escape
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsMobileOpen(false);
-    };
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsMobileOpen(false); };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, []);
 
   return (
     <div className="layout-admin">
+
 
       {/* Backdrop overlay — mobile only, saat sidebar terbuka */}
       {isMobileOpen && (
@@ -351,14 +422,25 @@ export default function AdminLayoutClient({
       <div className="layout-main">
         <header className="layout-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-            {/* Hamburger button */}
+            {/* Hamburger button — inline style to prevent browser extension hydration mismatch */}
             <button
               id="btn-mobile-menu"
-              className="btn-hamburger"
               onClick={() => setIsMobileOpen((v) => !v)}
-              aria-label={isMobileOpen ? 'Tutup menu' : 'Buka menu navigasi'}
+              aria-label="Buka menu navigasi"
               aria-expanded={isMobileOpen}
               aria-controls="admin-sidebar"
+              suppressHydrationWarning
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--color-text-secondary)',
+                display: 'flex',
+                alignItems: 'center',
+                padding: 'var(--space-2)',
+                borderRadius: 'var(--radius-sm)',
+                minHeight: 0,
+              }}
             >
               <Menu size={22} aria-hidden="true" />
             </button>
