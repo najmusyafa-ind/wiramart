@@ -406,8 +406,25 @@ export default function AdminJadwalPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
           {/* Progress */}
           {!loading && (
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', textAlign: 'right' }}>
-              <span style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>{filledSlots}</span> / {totalSlots} slot terisi
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
+                <span style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>{filledSlots}</span>
+                {' / '}{totalSlots} slot terisi
+              </div>
+              {/* Progress bar global */}
+              <div style={{ width: 160, height: 6, background: 'var(--color-border)', borderRadius: 999, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%',
+                  width: `${totalSlots > 0 ? Math.round((filledSlots / totalSlots) * 100) : 0}%`,
+                  background: filledSlots === totalSlots
+                    ? 'var(--color-success)'
+                    : filledSlots / totalSlots >= 0.75
+                      ? 'var(--color-warning, hsl(38,92%,50%))'
+                      : 'var(--color-primary)',
+                  borderRadius: 999,
+                  transition: 'width 0.4s ease',
+                }} />
+              </div>
             </div>
           )}
           <button
@@ -454,12 +471,48 @@ export default function AdminJadwalPage() {
                         <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-text-muted)' }}>
                           {slotGroup.slotStart} – {slotGroup.slotEnd}
                         </div>
-                        {koordinator && (
-                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-primary)', background: 'var(--color-primary-light)', padding: '1px 6px', borderRadius: 'var(--radius-full)' }}>
-                            {koordinator}
-                          </div>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {koordinator && (
+                            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-primary)', background: 'var(--color-primary-light)', padding: '1px 6px', borderRadius: 'var(--radius-full)' }}>
+                              {koordinator}
+                            </div>
+                          )}
+                          {/* Badge kapasitas — warna dinamis */}
+                          {(() => {
+                            const filled = normalEntries.filter(e => e.isFilled).length;
+                            const total  = normalEntries.length;
+                            const isFull = filled === total;
+                            const isAlmost = !isFull && filled / total >= 0.75;
+                            const bg    = isFull ? 'hsl(0,72%,95%)' : isAlmost ? 'hsl(38,92%,92%)' : 'hsl(145,55%,92%)';
+                            const color = isFull ? 'hsl(0,72%,40%)' : isAlmost ? 'hsl(38,92%,32%)' : 'hsl(145,55%,28%)';
+                            return (
+                              <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', background: bg, color, padding: '1px 8px', borderRadius: 'var(--radius-full)' }}>
+                                {filled}/{total}
+                              </div>
+                            );
+                          })()}
+                        </div>
                       </div>
+                      {/* Mini progress bar */}
+                      {(() => {
+                        const filled = normalEntries.filter(e => e.isFilled).length;
+                        const total  = normalEntries.length;
+                        return total > 0 ? (
+                          <div style={{ height: 3, background: 'var(--color-border)', borderRadius: 999, marginBottom: 'var(--space-2)', overflow: 'hidden' }}>
+                            <div style={{
+                              height: '100%',
+                              width: `${Math.round((filled / total) * 100)}%`,
+                              background: filled === total
+                                ? 'hsl(0,72%,50%)'
+                                : filled / total >= 0.75
+                                  ? 'hsl(38,92%,50%)'
+                                  : 'var(--color-success)',
+                              borderRadius: 999,
+                              transition: 'width 0.4s ease',
+                            }} />
+                          </div>
+                        ) : null;
+                      })()}
                       {/* Slot entries */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                         {normalEntries.map(entry => (

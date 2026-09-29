@@ -81,62 +81,93 @@ function ShiftGrid({ onSelect, selected }: {
           <div style={{ fontWeight: 'var(--weight-bold)', fontSize: 'var(--text-sm)', color: 'var(--color-text)', marginBottom: 'var(--space-2)', padding: 'var(--space-1) var(--space-3)', background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)' }}>
             {day.dayOfWeek}
           </div>
-          {day.slots.map((slot) => (
-            <div key={`${slot.slotStart}-${slot.slotEnd}`} style={{ marginBottom: 'var(--space-3)' }}>
-              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-1)', marginLeft: 'var(--space-1)' }}>
-                {slot.slotStart} – {slot.slotEnd}
-                {slot.coordinatorName && <span style={{ marginLeft: 'var(--space-2)', color: 'var(--color-primary)', fontWeight: 'var(--weight-semibold)' }}>Koordinator: {slot.coordinatorName}</span>}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-                {slot.entries.map((entry) =>
-                  entry.isFilled ? (
-                    // Slot terisi
-                    <div key={entry.id} style={{
-                      padding: 'var(--space-2) var(--space-3)',
-                      background: 'var(--color-surface-muted)',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius-md)',
-                      fontSize: 'var(--text-xs)',
-                      color: 'var(--color-text-muted)',
-                      display: 'flex', alignItems: 'center', gap: 4,
-                      cursor: 'not-allowed', opacity: 0.7,
-                    }}>
-                      <CheckCircle size={11} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
-                      {entry.employeeName}
-                    </div>
-                  ) : (
-                    // Slot kosong — bisa diklik
-                    <button
-                      key={entry.id}
-                      onClick={() => onSelect(entry.id)}
-                      style={{
-                        padding: 'var(--space-2) var(--space-4)',
-                        border: selected === entry.id
-                          ? '2px solid var(--color-primary)'
-                          : '1.5px dashed var(--color-border)',
-                        background: selected === entry.id
-                          ? 'var(--color-primary-light)'
-                          : 'transparent',
+          {day.slots.map((slot) => {
+            const normalEntries = slot.entries.filter(e => e.orderInSlot !== 99);
+            const emptyCount    = normalEntries.filter(e => !e.isFilled).length;
+            const totalNormal   = normalEntries.length;
+            const isFull        = emptyCount === 0;
+            return (
+              <div key={`${slot.slotStart}-${slot.slotEnd}`} style={{ marginBottom: 'var(--space-3)' }}>
+                {/* Slot header dengan badge kapasitas */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-1)', marginLeft: 'var(--space-1)' }}>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                    {slot.slotStart} – {slot.slotEnd}
+                    {slot.coordinatorName && <span style={{ marginLeft: 'var(--space-2)', color: 'var(--color-primary)', fontWeight: 'var(--weight-semibold)' }}>Koordinator: {slot.coordinatorName}</span>}
+                  </div>
+                  {/* Badge sisa slot */}
+                  <div style={{
+                    fontSize: '10px',
+                    fontWeight: 'var(--weight-bold)',
+                    padding: '1px 8px',
+                    borderRadius: 999,
+                    background: isFull ? 'hsl(0,72%,95%)' : emptyCount <= 1 ? 'hsl(38,92%,92%)' : 'hsl(145,55%,92%)',
+                    color:      isFull ? 'hsl(0,72%,40%)' : emptyCount <= 1 ? 'hsl(38,92%,32%)' : 'hsl(145,55%,28%)',
+                  }}>
+                    {isFull ? 'Penuh' : `${emptyCount} tersisa`}
+                  </div>
+                </div>
+                {/* Mini progress bar */}
+                {totalNormal > 0 && (
+                  <div style={{ height: 3, background: 'var(--color-border)', borderRadius: 999, marginBottom: 'var(--space-2)', marginLeft: 'var(--space-1)', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${Math.round(((totalNormal - emptyCount) / totalNormal) * 100)}%`,
+                      background: isFull ? 'hsl(0,72%,50%)' : emptyCount <= 1 ? 'hsl(38,92%,50%)' : 'var(--color-success)',
+                      borderRadius: 999,
+                      transition: 'width 0.4s ease',
+                    }} />
+                  </div>
+                )}
+                {/* Slot buttons */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                  {normalEntries.map((entry) =>
+                    entry.isFilled ? (
+                      <div key={entry.id} style={{
+                        padding: 'var(--space-2) var(--space-3)',
+                        background: 'var(--color-surface-muted)',
+                        border: '1px solid var(--color-border)',
                         borderRadius: 'var(--radius-md)',
                         fontSize: 'var(--text-xs)',
-                        color: selected === entry.id ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                        cursor: 'pointer',
-                        fontWeight: selected === entry.id ? 'var(--weight-semibold)' : 'var(--weight-normal)',
-                        transition: 'all 0.2s ease',
+                        color: 'var(--color-text-muted)',
                         display: 'flex', alignItems: 'center', gap: 4,
-                      }}
-                    >
-                      {selected === entry.id ? (
-                        <><CheckCircle size={11} /> Dipilih</>
-                      ) : (
-                        <>Kosong {entry.orderInSlot}</>
-                      )}
-                    </button>
-                  )
-                )}
+                        cursor: 'not-allowed', opacity: 0.6,
+                      }}>
+                        <CheckCircle size={11} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
+                        {entry.employeeName}
+                      </div>
+                    ) : (
+                      <button
+                        key={entry.id}
+                        onClick={() => onSelect(entry.id)}
+                        style={{
+                          padding: 'var(--space-2) var(--space-4)',
+                          border: selected === entry.id
+                            ? '2px solid var(--color-primary)'
+                            : '1.5px dashed hsl(145,55%,50%)',
+                          background: selected === entry.id
+                            ? 'var(--color-primary-light)'
+                            : 'hsl(145,55%,97%)',
+                          borderRadius: 'var(--radius-md)',
+                          fontSize: 'var(--text-xs)',
+                          color: selected === entry.id ? 'var(--color-primary)' : 'hsl(145,55%,28%)',
+                          cursor: 'pointer',
+                          fontWeight: selected === entry.id ? 'var(--weight-semibold)' : 'var(--weight-medium)',
+                          transition: 'all 0.2s cubic-bezier(0.16,1,0.3,1)',
+                          display: 'flex', alignItems: 'center', gap: 4,
+                        }}
+                      >
+                        {selected === entry.id ? (
+                          <><CheckCircle size={11} /> Dipilih</>
+                        ) : (
+                          <>○ Slot {entry.orderInSlot} — Kosong</>
+                        )}
+                      </button>
+                    )
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ))}
     </div>
