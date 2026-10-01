@@ -42,6 +42,7 @@ function KaryawanModal({
   const isEdit = !!editData;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [slotAssignError, setSlotAssignError] = useState('');
   const [form, setForm] = useState({
     fullName: editData?.fullName ?? '',
     nim: editData?.nim ?? '',
@@ -128,12 +129,23 @@ function KaryawanModal({
       }
       // Jika ada slot dipilih saat Tambah, langsung assign
       if (!isEdit && selectedSlotId && json.data?.id) {
-        await fetch(`/api/admin/jadwal/slot/${selectedSlotId}`, {
+        const slotRes = await fetch(`/api/admin/jadwal/slot/${selectedSlotId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'reassign', newEmployeeId: json.data.id }),
         });
-        // Gagal assign slot tidak cancel create — karyawan tetap tersimpan
+        if (!slotRes.ok) {
+          const slotJson = await slotRes.json() as { error?: string };
+          // Karyawan tetap dibuat, tapi slot gagal diassign — tampilkan warning
+          setSlotAssignError(
+            'Karyawan berhasil ditambah, tapi slot shift gagal diassign: ' +
+            (slotJson.error ?? 'Error tidak diketahui') +
+            '. Silakan assign manual dari halaman Jadwal Shift.'
+          );
+          setLoading(false);
+          onSuccess(); // Tetap refresh list karyawan
+          return;
+        }
       }
       onSuccess();
       onClose();
@@ -197,6 +209,16 @@ function KaryawanModal({
           {error && (
             <div className="alert alert-error" role="alert" style={{ marginBottom: 'var(--space-4)' }}>
               {error}
+            </div>
+          )}
+          {slotAssignError && (
+            <div className="alert" role="alert" style={{
+              marginBottom: 'var(--space-4)',
+              background: 'hsl(38 95% 92%)', border: '1px solid hsl(38 90% 75%)',
+              color: 'hsl(38 90% 30%)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)',
+              fontSize: 'var(--text-sm)',
+            }}>
+              &#9888;&#65039; {slotAssignError}
             </div>
           )}
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -300,7 +322,7 @@ function KaryawanModal({
                         <optgroup key={g.key} label={`${g.dayOfWeek} ${g.slotStart}-${g.slotEnd} (${status})`}>
                           {emptyEntries.map((e, i) => (
                             <option key={e.slotId} value={e.slotId}>
-                              Slot kosong #{terisi + i + 1} — {g.dayOfWeek} {g.slotStart}-{g.slotEnd}
+                              Slot #{terisi + i + 1} (tersedia)
                             </option>
                           ))}
                         </optgroup>
