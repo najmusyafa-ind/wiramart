@@ -99,8 +99,25 @@ function TambahManualModal({
   const fromSlot = slots.find(s => s.id === fromId);
   const toSlot   = slots.find(s => s.id === toId);
 
-  // Slot tujuan tidak boleh sama dengan slot asal
-  const toOptions = slots.filter(s => s.id !== fromId);
+  // Slot Asal: hanya yang TERISI (ada kasir assigned) — tidak bisa swap slot kosong
+  const filledSlots = slots.filter(s => s.employeeName !== null);
+
+  // Slot Tujuan: hanya yang terisi juga (swap = tukar 2 orang), kecuali slot asal itu sendiri
+  const toOptions = filledSlots.filter(s => s.id !== fromId);
+
+  // Group by dayOfWeek untuk optgroup
+  type GroupedSlots = Record<string, FlatSlot[]>;
+  const groupFrom: GroupedSlots = {};
+  for (const s of filledSlots) {
+    if (!groupFrom[s.dayOfWeek]) groupFrom[s.dayOfWeek] = [];
+    groupFrom[s.dayOfWeek]!.push(s);
+  }
+  const groupTo: GroupedSlots = {};
+  for (const s of toOptions) {
+    if (!groupTo[s.dayOfWeek]) groupTo[s.dayOfWeek] = [];
+    groupTo[s.dayOfWeek]!.push(s);
+  }
+  const dayOrder = ['SENIN','SELASA','RABU','KAMIS','JUMAT','SABTU','MINGGU'];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -162,8 +179,16 @@ function TambahManualModal({
               </label>
               <select id={`${uid}-from`} value={fromId} onChange={e => { setFromId(e.target.value); if (e.target.value === toId) setToId(''); }} required
                 style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-surface)', color: 'var(--color-text-primary)', fontSize: '0.875rem', cursor: 'pointer' }}>
-                <option value="">-- Pilih slot asal --</option>
-                {slots.map(s => <option key={s.id} value={s.id}>{slotLabel(s)}</option>)}
+                <option value="">-- Pilih slot asal (kasir terisi) --</option>
+                {dayOrder.filter(d => groupFrom[d]).map(day => (
+                  <optgroup key={day} label={day}>
+                    {groupFrom[day]!.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.slotStart} - {s.slotEnd} | {s.employeeName}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
               {fromSlot && (
                 <div style={{ marginTop: 6, fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'flex', gap: 6 }}>
@@ -183,8 +208,16 @@ function TambahManualModal({
               </label>
               <select id={`${uid}-to`} value={toId} onChange={e => setToId(e.target.value)} required
                 style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-surface)', color: 'var(--color-text-primary)', fontSize: '0.875rem', cursor: 'pointer' }}>
-                <option value="">-- Pilih slot tujuan --</option>
-                {toOptions.map(s => <option key={s.id} value={s.id}>{slotLabel(s)}</option>)}
+                <option value="">-- Pilih slot tujuan (kasir terisi) --</option>
+                {dayOrder.filter(d => groupTo[d]).map(day => (
+                  <optgroup key={day} label={day}>
+                    {groupTo[day]!.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.slotStart} - {s.slotEnd} | {s.employeeName}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
               {toSlot && (
                 <div style={{ marginTop: 6, fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'flex', gap: 6 }}>
@@ -458,7 +491,7 @@ export default function SwapRequestPage() {
           <ArrowLeftRight size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
           <p style={{ margin: 0, fontWeight: 600 }}>Tidak ada pengajuan</p>
           <p style={{ margin: '4px 0 0', fontSize: '0.8rem' }}>
-            {filter === 'PENDING' ? 'Semua pengajuan sudah diproses ├░┼╕┼╜ΓÇ░' : 'Tidak ada pengajuan dengan status ini'}
+            {filter === 'PENDING' ? 'Semua pengajuan sudah diproses' : 'Tidak ada pengajuan dengan status ini'}
           </p>
         </div>
       ) : (
