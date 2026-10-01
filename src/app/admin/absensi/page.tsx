@@ -650,27 +650,27 @@ export default function AbsensiPage() {
       </div>
 
       {/* Search */}
-      <div style={{ position: 'relative', marginBottom: 'var(--space-4)', maxWidth: '360px' }}>
-        <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} aria-hidden="true" />
+      <div className="search-box" style={{ marginBottom: 'var(--space-4)', maxWidth: '360px' }}>
+        <span className="search-icon" aria-hidden="true"><Search size={16} /></span>
         <input
+          className="form-input"
           type="search" value={searchQ} onChange={e => setSearchQ(e.target.value)}
           placeholder="Cari nama atau NIM..."
-          style={{ width: '100%', padding: '10px 12px 10px 38px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)', fontSize: '0.875rem', boxSizing: 'border-box' }}
         />
       </div>
 
       {/* Table */}
       <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
         {loading ? (
-          <div style={{ padding: 'var(--space-12)', textAlign: 'center', color: 'var(--color-text-muted)' }} aria-live="polite" aria-busy="true">
-            <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', marginBottom: '8px' }} />
+          <div className="empty-state" aria-live="polite" aria-busy="true">
+            <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', opacity: 1 }} />
             <p style={{ margin: 0, fontSize: '0.875rem' }}>Memuat data absensi...</p>
           </div>
         ) : filtered.length === 0 ? (
-          <div style={{ padding: 'var(--space-12)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-            <ClipboardList size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
+          <div className="empty-state">
+            <ClipboardList size={40} />
             <p style={{ margin: 0, fontWeight: 600 }}>Belum ada data absensi</p>
-            <p style={{ margin: '4px 0 0', fontSize: '0.8rem' }}>{searchQ ? 'Coba kata kunci lain' : 'Kasir belum login hari ini, atau belum ada jadwal yang disetup'}</p>
+            <p style={{ margin: 0, fontSize: '0.8rem' }}>{searchQ ? 'Coba kata kunci lain' : 'Kasir belum login hari ini, atau belum ada jadwal yang disetup'}</p>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>

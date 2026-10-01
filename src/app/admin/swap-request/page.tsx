@@ -482,15 +482,15 @@ export default function SwapRequestPage() {
 
       {/* List */}
       {loading ? (
-        <div style={{ padding: 'var(--space-12)', textAlign: 'center', color: 'var(--color-text-muted)' }} aria-live="polite" aria-busy="true">
-          <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', marginBottom: '8px' }} />
+        <div className="empty-state" aria-live="polite" aria-busy="true">
+          <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', opacity: 1 }} />
           <p style={{ margin: 0, fontSize: '0.875rem' }}>Memuat pengajuan...</p>
         </div>
       ) : requests.length === 0 ? (
-        <div style={{ padding: 'var(--space-12)', textAlign: 'center', color: 'var(--color-text-muted)', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-xl)' }}>
-          <ArrowLeftRight size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
+        <div className="empty-state" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-xl)' }}>
+          <ArrowLeftRight size={40} />
           <p style={{ margin: 0, fontWeight: 600 }}>Tidak ada pengajuan</p>
-          <p style={{ margin: '4px 0 0', fontSize: '0.8rem' }}>
+          <p style={{ margin: 0, fontSize: '0.8rem' }}>
             {filter === 'PENDING' ? 'Semua pengajuan sudah diproses' : 'Tidak ada pengajuan dengan status ini'}
           </p>
         </div>

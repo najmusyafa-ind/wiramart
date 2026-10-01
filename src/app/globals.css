@@ -515,6 +515,48 @@ p, h1, h2, h3, h4, h5, h6 {
 }
 
 /* ==========================================================
+   SEARCH BOX & EMPTY STATE UTILITIES
+   ========================================================== */
+
+/* Search box: icon overlay pattern — cross-browser safe */
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.search-box .search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  pointer-events: none;
+  display: flex;            /* Pastikan SVG tidak meleset */
+  align-items: center;
+  line-height: 0;
+}
+.search-box input {
+  width: 100%;
+  padding-left: 38px;
+}
+
+/* Empty state: selalu flex column center — mencegah SVG meleset */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: var(--space-12);
+  gap: var(--space-2);
+}
+.empty-state svg {
+  opacity: 0.3;
+  flex-shrink: 0;
+}
+
+/* ==========================================================
    CARD COMPONENT
    ========================================================== */
 
