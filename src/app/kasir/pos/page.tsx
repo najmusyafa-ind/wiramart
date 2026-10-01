@@ -33,8 +33,10 @@ type PaymentMethod = 'CASH' | 'QRIS';
 
 type SessionInfo = {
   employee: { id: string; fullName: string; jabatan: string; nim: string };
-  shift: { id: string; clockIn: string } | null;
+  shift: { id: string; clockIn: string; modalAwal: string | null } | null;
   qris: { qrImageUrl: string | null; bankName: string | null; accountName: string | null; isActive: boolean } | null;
+  store: { name: string; address: string; phone: string };
+  otherActiveShifts: { kasirName: string; kasirNim: string; clockIn: string; shiftId: string }[];
 };
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -104,7 +106,292 @@ function ProductCard({ product, onAdd }: { product: Product; onAdd: (p: Product)
   );
 }
 
+// ── Buka Shift Overlay ───────────────────────────────────────
+// Blocking overlay yang muncul setelah login jika modal awal belum diisi.
+// Jika ada kasir lain yang masih aktif → tampilkan warning handover.
+function BukaShiftOverlay({
+  kasirName,
+  otherActiveShifts,
+  onSuccess,
+}: {
+  kasirName: string;
+  otherActiveShifts: SessionInfo['otherActiveShifts'];
+  onSuccess: (modalAwal: number) => void;
+}) {
+  const [modalInput, setModalInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Fase handover: jika ada kasir lain aktif, tampilkan konfirmasi dulu
+  const [handoverConfirmed, setHandoverConfirmed] = useState(false);
+
+  const hasOtherShift = otherActiveShifts.length > 0;
+  // Tampilkan warning handover jika ada kasir lain & belum dikonfirmasi
+  const showHandoverWarning = hasOtherShift && !handoverConfirmed;
+
+  const rp = (n: number) => 'Rp ' + n.toLocaleString('id-ID');
+  const quickAmounts = [0, 50000, 100000, 200000, 500000];
+  const modalNominal = modalInput ? parseFloat(modalInput.replace(/\D/g, '')) : NaN;
+
+  async function handleBuka() {
+    const nominal = parseFloat(modalInput.replace(/\D/g, ''));
+    if (isNaN(nominal) || nominal < 0) {
+      setError('Masukkan nominal modal awal yang valid (boleh 0).');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/kasir/shift/buka', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modalAwal: nominal }),
+      });
+      const json = await res.json() as { success: boolean; error?: string };
+      if (!res.ok) {
+        setError(json.error ?? 'Gagal membuka shift.');
+        return;
+      }
+      onSuccess(nominal);
+    } catch {
+      setError('Kesalahan jaringan. Coba lagi.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog" aria-modal="true" aria-labelledby="buka-shift-title"
+      style={{
+        position: 'fixed', inset: 0, zIndex: 2000,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 'var(--space-3)',
+        background: 'linear-gradient(135deg, var(--color-primary) 0%, hsl(220, 70%, 25%) 100%)',
+        overflowY: 'auto',
+      }}
+    >
+      <div
+        className="card"
+        style={{
+          width: '100%', maxWidth: 420, margin: 'auto', boxShadow: 'var(--shadow-xl)',
+          marginTop: 'env(safe-area-inset-top, 0)',
+          marginBottom: 'env(safe-area-inset-bottom, 0)',
+        }}
+      >
+        <div className="card-body" style={{ padding: 'clamp(var(--space-4), 5vw, var(--space-6))', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+
+          {/* ── HANDOVER WARNING — tampil jika kasir lain masih aktif ── */}
+          {showHandoverWarning ? (
+            <>
+              {/* Header warning */}
+              <div style={{ textAlign: 'center' }}>
+                <div style={{
+                  width: 60, height: 60, borderRadius: '50%',
+                  background: 'hsl(38 95% 90%)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  margin: '0 auto var(--space-2)',
+                  fontSize: 28,
+                }}>⚠️</div>
+                <h2 id="buka-shift-title" style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', margin: '0 0 var(--space-1)' }}>
+                  Perhatian: Ada Shift Aktif
+                </h2>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>
+                  Kasir berikut masih memiliki shift yang belum ditutup:
+                </p>
+              </div>
+
+              {/* Daftar kasir yang masih aktif */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                {otherActiveShifts.map((s) => (
+                  <div
+                    key={s.shiftId}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
+                      padding: 'var(--space-3)', borderRadius: 'var(--radius-md)',
+                      background: 'hsl(38 95% 96%)', border: '1px solid hsl(38 90% 75%)',
+                    }}
+                  >
+                    <div style={{
+                      width: 40, height: 40, borderRadius: '50%',
+                      background: 'hsl(38 90% 85%)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 18, flexShrink: 0,
+                    }}>👤</div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 'var(--text-sm)', color: 'var(--color-text-primary)' }}>
+                        {s.kasirName}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                        NIM {s.kasirNim} • Masuk sejak {formatTimeShort(s.clockIn)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Instruksi */}
+              <div style={{
+                padding: 'var(--space-3)',
+                background: 'var(--color-surface-elevated)',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '0.8rem',
+                lineHeight: 1.5,
+                color: 'var(--color-text-secondary)',
+              }}>
+                <strong>Apa yang perlu dilakukan:</strong>
+                <ol style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  <li>Minta kasir sebelumnya menutup shift mereka terlebih dahulu.</li>
+                  <li>Atau hubungi Admin untuk menutup shift secara manual.</li>
+                  <li>Jika sudah dikonfirmasi serah terima secara fisik, klik tombol di bawah.</li>
+                </ol>
+              </div>
+
+              {error && (
+                <div style={{ padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--color-error-light)', fontSize: '0.8rem', color: 'var(--color-error)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                  {error}
+                </div>
+              )}
+
+              <button
+                id="btn-konfirmasi-handover"
+                onClick={() => setHandoverConfirmed(true)}
+                className="btn btn-primary"
+                style={{ width: '100%', minHeight: 52 }}
+              >
+                ✅ Saya Sudah Serah Terima — Lanjut Buka Shift
+              </button>
+
+              <p style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textAlign: 'center', margin: 0 }}>
+                Shift aktif yang ada akan tetap terbuka sampai kasir tsb atau Admin menutupnya.
+              </p>
+            </>
+          ) : (
+            <>
+              {/* ── FORM BUKA SHIFT (normal / setelah konfirmasi handover) ── */}
+              {/* Header */}
+              <div style={{ textAlign: 'center' }}>
+                <div style={{
+                  width: 56, height: 56, borderRadius: '50%',
+                  background: 'var(--color-primary-light)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  margin: '0 auto var(--space-2)',
+                }}>
+                  <Banknote size={28} style={{ color: 'var(--color-primary)' }} />
+                </div>
+                <h2 id="buka-shift-title" style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', marginBottom: 'var(--space-1)', margin: '0 0 var(--space-1)' }}>
+                  Buka Shift
+                </h2>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>
+                  Halo, <strong>{kasirName}</strong>! Masukkan uang di laci kasir.
+                </p>
+              </div>
+
+              {/* Badge handover jika tadi dikonfirmasi */}
+              {handoverConfirmed && hasOtherShift && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 12px', borderRadius: 'var(--radius-md)',
+                  background: 'var(--color-success-light)',
+                  border: '1px solid var(--color-success)',
+                  fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: 600,
+                }}>
+                  ✓ Serah terima dikonfirmasi. Masukkan modal awal yang diterima.
+                </div>
+              )}
+
+              {/* Info box */}
+              <div style={{
+                padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)',
+                background: 'var(--color-warning-light)',
+                border: '1px solid var(--color-warning)',
+                fontSize: '0.72rem', color: 'var(--color-text)', lineHeight: 1.4,
+              }}>
+                <strong>ℹ️</strong> Shift pertama? Masukkan <strong>0</strong> jika laci kosong. Serah terima? Masukkan saldo yang diterima.
+              </div>
+
+              {/* Input nominal */}
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label htmlFor="modal-awal-input" className="form-label">Modal Awal (Rp) *</label>
+                <input
+                  id="modal-awal-input"
+                  type="number"
+                  inputMode="numeric"
+                  className="form-input"
+                  placeholder="0"
+                  value={modalInput}
+                  onChange={(e) => setModalInput(e.target.value)}
+                  min={0}
+                  step={1000}
+                  style={{
+                    fontSize: 'clamp(1.25rem, 6vw, var(--text-2xl))',
+                    textAlign: 'center',
+                    fontWeight: 'var(--weight-bold)',
+                    minHeight: 52,
+                  }}
+                />
+              </div>
+
+              {/* Quick amount buttons */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)' }}>
+                {quickAmounts.map((a) => (
+                  <button
+                    key={a}
+                    onClick={() => setModalInput(a.toString())}
+                    className="btn btn-secondary"
+                    style={{
+                      minHeight: 44,
+                      padding: 'var(--space-2) var(--space-1)',
+                      fontSize: '0.72rem',
+                      fontWeight: 'var(--weight-semibold)',
+                    }}
+                  >
+                    {a === 0 ? 'Kosong (Rp 0)' : rp(a)}
+                  </button>
+                ))}
+              </div>
+
+              {/* Preview */}
+              {!isNaN(modalNominal) && (
+                <div style={{
+                  textAlign: 'center', padding: 'var(--space-3)',
+                  background: 'var(--color-success-light)', borderRadius: 'var(--radius-md)',
+                }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>Modal tercatat</div>
+                  <div style={{ fontSize: 'clamp(1.25rem, 5vw, var(--text-2xl))', fontWeight: 'var(--weight-bold)', color: 'var(--color-success)' }}>
+                    {rp(modalNominal)}
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div style={{ padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--color-error-light)', fontSize: '0.8rem', color: 'var(--color-error)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+                  {error}
+                </div>
+              )}
+
+              <button
+                id="btn-buka-shift"
+                onClick={handleBuka}
+                className="btn btn-primary"
+                disabled={loading || modalInput === ''}
+                style={{ width: '100%', minHeight: 52, fontSize: 'var(--text-base)', gap: 'var(--space-2)' }}
+              >
+                {loading
+                  ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Membuka shift...</>
+                  : <><CheckCircle size={16} /> Buka Shift &amp; Mulai Jaga</>}
+              </button>
+            </> /* end: form normal */
+          )} {/* end: ternary handover vs form */}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Payment Modal ─────────────────────────────────────────────
+
 function PaymentModal({
   total, method, qrisInfo, onClose, onConfirm, loading,
 }: {
@@ -281,13 +568,18 @@ function PaymentModal({
 
 // ── Success Modal (Struk) ──────────────────────────────
 function SuccessModal({
-  invoiceNumber, total, change, method, kasirName, items, onClose,
+  invoiceNumber, total, change, method, kasirName,
+  storeName, storeAddress, storePhone,
+  items, onClose,
 }: {
   invoiceNumber: string;
   total: number;
   change: number | null;
   method: PaymentMethod;
   kasirName: string;
+  storeName: string;
+  storeAddress: string;
+  storePhone: string;
   items: { name: string; qty: number; price: number }[];
   onClose: () => void;
 }) {
@@ -369,10 +661,11 @@ function SuccessModal({
               lineHeight: 1.7,
             }}
           >
-            {/* Header struk */}
+            {/* Header struk — dinamis dari Pengaturan Toko */}
             <div style={{ textAlign: 'center', marginBottom: 8 }}>
-              <div style={{ fontWeight: 'bold', fontSize: 14 }}>🏪 WIRAMART UNPERBA</div>
-              <div>UKM Kewirausahaan Universitas Perwira</div>
+              <div style={{ fontWeight: 'bold', fontSize: 14 }}>🏪 {storeName}</div>
+              {storeAddress && <div style={{ fontSize: 11, color: '#444' }}>{storeAddress}</div>}
+              {storePhone   && <div style={{ fontSize: 11, color: '#444' }}>Telp: {storePhone}</div>}
               <div style={{ borderTop: '1px dashed #000', marginTop: 6, paddingTop: 4, fontSize: 11, color: '#555' }}>
                 {now}
               </div>
@@ -471,6 +764,12 @@ export default function PosPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [processingTx, setProcessingTx] = useState(false);
   const [showCart, setShowCart] = useState(false); // mobile cart toggle
+  const [tutupLoading, setTutupLoading] = useState(false);
+  const [showTutupConfirm, setShowTutupConfirm] = useState(false);
+  const [tutupResult, setTutupResult] = useState<{
+    totalCash: number; totalQris: number; txCount: number;
+    modalAwal: number; saldoAkhirLaci: number;
+  } | null>(null);
   const [lastTx, setLastTx] = useState<{
     invoiceNumber: string;
     total: number;
@@ -478,6 +777,9 @@ export default function PosPage() {
     method: PaymentMethod;
     items: { name: string; qty: number; price: number }[];
     kasirName: string;
+    storeName: string;
+    storeAddress: string;
+    storePhone: string;
   } | null>(null);
   const [shiftDuration, setShiftDuration] = useState('');
   const [showPosScanner, setShowPosScanner] = useState(false);
@@ -641,7 +943,10 @@ export default function PosPage() {
         change: json.data.changeAmount,
         method: paymentMethod,
         items: cart.map((i) => ({ name: i.name, qty: i.qty, price: parseFloat(i.sellingPrice) })),
-        kasirName: session?.employee?.fullName ?? 'Kasir',
+        kasirName:    session?.employee?.fullName ?? 'Kasir',
+        storeName:    session?.store?.name    ?? 'WIRAMART UNPERBA',
+        storeAddress: session?.store?.address ?? '',
+        storePhone:   session?.store?.phone   ?? '',
       });
       setShowPayment(false);
       setShowSuccess(true);
@@ -667,12 +972,146 @@ export default function PosPage() {
     router.refresh();
   }
 
+  async function handleTutupShift() {
+    setTutupLoading(true);
+    try {
+      const res = await fetch('/api/kasir/shift/tutup', { method: 'PATCH' });
+      const json = await res.json() as {
+        success: boolean;
+        data?: { totalCash: number; totalQris: number; txCount: number; modalAwal: number; saldoAkhirLaci: number };
+        error?: string;
+      };
+      if (!res.ok) {
+        alert(json.error ?? 'Gagal menutup shift.');
+        return;
+      }
+      setTutupResult(json.data ?? null);
+      setShowTutupConfirm(false);
+      // Update session: shift = null setelah tutup
+      setSession((prev) => prev ? { ...prev, shift: null } : prev);
+    } catch {
+      alert('Kesalahan jaringan. Coba lagi.');
+    } finally {
+      setTutupLoading(false);
+    }
+  }
+
   const kasirName = session?.employee?.fullName ?? '...';
+  // True jika shift ada tapi modal awal belum diisi → tampilkan overlay
+  const shiftPerluModal = session !== null && session.shift !== null && session.shift.modalAwal === null;
+
+  // Handler: setelah kasir berhasil input modal awal, update local session state
+  function handleBukaShiftSuccess(modalAwal: number) {
+    setSession((prev) => prev && prev.shift
+      ? { ...prev, shift: { ...prev.shift, modalAwal: modalAwal.toString() } }
+      : prev,
+    );
+  }
 
   return (
     <div className="layout-pos">
 
-      {/* ── Scan Toast ──────────────────────────────────── */}
+      {/* ── Buka Shift Overlay — blocking jika modal awal belum diisi ── */}
+      {shiftPerluModal && (
+        <BukaShiftOverlay
+          kasirName={kasirName}
+          otherActiveShifts={session?.otherActiveShifts ?? []}
+          onSuccess={handleBukaShiftSuccess}
+        />
+      )}
+
+      {/* ── Tutup Shift Konfirmasi Modal ─────────────────────────── */}
+      {showTutupConfirm && (
+        <div
+          role="dialog" aria-modal="true" aria-labelledby="tutup-shift-title"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1800,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 'var(--space-4)', background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+          }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: 380, margin: 'auto', boxShadow: 'var(--shadow-xl)' }}>
+            <div className="card-body" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <h2 id="tutup-shift-title" style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-bold)', textAlign: 'center', margin: 0 }}>
+                ⚠️ Tutup Kasir?
+              </h2>
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', textAlign: 'center', margin: 0 }}>
+                Shift akan ditutup sekarang. Yakin ingin menutup sesi ini?
+              </p>
+              <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+                <button onClick={() => setShowTutupConfirm(false)} className="btn btn-secondary" style={{ flex: 1 }} disabled={tutupLoading}>
+                  Batal
+                </button>
+                <button
+                  onClick={handleTutupShift}
+                  className="btn btn-primary"
+                  disabled={tutupLoading}
+                  style={{ flex: 2, background: 'hsl(0 70% 50%)', minHeight: 44 }}
+                >
+                  {tutupLoading
+                    ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Menutup...</>
+                    : <><X size={14} /> Ya, Tutup Kasir</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Ringkasan Shift Setelah Tutup ───────────────────────── */}
+      {tutupResult && (
+        <div
+          role="dialog" aria-modal="true" aria-labelledby="ringkasan-shift-title"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1800,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 'var(--space-4)', background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+          }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: 400, margin: 'auto', boxShadow: 'var(--shadow-xl)' }}>
+            <div className="card-body" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 40, marginBottom: 'var(--space-2)' }}>✅</div>
+                <h2 id="ringkasan-shift-title" style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', margin: 0 }}>
+                  Shift Ditutup!
+                </h2>
+                <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 'var(--space-1) 0 0' }}>
+                  Ringkasan sesi kasir hari ini
+                </p>
+              </div>
+              {/* Tabel ringkasan */}
+              {([
+                { label: 'Modal Awal Laci', val: rp(tutupResult.modalAwal) },
+                { label: 'Total Cash Masuk', val: rp(tutupResult.totalCash), green: true },
+                { label: 'Total QRIS', val: rp(tutupResult.totalQris) },
+                { label: 'Total Transaksi', val: `${tutupResult.txCount} txn` },
+              ]).map(row => (
+                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-sm)', padding: 'var(--space-2) 0', borderBottom: '1px solid var(--color-border)' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>{row.label}</span>
+                  <span style={{ fontWeight: 'var(--weight-semibold)', color: row.green ? 'var(--color-success)' : 'var(--color-text)' }}>{row.val}</span>
+                </div>
+              ))}
+              {/* Saldo akhir */}
+              <div style={{ padding: 'var(--space-3)', background: 'var(--color-success-light)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>💰 Saldo Expected di Laci</div>
+                <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-success)' }}>
+                  {rp(tutupResult.saldoAkhirLaci)}
+                </div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 2 }}>(Modal Awal + Cash Masuk)</div>
+              </div>
+              <button
+                onClick={() => { setTutupResult(null); handleLogout(); }}
+                className="btn btn-primary"
+                style={{ minHeight: 44 }}
+              >
+                <LogOut size={14} /> Selesai &amp; Keluar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Scan Toast ────────────────────────────────────── */}
       {scanToast && (
         <div style={{
           position: 'fixed', bottom: 'var(--space-8)', left: '50%', transform: 'translateX(-50%)',
@@ -807,6 +1246,32 @@ export default function PosPage() {
               <span className="pos-cart-badge">{totalItems}</span>
             )}
           </button>
+
+          {/* Tombol Tutup Kasir — hanya muncul jika ada shift aktif */}
+          {session?.shift && (
+            <button
+              id="btn-tutup-kasir"
+              onClick={() => setShowTutupConfirm(true)}
+              title="Tutup Kasir"
+              aria-label="Tutup shift kasir"
+              style={{
+                background: 'rgba(220, 38, 38, 0.15)',
+                border: '1px solid rgba(220, 38, 38, 0.35)',
+                borderRadius: 'var(--radius-md)',
+                color: 'hsl(0 80% 75%)',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                padding: '6px 10px',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 'var(--weight-semibold)',
+                transition: 'all var(--duration-fast)',
+                minHeight: 36,
+              }}
+            >
+              <X size={14} />
+              <span className="pos-logout-label">Tutup Kasir</span>
+            </button>
+          )}
 
           <button
             onClick={handleLogout}
@@ -1090,6 +1555,9 @@ export default function PosPage() {
           change={lastTx.change}
           method={lastTx.method}
           kasirName={lastTx.kasirName}
+          storeName={lastTx.storeName}
+          storeAddress={lastTx.storeAddress}
+          storePhone={lastTx.storePhone}
           items={lastTx.items}
           onClose={() => setShowSuccess(false)}
         />

@@ -36,14 +36,27 @@ export async function GET(req: NextRequest): Promise<Response> {
   const employeeIdParam = searchParams.get('employeeId');
   const startDateParam  = searchParams.get('startDate');
   const endDateParam    = searchParams.get('endDate');
+  const monthParam      = searchParams.get('month'); // 'YYYY-MM' → full month range
 
   // Build where conditions
   const conditions = [];
 
-  if (startDateParam && endDateParam) {
+  // Month shortcut: ?month=YYYY-MM → expand to full month range
+  const effectiveStart = monthParam
+    ? `${monthParam}-01`
+    : startDateParam;
+  const effectiveEnd = monthParam
+    ? (() => {
+        const [y, m] = monthParam.split('-').map(Number);
+        const lastDay = new Date((y ?? 2000), (m ?? 1), 0).getDate();
+        return `${monthParam}-${String(lastDay).padStart(2, '0')}`;
+      })()
+    : endDateParam;
+
+  if (effectiveStart && effectiveEnd) {
     // Range mode
-    const start = new Date(startDateParam);
-    const end   = new Date(endDateParam);
+    const start = new Date(effectiveStart);
+    const end   = new Date(effectiveEnd);
     const diffDays = (end.getTime() - start.getTime()) / 86400000;
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       return apiError('Format tanggal tidak valid (gunakan YYYY-MM-DD).', 422);
@@ -54,8 +67,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     if (diffDays < 0) {
       return apiError('startDate harus sebelum endDate.', 422);
     }
-    conditions.push(gte(attendances.attendanceDate, startDateParam));
-    conditions.push(lte(attendances.attendanceDate, endDateParam));
+    conditions.push(gte(attendances.attendanceDate, effectiveStart));
+    conditions.push(lte(attendances.attendanceDate, effectiveEnd));
   } else {
     // Single date mode (default: hari ini WIB)
     const targetDate = dateParam ?? new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });

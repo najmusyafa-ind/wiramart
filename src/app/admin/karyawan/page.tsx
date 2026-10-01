@@ -61,9 +61,21 @@ function KaryawanModal({
     }
   }
 
-  const prodiOptions = [
-    'Manajemen', 'Akuntansi', 'Sistem Informasi', 'Teknik Informatika',
-    'Ilmu Hukum', 'Administrasi Publik', 'Pendidikan Ekonomi', 'Lainnya',
+  // Prodi resmi UNPERBA yang terlibat di Wiramart
+  const prodiOptions: { fakultas: string; prodi: string[] }[] = [
+    {
+      fakultas: 'FEB — Fakultas Ekonomi & Bisnis',
+      prodi: ['Akuntansi', 'Manajemen'],
+    },
+    {
+      fakultas: 'FST — Fakultas Sains & Teknologi',
+      prodi: ['Teknik Informatika', 'Agribisnis', 'Teknik Mesin'],
+    },
+  ];
+
+  const jabatanOptions = [
+    { value: 'Kasir', label: 'Kasir', desc: 'Bertugas di POS, melayani transaksi' },
+    { value: 'Koordinator', label: 'Koordinator', desc: 'Dosen/pengawas, memantau jadwal & absensi' },
   ];
 
   return (
@@ -133,16 +145,24 @@ function KaryawanModal({
                 />
               </div>
               <div className="form-group">
-                <label htmlFor={`${uid}-jabatan`} className="form-label">Jabatan</label>
-                <input
+                <label htmlFor={`${uid}-jabatan`} className="form-label">Jabatan *</label>
+                <select
                   id={`${uid}-jabatan`}
-                  type="text"
-                  className="form-input"
-                  placeholder="Kasir"
+                  className="form-input form-select"
                   value={form.jabatan}
                   onChange={(e) => setForm((f) => ({ ...f, jabatan: e.target.value }))}
+                  required
                   disabled={loading}
-                />
+                >
+                  {jabatanOptions.map((j) => (
+                    <option key={j.value} value={j.value} title={j.desc}>
+                      {j.label}
+                    </option>
+                  ))}
+                </select>
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                  {jabatanOptions.find(j => j.value === form.jabatan)?.desc}
+                </p>
               </div>
             </div>
             <div className="form-group">
@@ -153,10 +173,16 @@ function KaryawanModal({
                 value={form.programStudi}
                 onChange={(e) => setForm((f) => ({ ...f, programStudi: e.target.value }))}
                 required
-                disabled={loading || isEdit}
+                disabled={loading}
               >
                 <option value="">— Pilih Program Studi —</option>
-                {prodiOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+                {prodiOptions.map((group) => (
+                  <optgroup key={group.fakultas} label={group.fakultas}>
+                    {group.prodi.map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </div>
             <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', paddingTop: 'var(--space-2)' }}>

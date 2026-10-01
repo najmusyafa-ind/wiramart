@@ -126,6 +126,11 @@ export const shifts = pgTable(
     clockIn: timestamp('clock_in', { withTimezone: true }).notNull().defaultNow(),
     clockOut: timestamp('clock_out', { withTimezone: true }),
     status: shiftStatusEnum('status').notNull().default('ACTIVE'),
+    // Modal awal — jumlah uang di laci saat kasir buka shift (wajib diisi)
+    modalAwal: decimal('modal_awal', { precision: 15, scale: 2 }),
+    // Catatan serah terima laci ke shift berikutnya
+    handoverNote: text('handover_note'),
+    notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -133,6 +138,7 @@ export const shifts = pgTable(
     // (enforced di application layer via check sebelum insert)
     uniqueIndex('shifts_employee_one_active').on(table.employeeId, table.status),
     index('idx_shifts_employee').on(table.employeeId, table.createdAt),
+    index('idx_shifts_clock_in').on(table.clockIn),
   ],
 );
 
@@ -328,6 +334,14 @@ export const qrisSettings = pgTable('qris_settings', {
   isActive: boolean('is_active').notNull().default(false),
   uploadedByAdminId: uuid('uploaded_by_admin_id').references(() => admins.id),
   uploadedAt: timestamp('uploaded_at', { withTimezone: true }),
+  // ── Info Toko (untuk struk gaya Indomaret/Alfamart) ──────────
+  storeName:    varchar('store_name',    { length: 200 }),  // Contoh: WIRAMART UNPERBA
+  storeAddress: text('store_address'),                      // Jl. Letjend. Suprapto No. 73...
+  storePhone:   varchar('store_phone',   { length: 30 }),   // 0281-XXXXXX
+  // ── Pengaturan Operasional ───────────────────────────────────
+  attendanceTolerance: integer('attendance_tolerance').notNull().default(15), // menit toleransi clock-in
+  lowStockThreshold:   integer('low_stock_threshold').notNull().default(5),   // batas stok rendah
+  // ────────────────────────────────────────────────────────────
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

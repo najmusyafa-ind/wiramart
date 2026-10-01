@@ -7,8 +7,8 @@
 
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { transactions, transactionItems, employees } from '@/lib/db/schema';
-import { eq, and, gte, lte, sql, count } from 'drizzle-orm';
+import { transactions, transactionItems, employees, shifts } from '@/lib/db/schema';
+import { eq, and, gte, lte, sql, count, isNotNull } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import { getPeriodRange } from '@/lib/utils/helpers';
 
@@ -129,6 +129,28 @@ export async function GET(req: NextRequest) {
       .orderBy(sql`${transactions.createdAt} DESC`)
       .limit(20);
 
+    // ── Shift dalam periode (dengan modal awal) ───────────────────────
+    const shiftList = await db
+      .select({
+        shiftId:     shifts.id,
+        clockIn:     shifts.clockIn,
+        clockOut:    shifts.clockOut,
+        status:      shifts.status,
+        modalAwal:   shifts.modalAwal,
+        kasirName:   employees.fullName,
+        kasirNim:    employees.nim,
+      })
+      .from(shifts)
+      .innerJoin(employees, eq(shifts.employeeId, employees.id))
+      .where(
+        and(
+          gte(shifts.clockIn, start),
+          lte(shifts.clockIn, end),
+        ),
+      )
+      .orderBy(sql`${shifts.clockIn} DESC`)
+      .limit(100);
+
     return apiOk({
       period: period ?? 'custom',
       label,
@@ -149,6 +171,15 @@ export async function GET(req: NextRequest) {
       topProducts,
       dailyChart,
       recentTransactions,
+      shifts: shiftList.map(s => ({
+        shiftId:   s.shiftId,
+        clockIn:   s.clockIn,
+        clockOut:  s.clockOut,
+        status:    s.status,
+        modalAwal: s.modalAwal ? parseFloat(s.modalAwal) : null,
+        kasirName: s.kasirName,
+        kasirNim:  s.kasirNim,
+      })),
     });
   } catch {
     return apiError('Gagal mengambil data laporan', 500);

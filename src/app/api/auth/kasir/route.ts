@@ -141,15 +141,21 @@ export async function POST(request: Request): Promise<Response> {
 
       if (!jadwalHariIni) return; // Tidak ada jadwal hari ini — skip
 
-      // Hitung keterlambatan (toleransi 15 menit)
-      const TOLERANSI_MENIT = 15;
+      // Hitung keterlambatan berdasarkan jenis shift:
+      // - Shift pagi (slotStart < 10:00) → toleransi 60 menit (kasir sering mulur)
+      // - Shift siang/lainnya           → toleransi 15 menit
       const [jamJadwal, menitJadwal] = jadwalHariIni.slotStart.split(':').map(Number);
       const [jamAktual, menitAktual] = jamMenitSekarang.split(':').map(Number);
-      const menitJadwalTotal = jamJadwal * 60 + menitJadwal;
-      const menitAktualTotal = jamAktual * 60 + menitAktual;
-      const selisihMenit     = menitAktualTotal - menitJadwalTotal;
-      const isTelat          = selisihMenit > TOLERANSI_MENIT;
-      const lateMinutes      = isTelat ? selisihMenit : 0;
+      const menitJadwalTotal = (jamJadwal ?? 0) * 60 + (menitJadwal ?? 0);
+      const menitAktualTotal = (jamAktual ?? 0) * 60 + (menitAktual ?? 0);
+      const selisihMenit = menitAktualTotal - menitJadwalTotal;
+
+      // Toleransi dinamis per jenis shift
+      const isPagiShift = (jamJadwal ?? 12) < 10; // slotStart sebelum jam 10
+      const TOLERANSI_MENIT = isPagiShift ? 60 : 15;
+
+      const isTelat     = selisihMenit > TOLERANSI_MENIT;
+      const lateMinutes = isTelat ? selisihMenit : 0;
 
       await db
         .insert(attendances)

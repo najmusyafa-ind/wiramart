@@ -3,6 +3,7 @@
 import { useState, useEffect, useId, useRef } from 'react';
 import {
   Settings,
+  Store,
   Wrench,
   QrCode,
   Loader2,
@@ -38,6 +39,12 @@ export default function PengaturanPage() {
   const [maintenanceMsg, setMaintenanceMsg] = useState('');
   const [maintenanceStatus, setMaintenanceStatus] = useState<FeedbackStatus>('idle');
 
+  // ── Info Toko state ────────────────────────────────────────
+  const [tokoNama, setTokoNama]     = useState('');
+  const [tokoAlamat, setTokoAlamat] = useState('');
+  const [tokoTelp, setTokoTelp]     = useState('');
+  const [tokoStatus, setTokoStatus] = useState<FeedbackStatus>('idle');
+
   // ── QRIS state ─────────────────────────────────────────────
   const [qrisBank, setQrisBank] = useState('');
   const [qrisName, setQrisName] = useState('');
@@ -46,6 +53,11 @@ export default function PengaturanPage() {
   const [qrisPreview, setQrisPreview] = useState<string | null>(null);
   const [qrisCurrentUrl, setQrisCurrentUrl] = useState<string | null>(null);
   const [qrisStatus, setQrisStatus] = useState<FeedbackStatus>('idle');
+
+  // ── Pengaturan Operasional state ────────────────────────────
+  const [attendanceTolerance, setAttendanceTolerance] = useState(15);
+  const [lowStockThreshold, setLowStockThreshold]     = useState(5);
+  const [operasionalStatus, setOperasionalStatus]     = useState<FeedbackStatus>('idle');
 
   // ── Database Backup & Restore state ─────────────────────────
   const [backupLoading, setBackupLoading] = useState(false);
@@ -77,7 +89,7 @@ export default function PengaturanPage() {
 
   // ── Fetch initial state ────────────────────────────────────
   useEffect(() => {
-    // Fix Bug 1: URL yang benar adalah /api/maintenance/status (bukan /api/maintenance/route)
+    // Fetch maintenance
     fetch('/api/maintenance/status')
       .then((r) => r.json())
       .then((json: { isMaintenance?: boolean; message?: string }) => {
@@ -86,11 +98,21 @@ export default function PengaturanPage() {
           setMaintenanceMsg(json.message ?? '');
         }
       })
-      .catch(() => {
-        // Gagal fetch — biarkan default (false)
-      });
+      .catch(() => {});
 
-    // Fetch QRIS settings yang sudah tersimpan
+    // Fetch Info Toko
+    fetch('/api/admin/pengaturan/toko')
+      .then((r) => r.json())
+      .then((json: { success?: boolean; data?: { storeName?: string; storeAddress?: string; storePhone?: string } }) => {
+        if (json.success && json.data) {
+          setTokoNama(json.data.storeName ?? '');
+          setTokoAlamat(json.data.storeAddress ?? '');
+          setTokoTelp(json.data.storePhone ?? '');
+        }
+      })
+      .catch(() => {});
+
+    // Fetch QRIS settings
     fetch('/api/admin/pengaturan/qris')
       .then((r) => r.json())
       .then((json: { success?: boolean; data?: { bankName?: string; accountName?: string; isActive?: boolean; qrImageUrl?: string | null } }) => {
@@ -101,9 +123,18 @@ export default function PengaturanPage() {
           setQrisCurrentUrl(json.data.qrImageUrl ?? null);
         }
       })
-      .catch(() => {
-        // Belum ada data QRIS — biarkan form kosong
-      });
+      .catch(() => {});
+
+    // Fetch Pengaturan Operasional
+    fetch('/api/admin/pengaturan/operasional')
+      .then((r) => r.json())
+      .then((json: { success?: boolean; data?: { attendanceTolerance?: number; lowStockThreshold?: number } }) => {
+        if (json.success && json.data) {
+          setAttendanceTolerance(json.data.attendanceTolerance ?? 15);
+          setLowStockThreshold(json.data.lowStockThreshold ?? 5);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // ── Handle QR file select ──────────────────────────────────
@@ -124,6 +155,44 @@ export default function PengaturanPage() {
     setQrisFile(null);
     setQrisPreview(null);
     if (qrFileInputRef.current) qrFileInputRef.current.value = '';
+  }
+
+  // ── Save Info Toko ─────────────────────────────────────────
+  async function saveToko() {
+    setTokoStatus('loading');
+    try {
+      const res = await fetch('/api/admin/pengaturan/toko', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storeName:    tokoNama.trim()    || undefined,
+          storeAddress: tokoAlamat.trim()  || undefined,
+          storePhone:   tokoTelp.trim()    || undefined,
+        }),
+      });
+      setTokoStatus(res.ok ? 'success' : 'error');
+    } catch {
+      setTokoStatus('error');
+    } finally {
+      setTimeout(() => setTokoStatus('idle'), 3000);
+    }
+  }
+
+  // ── Save Pengaturan Operasional ────────────────────────────
+  async function saveOperasional() {
+    setOperasionalStatus('loading');
+    try {
+      const res = await fetch('/api/admin/pengaturan/operasional', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attendanceTolerance, lowStockThreshold }),
+      });
+      setOperasionalStatus(res.ok ? 'success' : 'error');
+    } catch {
+      setOperasionalStatus('error');
+    } finally {
+      setTimeout(() => setOperasionalStatus('idle'), 3000);
+    }
   }
 
   // ── Save maintenance ───────────────────────────────────────
@@ -333,7 +402,7 @@ export default function PengaturanPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Pengaturan Sistem & Database</h1>
-          <p className="page-subtitle">Konfigurasi maintenance mode, QRIS, dan pencadangan database</p>
+          <p className="page-subtitle">Info toko, maintenance mode, QRIS, dan pencadangan database</p>
         </div>
         <Settings size={20} aria-hidden="true" style={{ color: 'var(--color-text-muted)' }} />
       </div>
@@ -345,6 +414,182 @@ export default function PengaturanPage() {
           gap: 'var(--space-5)',
         }}
       >
+        {/* ── Info Toko ──────────────────────────────────── */}
+        <div className="card">
+          <div className="card-header">
+            <h2
+              className="card-title"
+              style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            >
+              <Store size={16} aria-hidden="true" />
+              Info Toko (Tampil di Struk)
+            </h2>
+          </div>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
+              Nama, alamat, dan nomor telepon akan muncul di header struk kasir — gaya Indomaret/Alfamart.
+            </p>
+
+            <div className="form-group">
+              <label htmlFor={`${uid}-toko-nama`} className="form-label">Nama Toko *</label>
+              <input
+                id={`${uid}-toko-nama`}
+                type="text"
+                className="form-input"
+                placeholder="Contoh: WIRAMART UNPERBA"
+                value={tokoNama}
+                onChange={(e) => setTokoNama(e.target.value)}
+                maxLength={200}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor={`${uid}-toko-alamat`} className="form-label">Alamat Toko</label>
+              <textarea
+                id={`${uid}-toko-alamat`}
+                className="form-input form-textarea"
+                rows={2}
+                placeholder="Jl. Letjend. Suprapto No. 73, Purbalingga"
+                value={tokoAlamat}
+                onChange={(e) => setTokoAlamat(e.target.value)}
+                maxLength={500}
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor={`${uid}-toko-telp`} className="form-label">No. Telepon</label>
+              <input
+                id={`${uid}-toko-telp`}
+                type="tel"
+                className="form-input"
+                placeholder="Contoh: 0281-XXXXXX"
+                value={tokoTelp}
+                onChange={(e) => setTokoTelp(e.target.value)}
+                maxLength={30}
+              />
+            </div>
+
+            <button
+              id={`${uid}-save-toko`}
+              onClick={saveToko}
+              className="btn btn-primary"
+              disabled={tokoStatus === 'loading' || !tokoNama.trim()}
+              style={{ alignSelf: 'flex-end', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            >
+              {tokoStatus === 'loading' && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+              {tokoStatus === 'success' && <CheckCircle size={14} aria-hidden="true" />}
+              {tokoStatus === 'error'   && <AlertCircle size={14} aria-hidden="true" />}
+              {tokoStatus === 'loading' ? 'Menyimpan...' : tokoStatus === 'success' ? 'Tersimpan!' : tokoStatus === 'error' ? 'Gagal!' : 'Simpan Info Toko'}
+            </button>
+          </div>
+        </div>
+
+        {/* ── Pengaturan Operasional ─────────────────────────────── */}
+        <div className="card">
+          <div className="card-header">
+            <h2
+              className="card-title"
+              style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            >
+              <Wrench size={16} aria-hidden="true" />
+              Pengaturan Operasional
+            </h2>
+          </div>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
+              Atur parameter operasional kasir. Perubahan berlaku mulai sesi berikutnya.
+            </p>
+
+            {/* Toleransi Absensi */}
+            <div>
+              <label htmlFor={`${uid}-attendance-tolerance`} className="form-label">
+                Toleransi Clock-In Absensi
+              </label>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '0 0 var(--space-2)' }}>
+                Kasir masih dianggap tepat waktu jika clock-in dalam &plusmn;{attendanceTolerance} menit dari jam shift.
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                <input
+                  id={`${uid}-attendance-tolerance`}
+                  type="range"
+                  min={0}
+                  max={60}
+                  step={5}
+                  value={attendanceTolerance}
+                  onChange={(e) => setAttendanceTolerance(Number(e.target.value))}
+                  style={{ flex: 1, accentColor: 'var(--color-primary)' }}
+                  aria-label={`Toleransi absensi: ${attendanceTolerance} menit`}
+                />
+                <div style={{
+                  minWidth: 72,
+                  padding: 'var(--space-1) var(--space-3)',
+                  background: 'var(--color-primary-surface)',
+                  borderRadius: 'var(--radius-md)',
+                  textAlign: 'center',
+                  fontWeight: 'var(--weight-bold)',
+                  color: 'var(--color-primary)',
+                  fontSize: 'var(--text-sm)',
+                }}>
+                  {attendanceTolerance} menit
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 4 }}>
+                <span>0 mnt (ketat)</span>
+                <span>30 mnt</span>
+                <span>60 mnt (longgar)</span>
+              </div>
+            </div>
+
+            {/* Threshold Stok Rendah */}
+            <div>
+              <label htmlFor={`${uid}-low-stock`} className="form-label">
+                Batas Peringatan Stok Rendah
+              </label>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '0 0 var(--space-2)' }}>
+                Produk dengan stok &le;{lowStockThreshold} unit akan tampil dengan indikator peringatan merah di halaman Produk.
+              </p>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+                <input
+                  id={`${uid}-low-stock`}
+                  type="number"
+                  min={0}
+                  max={9999}
+                  className="form-input"
+                  style={{ maxWidth: 120 }}
+                  value={lowStockThreshold}
+                  onChange={(e) => setLowStockThreshold(Math.max(0, Math.min(9999, Number(e.target.value))))}
+                  aria-label="Batas stok rendah"
+                />
+                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>unit</span>
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 10px', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 600,
+                  background: 'hsl(0 70% 55% / 0.1)', color: 'hsl(0 70% 60%)',
+                  border: '1px solid hsl(0 70% 55% / 0.3)',
+                }}>
+                  ⚠ Stok ≤{lowStockThreshold} → Peringatan
+                </div>
+              </div>
+            </div>
+
+            <button
+              id={`${uid}-save-operasional`}
+              onClick={saveOperasional}
+              className="btn btn-primary"
+              disabled={operasionalStatus === 'loading'}
+              style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            >
+              {operasionalStatus === 'loading' && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+              {operasionalStatus === 'success' && <CheckCircle size={14} aria-hidden="true" />}
+              {operasionalStatus === 'error'   && <AlertCircle size={14} aria-hidden="true" />}
+              {operasionalStatus === 'loading' ? 'Menyimpan...'
+                : operasionalStatus === 'success' ? 'Tersimpan!'
+                : operasionalStatus === 'error'   ? 'Gagal!'
+                : 'Simpan Pengaturan Operasional'}
+            </button>
+          </div>
+        </div>
+
         {/* ── Maintenance Mode ───────────────────────────── */}
         <div className="card">
           <div className="card-header">

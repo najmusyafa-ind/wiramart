@@ -68,7 +68,7 @@ const NAV_ITEMS: NavItem[] = [
     section: 'Menu Utama',
   },
   {
-    label: 'Pengajuan Swap',
+    label: 'Riwayat Tukar Shift',
     href: '/admin/swap-request',
     icon: <ArrowLeftRight size={18} aria-hidden="true" />,
     section: 'Menu Utama',
@@ -87,7 +87,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     label: 'Export Data',
-    href: '/api/admin/export?type=full',
+    href: '/admin/export',
     icon: <Download size={18} aria-hidden="true" />,
     section: 'Sistem',
   },

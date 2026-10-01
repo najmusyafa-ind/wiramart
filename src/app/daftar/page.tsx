@@ -272,6 +272,18 @@ function PanelDosen({ onBack }: { onBack: () => void }) {
 // ─────────────────────────────────────────────────────────────
 // PANEL: Mahasiswa — Daftar + Pilih Shift / Lupa NIM
 // ─────────────────────────────────────────────────────────────
+// Prodi resmi UNPERBA yang terlibat di Wiramart (FEB + FST)
+const PRODI_OPTIONS: { fakultas: string; prodi: string[] }[] = [
+  {
+    fakultas: 'FEB — Ekonomi & Bisnis',
+    prodi: ['Akuntansi', 'Manajemen'],
+  },
+  {
+    fakultas: 'FST — Sains & Teknologi',
+    prodi: ['Teknik Informatika', 'Agribisnis', 'Teknik Mesin'],
+  },
+];
+
 function PanelMahasiswa({ onBack }: { onBack: () => void }) {
   const [tab, setTab] = useState<MahasiswaTab>('daftar');
   // Step daftar: 1 = isi data, 2 = pilih slot, 3 = sukses
@@ -368,8 +380,22 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                 <input className="form-input" placeholder="Nomor Induk Mahasiswa" value={nim} onChange={e => setNim(e.target.value)} />
               </div>
               <div className="form-group">
-                <label className="form-label">Program Studi</label>
-                <input className="form-input" placeholder="Contoh: Teknik Informatika" value={prodi} onChange={e => setProdi(e.target.value)} />
+                <label className="form-label">Program Studi *</label>
+                <select
+                  className="form-input form-select"
+                  value={prodi}
+                  onChange={e => setProdi(e.target.value)}
+                  required
+                >
+                  <option value="">— Pilih Program Studi —</option>
+                  {PRODI_OPTIONS.map((group) => (
+                    <optgroup key={group.fakultas} label={group.fakultas}>
+                      {group.prodi.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
               </div>
               <button
                 onClick={() => { setError(null); setStep(2); }}
@@ -427,7 +453,8 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
       {tab === 'lupa-nim' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-            Masukkan nama lengkap dan program studi, sistem akan mencari NIM kamu.
+            Masukkan nama lengkap dan program studi — sistem akan menampilkan NIM kamu.
+            Jika masih tidak ditemukan, hubungi admin Wiramart atau kaprodi.
           </p>
           <div className="form-group">
             <label className="form-label">Nama Lengkap</label>
@@ -435,7 +462,20 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
           </div>
           <div className="form-group">
             <label className="form-label">Program Studi</label>
-            <input className="form-input" placeholder="Contoh: Teknik Informatika" value={lupaProdi} onChange={e => setLupaProdi(e.target.value)} />
+            <select
+              className="form-input form-select"
+              value={lupaProdi}
+              onChange={e => setLupaProdi(e.target.value)}
+            >
+              <option value="">— Pilih Program Studi —</option>
+              {PRODI_OPTIONS.map((group) => (
+                <optgroup key={group.fakultas} label={group.fakultas}>
+                  {group.prodi.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
           </div>
           {lupaError && (
             <div style={{ padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--color-error-light)', display: 'flex', gap: 8, fontSize: 'var(--text-sm)', color: 'var(--color-error)' }}>

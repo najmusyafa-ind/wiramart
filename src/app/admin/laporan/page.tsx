@@ -38,6 +38,16 @@ type RecentTransaction = {
   employeeId: string;
 };
 
+type ShiftRecord = {
+  shiftId: string;
+  clockIn: string;
+  clockOut: string | null;
+  status: string;
+  modalAwal: number | null;
+  kasirName: string;
+  kasirNim: string;
+};
+
 type LaporanData = {
   period: string;
   label: string;
@@ -62,6 +72,7 @@ type LaporanData = {
     amountQris: string;
   }[];
   recentTransactions: RecentTransaction[];
+  shifts: ShiftRecord[];
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -421,6 +432,77 @@ export default function LaporanPage() {
         row.getCell('omzet').numFmt = '"Rp "#,##0';
       }
 
+      // ── Sheet 4: Laporan Shift (Modal Awal) ─────────────────
+      const ws4 = wb.addWorksheet('Laporan Shift');
+      ws4.columns = [
+        { header: 'Kasir', key: 'kasir', width: 28 },
+        { header: 'NIM', key: 'nim', width: 16 },
+        { header: 'Clock In', key: 'in', width: 22 },
+        { header: 'Clock Out', key: 'out', width: 22 },
+        { header: 'Durasi', key: 'durasi', width: 12 },
+        { header: 'Status', key: 'status', width: 12 },
+        { header: 'Modal Awal (Rp)', key: 'modal', width: 20 },
+      ];
+      const hRow4 = ws4.getRow(1);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hRow4.eachCell((cell: any) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
+        cell.alignment = { vertical: 'middle' };
+      });
+      hRow4.height = 22;
+
+      const shiftRows = data.shifts ?? [];
+      shiftRows.forEach((s, idx) => {
+        const inStr = new Date(s.clockIn).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
+        const outStr = s.clockOut
+          ? new Date(s.clockOut).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })
+          : 'Masih Aktif';
+        const durasiMenit = s.clockOut
+          ? Math.round((new Date(s.clockOut).getTime() - new Date(s.clockIn).getTime()) / 60000)
+          : null;
+        const durasiStr = durasiMenit !== null
+          ? `${Math.floor(durasiMenit / 60)}j ${durasiMenit % 60}m`
+          : '—';
+        const row = ws4.addRow({
+          kasir: s.kasirName,
+          nim: s.kasirNim,
+          in: inStr,
+          out: outStr,
+          durasi: durasiStr,
+          status: s.status,
+          modal: s.modalAwal ?? 0,
+        });
+        row.getCell('modal').numFmt = '"Rp "#,##0';
+        if (idx % 2 === 1) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          row.eachCell((cell: any) => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
+          });
+        }
+        // Highlight shift masih aktif
+        if (s.status === 'ACTIVE') {
+          const statusCell = row.getCell('status');
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (statusCell as any).font = { bold: true, color: { argb: 'FF16A34A' } };
+        }
+        row.height = 20;
+      });
+
+      // Total modal awal di bawah
+      if (shiftRows.length > 0) {
+        const totalModal = shiftRows.reduce((sum, s) => sum + (s.modalAwal ?? 0), 0);
+        const totalRow = ws4.addRow({
+          kasir: 'TOTAL', nim: '', in: '', out: '', durasi: `${shiftRows.length} shift`, status: '', modal: totalModal,
+        });
+        totalRow.getCell('modal').numFmt = '"Rp "#,##0';
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        totalRow.eachCell((cell: any) => {
+          cell.font = { bold: true };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+        });
+      }
+
       // Generate dan download
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -572,6 +654,22 @@ export default function LaporanPage() {
                 <div className="stat-card__value" style={{ fontSize: 'var(--text-xl)' }}>{formatRp(data.summary.grossProfit)}</div>
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
                   HPP: {formatRp(data.summary.totalHpp)}
+                </div>
+                {/* Keterangan audit: Laba Bersih = Laba Kotor untuk Wiramart */}
+                <div
+                  title="Laba dihitung dari Omzet dikurangi HPP produk. Biaya operasional (listrik, plastik, dll) tidak dicatat di sistem dan ditanggung terpisah."
+                  style={{
+                    marginTop: 'var(--space-2)',
+                    fontSize: '0.68rem',
+                    color: 'var(--color-text-muted)',
+                    lineHeight: 1.35,
+                    borderTop: '1px solid var(--color-border)',
+                    paddingTop: 'var(--space-1)',
+                    display: 'flex', alignItems: 'flex-start', gap: 4,
+                  }}
+                >
+                  <span style={{ flexShrink: 0 }}>ℹ️</span>
+                  <span>Omzet − HPP produk. Biaya operasional (listrik, plastik) ditanggung terpisah.</span>
                 </div>
               </article>
             </div>

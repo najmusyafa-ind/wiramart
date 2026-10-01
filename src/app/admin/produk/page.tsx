@@ -812,6 +812,19 @@ export default function ProdukPage() {
   // ── Foto Upload state ──────────────────────────────────
   const [fotoProduct, setFotoProduct] = useState<Product | null>(null);
 
+  // ── Low Stock Threshold (dari pengaturan operasional) ──
+  const [lowStockThreshold, setLowStockThreshold] = useState(5);
+  useEffect(() => {
+    fetch('/api/admin/pengaturan/operasional')
+      .then(r => r.json())
+      .then((j: { success?: boolean; data?: { lowStockThreshold?: number } }) => {
+        if (j.success && j.data?.lowStockThreshold !== undefined) {
+          setLowStockThreshold(j.data.lowStockThreshold);
+        }
+      })
+      .catch(() => {}); // silent — fallback ke 5
+  }, []);
+
   const fetchProducts = useCallback(async (q = '', cat = '') => {
     setLoading(true);
     try {
@@ -978,12 +991,12 @@ export default function ProdukPage() {
             <h1 className="page-title">Manajemen Produk</h1>
             <p className="page-subtitle">{products.length} produk ditemukan</p>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
             <button
               id={`${uid}-scan-barcode`}
               onClick={() => { setScanPrefillName(undefined); setShowScanner(true); }}
               className="btn btn-secondary"
-              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minHeight: '44px' }}
             >
               <ScanLine size={16} aria-hidden="true" />
               Scan Barcode
@@ -992,7 +1005,7 @@ export default function ProdukPage() {
               id="btn-tambah-produk"
               onClick={() => { setEditData(null); setScanPrefillName(undefined); setShowModal(true); }}
               className="btn btn-primary"
-              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minHeight: '44px' }}
             >
               <Plus size={16} aria-hidden="true" />
               Tambah Produk
@@ -1030,6 +1043,29 @@ export default function ProdukPage() {
 
         {/* Products table */}
         {/* aria-live="polite": screen reader announce saat konten berubah (loading → hasil) */}
+        {/* Low Stock Banner */}
+        {!loading && products.length > 0 && (() => {
+          const lowCount = products.filter(p => p.stockQty <= lowStockThreshold).length;
+          return lowCount > 0 ? (
+            <div role="alert" style={{
+              display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
+              padding: 'var(--space-3) var(--space-4)',
+              background: 'hsl(0 70% 55% / 0.08)',
+              border: '1px solid hsl(0 70% 55% / 0.3)',
+              borderRadius: 'var(--radius-lg)',
+              marginBottom: 'var(--space-3)',
+              fontSize: 'var(--text-sm)',
+            }}>
+              <AlertTriangle size={16} style={{ color: 'hsl(0 70% 60%)', flexShrink: 0 }} aria-hidden="true" />
+              <span style={{ color: 'hsl(0 70% 60%)', fontWeight: 'var(--weight-semibold)' }}>
+                {lowCount} produk dengan stok rendah (≤{lowStockThreshold} unit)
+              </span>
+              <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)', marginLeft: 'auto' }}>
+                Segera lakukan pengisian stok
+              </span>
+            </div>
+          ) : null;
+        })()}
         <div className="card" aria-live="polite" aria-busy={loading}>
           {loading ? (
             <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
@@ -1081,18 +1117,18 @@ export default function ProdukPage() {
                       </td>
                       <td className="text-right">
                         <span style={{
-                          color: p.stockQty <= 5 ? 'var(--color-error)' : 'inherit',
-                          fontWeight: p.stockQty <= 5 ? 'var(--weight-bold)' : undefined,
+                          color: p.stockQty <= lowStockThreshold ? 'var(--color-error)' : 'inherit',
+                          fontWeight: p.stockQty <= lowStockThreshold ? 'var(--weight-bold)' : undefined,
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: 'var(--space-1)',
                         }}>
                           {/* FIXED: ikon + teks sebagai indikator — tidak hanya warna (WCAG color-contrast) */}
-                          {p.stockQty <= 5 && (
+                          {p.stockQty <= lowStockThreshold && (
                             <AlertTriangle size={12} aria-hidden="true" />
                           )}
                           {p.stockQty} {p.unit}
-                          {p.stockQty <= 5 && (
+                          {p.stockQty <= lowStockThreshold && (
                             <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-normal)', marginLeft: 2 }}>
                               (Rendah)
                             </span>
