@@ -76,11 +76,15 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // CATATAN: fetch internal di Edge middleware (proxy.ts) menyebabkan "Failed to fetch".
   // Maintenance check dilakukan via cookie 'sk_maintenance' yang di-set oleh admin,
   // sehingga tidak perlu HTTP round-trip ke API route internal.
+  // BUG-2 FIX: Kasir juga harus diblokir saat maintenance — bukan hanya publik.
   if (!adminSession) {
-    const maintenanceCookie = request.cookies.get('sk_maintenance')?.value;
-    const isMaintenance = maintenanceCookie === '1';
+    const isMaintenance = request.cookies.get('sk_maintenance')?.value === '1';
 
-    if (isMaintenance && pathname !== '/maintenance') {
+    // Halaman yang tetap accessible saat maintenance (untuk semua role)
+    const maintenanceExempt = ['/maintenance', '/login', '/kasir/login', '/daftar', '/setup'];
+    const isExempt = maintenanceExempt.includes(pathname);
+
+    if (isMaintenance && !isExempt) {
       return NextResponse.redirect(new URL('/maintenance', request.url));
     }
   }

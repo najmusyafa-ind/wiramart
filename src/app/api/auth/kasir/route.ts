@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { employees, shifts, shiftSchedules, attendances } from '@/lib/db/schema';
+import { employees, shifts, shiftSchedules, attendances, qrisSettings } from '@/lib/db/schema';
 import { NextResponse } from 'next/server';
 import { signAccessToken, signRefreshToken } from '@/lib/utils/auth';
 import { apiError } from '@/lib/utils/helpers';
@@ -141,18 +141,19 @@ export async function POST(request: Request): Promise<Response> {
 
       if (!jadwalHariIni) return; // Tidak ada jadwal hari ini — skip
 
-      // Hitung keterlambatan berdasarkan jenis shift:
-      // - Shift pagi (slotStart < 10:00) → toleransi 60 menit (kasir sering mulur)
-      // - Shift siang/lainnya           → toleransi 15 menit
+      // BUG-3 FIX: Toleransi dari DB (admin-configurable), bukan hardcoded
+      // Ambil dari qrisSettings singleton — fallback 15 menit jika gagal
+      const settingsRow = await db.query.qrisSettings.findFirst({
+        where: eq(qrisSettings.id, '00000000-0000-0000-0000-000000000002'),
+        columns: { attendanceTolerance: true },
+      });
+      const TOLERANSI_MENIT = settingsRow?.attendanceTolerance ?? 15;
+
       const [jamJadwal, menitJadwal] = jadwalHariIni.slotStart.split(':').map(Number);
       const [jamAktual, menitAktual] = jamMenitSekarang.split(':').map(Number);
       const menitJadwalTotal = (jamJadwal ?? 0) * 60 + (menitJadwal ?? 0);
       const menitAktualTotal = (jamAktual ?? 0) * 60 + (menitAktual ?? 0);
-      const selisihMenit = menitAktualTotal - menitJadwalTotal;
-
-      // Toleransi dinamis per jenis shift
-      const isPagiShift = (jamJadwal ?? 12) < 10; // slotStart sebelum jam 10
-      const TOLERANSI_MENIT = isPagiShift ? 60 : 15;
+      const selisihMenit     = menitAktualTotal - menitJadwalTotal;
 
       const isTelat     = selisihMenit > TOLERANSI_MENIT;
       const lateMinutes = isTelat ? selisihMenit : 0;

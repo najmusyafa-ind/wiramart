@@ -674,6 +674,7 @@ p, h1, h2, h3, h4, h5, h6 {
 
 .table-wrapper {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-xs);
@@ -681,6 +682,7 @@ p, h1, h2, h3, h4, h5, h6 {
 
 .table {
   width: 100%;
+  min-width: 480px; /* BUG-4 FIX: pastikan tabel tidak collapse di mobile */
   border-collapse: collapse;
   font-size: var(--text-sm);
 }
@@ -699,6 +701,7 @@ p, h1, h2, h3, h4, h5, h6 {
   letter-spacing: var(--tracking-wider);
   text-transform: uppercase;
   white-space: nowrap;
+  min-width: 80px; /* BUG-4 FIX: kolom tidak collapse */
 }
 
 .table tbody tr {
@@ -718,6 +721,13 @@ p, h1, h2, h3, h4, h5, h6 {
   padding: var(--space-3) var(--space-4);
   color: var(--color-text);
   vertical-align: middle;
+  white-space: nowrap; /* BUG-4 FIX: teks tidak wrap → scroll horizontal */
+}
+
+/* Kolom yang boleh wrap (nama panjang) */
+.table tbody td.allow-wrap {
+  white-space: normal;
+  min-width: 140px;
 }
 
 .table tbody td.text-right { text-align: right; }

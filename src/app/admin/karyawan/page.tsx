@@ -381,9 +381,9 @@ export default function KaryawanPage() {
               <tbody>
                 {employees.map((emp) => (
                   <tr key={emp.id}>
-                    <td style={{ fontWeight: 'var(--weight-medium)' }}>{emp.fullName}</td>
+                    <td className="allow-wrap" style={{ fontWeight: 'var(--weight-medium)' }}>{emp.fullName}</td>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{emp.nim}</td>
-                    <td>{emp.programStudi}</td>
+                    <td className="allow-wrap">{emp.programStudi}</td>
                     <td>{emp.jabatan}</td>
                     <td>
                       <span className={`badge ${emp.isActive ? 'badge-success' : 'badge-error'}`}>

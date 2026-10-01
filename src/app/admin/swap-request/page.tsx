@@ -6,7 +6,7 @@ import {
   AlertTriangle, UserCheck, X, PlusCircle, MessageSquare,
 } from 'lucide-react';
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Types ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
 type SwapStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 
 type SwapRequest = {
@@ -31,7 +31,7 @@ type FlatSlot = {
   employeeName: string | null;
 };
 
-// â”€â”€â”€ Status Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Status Config ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
 const STATUS_CFG: Record<SwapStatus, { label: string; color: string; icon: React.ReactNode }> = {
   PENDING:   { label: 'Menunggu',  color: 'hsl(38 90% 55%)',   icon: <Clock size={13} /> },
   APPROVED:  { label: 'Disetujui', color: 'var(--color-success)', icon: <CheckCircle2 size={13} /> },
@@ -48,7 +48,7 @@ function SwapBadge({ status }: { status: SwapStatus }) {
   );
 }
 
-// â”€â”€â”€ Tambah Manual Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Tambah Manual Modal ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
 function TambahManualModal({
   onClose,
   onSuccess,
@@ -121,8 +121,8 @@ function TambahManualModal({
   }
 
   function slotLabel(s: FlatSlot) {
-    const name = s.employeeName ? ` â€” ${s.employeeName}` : ' â€” (Kosong)';
-    return `${s.dayOfWeek} ${s.slotStart}â€“${s.slotEnd}${name}`;
+    const name = s.employeeName ? ` - ${s.employeeName}` : ' - (Kosong)';
+    return `${s.dayOfWeek} ${s.slotStart} - ${s.slotEnd}${name}`;
   }
 
   return (
@@ -162,13 +162,13 @@ function TambahManualModal({
               </label>
               <select id={`${uid}-from`} value={fromId} onChange={e => { setFromId(e.target.value); if (e.target.value === toId) setToId(''); }} required
                 style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-surface)', color: 'var(--color-text-primary)', fontSize: '0.875rem', cursor: 'pointer' }}>
-                <option value="">â€” Pilih slot asal â€”</option>
+                <option value="">-- Pilih slot asal --</option>
                 {slots.map(s => <option key={s.id} value={s.id}>{slotLabel(s)}</option>)}
               </select>
               {fromSlot && (
                 <div style={{ marginTop: 6, fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'flex', gap: 6 }}>
                   <span style={{ background: 'hsl(0 70% 55% / 0.1)', color: 'hsl(0 70% 60%)', padding: '2px 8px', borderRadius: '999px', fontWeight: 600 }}>
-                    {fromSlot.dayOfWeek} {fromSlot.slotStart}â€“{fromSlot.slotEnd}
+                    {fromSlot.dayOfWeek} {fromSlot.slotStart} - {fromSlot.slotEnd}
                   </span>
                   {fromSlot.employeeName && <span>{fromSlot.employeeName}</span>}
                 </div>
@@ -183,13 +183,13 @@ function TambahManualModal({
               </label>
               <select id={`${uid}-to`} value={toId} onChange={e => setToId(e.target.value)} required
                 style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-surface)', color: 'var(--color-text-primary)', fontSize: '0.875rem', cursor: 'pointer' }}>
-                <option value="">â€” Pilih slot tujuan â€”</option>
+                <option value="">-- Pilih slot tujuan --</option>
                 {toOptions.map(s => <option key={s.id} value={s.id}>{slotLabel(s)}</option>)}
               </select>
               {toSlot && (
                 <div style={{ marginTop: 6, fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'flex', gap: 6 }}>
                   <span style={{ background: 'hsl(142 70% 45% / 0.1)', color: 'hsl(142 70% 45%)', padding: '2px 8px', borderRadius: '999px', fontWeight: 600 }}>
-                    {toSlot.dayOfWeek} {toSlot.slotStart}â€“{toSlot.slotEnd}
+                    {toSlot.dayOfWeek} {toSlot.slotStart} - {toSlot.slotEnd}
                   </span>
                   {toSlot.employeeName && <span>{toSlot.employeeName}</span>}
                 </div>
@@ -202,14 +202,14 @@ function TambahManualModal({
                 <div style={{ flex: 1, textAlign: 'center' }}>
                   <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Dari</div>
                   <div style={{ fontWeight: 700, color: 'hsl(0 70% 60%)', fontSize: '0.9rem' }}>{fromSlot.dayOfWeek}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>{fromSlot.slotStart}â€“{fromSlot.slotEnd}</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>{fromSlot.slotStart} - {fromSlot.slotEnd}</div>
                   {fromSlot.employeeName && <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{fromSlot.employeeName}</div>}
                 </div>
                 <ArrowLeftRight size={18} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
                 <div style={{ flex: 1, textAlign: 'center' }}>
                   <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Ke</div>
                   <div style={{ fontWeight: 700, color: 'hsl(142 70% 45%)', fontSize: '0.9rem' }}>{toSlot.dayOfWeek}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>{toSlot.slotStart}â€“{toSlot.slotEnd}</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>{toSlot.slotStart} - {toSlot.slotEnd}</div>
                   {toSlot.employeeName && <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{toSlot.employeeName}</div>}
                 </div>
               </div>
@@ -255,7 +255,7 @@ function TambahManualModal({
   );
 }
 
-// â”€â”€â”€ Review Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Review Modal ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
 function ReviewModal({
   swap,
   onClose,
@@ -307,7 +307,7 @@ function ReviewModal({
           <div style={{ flex: 1, textAlign: 'center' }}>
             <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Dari</div>
             <div style={{ fontWeight: 700, color: 'var(--color-danger)', fontSize: '0.9rem' }}>{swap.fromSchedule.dayOfWeek}</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{swap.fromSchedule.slotStart}â€“{swap.fromSchedule.slotEnd}</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{swap.fromSchedule.slotStart}├óΓé¼ΓÇ£{swap.fromSchedule.slotEnd}</div>
           </div>
           <div style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center' }}>
             <ArrowLeftRight size={20} />
@@ -315,7 +315,7 @@ function ReviewModal({
           <div style={{ flex: 1, textAlign: 'center' }}>
             <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Ke</div>
             <div style={{ fontWeight: 700, color: 'var(--color-success)', fontSize: '0.9rem' }}>{swap.toSchedule.dayOfWeek}</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{swap.toSchedule.slotStart}â€“{swap.toSchedule.slotEnd}</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{swap.toSchedule.slotStart}├óΓé¼ΓÇ£{swap.toSchedule.slotEnd}</div>
           </div>
         </div>
 
@@ -346,7 +346,7 @@ function ReviewModal({
               Catatan Admin {action === 'REJECT' && <span style={{ color: 'var(--color-danger)' }}>*</span>}
             </label>
             <textarea id={`${uid}-note`} value={adminNote} onChange={e => setAdminNote(e.target.value)}
-              placeholder={action === 'APPROVE' ? 'Opsional â€” misal: sudah berkoordinasi dengan koordinator' : 'Wajib â€” jelaskan alasan penolakan'}
+              placeholder={action === 'APPROVE' ? 'Opsional ├óΓé¼ΓÇ¥ misal: sudah berkoordinasi dengan koordinator' : 'Wajib ├óΓé¼ΓÇ¥ jelaskan alasan penolakan'}
               required={action === 'REJECT'} rows={3}
               style={{ width: '100%', padding: '10px 12px', background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)', fontSize: '0.875rem', resize: 'vertical', boxSizing: 'border-box' }} />
           </div>
@@ -377,7 +377,7 @@ function ReviewModal({
   );
 }
 
-// â”€â”€â”€ Main Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Main Page ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
 const FILTER_OPTIONS: { label: string; value: string }[] = [
   { label: 'Menunggu', value: 'PENDING' },
   { label: 'Semua', value: 'ALL' },
@@ -458,7 +458,7 @@ export default function SwapRequestPage() {
           <ArrowLeftRight size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
           <p style={{ margin: 0, fontWeight: 600 }}>Tidak ada pengajuan</p>
           <p style={{ margin: '4px 0 0', fontSize: '0.8rem' }}>
-            {filter === 'PENDING' ? 'Semua pengajuan sudah diproses ðŸŽ‰' : 'Tidak ada pengajuan dengan status ini'}
+            {filter === 'PENDING' ? 'Semua pengajuan sudah diproses ├░┼╕┼╜ΓÇ░' : 'Tidak ada pengajuan dengan status ini'}
           </p>
         </div>
       ) : (
@@ -469,7 +469,7 @@ export default function SwapRequestPage() {
               {/* Requester info */}
               <div style={{ flex: '1 1 160px', minWidth: 0 }}>
                 <div style={{ fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '2px' }}>{r.requester.fullName}</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>{r.requester.nim} Â· {r.requester.programStudi}</div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>{r.requester.nim} ├é┬╖ {r.requester.programStudi}</div>
               </div>
 
               {/* Swap arrow */}
@@ -477,13 +477,13 @@ export default function SwapRequestPage() {
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Dari</div>
                   <div style={{ fontWeight: 700, color: 'var(--color-danger)', fontSize: '0.9rem' }}>{r.fromSchedule.dayOfWeek}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>{r.fromSchedule.slotStart}â€“{r.fromSchedule.slotEnd}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>{r.fromSchedule.slotStart}├óΓé¼ΓÇ£{r.fromSchedule.slotEnd}</div>
                 </div>
                 <ArrowLeftRight size={16} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Ke</div>
                   <div style={{ fontWeight: 700, color: 'var(--color-success)', fontSize: '0.9rem' }}>{r.toSchedule.dayOfWeek}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>{r.toSchedule.slotStart}â€“{r.toSchedule.slotEnd}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>{r.toSchedule.slotStart}├óΓé¼ΓÇ£{r.toSchedule.slotEnd}</div>
                 </div>
               </div>
 
