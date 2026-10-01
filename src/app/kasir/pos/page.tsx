@@ -257,9 +257,16 @@ function BukaShiftOverlay({
                 id="btn-konfirmasi-handover"
                 onClick={() => setHandoverConfirmed(true)}
                 className="btn btn-primary"
-                style={{ width: '100%', minHeight: 52 }}
+                style={{
+                  width: '100%',
+                  minHeight: 52,
+                  whiteSpace: 'normal',
+                  lineHeight: 1.4,
+                  padding: 'var(--space-3) var(--space-4)',
+                  textAlign: 'center',
+                }}
               >
-                ✅ Saya Sudah Serah Terima — Lanjut Buka Shift
+                Saya Sudah Serah Terima &mdash; Lanjut Buka Shift
               </button>
 
               <p style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textAlign: 'center', margin: 0 }}>
