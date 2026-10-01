@@ -11,6 +11,21 @@ type Employee = {
   jabatan: string;
   isActive: boolean;
   createdAt: string;
+  // Dari left join shiftSchedules
+  shiftDay:    string | null;
+  shiftStart:  string | null;
+  shiftEnd:    string | null;
+  shiftSlotId: string | null;
+};
+
+// Tipe slot dari publik jadwal endpoint
+type SlotOption = {
+  slotId:     string;
+  dayOfWeek:  string;
+  slotStart:  string;
+  slotEnd:    string;
+  isFilled:   boolean;
+  employeeName: string | null;
 };
 
 // ── Modal tambah/edit karyawan ────────────────────────────────
@@ -34,6 +49,65 @@ function KaryawanModal({
     jabatan: editData?.jabatan ?? 'Kasir',
   });
 
+  // Slot picker — hanya untuk modal Tambah
+  const [slots, setSlots]           = useState<SlotOption[]>([]);
+  const [slotsLoading, setSlotsLoading] = useState(!isEdit);
+  const [selectedSlotId, setSelectedSlotId] = useState('');
+
+  useEffect(() => {
+    if (isEdit) return; // Tidak perlu slot saat edit
+    fetch('/api/publik/jadwal-slot')
+      .then(r => r.json())
+      .then(j => {
+        type RawEntry = { id: string; employeeId: string | null; employeeName: string | null; isFilled: boolean };
+        type RawSlot  = { slotStart: string; slotEnd: string; entries: RawEntry[] };
+        type RawDay   = { dayOfWeek: string; slots: RawSlot[] };
+        const schedule: RawDay[] = j.data?.schedule ?? [];
+        const flat: SlotOption[] = [];
+        for (const day of schedule) {
+          for (const slot of day.slots) {
+            for (const entry of slot.entries) {
+              flat.push({
+                slotId:      entry.id,
+                dayOfWeek:   day.dayOfWeek,
+                slotStart:   slot.slotStart,
+                slotEnd:     slot.slotEnd,
+                isFilled:    entry.isFilled,
+                employeeName: entry.employeeName,
+              });
+            }
+          }
+        }
+        setSlots(flat);
+      })
+      .catch(() => {})
+      .finally(() => setSlotsLoading(false));
+  }, [isEdit]);
+
+  // Group slot per hari+waktu untuk optgroup summary
+  type SlotGroup = { key: string; dayOfWeek: string; slotStart: string; slotEnd: string; entries: SlotOption[] };
+  const slotGroups: SlotGroup[] = [];
+  const seenKeys = new Set<string>();
+  const dayOrder = ['SENIN','SELASA','RABU','KAMIS','JUMAT','SABTU','MINGGU'];
+  for (const day of dayOrder) {
+    const daySlotsRaw = slots.filter(s => s.dayOfWeek === day);
+    const timeKeys = Array.from(new Set(daySlotsRaw.map(s => `${s.slotStart}-${s.slotEnd}`)));
+    for (const tk of timeKeys) {
+      const key = `${day}|${tk}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        const [st, en] = tk.split('-');
+        slotGroups.push({
+          key,
+          dayOfWeek: day,
+          slotStart: st ?? '',
+          slotEnd:   en ?? '',
+          entries:   daySlotsRaw.filter(s => `${s.slotStart}-${s.slotEnd}` === tk),
+        });
+      }
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -51,6 +125,15 @@ function KaryawanModal({
       if (!res.ok) {
         setError(typeof json.error === 'string' ? json.error : 'Gagal menyimpan data');
         return;
+      }
+      // Jika ada slot dipilih saat Tambah, langsung assign
+      if (!isEdit && selectedSlotId && json.data?.id) {
+        await fetch(`/api/admin/jadwal/slot/${selectedSlotId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'reassign', newEmployeeId: json.data.id }),
+        });
+        // Gagal assign slot tidak cancel create — karyawan tetap tersimpan
       }
       onSuccess();
       onClose();
@@ -185,6 +268,54 @@ function KaryawanModal({
                 ))}
               </select>
             </div>
+            {/* Pilih slot shift — hanya saat Tambah baru */}
+            {!isEdit && (
+              <div className="form-group">
+                <label htmlFor={`${uid}-slot`} className="form-label">
+                  Slot Shift
+                  <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', marginLeft: 6 }}>(opsional — bisa diatur nanti)</span>
+                </label>
+                {slotsLoading ? (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Loader2 size={13} className="animate-spin" /> Memuat jadwal...
+                  </div>
+                ) : (
+                  <select
+                    id={`${uid}-slot`}
+                    className="form-input form-select"
+                    value={selectedSlotId}
+                    onChange={e => setSelectedSlotId(e.target.value)}
+                    disabled={loading}
+                  >
+                    <option value="">-- Tidak assign shift sekarang --</option>
+                    {slotGroups.map(g => {
+                      const kosong  = g.entries.filter(e => !e.isFilled).length;
+                      const terisi  = g.entries.filter(e => e.isFilled).length;
+                      const total   = g.entries.length;
+                      const status  = kosong === 0 ? 'PENUH' : `${kosong} kosong / ${total} slot`;
+                      // Hanya tampilkan entry kosong sebagai pilihan
+                      const emptyEntries = g.entries.filter(e => !e.isFilled);
+                      if (emptyEntries.length === 0) return null;
+                      return (
+                        <optgroup key={g.key} label={`${g.dayOfWeek} ${g.slotStart}-${g.slotEnd} (${status})`}>
+                          {emptyEntries.map((e, i) => (
+                            <option key={e.slotId} value={e.slotId}>
+                              Slot kosong #{terisi + i + 1} — {g.dayOfWeek} {g.slotStart}-{g.slotEnd}
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
+                )}
+                {/* Summary info */}
+                {!slotsLoading && (
+                  <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    {slots.filter(s => !s.isFilled).length} slot kosong tersedia dari {slots.length} total slot
+                  </p>
+                )}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', paddingTop: 'var(--space-2)' }}>
               <button type="button" onClick={onClose} className="btn btn-secondary" disabled={loading}>
                 Batal
@@ -374,6 +505,7 @@ export default function KaryawanPage() {
                   <th scope="col">NIM</th>
                   <th scope="col">Program Studi</th>
                   <th scope="col">Jabatan</th>
+                  <th scope="col">Jadwal Shift</th>
                   <th scope="col">Status</th>
                   <th scope="col" className="text-right">Aksi</th>
                 </tr>
@@ -385,6 +517,29 @@ export default function KaryawanPage() {
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{emp.nim}</td>
                     <td className="allow-wrap">{emp.programStudi}</td>
                     <td>{emp.jabatan}</td>
+                    <td>
+                      {emp.shiftDay && emp.shiftStart && emp.shiftEnd ? (
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                          background: 'hsl(142 70% 45% / 0.12)',
+                          color: 'hsl(142 60% 38%)',
+                          padding: '2px 8px', borderRadius: '999px',
+                          fontSize: '0.72rem', fontWeight: 600, whiteSpace: 'nowrap',
+                        }}>
+                          {emp.shiftDay} {emp.shiftStart}-{emp.shiftEnd}
+                        </span>
+                      ) : (
+                        <span style={{
+                          display: 'inline-flex',
+                          background: 'hsl(0 0% 50% / 0.1)',
+                          color: 'var(--color-text-muted)',
+                          padding: '2px 8px', borderRadius: '999px',
+                          fontSize: '0.72rem', whiteSpace: 'nowrap',
+                        }}>
+                          Belum dijadwal
+                        </span>
+                      )}
+                    </td>
                     <td>
                       <span className={`badge ${emp.isActive ? 'badge-success' : 'badge-error'}`}>
                         {emp.isActive ? 'Aktif' : 'Nonaktif'}

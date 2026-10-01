@@ -1,13 +1,7 @@
-// =============================================================
-// GET  /api/admin/karyawan — Daftar semua karyawan aktif
-// POST /api/admin/karyawan — Tambah karyawan baru
-// Auth: Admin JWT cookie required
-// =============================================================
-
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { employees, admins } from '@/lib/db/schema';
+import { employees, admins, shiftSchedules } from '@/lib/db/schema';
 import { eq, and, isNull, or, ilike } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
@@ -30,8 +24,20 @@ export async function GET(req: NextRequest) {
       jabatan: employees.jabatan,
       isActive: employees.isActive,
       createdAt: employees.createdAt,
+      // Shift yang diassign ke karyawan ini (nullable jika belum ada slot)
+      shiftDay:   shiftSchedules.dayOfWeek,
+      shiftStart: shiftSchedules.slotStart,
+      shiftEnd:   shiftSchedules.slotEnd,
+      shiftSlotId: shiftSchedules.id,
     })
     .from(employees)
+    .leftJoin(
+      shiftSchedules,
+      and(
+        eq(shiftSchedules.employeeId, employees.id),
+        eq(shiftSchedules.isActive, true),
+      ),
+    )
     .where(
       and(
         isNull(employees.deletedAt),
