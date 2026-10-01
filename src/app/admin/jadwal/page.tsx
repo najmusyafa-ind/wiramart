@@ -11,7 +11,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   RefreshCw, UserX, UserCheck, ArrowLeftRight,
-  CheckCircle, AlertCircle, Loader2, X, Search,
+  CheckCircle, AlertCircle, Loader2, X, Search, Trash2,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────
@@ -464,6 +464,34 @@ export default function AdminJadwalPage() {
                 {day.slots.map(slotGroup => {
                   const normalEntries = slotGroup.entries.filter(e => e.orderInSlot !== 99);
                   const koordinator = slotGroup.coordinatorName;
+                  const filledCount = normalEntries.filter(e => e.isFilled).length;
+
+                  async function handleDeleteGroup() {
+                    const label = `${slotGroup.slotStart}-${slotGroup.slotEnd}`;
+                    if (!confirm(
+                      `Hapus shift ${day.dayOfWeek} ${label}?\n\n` +
+                      `Ini akan menghapus ${normalEntries.length} slot secara permanen.\n` +
+                      `Pastikan semua slot kosong sebelum menghapus.`
+                    )) return;
+
+                    const res = await fetch('/api/admin/jadwal/slot-group', {
+                      method: 'DELETE',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        dayOfWeek: day.dayOfWeek,
+                        slotStart: slotGroup.slotStart,
+                        slotEnd:   slotGroup.slotEnd,
+                      }),
+                    });
+                    const json = await res.json() as { data?: { message?: string }; error?: string };
+                    if (!res.ok) {
+                      alert('Gagal hapus: ' + (json.error ?? 'Error tidak diketahui'));
+                    } else {
+                      alert(json.data?.message ?? 'Shift berhasil dihapus.');
+                      fetchSchedule();
+                    }
+                  }
+
                   return (
                     <div key={`${slotGroup.slotStart}-${slotGroup.slotEnd}`}>
                       {/* Slot header */}
@@ -477,7 +505,7 @@ export default function AdminJadwalPage() {
                               {koordinator}
                             </div>
                           )}
-                          {/* Badge kapasitas — warna dinamis */}
+                          {/* Badge kapasitas */}
                           {(() => {
                             const filled = normalEntries.filter(e => e.isFilled).length;
                             const total  = normalEntries.length;
@@ -491,6 +519,22 @@ export default function AdminJadwalPage() {
                               </div>
                             );
                           })()}
+                          {/* Tombol hapus slot group — hanya jika semua slot kosong */}
+                          {filledCount === 0 && (
+                            <button
+                              onClick={handleDeleteGroup}
+                              title={`Hapus shift ${slotGroup.slotStart}-${slotGroup.slotEnd}`}
+                              style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: 'hsl(0 70% 55%)', padding: '2px 4px',
+                                display: 'flex', alignItems: 'center',
+                                opacity: 0.7, borderRadius: 'var(--radius-sm)',
+                              }}
+                              aria-label={`Hapus shift ${day.dayOfWeek} ${slotGroup.slotStart}-${slotGroup.slotEnd}`}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
                         </div>
                       </div>
                       {/* Mini progress bar */}
