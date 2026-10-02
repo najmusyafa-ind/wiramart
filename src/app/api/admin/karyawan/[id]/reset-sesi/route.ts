@@ -12,7 +12,7 @@ export async function POST(
 ) {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') {
-    return apiError('Unauthorized', 'UNAUTHORIZED', 401);
+    return apiError('Unauthorized', 401);
   }
 
   const { id: employeeId } = await params;
@@ -24,7 +24,7 @@ export async function POST(
   });
 
   if (!emp) {
-    return apiError('Karyawan tidak ditemukan.', 'NOT_FOUND', 404);
+    return apiError('Karyawan tidak ditemukan.', 404);
   }
 
   // Cari semua sesi aktif
