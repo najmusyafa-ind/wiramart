@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useId, useRef } from 'react';
 import Image from 'next/image';
 import {
   ShoppingCart, Search, Plus, Minus, Trash2, Banknote,
-  CheckCircle, X, Loader2, Package, LogOut,
+  CheckCircle, X, Loader2, Package, LogOut, ArrowLeftRight,
   User, Clock, AlertTriangle, ScanLine,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -1258,30 +1258,54 @@ export default function PosPage() {
             )}
           </button>
 
-          {/* Tombol Kelola Produk — hanya render setelah mounted (client-only) agar tidak ada hydration mismatch */}
+          {/* Tombol Kelola Produk + Tukar Shift — hanya render setelah mounted (client-only) agar tidak ada hydration mismatch */}
           {mounted && (
-            <a
-              href="/kasir/produk"
-              id="btn-kelola-produk"
-              title="Kelola Produk"
-              aria-label="Kelola produk"
-              style={{
-                background: 'rgba(255,255,255,0.08)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: 'var(--radius-md)',
-                color: 'var(--color-sidebar-muted)',
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                padding: '6px 10px',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-medium)',
-                transition: 'all var(--duration-fast)',
-                textDecoration: 'none',
-              }}
-            >
-              <Package size={14} />
-              <span className="pos-logout-label">Produk</span>
-            </a>
+            <>
+              <a
+                href="/kasir/produk"
+                id="btn-kelola-produk"
+                title="Kelola Produk"
+                aria-label="Kelola produk"
+                style={{
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--color-sidebar-muted)',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                  padding: '6px 10px',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: 'var(--weight-medium)',
+                  transition: 'all var(--duration-fast)',
+                  textDecoration: 'none',
+                }}
+              >
+                <Package size={14} />
+                <span className="pos-logout-label">Produk</span>
+              </a>
+              <a
+                href="/kasir/tukar-shift"
+                id="btn-tukar-shift"
+                title="Ajukan Tukar Shift"
+                aria-label="Ajukan tukar shift"
+                style={{
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--color-sidebar-muted)',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                  padding: '6px 10px',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: 'var(--weight-medium)',
+                  transition: 'all var(--duration-fast)',
+                  textDecoration: 'none',
+                }}
+              >
+                <ArrowLeftRight size={14} />
+                <span className="pos-logout-label">Tukar Shift</span>
+              </a>
+            </>
           )}
 
           {/* Tombol Tutup Kasir — hanya muncul jika ada shift aktif */}

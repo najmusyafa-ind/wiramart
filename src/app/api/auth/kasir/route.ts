@@ -130,16 +130,42 @@ export async function POST(request: Request): Promise<Response> {
         timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
       }); // 'HH:MM'
 
-      // Cari jadwal hari ini yang di-assign ke karyawan ini
-      const jadwalHariIni = await db.query.shiftSchedules.findFirst({
-        where: and(
+      // BUGFIX: Query SEMUA slot hari ini, lalu pilih yang paling cocok dengan waktu login.
+      // Tanpa ini: kasir shift SIANG (11:30) bisa dianggap 3+ jam TELAT karena findFirst()
+      // mengambil slot pagi (08:00) secara random dari DB.
+      const allSlotsHariIni = await db
+        .select({
+          id:        shiftSchedules.id,
+          slotStart: shiftSchedules.slotStart,
+          slotEnd:   shiftSchedules.slotEnd,
+        })
+        .from(shiftSchedules)
+        .where(and(
           eq(shiftSchedules.employeeId, employee.id),
           eq(shiftSchedules.dayOfWeek, hariIni),
           eq(shiftSchedules.isActive, true),
-        ),
-      });
+        ));
 
-      if (!jadwalHariIni) return; // Tidak ada jadwal hari ini — skip
+      if (allSlotsHariIni.length === 0) return; // Tidak ada jadwal hari ini — skip
+
+      // Konversi login time ke total menit sejak tengah malam
+      const [jamAktual, menitAktual] = jamMenitSekarang.split(':').map(Number);
+      const loginMenit = (jamAktual ?? 0) * 60 + (menitAktual ?? 0);
+
+      // Algoritma pilih slot paling cocok:
+      // → Slot dengan slotStart ≤ loginTime → ambil yang TERBESAR (paling dekat ke atas)
+      // → Jika login sebelum semua slot mulai → gunakan slot pertama (paling pagi)
+      let jadwalHariIni = allSlotsHariIni[0]!; // fallback: slot pertama
+      let bestStartMenit = -1;
+
+      for (const slot of allSlotsHariIni) {
+        const [sH, sM] = slot.slotStart.split(':').map(Number);
+        const slotStartMenit = (sH ?? 0) * 60 + (sM ?? 0);
+        if (slotStartMenit <= loginMenit && slotStartMenit > bestStartMenit) {
+          bestStartMenit = slotStartMenit;
+          jadwalHariIni  = slot;
+        }
+      }
 
       // BUG-3 FIX: Toleransi dari DB (admin-configurable), bukan hardcoded
       // Ambil dari qrisSettings singleton — fallback 15 menit jika gagal
@@ -150,10 +176,8 @@ export async function POST(request: Request): Promise<Response> {
       const TOLERANSI_MENIT = settingsRow?.attendanceTolerance ?? 15;
 
       const [jamJadwal, menitJadwal] = jadwalHariIni.slotStart.split(':').map(Number);
-      const [jamAktual, menitAktual] = jamMenitSekarang.split(':').map(Number);
       const menitJadwalTotal = (jamJadwal ?? 0) * 60 + (menitJadwal ?? 0);
-      const menitAktualTotal = (jamAktual ?? 0) * 60 + (menitAktual ?? 0);
-      const selisihMenit     = menitAktualTotal - menitJadwalTotal;
+      const selisihMenit     = loginMenit - menitJadwalTotal; // positif = telat
 
       const isTelat     = selisihMenit > TOLERANSI_MENIT;
       const lateMinutes = isTelat ? selisihMenit : 0;

@@ -16,8 +16,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { shifts, shiftSchedules } from '@/lib/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { shifts, shiftSchedules, attendances, employees } from '@/lib/db/schema';
+import { eq, and, isNull, notExists } from 'drizzle-orm';
 
 export const runtime = 'nodejs';
 
@@ -152,14 +152,94 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
 
+    // ── PASS 2: Auto-mark TIDAK_HADIR ─────────────────────────────────────
+    // Karyawan yang punya jadwal hari ini, slotEnd sudah lewat + 30 menit,
+    // tapi tidak ada attendance record (tidak pernah login sama sekali hari ini)
+    let absenCount = 0;
+    try {
+      const tanggalHariIni = nowWib.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+      const BUFFER_ABSEN = 30; // menit setelah slotEnd sebelum dianggap absen
+
+      // Ambil semua jadwal aktif hari ini yang slotEnd-nya sudah lewat + buffer
+      const jadwalHariIniAll = await db
+        .select({
+          scheduleId: shiftSchedules.id,
+          employeeId: shiftSchedules.employeeId,
+          slotStart:  shiftSchedules.slotStart,
+          slotEnd:    shiftSchedules.slotEnd,
+        })
+        .from(shiftSchedules)
+        .where(and(
+          eq(shiftSchedules.dayOfWeek, hariIni),
+          eq(shiftSchedules.isActive, true),
+        ))
+        .limit(100);
+
+      for (const jadwal of jadwalHariIniAll) {
+        try {
+          const [slotH, slotM] = jadwal.slotEnd.split(':').map(Number);
+          const slotEndMenit = (slotH ?? 0) * 60 + (slotM ?? 0);
+
+          // Hanya proses jika slotEnd + buffer sudah lewat
+          if (nowMinutes < slotEndMenit + BUFFER_ABSEN) continue;
+
+          // Cek apakah sudah ada attendance record hari ini untuk employee ini
+          const existingAttendance = await db.query.attendances.findFirst({
+            where: and(
+              eq(attendances.employeeId, jadwal.employeeId),
+              eq(attendances.attendanceDate, tanggalHariIni),
+            ),
+            columns: { id: true },
+          });
+
+          if (existingAttendance) continue; // Sudah hadir/telat/ijin → skip
+
+          // Cek apakah ada shift hari ini (berarti mereka login tapi attendance gagal)
+          const existingShiftToday = await db.query.shifts.findFirst({
+            where: and(
+              eq(shifts.employeeId, jadwal.employeeId),
+              isNull(shifts.deletedAt ?? undefined),
+            ),
+            columns: { id: true, clockIn: true },
+          });
+
+          // Jika ada shift CLOSED hari ini tapi tanpa attendance → sudah dihandle, skip
+          if (existingShiftToday) {
+            const clockInDate = new Date(existingShiftToday.clockIn).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+            if (clockInDate === tanggalHariIni) continue;
+          }
+
+          // Tidak ada attendance & tidak ada shift hari ini → TIDAK_HADIR
+          await db
+            .insert(attendances)
+            .values({
+              employeeId:     jadwal.employeeId,
+              scheduleId:     jadwal.scheduleId,
+              attendanceDate: tanggalHariIni,
+              status:         'TIDAK_HADIR',
+              lateMinutes:    0,
+            })
+            .onConflictDoNothing();
+
+          absenCount++;
+        } catch {
+          // Gagal satu jadwal tidak menghentikan proses
+        }
+      }
+    } catch {
+      // PASS 2 gagal total — tetap return hasil PASS 1
+    }
+
     return NextResponse.json({
       success: true,
-      message: `Cron selesai. Ditutup: ${closedCount}, Dilewati: ${skippedCount}.`,
+      message: `Cron selesai. Ditutup: ${closedCount}, Dilewati: ${skippedCount}, Auto-Absen: ${absenCount}.`,
       closedCount,
       skippedCount,
+      absenCount,
       errors: errors.length > 0 ? errors : undefined,
       timestamp: nowWib.toISOString(),
     });
+
 
   } catch (err) {
     return NextResponse.json(
