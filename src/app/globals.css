@@ -798,6 +798,18 @@ p, h1, h2, h3, h4, h5, h6 {
 .table tbody td.text-right { text-align: right; }
 .table tbody td.text-center { text-align: center; }
 
+/* Kolom aksi (biasanya last-child) — min-width agar 3 tombol tidak collapse */
+.table th:last-child,
+.table td:last-child {
+  min-width: 120px;
+}
+
+/* SVG di dalam button jangan shrink — mencegah icon invisible di mobile */
+.btn svg {
+  flex-shrink: 0;
+  display: block;
+}
+
 /* ==========================================================
    ADMIN LAYOUT SYSTEM
    ========================================================== */
@@ -1921,6 +1933,8 @@ p, h1, h2, h3, h4, h5, h6 {
 
   .layout-content {
     padding: var(--space-4);
+    /* Tambah padding-bottom setelah shorthand agar tidak ditimpa — ruang untuk bottom nav */
+    padding-bottom: calc(var(--space-4) + 64px + env(safe-area-inset-bottom, 0px));
   }
 
   /* POS mobile: single column */
