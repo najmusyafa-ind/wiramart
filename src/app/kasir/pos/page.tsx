@@ -1241,7 +1241,6 @@ export default function PosPage() {
             )}
           </div>
 
-          {/* Mobile cart button */}
           <button
             id="btn-show-cart"
             onClick={() => setShowCart((v) => !v)}
@@ -1252,6 +1251,29 @@ export default function PosPage() {
             {totalItems > 0 && (
               <span className="pos-cart-badge">{totalItems}</span>
             )}
+          </button>
+
+          {/* Tombol Kelola Produk */}
+          <button
+            id="btn-kelola-produk"
+            onClick={() => router.push('/kasir/produk')}
+            title="Kelola Produk"
+            aria-label="Kelola produk"
+            style={{
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 'var(--radius-md)',
+              color: 'var(--color-sidebar-muted)',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+              padding: '6px 10px',
+              fontSize: 'var(--text-xs)',
+              fontWeight: 'var(--weight-medium)',
+              transition: 'all var(--duration-fast)',
+            }}
+          >
+            <Package size={14} />
+            <span className="pos-logout-label">Produk</span>
           </button>
 
           {/* Tombol Tutup Kasir — hanya muncul jika ada shift aktif */}

@@ -1,7 +1,7 @@
 // =============================================================
 // POST /api/admin/produk/[id]/foto — Upload foto produk
 // Body: multipart/form-data, field 'foto' (image/jpeg, image/png, image/webp)
-// Auth: Admin only
+// Auth: Admin ATAU Kasir aktif (keduanya boleh upload)
 //
 // Upload ke Supabase Storage bucket 'product-photos'
 // Path: {productId}.webp — overwrite jika sudah ada
@@ -13,8 +13,8 @@ import { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { products } from '@/lib/db/schema';
-import { requireAdmin } from '@/lib/utils/auth';
-import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
+import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { AppError } from '@/lib/utils/helpers';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 import sharp from 'sharp';
 
@@ -29,13 +29,16 @@ type Params = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, { params }: Params): Promise<Response> {
   try {
-    await requireAdmin();
+    // Auth: admin ATAU kasir aktif boleh upload foto
+    const payload = await verifyJwt(req);
+    if (!payload) return apiError('Unauthorized', 401);
+
     const { id: productId } = await params;
 
     // Validasi UUID format
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(productId)) {
-      return apiError('ID produk tidak valid.', 'INVALID_ID', 400);
+      return apiError('ID produk tidak valid.', 400);
     }
 
     // ── Cek produk exist ────────────────────────────────────
@@ -45,7 +48,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
     });
 
     if (!product || product.deletedAt !== null) {
-      return apiError('Produk tidak ditemukan.', 'NOT_FOUND', 404);
+      return apiError('Produk tidak ditemukan.', 404);
     }
 
     // ── Parse FormData ──────────────────────────────────────
@@ -53,35 +56,29 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
     try {
       formData = await req.formData();
     } catch {
-      return apiError('Format request tidak valid. Gunakan multipart/form-data.', 'INVALID_FORM', 400);
+      return apiError('Format request tidak valid. Gunakan multipart/form-data.', 400);
     }
 
     const fotoFile = formData.get('foto');
     if (!(fotoFile instanceof File) || fotoFile.size === 0) {
-      return apiError('File foto wajib disertakan (field: foto).', 'MISSING_FILE', 400);
+      return apiError('File foto wajib disertakan (field: foto).', 400);
     }
 
     // ── Validasi tipe file ──────────────────────────────────
     if (!ALLOWED_MIME.includes(fotoFile.type)) {
-      return apiError(
-        'Tipe file tidak didukung. Gunakan JPEG, PNG, atau WebP.',
-        'INVALID_FILE_TYPE',
-        400,
-      );
+      return apiError('Tipe file tidak didukung. Gunakan JPEG, PNG, atau WebP.', 400);
     }
 
     // ── Validasi ukuran file asli ───────────────────────────
     if (fotoFile.size > MAX_FILE_BYTES) {
       return apiError(
         `Ukuran file terlalu besar. Maksimum 15MB. File Anda: ${(fotoFile.size / 1024 / 1024).toFixed(1)}MB`,
-        'FILE_TOO_LARGE',
         400,
       );
     }
 
     // ── Kompresi otomatis via Sharp ─────────────────────────
     // Resize max 800x800 (fit inside, tanpa distorsi) + WebP 82%
-    // Foto HP 4MB → ~150-300KB, upload jadi instant
     const rawBuffer = Buffer.from(await fotoFile.arrayBuffer());
     let compressedBuffer: Buffer;
     try {
@@ -90,28 +87,22 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
         .webp({ quality: 82 })
         .toBuffer();
     } catch {
-      // Fallback: upload file asli jika Sharp gagal (file rusak, dll)
       compressedBuffer = rawBuffer;
     }
 
     // ── Upload ke Supabase Storage ──────────────────────────
     const supabase = getSupabaseAdmin();
-    // Selalu simpan sebagai .webp setelah kompresi
     const storagePath = `${productId}.webp`;
 
     const { error: uploadError } = await supabase.storage
       .from('product-photos')
       .upload(storagePath, compressedBuffer, {
         contentType: 'image/webp',
-        upsert: true, // overwrite jika sudah ada foto lama
+        upsert: true,
       });
 
     if (uploadError) {
-      return apiError(
-        `Gagal upload foto: ${uploadError.message}`,
-        'STORAGE_UPLOAD_ERROR',
-        500,
-      );
+      return apiError(`Gagal upload foto: ${uploadError.message}`, 500);
     }
 
     // ── Dapatkan public URL ─────────────────────────────────
@@ -119,7 +110,6 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
       .from('product-photos')
       .getPublicUrl(storagePath);
 
-    // Cache-buster agar browser tidak tampilkan foto lama
     const photoUrl = `${urlData.publicUrl}?t=${Date.now()}`;
 
     // ── Update products.photoUrl ────────────────────────────
@@ -143,8 +133,8 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
     });
   } catch (err) {
     if (err instanceof AppError) {
-      return apiError(err.message, err.code, err.statusCode);
+      return apiError(err.message, err.statusCode);
     }
-    return apiError('Terjadi kesalahan server.', 'INTERNAL_ERROR', 500);
+    return apiError('Terjadi kesalahan server.', 500);
   }
 }

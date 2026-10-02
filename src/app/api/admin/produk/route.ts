@@ -12,7 +12,8 @@ import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
+  // GET: admin ATAU kasir aktif boleh lihat daftar produk
+  if (!payload) return apiError('Unauthorized', 401);
 
   const { searchParams } = new URL(req.url);
   const q = searchParams.get('q')?.trim() ?? '';
@@ -69,7 +70,8 @@ const CreateProductSchema = z.object({
 
 export async function POST(req: NextRequest) {
   const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
+  // POST: admin ATAU kasir aktif boleh tambah produk baru
+  if (!payload) return apiError('Unauthorized', 401);
 
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('Invalid JSON', 400); }

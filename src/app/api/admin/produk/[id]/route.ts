@@ -25,7 +25,8 @@ const PatchSchema = z.object({
 
 export async function PATCH(req: NextRequest, ctx: Context) {
   const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
+  // PATCH: admin ATAU kasir boleh edit produk
+  if (!payload) return apiError('Unauthorized', 401);
 
   const { id } = await ctx.params;
 
