@@ -16,8 +16,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { shifts, shiftSchedules, attendances, employees } from '@/lib/db/schema';
-import { eq, and, isNull, notExists } from 'drizzle-orm';
+import { shifts, shiftSchedules, attendances } from '@/lib/db/schema';
+import { eq, and, isNull } from 'drizzle-orm';
 
 export const runtime = 'nodejs';
 
@@ -177,6 +177,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       for (const jadwal of jadwalHariIniAll) {
         try {
+          // Guard: employeeId bisa nullable dari join result — skip jika null
+          if (!jadwal.employeeId) continue;
+          const empId = jadwal.employeeId; // now typed as string (non-null)
+
           const [slotH, slotM] = jadwal.slotEnd.split(':').map(Number);
           const slotEndMenit = (slotH ?? 0) * 60 + (slotM ?? 0);
 
@@ -186,7 +190,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           // Cek apakah sudah ada attendance record hari ini untuk employee ini
           const existingAttendance = await db.query.attendances.findFirst({
             where: and(
-              eq(attendances.employeeId, jadwal.employeeId),
+              eq(attendances.employeeId, empId),
               eq(attendances.attendanceDate, tanggalHariIni),
             ),
             columns: { id: true },
@@ -194,16 +198,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
           if (existingAttendance) continue; // Sudah hadir/telat/ijin → skip
 
-          // Cek apakah ada shift hari ini (berarti mereka login tapi attendance gagal)
+          // Cek apakah ada shift hari ini (login tapi attendance gagal di tengah jalan)
           const existingShiftToday = await db.query.shifts.findFirst({
-            where: and(
-              eq(shifts.employeeId, jadwal.employeeId),
-              isNull(shifts.deletedAt ?? undefined),
-            ),
+            where: eq(shifts.employeeId, empId), // shifts tidak punya deletedAt
             columns: { id: true, clockIn: true },
           });
 
-          // Jika ada shift CLOSED hari ini tapi tanpa attendance → sudah dihandle, skip
+          // Jika ada shift hari ini tapi tanpa attendance → sudah dihandle, skip
           if (existingShiftToday) {
             const clockInDate = new Date(existingShiftToday.clockIn).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
             if (clockInDate === tanggalHariIni) continue;
@@ -213,7 +214,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           await db
             .insert(attendances)
             .values({
-              employeeId:     jadwal.employeeId,
+              employeeId:     empId,
               scheduleId:     jadwal.scheduleId,
               attendanceDate: tanggalHariIni,
               status:         'TIDAK_HADIR',
