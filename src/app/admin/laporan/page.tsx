@@ -590,8 +590,8 @@ export default function LaporanPage() {
         )}
 
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 'var(--space-16)', color: 'var(--color-text-muted)' }}>
-            <Loader2 size={28} className="spin-icon" aria-hidden="true" style={{ marginBottom: 'var(--space-3)' }} />
+          <div className="empty-state" style={{ padding: 'var(--space-16)', color: 'var(--color-text-muted)' }}>
+            <Loader2 size={28} className="spin-icon" aria-hidden="true" />
             <div style={{ fontSize: 'var(--text-sm)' }}>Memuat laporan...</div>
           </div>
         ) : data ? (
