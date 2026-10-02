@@ -25,10 +25,10 @@ const ZAHARA_EMPLOYEE_ID = "ab676650-e971-4780-acbd-d01b7e40523d";
 const ZAHARA_OLD_SLOT_ID = "0d688881-12b9-4f51-8e41-9a19a05b0e4f";
 const ZAHARA_NEW_SLOT_ID = "0ae5a727-2731-4f6a-b33a-61bc7fce760b";
 
-function ok(msg)   { console.log("  [OK] " + msg); }
-function warn(msg) { console.log("  [WARN] " + msg); }
-function info(msg) { console.log("  [INFO] " + msg); }
-function fail(msg) { console.log("  [FAIL] " + msg); }
+function ok(msg: string)   { console.log("  [OK] " + msg); }
+function warn(msg: string) { console.log("  [WARN] " + msg); }
+function info(msg: string) { console.log("  [INFO] " + msg); }
+function fail(msg: string) { console.log("  [FAIL] " + msg); }
 
 async function main() {
   console.log("\n=== SEED KARYAWAN BATCH ===\n");
@@ -100,3 +100,4 @@ async function main() {
 }
 
 main().catch(e => { console.error("FATAL:", e); process.exit(1); });
+
