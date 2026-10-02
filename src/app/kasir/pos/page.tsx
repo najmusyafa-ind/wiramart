@@ -793,6 +793,11 @@ export default function PosPage() {
   const [scanToast, setScanToast] = useState<string | null>(null);
   const posCamRef = useRef<HTMLVideoElement>(null);
   const posScanInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  // mounted: mencegah hydration mismatch untuk elemen client-only di header
+  const [mounted, setMounted] = useState(false);
+
+  // Client-side mount flag — prevents hydration mismatch
+  useEffect(() => { setMounted(true); }, []);
 
   // Fetch session info
   useEffect(() => {
@@ -1253,29 +1258,31 @@ export default function PosPage() {
             )}
           </button>
 
-          {/* Tombol Kelola Produk — native <a> agar identik SSR/CSR tanpa React mismatch */}
-          <a
-            href="/kasir/produk"
-            id="btn-kelola-produk"
-            title="Kelola Produk"
-            aria-label="Kelola produk"
-            style={{
-              background: 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--color-sidebar-muted)',
-              cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-              padding: '6px 10px',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 'var(--weight-medium)',
-              transition: 'all var(--duration-fast)',
-              textDecoration: 'none',
-            }}
-          >
-            <Package size={14} />
-            <span className="pos-logout-label">Produk</span>
-          </a>
+          {/* Tombol Kelola Produk — hanya render setelah mounted (client-only) agar tidak ada hydration mismatch */}
+          {mounted && (
+            <a
+              href="/kasir/produk"
+              id="btn-kelola-produk"
+              title="Kelola Produk"
+              aria-label="Kelola produk"
+              style={{
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 'var(--radius-md)',
+                color: 'var(--color-sidebar-muted)',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                padding: '6px 10px',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 'var(--weight-medium)',
+                transition: 'all var(--duration-fast)',
+                textDecoration: 'none',
+              }}
+            >
+              <Package size={14} />
+              <span className="pos-logout-label">Produk</span>
+            </a>
+          )}
 
           {/* Tombol Tutup Kasir — hanya muncul jika ada shift aktif */}
           {session?.shift && (
