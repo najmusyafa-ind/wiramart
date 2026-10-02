@@ -8,7 +8,6 @@ import {
   User, Clock, AlertTriangle, ScanLine,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 
 // BarcodeDetector Type — Shape Detection API (belum di TS stdlib)
 declare class BarcodeDetector {
@@ -1254,8 +1253,8 @@ export default function PosPage() {
             )}
           </button>
 
-          {/* Tombol Kelola Produk — Link agar konsisten SSR/CSR, hindari hydration mismatch */}
-          <Link
+          {/* Tombol Kelola Produk — native <a> agar identik SSR/CSR tanpa React mismatch */}
+          <a
             href="/kasir/produk"
             id="btn-kelola-produk"
             title="Kelola Produk"
@@ -1276,7 +1275,7 @@ export default function PosPage() {
           >
             <Package size={14} />
             <span className="pos-logout-label">Produk</span>
-          </Link>
+          </a>
 
           {/* Tombol Tutup Kasir — hanya muncul jika ada shift aktif */}
           {session?.shift && (
