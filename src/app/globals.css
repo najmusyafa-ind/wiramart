@@ -540,6 +540,29 @@ p, h1, h2, h3, h4, h5, h6 {
   padding-left: 38px;
 }
 
+/* form-input-icon: alias dari search-box — dipakai di karyawan page */
+.form-input-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.form-input-icon__icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  line-height: 0;
+  z-index: 1;
+}
+.form-input-icon__input {
+  width: 100%;
+  padding-left: 38px !important;
+}
+
 /* Empty state: selalu flex column center — mencegah SVG meleset */
 .empty-state {
   display: flex;
