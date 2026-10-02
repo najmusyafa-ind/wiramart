@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useId, useCallback } from 'react';
-import { Plus, Search, UserCheck, UserX, Trash2, Edit2, X, Loader2, Users, AlertTriangle } from 'lucide-react';
+import { Plus, Search, UserCheck, UserX, Trash2, Edit2, X, Loader2, Users, AlertTriangle, LogOut, CheckCircle } from 'lucide-react';
 
 type Employee = {
   id: string;
@@ -16,6 +16,9 @@ type Employee = {
   shiftStart:  string | null;
   shiftEnd:    string | null;
   shiftSlotId: string | null;
+  // Dari left join shifts (sesi kasir aktif)
+  activeShiftId:      string | null;
+  activeShiftClockIn: string | null;
 };
 
 // Tipe slot dari publik jadwal endpoint
@@ -363,6 +366,8 @@ export default function KaryawanPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
+  const [resettingId, setResettingId] = useState<string | null>(null);
+  const [resetToast, setResetToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const uid = useId();
 
   const fetchEmployees = useCallback(async (q = '') => {
@@ -415,8 +420,43 @@ export default function KaryawanPage() {
     }
   }
 
+  async function handleResetSesi(emp: Employee) {
+    if (!emp.activeShiftId) return;
+    setResettingId(emp.id);
+    try {
+      const res = await fetch(`/api/admin/karyawan/${emp.id}/reset-sesi`, { method: 'POST' });
+      const json = await res.json() as { data?: { message: string }; error?: string };
+      if (res.ok) {
+        setResetToast({ msg: json.data?.message ?? 'Sesi berhasil direset.', ok: true });
+        fetchEmployees(search);
+      } else {
+        setResetToast({ msg: json.error ?? 'Gagal mereset sesi.', ok: false });
+      }
+    } catch {
+      setResetToast({ msg: 'Gagal mereset sesi. Periksa koneksi.', ok: false });
+    } finally {
+      setResettingId(null);
+      setTimeout(() => setResetToast(null), 3500);
+    }
+  }
+
   return (
     <>
+      {/* ── Toast Reset Sesi ────────────────────────────────────── */}
+      {resetToast && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+          background: resetToast.ok ? 'hsl(142 60% 38%)' : 'hsl(0 72% 51%)',
+          color: '#fff', padding: '10px 18px', borderRadius: 12,
+          display: 'flex', alignItems: 'center', gap: 8,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+          fontSize: 14, fontWeight: 600,
+          animation: 'fade-in 0.2s ease',
+        }}>
+          {resetToast.ok ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
+          {resetToast.msg}
+        </div>
+      )}
       {/* ── Confirm Delete Dialog ──────────────────────────── */}
       {confirmDelete && (
         <div
@@ -529,6 +569,7 @@ export default function KaryawanPage() {
                   <th scope="col">Jabatan</th>
                   <th scope="col">Jadwal Shift</th>
                   <th scope="col">Status</th>
+                  <th scope="col">Sesi Aktif</th>
                   <th scope="col" className="text-right">Aksi</th>
                 </tr>
               </thead>
@@ -567,6 +608,35 @@ export default function KaryawanPage() {
                         {emp.isActive ? 'Aktif' : 'Nonaktif'}
                       </span>
                     </td>
+                    {/* Sesi aktif (kasir sedang login) */}
+                    <td>
+                      {emp.activeShiftId ? (
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          background: 'hsl(142 70% 45% / 0.12)',
+                          color: 'hsl(142 55% 35%)',
+                          padding: '3px 10px', borderRadius: '999px',
+                          fontSize: '0.72rem', fontWeight: 700,
+                        }}>
+                          <span style={{
+                            width: 7, height: 7, borderRadius: '50%',
+                            background: 'hsl(142 60% 40%)',
+                            display: 'inline-block',
+                            boxShadow: '0 0 0 2px hsl(142 60% 40% / 0.3)',
+                            animation: 'pulse 1.5s ease-in-out infinite',
+                          }} />
+                          Online
+                        </span>
+                      ) : (
+                        <span style={{
+                          display: 'inline-flex',
+                          background: 'hsl(0 0% 50% / 0.08)',
+                          color: 'var(--color-text-muted)',
+                          padding: '3px 10px', borderRadius: '999px',
+                          fontSize: '0.72rem',
+                        }}>Offline</span>
+                      )}
+                    </td>
                     <td>
                       <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
                         {/* Toggle aktif */}
@@ -588,6 +658,21 @@ export default function KaryawanPage() {
                         >
                           <Edit2 size={15} />
                         </button>
+                        {/* Force Logout — hanya muncul kalau kasir sedang online */}
+                        {emp.activeShiftId && (
+                          <button
+                            onClick={() => handleResetSesi(emp)}
+                            className="btn btn-ghost btn-sm"
+                            title="Force Logout — tutup sesi aktif karyawan ini"
+                            aria-label={`Force logout ${emp.fullName}`}
+                            disabled={resettingId === emp.id}
+                            style={{ color: 'hsl(25 95% 53%)' }}
+                          >
+                            {resettingId === emp.id
+                              ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
+                              : <LogOut size={15} />}
+                          </button>
+                        )}
                         {/* Hapus */}
                         <button
                           onClick={() => handleDelete(emp.id, emp.fullName)}

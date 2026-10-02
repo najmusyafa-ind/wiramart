@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { employees, admins, shiftSchedules } from '@/lib/db/schema';
+import { employees, admins, shiftSchedules, shifts } from '@/lib/db/schema';
 import { eq, and, isNull, or, ilike } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
@@ -29,6 +29,9 @@ export async function GET(req: NextRequest) {
       shiftStart: shiftSchedules.slotStart,
       shiftEnd:   shiftSchedules.slotEnd,
       shiftSlotId: shiftSchedules.id,
+      // Sesi aktif (kasir sedang login) — untuk fitur Force Logout
+      activeShiftId:      shifts.id,
+      activeShiftClockIn: shifts.clockIn,
     })
     .from(employees)
     .leftJoin(
@@ -36,6 +39,13 @@ export async function GET(req: NextRequest) {
       and(
         eq(shiftSchedules.employeeId, employees.id),
         eq(shiftSchedules.isActive, true),
+      ),
+    )
+    .leftJoin(
+      shifts,
+      and(
+        eq(shifts.employeeId, employees.id),
+        eq(shifts.status, 'ACTIVE'),
       ),
     )
     .where(
