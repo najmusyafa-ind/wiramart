@@ -1,13 +1,13 @@
 // =============================================================
 // GET  /api/admin/produk — Daftar produk (dengan kategori)
-// POST /api/admin/produk — Tambah produk baru
+// POST /api/admin/produk — Tambah produk baru (admin + kasir aktif)
 // =============================================================
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { products, categories } from '@/lib/db/schema';
-import { eq, and, isNull, or, ilike, sql } from 'drizzle-orm';
+import { products, categories, employees } from '@/lib/db/schema';
+import { eq, and, isNull, or, ilike } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export async function GET(req: NextRequest) {
@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
       createdAt: products.createdAt,
       categoryId: products.categoryId,
       categoryName: categories.name,
+      barcode: products.barcode,
     })
     .from(products)
     .leftJoin(categories, eq(products.categoryId, categories.id))
@@ -62,6 +63,7 @@ const CreateProductSchema = z.object({
   categoryId: z.string().uuid(),
   name: z.string().min(1).max(200),
   description: z.string().max(500).optional(),
+  barcode: z.string().max(100).optional(),
   costPrice: z.number().nonnegative(),
   sellingPrice: z.number().positive(),
   stockQty: z.number().int().nonnegative().default(0),
@@ -73,13 +75,30 @@ export async function POST(req: NextRequest) {
   // POST: admin ATAU kasir aktif boleh tambah produk baru
   if (!payload) return apiError('Unauthorized', 401);
 
+  // ── Resolusi createdByAdminId (FK ke tabel admins) ──────────────────────
+  // Jika kasir yang memanggil, gunakan adminId yang mendaftarkan kasir tsb.
+  // Mencegah FK violation saat UUID kasir di-insert ke kolom admin FK.
+  let resolvedAdminId: string;
+  if (payload.role === 'admin') {
+    resolvedAdminId = payload.sub as string;
+  } else {
+    // Kasir (employee): ambil createdByAdminId dari data employee
+    const [emp] = await db
+      .select({ createdByAdminId: employees.createdByAdminId })
+      .from(employees)
+      .where(eq(employees.id, payload.sub as string))
+      .limit(1);
+    if (!emp?.createdByAdminId) return apiError('Admin referensi tidak ditemukan', 400);
+    resolvedAdminId = emp.createdByAdminId;
+  }
+
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('Invalid JSON', 400); }
 
   const parsed = CreateProductSchema.safeParse(body);
   if (!parsed.success) return apiError(parsed.error.flatten().fieldErrors, 422);
 
-  const { categoryId, name, description, costPrice, sellingPrice, stockQty, unit } = parsed.data;
+  const { categoryId, name, description, barcode, costPrice, sellingPrice, stockQty, unit } = parsed.data;
 
   // Cek kategori valid
   const [cat] = await db
@@ -96,11 +115,12 @@ export async function POST(req: NextRequest) {
       categoryId,
       name: name.trim(),
       description: description?.trim(),
+      barcode: barcode?.trim() || undefined,
       costPrice: costPrice.toString(),
       sellingPrice: sellingPrice.toString(),
       stockQty,
       unit,
-      createdByAdminId: payload.sub as string,
+      createdByAdminId: resolvedAdminId,
     })
     .returning();
 
