@@ -6,7 +6,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { products, categories, employees } from '@/lib/db/schema';
+import { products, categories, employees, admins } from '@/lib/db/schema';
 import { eq, and, isNull, or, ilike } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
@@ -88,8 +88,18 @@ export async function POST(req: NextRequest) {
       .from(employees)
       .where(eq(employees.id, payload.sub as string))
       .limit(1);
-    if (!emp?.createdByAdminId) return apiError('Admin referensi tidak ditemukan', 400);
-    resolvedAdminId = emp.createdByAdminId;
+
+    if (emp?.createdByAdminId) {
+      resolvedAdminId = emp.createdByAdminId;
+    } else {
+      // Fallback: pakai admin pertama yang terdaftar di sistem
+      const [firstAdmin] = await db
+        .select({ id: admins.id })
+        .from(admins)
+        .limit(1);
+      if (!firstAdmin) return apiError('Tidak ada admin terdaftar di sistem', 500);
+      resolvedAdminId = firstAdmin.id;
+    }
   }
 
   let body: unknown;
