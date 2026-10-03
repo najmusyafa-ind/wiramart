@@ -662,13 +662,13 @@ export default function KasirProdukPage() {
             }}>
               {/* Foto */}
               <div style={{
-                width: 52, height: 52, borderRadius: 8, flexShrink: 0,
+                width: 72, height: 72, borderRadius: 10, flexShrink: 0,
                 background: 'var(--color-surface-muted)', overflow: 'hidden',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 {p.photoUrl
                   ? <img src={p.photoUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : <Package size={22} color="var(--color-text-muted)" />}
+                  : <Package size={32} color="var(--color-text-muted)" />}
               </div>
               {/* Info */}
               <div style={{ flex: 1, minWidth: 0 }}>
