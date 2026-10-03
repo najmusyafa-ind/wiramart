@@ -33,7 +33,9 @@ export async function GET(req: NextRequest) {
       columns: { id: true, clockIn: true, modalAwal: true },
     }),
     // Ambil QRIS tanpa filter isActive — kasir tetap bisa konfirmasi QRIS manual
+    // WAJIB filter singleton ID: tabel bisa berisi baris lama/kosong (legacy)
     db.query.qrisSettings.findFirst({
+      where: eq(qrisSettings.id, '00000000-0000-0000-0000-000000000002'),
       columns: { qrImageUrl: true, bankName: true, accountName: true, isActive: true, storeName: true, storeAddress: true, storePhone: true },
     }),
     // Cek shift ACTIVE dari karyawan LAIN (untuk deteksi handover)

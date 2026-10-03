@@ -53,6 +53,7 @@ export default function PengaturanPage() {
   const [qrisPreview, setQrisPreview] = useState<string | null>(null);
   const [qrisCurrentUrl, setQrisCurrentUrl] = useState<string | null>(null);
   const [qrisStatus, setQrisStatus] = useState<FeedbackStatus>('idle');
+  const [qrisError, setQrisError] = useState<string>('');
 
   // ── Pengaturan Operasional state ────────────────────────────
   const [attendanceTolerance, setAttendanceTolerance] = useState(15);
@@ -244,12 +245,15 @@ export default function PengaturanPage() {
         setQrisPreview(null);
         if (qrFileInputRef.current) qrFileInputRef.current.value = '';
       } else {
+        const errJson = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        setQrisError(errJson.error ?? errJson.message ?? `Server error (${res.status})`);
         setQrisStatus('error');
       }
     } catch {
+      setQrisError('Koneksi gagal. Periksa jaringan.');
       setQrisStatus('error');
     } finally {
-      setTimeout(() => setQrisStatus('idle'), 3000);
+      setTimeout(() => setQrisStatus('idle'), 6000);
     }
   }
 
@@ -927,7 +931,7 @@ export default function PengaturanPage() {
               ) : qrisStatus === 'error' ? (
                 <>
                   <AlertCircle size={14} aria-hidden="true" />
-                  Gagal — Coba lagi
+                  {qrisError ? `Gagal: ${qrisError}` : 'Gagal — Coba lagi'}
                 </>
               ) : (
                 <>
