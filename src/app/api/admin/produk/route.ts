@@ -119,20 +119,40 @@ export async function POST(req: NextRequest) {
 
   if (!cat) return apiError('Kategori tidak valid', 400);
 
-  const [created] = await db
-    .insert(products)
-    .values({
-      categoryId,
-      name: name.trim(),
-      description: description?.trim(),
-      barcode: barcode?.trim() || undefined,
-      costPrice: costPrice.toString(),
-      sellingPrice: sellingPrice.toString(),
-      stockQty,
-      unit,
-      createdByAdminId: resolvedAdminId,
-    })
-    .returning();
+  let created: (typeof products.$inferSelect) | undefined;
+  try {
+    const [row] = await db
+      .insert(products)
+      .values({
+        categoryId,
+        name: name.trim(),
+        description: description?.trim(),
+        barcode: barcode?.trim() || undefined,
+        costPrice: costPrice.toString(),
+        sellingPrice: sellingPrice.toString(),
+        stockQty,
+        unit,
+        createdByAdminId: resolvedAdminId,
+      })
+      .returning();
+    created = row;
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      return apiError('Barcode sudah dipakai produk lain. Gunakan barcode berbeda atau kosongkan field barcode.', 409);
+    }
+    console.error('[POST /api/admin/produk] DB error:', err);
+    return apiError('Gagal menyimpan produk ke database.', 500);
+  }
 
   return apiOk(created, 201);
+}
+
+// Helper: deteksi PostgreSQL unique constraint violation
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: string }).code === '23505'
+  );
 }
