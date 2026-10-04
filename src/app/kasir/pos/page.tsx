@@ -5,7 +5,7 @@ import Image from 'next/image';
 import {
   ShoppingCart, Search, Plus, Minus, Trash2, Banknote,
   CheckCircle, X, Loader2, Package, LogOut, ArrowLeftRight,
-  User, Clock, AlertTriangle, ScanLine,
+  User, Clock, AlertTriangle, ScanLine, MoreVertical, ChevronRight,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -771,6 +771,7 @@ export default function PosPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [processingTx, setProcessingTx] = useState(false);
   const [showCart, setShowCart] = useState(false); // mobile cart toggle
+  const [showKasirMenu, setShowKasirMenu] = useState(false); // Option A mobile drawer menu toggle
   const [tutupLoading, setTutupLoading] = useState(false);
   const [showTutupConfirm, setShowTutupConfirm] = useState(false);
   const [tutupResult, setTutupResult] = useState<{
@@ -1206,46 +1207,27 @@ export default function PosPage() {
           />
         </div>
 
-        {/* Tombol Scan Barcode */}
-        <button
-          onClick={startPosScanner}
-          aria-label="Scan barcode produk"
-          title="Scan Barcode"
-          style={{
-            background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: 'var(--radius-md)', padding: '6px 12px', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-            color: 'white', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
-            flexShrink: 0,
-          }}
-        >
-          <ScanLine size={16} aria-hidden="true" />
-          <span className="pos-search-wrap">Scan</span>
-        </button>
 
-        {/* User info + Logout */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          {/* Kasir info — hidden on very small screens */}
-          <div className="pos-kasir-info">
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
-              color: 'var(--color-sidebar-text)',
-            }}>
-              <User size={14} style={{ flexShrink: 0, opacity: 0.7 }} />
-              <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {kasirName}
-              </span>
-            </div>
-            {session?.shift && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', color: 'var(--color-sidebar-muted)' }}>
-                <Clock size={12} style={{ flexShrink: 0 }} />
-                <span style={{ fontSize: 10 }}>
-                  {formatTimeShort(session.shift.clockIn)} · {shiftDuration}
-                </span>
-              </div>
-            )}
-          </div>
+        {/* Actions Container */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          {/* Tombol Scan Barcode — selalu tampil di desktop & mobile */}
+          <button
+            onClick={startPosScanner}
+            aria-label="Scan barcode produk"
+            title="Scan Barcode"
+            style={{
+              background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 'var(--radius-md)', padding: '6px 12px', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+              color: 'white', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
+              flexShrink: 0,
+            }}
+          >
+            <ScanLine size={16} aria-hidden="true" />
+            <span className="pos-search-wrap">Scan</span>
+          </button>
 
+          {/* Tombol Keranjang — selalu tampil di desktop & mobile */}
           <button
             id="btn-show-cart"
             onClick={() => setShowCart((v) => !v)}
@@ -1258,102 +1240,138 @@ export default function PosPage() {
             )}
           </button>
 
-          {/* Tombol Kelola Produk + Tukar Shift — hanya render setelah mounted (client-only) agar tidak ada hydration mismatch */}
-          {mounted && (
-            <>
-              <a
-                href="/kasir/produk"
-                id="btn-kelola-produk"
-                title="Kelola Produk"
-                aria-label="Kelola produk"
-                style={{
-                  background: 'rgba(255,255,255,0.08)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--color-sidebar-muted)',
-                  cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                  padding: '6px 10px',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 'var(--weight-medium)',
-                  transition: 'all var(--duration-fast)',
-                  textDecoration: 'none',
-                }}
-              >
-                <Package size={14} />
-                <span className="pos-logout-label">Produk</span>
-              </a>
-              <a
-                href="/kasir/tukar-shift"
-                id="btn-tukar-shift"
-                title="Ajukan Tukar Shift"
-                aria-label="Ajukan tukar shift"
-                style={{
-                  background: 'rgba(255,255,255,0.08)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--color-sidebar-muted)',
-                  cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                  padding: '6px 10px',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 'var(--weight-medium)',
-                  transition: 'all var(--duration-fast)',
-                  textDecoration: 'none',
-                }}
-              >
-                <ArrowLeftRight size={14} />
-                <span className="pos-logout-label">Tukar Shift</span>
-              </a>
-            </>
-          )}
+          {/* DESKTOP ACTIONS ONLY (disembunyikan di mobile <= 640px) */}
+          <div className="pos-desktop-actions">
+            {/* Kasir info */}
+            <div className="pos-kasir-info">
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                color: 'var(--color-sidebar-text)',
+              }}>
+                <User size={14} style={{ flexShrink: 0, opacity: 0.7 }} />
+                <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {kasirName}
+                </span>
+              </div>
+              {session?.shift && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', color: 'var(--color-sidebar-muted)' }}>
+                  <Clock size={12} style={{ flexShrink: 0 }} />
+                  <span style={{ fontSize: 10 }}>
+                    {formatTimeShort(session.shift.clockIn)} · {shiftDuration}
+                  </span>
+                </div>
+              )}
+            </div>
 
-          {/* Tombol Tutup Kasir — hanya muncul jika ada shift aktif */}
-          {session?.shift && (
+            {/* Tombol Kelola Produk + Tukar Shift */}
+            {mounted && (
+              <>
+                <a
+                  href="/kasir/produk"
+                  id="btn-kelola-produk"
+                  title="Kelola Produk"
+                  aria-label="Kelola produk"
+                  style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    borderRadius: 'var(--radius-md)',
+                    color: 'var(--color-sidebar-muted)',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                    padding: '6px 10px',
+                    fontSize: 'var(--text-xs)',
+                    fontWeight: 'var(--weight-medium)',
+                    transition: 'all var(--duration-fast)',
+                    textDecoration: 'none',
+                  }}
+                >
+                  <Package size={14} />
+                  <span>Produk</span>
+                </a>
+                <a
+                  href="/kasir/tukar-shift"
+                  id="btn-tukar-shift"
+                  title="Ajukan Tukar Shift"
+                  aria-label="Ajukan tukar shift"
+                  style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    borderRadius: 'var(--radius-md)',
+                    color: 'var(--color-sidebar-muted)',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                    padding: '6px 10px',
+                    fontSize: 'var(--text-xs)',
+                    fontWeight: 'var(--weight-medium)',
+                    transition: 'all var(--duration-fast)',
+                    textDecoration: 'none',
+                  }}
+                >
+                  <ArrowLeftRight size={14} />
+                  <span>Tukar Shift</span>
+                </a>
+              </>
+            )}
+
+            {/* Tombol Tutup Kasir — hanya jika ada shift aktif */}
+            {session?.shift && (
+              <button
+                id="btn-tutup-kasir"
+                onClick={() => setShowTutupConfirm(true)}
+                title="Tutup Kasir"
+                aria-label="Tutup shift kasir"
+                style={{
+                  background: 'rgba(220, 38, 38, 0.15)',
+                  border: '1px solid rgba(220, 38, 38, 0.35)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'hsl(0 80% 75%)',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                  padding: '6px 10px',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: 'var(--weight-semibold)',
+                  transition: 'all var(--duration-fast)',
+                  minHeight: 36,
+                }}
+              >
+                <X size={14} />
+                <span>Tutup Kasir</span>
+              </button>
+            )}
+
+            {/* Tombol Keluar */}
             <button
-              id="btn-tutup-kasir"
-              onClick={() => setShowTutupConfirm(true)}
-              title="Tutup Kasir"
-              aria-label="Tutup shift kasir"
+              onClick={handleLogout}
               style={{
-                background: 'rgba(220, 38, 38, 0.15)',
-                border: '1px solid rgba(220, 38, 38, 0.35)',
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(255,255,255,0.12)',
                 borderRadius: 'var(--radius-md)',
-                color: 'hsl(0 80% 75%)',
+                color: 'var(--color-sidebar-muted)',
                 cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
                 padding: '6px 10px',
                 fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-semibold)',
+                fontWeight: 'var(--weight-medium)',
                 transition: 'all var(--duration-fast)',
-                minHeight: 36,
               }}
+              aria-label="Keluar dari sesi"
             >
-              <X size={14} />
-              <span className="pos-logout-label">Tutup Kasir</span>
+              <LogOut size={14} />
+              <span>Keluar</span>
             </button>
-          )}
+          </div>
 
+          {/* MOBILE ONLY MENU TRIGGER (Kebab ⋮ button — tampil hanya di mobile <= 640px) */}
           <button
-            onClick={handleLogout}
-            style={{
-              background: 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: 'var(--radius-md)',
-              color: 'var(--color-sidebar-muted)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-1)',
-              padding: '6px 10px',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 'var(--weight-medium)',
-              transition: 'all var(--duration-fast)',
-            }}
-            aria-label="Keluar dari sesi"
+            id="btn-mobile-kasir-menu"
+            onClick={() => setShowKasirMenu(true)}
+            className="pos-mobile-menu-btn"
+            aria-label="Menu Kasir & Akun"
+            title="Menu Kasir"
           >
-            <LogOut size={14} />
-            <span className="pos-logout-label">Keluar</span>
+            <MoreVertical size={20} />
           </button>
         </div>
       </header>
@@ -1622,6 +1640,136 @@ export default function PosPage() {
           items={lastTx.items}
           onClose={() => setShowSuccess(false)}
         />
+      )}
+
+      {/* ── Option A: Mobile Kasir Drawer (Bottom Sheet) ───────── */}
+      {showKasirMenu && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mobile-kasir-title"
+          className="pos-kasir-drawer-overlay"
+          onClick={() => setShowKasirMenu(false)}
+        >
+          <div
+            className="pos-kasir-drawer"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Grab Handle */}
+            <div className="pos-drawer-handle" />
+
+            {/* Profile Info Header */}
+            <div className="pos-drawer-profile">
+              <div className="pos-drawer-avatar">
+                <User size={22} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+                  <h3 id="mobile-kasir-title" className="pos-drawer-name">
+                    {kasirName}
+                  </h3>
+                  <button
+                    onClick={() => setShowKasirMenu(false)}
+                    className="pos-drawer-close-btn"
+                    aria-label="Tutup menu"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <p className="pos-drawer-nim">
+                  NIM {session?.employee?.nim ?? '—'} &bull; {session?.employee?.jabatan ?? 'Kasir'}
+                </p>
+                {session?.shift && (
+                  <div className="pos-drawer-shift-badge">
+                    <span className="pos-drawer-pulse-dot" />
+                    <span>Shift Aktif &bull; {formatTimeShort(session.shift.clockIn)} ({shiftDuration})</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Menu Items List */}
+            <div className="pos-drawer-items">
+              <a
+                href="/kasir/produk"
+                className="pos-drawer-link"
+                onClick={() => setShowKasirMenu(false)}
+              >
+                <div className="pos-drawer-icon-box">
+                  <Package size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="pos-drawer-link-title">Kelola Katalog Produk</div>
+                  <div className="pos-drawer-link-sub">Lihat daftar harga, barcode & sisa stok</div>
+                </div>
+                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+              </a>
+
+              <a
+                href="/kasir/tukar-shift"
+                className="pos-drawer-link"
+                onClick={() => setShowKasirMenu(false)}
+              >
+                <div className="pos-drawer-icon-box">
+                  <ArrowLeftRight size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="pos-drawer-link-title">Ajukan Tukar Shift</div>
+                  <div className="pos-drawer-link-sub">Permohonan pergantian jadwal tugas kasir</div>
+                </div>
+                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+              </a>
+
+              <div className="pos-drawer-divider" />
+
+              {session?.shift && (
+                <button
+                  type="button"
+                  className="pos-drawer-btn-tutup"
+                  onClick={() => {
+                    setShowKasirMenu(false);
+                    setShowTutupConfirm(true);
+                  }}
+                >
+                  <div className="pos-drawer-icon-box danger">
+                    <X size={20} />
+                  </div>
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <div className="pos-drawer-danger-title">Tutup Sesi Kasir</div>
+                    <div className="pos-drawer-danger-sub">Selesaikan shift kerja & rekap uang laci</div>
+                  </div>
+                  <ChevronRight size={18} style={{ opacity: 0.7 }} />
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="pos-drawer-btn-logout"
+                onClick={() => {
+                  setShowKasirMenu(false);
+                  handleLogout();
+                }}
+              >
+                <div className="pos-drawer-icon-box">
+                  <LogOut size={20} />
+                </div>
+                <div style={{ flex: 1, textAlign: 'left' }}>
+                  <div className="pos-drawer-link-title">Keluar dari Terminal</div>
+                  <div className="pos-drawer-link-sub">Logout dari akun kasir</div>
+                </div>
+              </button>
+            </div>
+
+            {/* Tombol Tutup */}
+            <button
+              type="button"
+              className="pos-drawer-dismiss-btn"
+              onClick={() => setShowKasirMenu(false)}
+            >
+              Tutup Menu
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
