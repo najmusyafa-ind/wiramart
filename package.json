@@ -9,7 +9,7 @@
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push --force",
+    "db:push": "echo db:push DINONAKTIFKAN: drizzle-kit push --force dapat menimpa skema produksi. Gunakan migrasi SQL tertulis yang diuji di staging. && exit 1",
     "db:studio": "drizzle-kit studio",
     "db:backup": "tsx scripts/db-backup.ts",
     "db:restore": "tsx scripts/db-restore.ts"

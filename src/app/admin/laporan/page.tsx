@@ -16,7 +16,20 @@ import {
   FileText,
   CheckCircle,
   QrCode,
+  Receipt,
+  Wallet,
 } from 'lucide-react';
+import RekapHarian from './RekapHarian';
+import BiayaOperasionalPanel from './BiayaOperasionalPanel';
+import {
+  EXPENSE_CATEGORY_LABEL,
+  formatRupiah,
+  formatTanggalWib,
+  noticeStyle,
+  type DailyRowUi,
+  type ExpenseRowUi,
+  type IntegrityChecksUi,
+} from './shared';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -61,7 +74,15 @@ type LaporanData = {
     countVoid: number;
     amountCash: number;
     amountQris: number;
+    voidAmount: number;
+    omzetTanpaHpp: number;
+    unitTanpaHpp: number;
+    labaLengkap: boolean;
+    biayaOperasional: number;
+    labaBersih: number;
   };
+  daily: DailyRowUi[];
+  checks: IntegrityChecksUi;
   topProducts: { productName: string; totalQty: number; totalRevenue: string }[];
   dailyChart: {
     day: string;
@@ -289,8 +310,8 @@ export default function LaporanPage() {
   const [exportLoading, setExportLoading] = useState(false);
   const [voidTarget, setVoidTarget] = useState<RecentTransaction | null>(null);
 
-  const fetchData = useCallback(async (p: PeriodKey) => {
-    setLoading(true);
+  const fetchData = useCallback(async (p: PeriodKey, silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const res = await fetch(`/api/admin/laporan?period=${p}`);
@@ -336,11 +357,20 @@ export default function LaporanPage() {
       const summaryRows: { label: string; value: number | string; isCurrency?: boolean }[] = [
         { label: 'Periode',          value: data.label },
         { label: 'Total Omzet',      value: data.summary.grossAmount,  isCurrency: true },
-        { label: 'Total HPP',        value: data.summary.totalHpp,     isCurrency: true },
-        { label: 'Laba Kotor',       value: data.summary.grossProfit,  isCurrency: true },
-        { label: 'Laba Bersih',      value: data.summary.grossProfit,  isCurrency: true }, // sama dengan laba kotor (belum ada biaya op)
         { label: 'Omzet Cash',       value: data.summary.amountCash,   isCurrency: true },
         { label: 'Omzet QRIS',       value: data.summary.amountQris,   isCurrency: true },
+        { label: 'Total HPP (produk ber-HPP)', value: data.summary.totalHpp, isCurrency: true },
+        { label: 'Laba Kotor',       value: data.summary.grossProfit,  isCurrency: true },
+        { label: 'Biaya Operasional', value: data.summary.biayaOperasional, isCurrency: true },
+        { label: 'Laba Bersih',      value: data.summary.labaBersih,   isCurrency: true },
+        {
+          label: 'Status Laba',
+          value: data.summary.labaLengkap
+            ? 'Lengkap'
+            : `TIDAK LENGKAP — ${data.summary.unitTanpaHpp} unit produk tanpa HPP tidak dihitung`,
+        },
+        { label: 'Omzet Produk Tanpa HPP', value: data.summary.omzetTanpaHpp, isCurrency: true },
+        { label: 'Nilai Transaksi Void', value: data.summary.voidAmount, isCurrency: true },
         { label: 'Jumlah Transaksi', value: data.summary.totalCount },
         { label: 'Transaksi Cash',   value: data.summary.countCash },
         { label: 'Transaksi QRIS',   value: data.summary.countQris },
@@ -503,6 +533,113 @@ export default function LaporanPage() {
         });
       }
 
+      // ── Sheet 5: Rekap Harian ─────────────────────────────────
+      const styleHeader = (row: typeof hRow1) => {
+        row.eachCell((cell) => {
+          cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
+          cell.alignment = { vertical: 'middle' };
+        });
+        row.height = 22;
+      };
+
+      const ws5 = wb.addWorksheet('Rekap Harian');
+      ws5.columns = [
+        { header: 'Tanggal', key: 'tanggal', width: 20 },
+        { header: 'Transaksi', key: 'trx', width: 11 },
+        { header: 'Void', key: 'void', width: 8 },
+        { header: 'Omzet (Rp)', key: 'omzet', width: 16 },
+        { header: 'Cash (Rp)', key: 'cash', width: 16 },
+        { header: 'QRIS (Rp)', key: 'qris', width: 16 },
+        { header: 'HPP (Rp)', key: 'hpp', width: 16 },
+        { header: 'Laba Kotor (Rp)', key: 'kotor', width: 18 },
+        { header: 'Biaya (Rp)', key: 'biaya', width: 16 },
+        { header: 'Laba Bersih (Rp)', key: 'bersih', width: 18 },
+      ];
+      styleHeader(ws5.getRow(1));
+      const moneyKeys = ['omzet', 'cash', 'qris', 'hpp', 'kotor', 'biaya', 'bersih'] as const;
+      for (const d of data.daily) {
+        const row = ws5.addRow({
+          tanggal: formatTanggalWib(d.date), trx: d.txCount, void: d.voidCount,
+          omzet: d.omzet, cash: d.omzetCash, qris: d.omzetQris, hpp: d.hppTerjual,
+          kotor: d.labaKotor, biaya: d.biayaOperasional, bersih: d.labaBersih,
+        });
+        moneyKeys.forEach((k) => { row.getCell(k).numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0'; });
+      }
+      if (data.daily.length > 0) {
+        const sum = (pick: (d: DailyRowUi) => number) => data.daily.reduce((s, d) => s + pick(d), 0);
+        const totOmzet = sum((d) => d.omzet);
+        const totBersih = sum((d) => d.labaBersih);
+        const totalRow = ws5.addRow({
+          tanggal: `TOTAL (${data.daily.length} hari)`,
+          trx: sum((d) => d.txCount), void: sum((d) => d.voidCount),
+          omzet: totOmzet, cash: sum((d) => d.omzetCash), qris: sum((d) => d.omzetQris),
+          hpp: sum((d) => d.hppTerjual), kotor: sum((d) => d.labaKotor),
+          biaya: sum((d) => d.biayaOperasional), bersih: totBersih,
+        });
+        moneyKeys.forEach((k) => { totalRow.getCell(k).numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0'; });
+        totalRow.eachCell((cell) => {
+          cell.font = { bold: true };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+        });
+        const konsisten =
+          totOmzet === data.summary.grossAmount &&
+          totBersih === data.summary.labaBersih &&
+          data.checks.methodSplitMatches && data.checks.itemsMatchOmzet && data.checks.dailyMatchesSummary;
+        ws5.addRow({});
+        ws5.addRow({ tanggal: `Pemeriksaan konsistensi: ${konsisten ? 'OK (total harian = ringkasan)' : 'PERIKSA — ada selisih'}` });
+        if (!data.summary.labaLengkap) {
+          ws5.addRow({ tanggal: '* Laba tidak lengkap: produk tanpa HPP tidak dihitung dalam laba.' });
+        }
+      }
+
+      // ── Sheet 6: Biaya Operasional ───────────────────────────
+      const ws6 = wb.addWorksheet('Biaya');
+      ws6.columns = [
+        { header: 'Tanggal', key: 'tanggal', width: 20 },
+        { header: 'Kategori', key: 'kategori', width: 30 },
+        { header: 'Keterangan', key: 'ket', width: 40 },
+        { header: 'Nominal (Rp)', key: 'nominal', width: 18 },
+        { header: 'Dicatat oleh', key: 'oleh', width: 24 },
+      ];
+      styleHeader(ws6.getRow(1));
+      let biayaRows: ExpenseRowUi[] = [];
+      let biayaOk = false;
+      try {
+        const biayaRes = await fetch(`/api/admin/biaya?period=${period}`);
+        const biayaJson = (await biayaRes.json()) as { success?: boolean; data?: { rows: ExpenseRowUi[] } };
+        if (biayaRes.ok && biayaJson.success && biayaJson.data) {
+          biayaRows = biayaJson.data.rows;
+          biayaOk = true;
+        }
+      } catch {
+        biayaOk = false;
+      }
+      if (!biayaOk) {
+        ws6.addRow({ tanggal: 'GAGAL memuat daftar biaya — ekspor ulang untuk melengkapi sheet ini.' });
+      }
+      for (const b of biayaRows) {
+        const row = ws6.addRow({
+          tanggal: formatTanggalWib(b.expenseDate),
+          kategori: EXPENSE_CATEGORY_LABEL[b.category],
+          ket: b.description,
+          nominal: b.amount,
+          oleh: b.createdByName,
+        });
+        row.getCell('nominal').numFmt = '"Rp "#,##0';
+      }
+      if (biayaRows.length > 0) {
+        const totalBiaya = ws6.addRow({
+          tanggal: 'TOTAL', kategori: '', ket: '',
+          nominal: biayaRows.reduce((s, b) => s + b.amount, 0), oleh: '',
+        });
+        totalBiaya.getCell('nominal').numFmt = '"Rp "#,##0';
+        totalBiaya.eachCell((cell) => {
+          cell.font = { bold: true };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+        });
+      }
+
       // Generate dan download
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -596,83 +733,174 @@ export default function LaporanPage() {
           </div>
         ) : data ? (
           <>
-            {/* ─── 3 Cards Utama: Total / Cash / QRIS ──────────── */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                gap: 'var(--space-4)',
-                marginBottom: 'var(--space-6)',
-              }}
-            >
-              {/* Total Omzet */}
-              <article id={`${uid}-card-total`} className="stat-card">
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-primary)', borderRadius: 'var(--radius-full) var(--radius-full) 0 0' }} />
-                <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
-                  <TrendingUp size={20} aria-hidden="true" />
-                </div>
-                <div className="stat-card__label">Total Omzet</div>
-                <div className="stat-card__value" style={{ fontSize: 'var(--text-xl)' }}>{formatRp(data.summary.grossAmount)}</div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                  {data.summary.totalCount} transaksi
-                </div>
-              </article>
+            {/* ─── Peringatan keakuratan ──────────────────────── */}
+            {!data.summary.labaLengkap && (
+              <div role="alert" style={{ ...noticeStyle('warning'), marginBottom: 'var(--space-4)' }}>
+                <strong>Laba belum lengkap.</strong> Ada penjualan {data.summary.unitTanpaHpp} unit produk
+                (omzet {formatRupiah(data.summary.omzetTanpaHpp)}) yang HPP-nya belum diisi. Penjualan tersebut
+                tetap masuk Omzet, tetapi <strong>tidak dihitung</strong> dalam Laba Kotor/Bersih. Lengkapi HPP
+                di menu Produk agar laba akurat.
+              </div>
+            )}
+            {(!data.checks.methodSplitMatches || !data.checks.itemsMatchOmzet || !data.checks.dailyMatchesSummary) && (
+              <div role="alert" style={{ ...noticeStyle('error'), marginBottom: 'var(--space-4)' }}>
+                <strong>Pemeriksaan konsistensi gagal.</strong> Total per metode/rincian/harian tidak sama dengan
+                ringkasan. Jangan gunakan angka ini sebelum diperiksa.
+              </div>
+            )}
 
-              {/* Cash */}
-              <article id={`${uid}-card-cash`} className="stat-card">
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-success)', borderRadius: 'var(--radius-full) var(--radius-full) 0 0' }} />
-                <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-success-light)', color: 'var(--color-success)' }}>
-                  <Banknote size={20} aria-hidden="true" />
-                </div>
-                <div className="stat-card__label">Cash</div>
-                <div className="stat-card__value" style={{ fontSize: 'var(--text-xl)', color: 'var(--color-success)' }}>{formatRp(data.summary.amountCash)}</div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                  {data.summary.countCash} transaksi
-                </div>
-              </article>
+            {/* ─── CLUSTER 1: Arus Pendapatan & Metode Pembayaran ── */}
+            <div style={{ marginBottom: 'var(--space-6)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
+                <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', margin: 0 }}>
+                  <TrendingUp size={16} style={{ color: 'var(--color-primary)' }} aria-hidden="true" />
+                  Arus Pendapatan &amp; Penjualan
+                </h2>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  Total {data.summary.totalCount} transaksi ({data.summary.countVoid > 0 ? `${data.summary.countVoid} void dibatalkan` : '0 void'})
+                </span>
+              </div>
 
-              {/* QRIS */}
-              <article id={`${uid}-card-qris`} className="stat-card">
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-info)', borderRadius: 'var(--radius-full) var(--radius-full) 0 0' }} />
-                <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-info-light)', color: 'var(--color-info)' }}>
-                  <QrCode size={20} aria-hidden="true" />
-                </div>
-                <div className="stat-card__label">QRIS</div>
-                <div className="stat-card__value" style={{ fontSize: 'var(--text-xl)', color: 'var(--color-info)' }}>{formatRp(data.summary.amountQris)}</div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                  {data.summary.countQris} transaksi
-                </div>
-              </article>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                  gap: 'var(--space-4)',
+                }}
+              >
+                {/* Total Omzet */}
+                <article id={`${uid}-card-total`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-primary)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
+                    <TrendingUp size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label">Total Omzet Penjualan</div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
+                    {formatRp(data.summary.grossAmount)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    100% total omzet kotor periode ini
+                  </div>
+                </article>
 
-              {/* Laba Kotor */}
-              <article id={`${uid}-card-laba`} className="stat-card">
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-warning)', borderRadius: 'var(--radius-full) var(--radius-full) 0 0' }} />
-                <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)' }}>
-                  <DollarSign size={20} aria-hidden="true" />
-                </div>
-                <div className="stat-card__label">Laba Kotor</div>
-                <div className="stat-card__value" style={{ fontSize: 'var(--text-xl)' }}>{formatRp(data.summary.grossProfit)}</div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                  HPP: {formatRp(data.summary.totalHpp)}
-                </div>
-                {/* Keterangan audit: Laba Bersih = Laba Kotor untuk Wiramart */}
-                <div
-                  title="Laba dihitung dari Omzet dikurangi HPP produk. Biaya operasional (listrik, plastik, dll) tidak dicatat di sistem dan ditanggung terpisah."
-                  style={{
-                    marginTop: 'var(--space-2)',
-                    fontSize: '0.68rem',
-                    color: 'var(--color-text-muted)',
-                    lineHeight: 1.35,
-                    borderTop: '1px solid var(--color-border)',
-                    paddingTop: 'var(--space-1)',
-                    display: 'flex', alignItems: 'flex-start', gap: 4,
-                  }}
-                >
-                  <span style={{ flexShrink: 0 }}>ℹ️</span>
-                  <span>Omzet − HPP produk. Biaya operasional (listrik, plastik) ditanggung terpisah.</span>
-                </div>
-              </article>
+                {/* Cash */}
+                <article id={`${uid}-card-cash`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-success)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-success-light)', color: 'var(--color-success)' }}>
+                    <Banknote size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label">Penerimaan Tunai (Cash)</div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-success)' }}>
+                    {formatRp(data.summary.amountCash)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    {data.summary.countCash} transaksi {data.summary.grossAmount > 0 ? `(${Math.round((data.summary.amountCash / data.summary.grossAmount) * 100)}% omzet)` : ''}
+                  </div>
+                </article>
+
+                {/* QRIS */}
+                <article id={`${uid}-card-qris`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-info)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-info-light)', color: 'var(--color-info)' }}>
+                    <QrCode size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label">Penerimaan Non-Tunai (QRIS)</div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-info)' }}>
+                    {formatRp(data.summary.amountQris)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    {data.summary.countQris} transaksi {data.summary.grossAmount > 0 ? `(${Math.round((data.summary.amountQris / data.summary.grossAmount) * 100)}% omzet)` : ''}
+                  </div>
+                </article>
+              </div>
             </div>
+
+            {/* ─── CLUSTER 2: Profitabilitas & Kalkulasi Laba Bersih ── */}
+            <div style={{ marginBottom: 'var(--space-6)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', margin: 0 }}>
+                  <Wallet size={16} style={{ color: 'var(--color-success)' }} aria-hidden="true" />
+                  Profitabilitas &amp; Beban Toko
+                </h2>
+                <span style={{ fontSize: 'var(--text-xs)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-alt)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)', fontWeight: 'var(--weight-medium)' }}>
+                  Rumus: Laba Kotor − Biaya Operasional = Laba Bersih
+                </span>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                  gap: 'var(--space-4)',
+                }}
+              >
+                {/* Laba Kotor */}
+                <article id={`${uid}-card-laba`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-warning)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)' }}>
+                    <DollarSign size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label">Laba Kotor{!data.summary.labaLengkap && ' *'}</div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
+                    {formatRupiah(data.summary.grossProfit)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    Omzet − Total HPP ({formatRupiah(data.summary.totalHpp)})
+                  </div>
+                  {!data.summary.labaLengkap && (
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)', marginTop: 'var(--space-1)' }}>
+                      * Sebagian produk belum memiliki data HPP
+                    </div>
+                  )}
+                </article>
+
+                {/* Biaya Operasional */}
+                <article id={`${uid}-card-biaya`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-error)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-error-light)', color: 'var(--color-error)' }}>
+                    <Receipt size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label">Biaya Operasional</div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: data.summary.biayaOperasional > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
+                    {formatRupiah(data.summary.biayaOperasional)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    Listrik, plastik, fee bank, honor, dll (catat di panel bawah)
+                  </div>
+                </article>
+
+                {/* Laba Bersih */}
+                <article id={`${uid}-card-bersih`} className="stat-card" style={{ position: 'relative', overflow: 'hidden', border: '1px solid var(--color-primary-light)' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: data.summary.labaBersih < 0 ? 'var(--color-error-light)' : 'var(--color-success-light)', color: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }}>
+                    <Wallet size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label" style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
+                    Laba Bersih Riil{!data.summary.labaLengkap && ' *'}
+                  </div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }}>
+                    {formatRupiah(data.summary.labaBersih)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    {data.summary.biayaOperasional === 0
+                      ? 'Laba Kotor − Rp 0 biaya = sama dengan Laba Kotor'
+                      : `${formatRupiah(data.summary.grossProfit)} − ${formatRupiah(data.summary.biayaOperasional)}`}
+                  </div>
+                </article>
+              </div>
+
+              {data.summary.biayaOperasional === 0 && (
+                <div style={{ marginTop: 'var(--space-3)', padding: 'var(--space-2) var(--space-3)', background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-md)', border: '1px dashed var(--color-border)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <span>💡 <strong>Catatan Akuntansi:</strong> Nilai Laba Bersih saat ini sama dengan Laba Kotor karena belum ada Biaya Operasional (listrik, kemasan, fee QRIS, dll) yang dicatat pada periode ini. Gunakan panel <em>Biaya Operasional</em> di bawah untuk mencatat pengeluaran agar laba bersih riil terpotong otomatis.</span>
+                </div>
+              )}
+            </div>
+
+            {/* ─── Rekap Harian ────────────────────────────────── */}
+            <RekapHarian rows={data.daily} labaLengkap={data.summary.labaLengkap} />
+
+            {/* ─── Biaya Operasional (input & daftar) ──────────── */}
+            <BiayaOperasionalPanel period={period} onChanged={() => void fetchData(period, true)} />
 
             {/* ─── Row: Top Produk + Void info ──────────────────── */}
             <div

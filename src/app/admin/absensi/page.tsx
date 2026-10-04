@@ -27,7 +27,7 @@ const STATUS_CONFIG: Record<AttendanceStatus, { label: string; color: string; ic
   HADIR:       { label: 'Hadir',       color: 'var(--color-success)',  icon: <CheckCircle2 size={13} /> },
   TELAT:       { label: 'Telat',       color: 'hsl(38 90% 55%)',       icon: <Clock size={13} /> },
   IJIN:        { label: 'Ijin',        color: 'hsl(210 80% 60%)',      icon: <UserCheck size={13} /> },
-  TIDAK_HADIR: { label: 'Tidak Hadir', color: 'var(--color-danger)',   icon: <UserX size={13} /> },
+  TIDAK_HADIR: { label: 'Tidak Hadir', color: 'var(--color-error)',    icon: <UserX size={13} /> },
   PENGGANTI:   { label: 'Pengganti',   color: 'hsl(280 70% 65%)',      icon: <CalendarDays size={13} /> },
 };
 
@@ -147,8 +147,8 @@ function ManualInputModal({
         width: '100%', maxWidth: '440px',
         boxShadow: '0 24px 48px -12px hsl(0 0% 0% / 0.35)',
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-5)' }}>
-          <h2 id={`${uid}-title`} style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+          <h2 id={`${uid}-title`} style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
             Input Absensi Manual
           </h2>
           <button onClick={onClose} aria-label="Tutup" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '4px' }}>
@@ -157,67 +157,69 @@ function ManualInputModal({
         </div>
 
         {/* Info tanggal + hari */}
-        <div style={{ margin: '0 0 var(--space-4)', padding: '8px 12px', background: 'var(--color-surface-elevated)', borderRadius: 'var(--radius-md)', fontSize: '0.875rem', color: 'var(--color-text-secondary)', display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ margin: '0 0 var(--space-4)', padding: 'var(--space-2) var(--space-3)', background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
           <CalendarDays size={14} aria-hidden="true" />
-          <span>Tanggal: <strong style={{ color: 'var(--color-text-primary)' }}>{date}</strong></span>
-          <span style={{ marginLeft: 'auto', fontSize: '0.75rem', background: 'var(--color-primary)', color: '#fff', padding: '2px 8px', borderRadius: '999px', fontWeight: 600 }}>{hariTerpilih}</span>
+          <span>Tanggal: <strong style={{ color: 'var(--color-text)' }}>{date}</strong></span>
+          <span style={{ marginLeft: 'auto', fontSize: '0.7rem', background: 'var(--color-primary-light)', color: 'var(--color-primary)', padding: '2px 8px', borderRadius: 'var(--radius-full)', fontWeight: 'var(--weight-bold)' }}>{hariTerpilih}</span>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          <div>
-            <label htmlFor={`${uid}-emp`} style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '6px' }}>Karyawan *</label>
-            <select id={`${uid}-emp`} value={form.employeeId} onChange={e => handleEmpChange(e.target.value)} required
-              style={{ width: '100%', padding: '10px 12px', background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)', fontSize: '0.875rem' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label htmlFor={`${uid}-emp`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>Karyawan *</label>
+            <select id={`${uid}-emp`} className="form-input form-select" value={form.employeeId} onChange={e => handleEmpChange(e.target.value)} required>
               <option value="">-- Pilih Karyawan --</option>
               {employees.map(e => <option key={e.id} value={e.id}>{e.fullName} ({e.nim})</option>)}
             </select>
           </div>
 
-          <div>
-            <label htmlFor={`${uid}-sched`} style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '6px' }}>
-              Jadwal <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}>— hari {hariTerpilih}{form.employeeId ? ', karyawan terpilih' : ''}</span> *
+          <div className="form-group" style={{ margin: 0 }}>
+            <label htmlFor={`${uid}-sched`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>
+              Jadwal Shift <span style={{ color: 'var(--color-text-muted)', fontWeight: 'normal' }}>— hari {hariTerpilih}{form.employeeId ? ', kasir terpilih' : ''}</span> *
             </label>
-            <select id={`${uid}-sched`} value={form.scheduleId} onChange={e => setForm(f => ({ ...f, scheduleId: e.target.value }))} required
-              style={{ width: '100%', padding: '10px 12px', background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)', fontSize: '0.875rem' }}>
+            <select id={`${uid}-sched`} className="form-input form-select" value={form.scheduleId} onChange={e => setForm(f => ({ ...f, scheduleId: e.target.value }))} required>
               <option value="">{schedules.length === 0 ? '-- Tidak ada jadwal untuk hari ini --' : '-- Pilih Jadwal --'}</option>
               {schedules.map(s => <option key={s.id} value={s.id}>{s.dayOfWeek} {s.slotStart}–{s.slotEnd}</option>)}
             </select>
             {schedules.length === 0 && hariTerpilih && (
-              <p style={{ fontSize: '0.75rem', color: 'var(--color-warning)', marginTop: '4px' }}>
-                Tidak ada jadwal {hariTerpilih}. Admin perlu setup jadwal dulu di menu Jadwal Shift.
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)', marginTop: '4px', margin: 0 }}>
+                Tidak ada jadwal {hariTerpilih}. Setup jadwal terlebih dahulu di menu Jadwal Shift.
               </p>
             )}
           </div>
 
-          <div>
-            <label htmlFor={`${uid}-status`} style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '6px' }}>Status *</label>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label htmlFor={`${uid}-status`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>Status Kehadiran *</label>
             <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
               {(['IJIN', 'TIDAK_HADIR'] as const).map(s => (
-                <label key={s} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', padding: '8px 14px', borderRadius: 'var(--radius-md)', border: `2px solid ${form.status === s ? STATUS_CONFIG[s].color : 'var(--color-border)'}`, background: form.status === s ? `${STATUS_CONFIG[s].color}18` : 'transparent', flex: 1, justifyContent: 'center', transition: 'border-color 0.15s, background 0.15s' }}>
-                  <input type="radio" name="status" value={s} checked={form.status === s} onChange={() => setForm(f => ({ ...f, status: s }))} style={{ display: 'none' }} />
-                  <span style={{ color: STATUS_CONFIG[s].color }}>{STATUS_CONFIG[s].icon}</span>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 600, color: STATUS_CONFIG[s].color }}>{STATUS_CONFIG[s].label}</span>
-                </label>
+                <button
+                  type="button"
+                  key={s}
+                  onClick={() => setForm(f => ({ ...f, status: s }))}
+                  className={`btn ${form.status === s ? (s === 'IJIN' ? 'btn-primary' : 'btn-danger') : 'btn-secondary'}`}
+                  style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-2)' }}
+                >
+                  <span>{STATUS_CONFIG[s].icon}</span>
+                  <span>{STATUS_CONFIG[s].label}</span>
+                </button>
               ))}
             </div>
           </div>
 
-          <div>
-            <label htmlFor={`${uid}-notes`} style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '6px' }}>Catatan (opsional)</label>
-            <textarea id={`${uid}-notes`} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Alasan ijin, keterangan khusus..." rows={3}
-              style={{ width: '100%', padding: '10px 12px', background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)', fontSize: '0.875rem', resize: 'vertical', boxSizing: 'border-box' }} />
+          <div className="form-group" style={{ margin: 0 }}>
+            <label htmlFor={`${uid}-notes`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>Catatan (opsional)</label>
+            <textarea id={`${uid}-notes`} className="form-input" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Alasan ijin, keterangan khusus sakit/kuliah..." rows={2} style={{ resize: 'vertical' }} />
           </div>
 
           {error && (
-            <div role="alert" style={{ display: 'flex', gap: '8px', padding: '10px 14px', background: 'hsl(0 70% 55% / 0.12)', border: '1px solid hsl(0 70% 55% / 0.3)', borderRadius: 'var(--radius-md)', color: 'hsl(0 70% 65%)', fontSize: '0.85rem', alignItems: 'center' }}>
-              <AlertTriangle size={14} /> {error}
+            <div role="alert" style={{ display: 'flex', gap: 8, padding: 'var(--space-2) var(--space-3)', background: 'var(--color-error-light)', border: '1px solid var(--color-error)', borderRadius: 'var(--radius-md)', color: 'var(--color-error)', fontSize: 'var(--text-xs)', alignItems: 'center' }}>
+              <AlertTriangle size={14} aria-hidden="true" /> {error}
             </div>
           )}
 
           <div style={{ display: 'flex', gap: 'var(--space-3)', paddingTop: 'var(--space-2)' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '10px', background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-secondary)', cursor: 'pointer', fontWeight: 600 }}>Batal</button>
-            <button type="submit" disabled={loading} style={{ flex: 2, padding: '10px', background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-md)', color: '#fff', cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', opacity: loading ? 0.7 : 1 }}>
-              {loading ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Menyimpan...</> : 'Simpan Absensi'}
+            <button type="button" onClick={onClose} className="btn btn-secondary" style={{ flex: 1 }}>Batal</button>
+            <button type="submit" disabled={loading} className="btn btn-primary" style={{ flex: 2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-2)' }}>
+              {loading ? <><Loader2 size={16} className="spin-icon" /> Menyimpan...</> : 'Simpan Absensi'}
             </button>
           </div>
         </form>
@@ -489,233 +491,305 @@ export default function AbsensiPage() {
   }
 
   return (
-    <div style={{ padding: 'var(--space-6)', maxWidth: '1100px' }}>
+    <div>
       {/* Header */}
-      <div style={{ marginBottom: 'var(--space-6)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-2)' }}>
-          <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-lg)', background: 'hsl(210 80% 60% / 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'hsl(210 80% 65%)' }}>
-            <ClipboardList size={20} />
-          </div>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>Rekap Absensi</h1>
-            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Pantau kehadiran karyawan kasir harian</p>
-          </div>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Rekap Absensi Karyawan</h1>
+          <p className="page-subtitle">Pantau kehadiran, keterlambatan, dan status shift kasir harian</p>
         </div>
+        <button
+          onClick={() => setShowModal(true)}
+          className="btn btn-primary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}
+        >
+          <UserX size={16} aria-hidden="true" /> Input Manual
+        </button>
       </div>
 
-      {/* Date Navigator */}
-      {/* Date Navigator + Actions — mobile-first layout */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
-        {/* Row 1: Date navigator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: '4px' }}>
-            <button
-              onClick={() => shiftDate(-1)} aria-label="Hari sebelumnya"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)', padding: '8px 10px', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', minWidth: 40, minHeight: 40, justifyContent: 'center' }}
+      {/* Date Navigator + Action Toolbar */}
+      <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
+        <div
+          className="card-body"
+          style={{
+            padding: 'var(--space-3) var(--space-4)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 'var(--space-3)',
+          }}
+        >
+          {/* Left: Date Navigator */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                background: 'var(--color-surface-alt)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+                padding: '2px',
+              }}
             >
-              <ChevronLeft size={18} />
-            </button>
-            <input
-              type="date" value={selectedDate} max={today}
-              onChange={e => setSelectedDate(e.target.value)}
-              aria-label="Pilih tanggal"
-              style={{ background: 'none', border: 'none', color: 'var(--color-text-primary)', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer', padding: '4px', minHeight: 40 }}
-            />
-            <button
-              onClick={() => shiftDate(1)} disabled={isToday} aria-label="Hari berikutnya"
-              style={{ background: 'none', border: 'none', cursor: isToday ? 'not-allowed' : 'pointer', color: isToday ? 'var(--color-text-muted)' : 'var(--color-text-secondary)', padding: '8px 10px', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', opacity: isToday ? 0.4 : 1, minWidth: 40, minHeight: 40, justifyContent: 'center' }}
-            >
-              <ChevronRight size={18} />
-            </button>
+              <button
+                onClick={() => shiftDate(-1)}
+                className="btn btn-sm btn-secondary"
+                aria-label="Hari sebelumnya"
+                style={{ padding: '6px 8px', minWidth: 32, minHeight: 32, border: 'none', background: 'transparent' }}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <input
+                type="date"
+                value={selectedDate}
+                max={today}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                style={{
+                  minHeight: 32,
+                  border: 'none',
+                  background: 'transparent',
+                  padding: '0 var(--space-2)',
+                  fontWeight: 'var(--weight-semibold)',
+                  fontSize: 'var(--text-sm)',
+                  color: 'var(--color-text)',
+                  cursor: 'pointer',
+                }}
+                aria-label="Pilih tanggal absensi"
+              />
+              <button
+                onClick={() => shiftDate(1)}
+                disabled={isToday}
+                className="btn btn-sm btn-secondary"
+                aria-label="Hari berikutnya"
+                style={{ padding: '6px 8px', minWidth: 32, minHeight: 32, border: 'none', background: 'transparent', opacity: isToday ? 0.3 : 1 }}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+            <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
+              {displayDate}
+            </span>
+            {!isToday && (
+              <button
+                onClick={() => setSelectedDate(today)}
+                className="btn btn-sm btn-secondary"
+              >
+                Hari Ini
+              </button>
+            )}
           </div>
-          <span style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', fontWeight: 500 }}>{displayDate}</span>
-          {!isToday && (
-            <button
-              onClick={() => setSelectedDate(today)}
-              style={{ padding: '8px 14px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--color-text-secondary)', fontWeight: 600, minHeight: 40 }}
-            >
-              Hari Ini
-            </button>
-          )}
-        </div>
 
-        {/* Row 2: Action buttons — full width on mobile, flex-end on desktop */}
-        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', alignItems: 'center' }}>
-          {/* Export Excel — dengan toggle mode Bulan / Range Bebas */}
-          <div style={{
-            display: 'flex', flexDirection: 'column', gap: 'var(--space-2)',
-            background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-md)', padding: '8px 12px',
-            flex: '1 1 auto', minWidth: 260,
-          }}>
-            {/* Toggle mode */}
-            <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.73rem', fontWeight: 600, color: 'var(--color-text-muted)' }}>Export absensi:</span>
-              {(['month', 'range'] as const).map(m => (
-                <button key={m} onClick={() => setExportMode(m)}
+          {/* Right: Export Excel Toolbar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+            <div
+              style={{
+                display: 'inline-flex',
+                background: 'var(--color-surface-alt)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+                padding: '2px',
+              }}
+            >
+              {(['month', 'range'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setExportMode(m)}
+                  className={`btn btn-sm ${exportMode === m ? 'btn-primary' : 'btn-secondary'}`}
                   style={{
-                    padding: '3px 10px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer',
-                    borderRadius: 'var(--radius-sm)', border: '1px solid',
-                    borderColor: exportMode === m ? 'var(--color-primary)' : 'var(--color-border)',
+                    padding: '4px 10px',
+                    fontSize: 'var(--text-xs)',
+                    border: 'none',
                     background: exportMode === m ? 'var(--color-primary)' : 'transparent',
-                    color: exportMode === m ? '#fff' : 'var(--color-text-muted)',
-                    transition: 'all 0.15s',
+                    color: exportMode === m ? '#fff' : 'var(--color-text-secondary)',
                   }}
                 >
-                  {m === 'month' ? '📅 Per Bulan' : '📆 Range Bebas'}
+                  {m === 'month' ? 'Per Bulan' : 'Range Bebas'}
                 </button>
               ))}
             </div>
-            {/* Input sesuai mode */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-              {exportMode === 'month' ? (
-                <input
-                  id="export-month"
-                  type="month"
-                  value={exportMonth}
-                  max={today.slice(0, 7)}
-                  onChange={e => setExportMonth(e.target.value)}
-                  style={{ background: 'none', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', color: 'var(--color-text-primary)', fontSize: '0.875rem', fontWeight: 600, cursor: 'pointer', flex: 1, minWidth: 0 }}
-                />
-              ) : (
-                <>
-                  <input
-                    type="date"
-                    value={exportStart}
-                    max={exportEnd || today}
-                    onChange={e => setExportStart(e.target.value)}
-                    style={{ background: 'none', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', color: 'var(--color-text-primary)', fontSize: '0.8rem', cursor: 'pointer', flex: 1, minWidth: 0 }}
-                  />
-                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>s/d</span>
-                  <input
-                    type="date"
-                    value={exportEnd}
-                    min={exportStart}
-                    max={today}
-                    onChange={e => setExportEnd(e.target.value)}
-                    style={{ background: 'none', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', color: 'var(--color-text-primary)', fontSize: '0.8rem', cursor: 'pointer', flex: 1, minWidth: 0 }}
-                  />
-                </>
-              )}
-              <button
-                id="btn-export-absensi"
-                onClick={handleExportAbsensi}
-                disabled={exportLoading || (exportMode === 'month' ? !exportMonth : !exportStart || !exportEnd)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '6px',
-                  padding: '8px 14px', background: 'hsl(140 60% 35%)',
-                  border: 'none', borderRadius: 'var(--radius-md)', color: '#fff',
-                  cursor: exportLoading ? 'wait' : 'pointer', fontWeight: 700,
-                  fontSize: '0.8rem', opacity: exportLoading ? 0.7 : 1,
-                  minHeight: 40, whiteSpace: 'nowrap',
-                }}
-              >
-                {exportLoading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={14} />}
-                {exportLoading ? 'Memproses...' : 'Export Excel'}
-              </button>
-            </div>
-          </div>
 
-          {/* Input Manual */}
-          <button
-            onClick={() => setShowModal(true)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '8px',
-              padding: '10px 18px', background: 'var(--color-primary)',
-              border: 'none', borderRadius: 'var(--radius-md)', color: '#fff',
-              cursor: 'pointer', fontWeight: 700, fontSize: '0.875rem',
-              minHeight: 40, whiteSpace: 'nowrap', flex: '0 0 auto',
-            }}
-          >
-            <UserX size={16} /> Input Manual
-          </button>
+            {exportMode === 'month' ? (
+              <input
+                id="export-month"
+                type="month"
+                value={exportMonth}
+                max={today.slice(0, 7)}
+                onChange={(e) => setExportMonth(e.target.value)}
+                className="form-input"
+                style={{ minHeight: 36, padding: '4px 8px', fontSize: 'var(--text-xs)', width: '135px' }}
+                aria-label="Pilih bulan untuk export"
+              />
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+                <input
+                  type="date"
+                  value={exportStart}
+                  max={exportEnd || today}
+                  onChange={(e) => setExportStart(e.target.value)}
+                  className="form-input"
+                  style={{ minHeight: 36, padding: '4px 6px', fontSize: 'var(--text-xs)', width: '120px' }}
+                  aria-label="Tanggal mulai export"
+                />
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>–</span>
+                <input
+                  type="date"
+                  value={exportEnd}
+                  min={exportStart}
+                  max={today}
+                  onChange={(e) => setExportEnd(e.target.value)}
+                  className="form-input"
+                  style={{ minHeight: 36, padding: '4px 6px', fontSize: 'var(--text-xs)', width: '120px' }}
+                  aria-label="Tanggal akhir export"
+                />
+              </div>
+            )}
+
+            <button
+              id="btn-export-absensi"
+              onClick={handleExportAbsensi}
+              disabled={exportLoading || (exportMode === 'month' ? !exportMonth : !exportStart || !exportEnd)}
+              className="btn btn-secondary btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)', whiteSpace: 'nowrap', minHeight: 36 }}
+            >
+              {exportLoading ? <Loader2 size={14} className="spin-icon" /> : <Download size={14} />}
+              Export Excel
+            </button>
+          </div>
         </div>
       </div>
 
-
       {/* Summary Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+          gap: 'var(--space-3)',
+          marginBottom: 'var(--space-5)',
+        }}
+      >
         {([
-          { key: 'hadir', label: 'Hadir', val: summary.hadir, color: 'var(--color-success)' },
-          { key: 'telat', label: 'Telat', val: summary.telat, color: 'hsl(38 90% 55%)' },
-          { key: 'ijin',  label: 'Ijin',  val: summary.ijin,  color: 'hsl(210 80% 60%)' },
-          { key: 'tidakHadir', label: 'Bolos', val: summary.tidakHadir, color: 'var(--color-danger)' },
-          { key: 'pengganti',  label: 'Pengganti', val: summary.pengganti, color: 'hsl(280 70% 65%)' },
-        ] as const).map(item => (
-          <div key={item.key} style={{ background: 'var(--color-surface)', border: `1px solid ${item.color}33`, borderRadius: 'var(--radius-lg)', padding: 'var(--space-4)', textAlign: 'center', borderTop: `3px solid ${item.color}` }}>
-            <div style={{ fontSize: '1.75rem', fontWeight: 800, color: item.color, lineHeight: 1 }}>{item.val}</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px', fontWeight: 600 }}>{item.label}</div>
+          { key: 'hadir', label: 'Hadir Tepat', val: summary.hadir, color: 'var(--color-success)', bg: 'var(--color-success-light)' },
+          { key: 'telat', label: 'Terlambat', val: summary.telat, color: 'var(--color-warning)', bg: 'var(--color-warning-light)' },
+          { key: 'ijin',  label: 'Ijin / Sakit', val: summary.ijin, color: 'var(--color-info)', bg: 'var(--color-info-light)' },
+          { key: 'tidakHadir', label: 'Tidak Hadir', val: summary.tidakHadir, color: 'var(--color-error)', bg: 'var(--color-error-light)' },
+          { key: 'pengganti', label: 'Shift Pengganti', val: summary.pengganti, color: 'hsl(280 70% 65%)', bg: 'hsl(280 70% 65% / 0.1)' },
+        ] as const).map((item) => (
+          <div
+            key={item.key}
+            className="stat-card"
+            style={{
+              padding: 'var(--space-4)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              position: 'relative',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: item.color }} />
+            <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 'var(--weight-extrabold)', color: item.color, lineHeight: 1 }}>
+              {item.val}
+            </div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-1)', fontWeight: 'var(--weight-medium)' }}>
+              {item.label}
+            </div>
           </div>
         ))}
       </div>
 
-      {/* Search */}
-      <div className="search-box" style={{ marginBottom: 'var(--space-4)', maxWidth: '360px' }}>
-        <span className="search-icon" aria-hidden="true"><Search size={16} /></span>
-        <input
-          className="form-input"
-          type="search" value={searchQ} onChange={e => setSearchQ(e.target.value)}
-          placeholder="Cari nama atau NIM..."
-        />
+      {/* Search & Filter */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+        <div className="search-box" style={{ maxWidth: '360px', flex: '1 1 260px' }}>
+          <span className="search-icon" aria-hidden="true"><Search size={16} /></span>
+          <input
+            className="form-input"
+            type="search"
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            placeholder="Cari kasir atau NIM..."
+            style={{ minHeight: 40 }}
+          />
+        </div>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+          Menampilkan {filtered.length} dari {records.length} data
+        </span>
       </div>
 
       {/* Table */}
-      <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
-        {loading ? (
-          <div className="empty-state" aria-live="polite" aria-busy="true">
-            <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', opacity: 1 }} />
-            <p style={{ margin: 0, fontSize: '0.875rem' }}>Memuat data absensi...</p>
+      {loading ? (
+        <div className="card">
+          <div className="empty-state" aria-live="polite" aria-busy="true" style={{ padding: 'var(--space-12)' }}>
+            <Loader2 size={28} className="spin-icon" style={{ opacity: 1 }} />
+            <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>Memuat data absensi...</p>
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="empty-state">
-            <ClipboardList size={40} />
-            <p style={{ margin: 0, fontWeight: 600 }}>Belum ada data absensi</p>
-            <p style={{ margin: 0, fontSize: '0.8rem' }}>{searchQ ? 'Coba kata kunci lain' : 'Kasir belum login hari ini, atau belum ada jadwal yang disetup'}</p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="card">
+          <div className="empty-state" style={{ padding: 'var(--space-12)' }}>
+            <ClipboardList size={36} aria-hidden="true" />
+            <p style={{ margin: 0, fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
+              Belum ada data absensi
+            </p>
+            <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              {searchQ ? 'Tidak ada hasil yang cocok dengan kata kunci pencarian.' : 'Kasir belum melakukan clock in hari ini, atau belum ada jadwal terdaftar.'}
+            </p>
           </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-              <thead>
-                <tr style={{ background: 'var(--color-surface-elevated)', borderBottom: '1px solid var(--color-border)' }}>
-                  {['Karyawan', 'NIM / Prodi', 'Jadwal', 'Clock In', 'Keterlambatan', 'Status', 'Catatan'].map(h => (
-                    <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-muted)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
+        </div>
+      ) : (
+        <div className="table-wrapper">
+          <table className="table" style={{ fontSize: 'var(--text-sm)' }}>
+            <thead>
+              <tr>
+                <th scope="col">Karyawan</th>
+                <th scope="col">NIM / Prodi</th>
+                <th scope="col">Jadwal Shift</th>
+                <th scope="col">Clock In</th>
+                <th scope="col">Keterlambatan</th>
+                <th scope="col">Status</th>
+                <th scope="col">Catatan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.id}>
+                  <td style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
+                    {r.employee.fullName}
+                  </td>
+                  <td style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-xs)' }}>
+                    <div>{r.employee.nim}</div>
+                    <div style={{ color: 'var(--color-text-muted)', fontSize: '0.7rem' }}>{r.employee.programStudi}</div>
+                  </td>
+                  <td style={{ color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
+                    {r.schedule.dayOfWeek} {r.schedule.slotStart}–{r.schedule.slotEnd}
+                  </td>
+                  <td style={{ color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>
+                    {r.clockInActual ? new Date(r.clockInActual).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                  </td>
+                  <td>
+                    {r.lateMinutes > 0 ? (
+                      <span style={{ color: 'var(--color-warning)', fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-xs)' }}>
+                        +{r.lateMinutes} mnt
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                    )}
+                  </td>
+                  <td>
+                    <StatusBadge status={r.status} />
+                  </td>
+                  <td style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)', maxWidth: '200px' }}>
+                    {r.notes ?? '—'}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r, i) => (
-                  <tr key={r.id} style={{ borderBottom: i < filtered.length - 1 ? '1px solid var(--color-border-subtle, var(--color-border))' : 'none', transition: 'background 0.1s' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-elevated)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                    <td style={{ padding: '13px 16px', fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.employee.fullName}</td>
-                    <td style={{ padding: '13px 16px', color: 'var(--color-text-secondary)', fontSize: '0.8rem' }}>
-                      <div>{r.employee.nim}</div>
-                      <div style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>{r.employee.programStudi}</div>
-                    </td>
-                    <td style={{ padding: '13px 16px', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
-                      {r.schedule.dayOfWeek} {r.schedule.slotStart}–{r.schedule.slotEnd}
-                    </td>
-                    <td style={{ padding: '13px 16px', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: '0.82rem' }}>
-                      {r.clockInActual ? new Date(r.clockInActual).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—'}
-                    </td>
-                    <td style={{ padding: '13px 16px' }}>
-                      {r.lateMinutes > 0 ? (
-                        <span style={{ color: 'hsl(38 90% 55%)', fontWeight: 600, fontSize: '0.82rem' }}>+{r.lateMinutes} mnt</span>
-                      ) : <span style={{ color: 'var(--color-text-muted)' }}>—</span>}
-                    </td>
-                    <td style={{ padding: '13px 16px' }}>
-                      <StatusBadge status={r.status} />
-                    </td>
-                    <td style={{ padding: '13px 16px', color: 'var(--color-text-muted)', fontSize: '0.8rem', maxWidth: '180px' }}>
-                      {r.notes ?? '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Modal */}
       {showModal && (

@@ -35,7 +35,7 @@ type FlatSlot = {
 const STATUS_CFG: Record<SwapStatus, { label: string; color: string; icon: React.ReactNode }> = {
   PENDING:   { label: 'Menunggu',  color: 'hsl(38 90% 55%)',   icon: <Clock size={13} /> },
   APPROVED:  { label: 'Disetujui', color: 'var(--color-success)', icon: <CheckCircle2 size={13} /> },
-  REJECTED:  { label: 'Ditolak',   color: 'var(--color-danger)',  icon: <XCircle size={13} /> },
+  REJECTED:  { label: 'Ditolak',   color: 'var(--color-error)',   icon: <XCircle size={13} /> },
   CANCELLED: { label: 'Dibatalkan',color: 'var(--color-text-muted)', icon: <X size={13} /> },
 };
 
@@ -143,46 +143,104 @@ function TambahManualModal({
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby={`${uid}-title`}
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-4)', backgroundColor: 'var(--color-overlay)', backdropFilter: 'blur(4px)', animation: 'fade-in 0.2s ease' }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-border)', padding: 'var(--space-6)', width: '100%', maxWidth: '520px', boxShadow: '0 24px 48px -12px hsl(0 0% 0% / 0.35)' }}>
-
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`${uid}-title`}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 'var(--space-4)',
+        backgroundColor: 'var(--color-overlay)',
+        backdropFilter: 'blur(4px)',
+        animation: 'fade-in 0.2s ease',
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        style={{
+          background: 'var(--color-surface)',
+          borderRadius: 'var(--radius-xl)',
+          border: '1px solid var(--color-border)',
+          padding: 'var(--space-6)',
+          width: '100%',
+          maxWidth: '520px',
+          boxShadow: 'var(--shadow-xl)',
+        }}
+      >
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-5)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-4)' }}>
           <div>
-            <h2 id={`${uid}-title`} style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>Tambah Tukar Shift Manual</h2>
-            <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Input swap request setelah konfirmasi via WhatsApp. Langsung disetujui.</p>
+            <h2 id={`${uid}-title`} style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
+              Tambah Tukar Shift Manual
+            </h2>
+            <p style={{ margin: '4px 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              Input pertukaran shift setelah konfirmasi via WhatsApp. Langsung disetujui.
+            </p>
           </div>
-          <button onClick={onClose} aria-label="Tutup" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '4px' }}><X size={20} /></button>
+          <button
+            onClick={onClose}
+            aria-label="Tutup"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '4px' }}
+          >
+            <X size={20} />
+          </button>
         </div>
 
         {/* WA notice */}
-        <div style={{ display: 'flex', gap: 10, padding: '10px 14px', background: 'hsl(142 70% 45% / 0.08)', border: '1px solid hsl(142 70% 45% / 0.25)', borderRadius: 'var(--radius-md)', color: 'hsl(142 70% 45%)', fontSize: '0.8rem', marginBottom: 'var(--space-4)', alignItems: 'flex-start' }}>
-          <MessageSquare size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-          <span>Kasir sudah mengkonfirmasi tukar shift via <strong>WhatsApp</strong>. Sistem akan langsung menjalankan tukar jadwal.</span>
+        <div
+          style={{
+            display: 'flex',
+            gap: 'var(--space-2)',
+            padding: 'var(--space-3) var(--space-4)',
+            background: 'var(--color-success-light)',
+            border: '1px solid var(--color-success)',
+            borderRadius: 'var(--radius-md)',
+            color: 'var(--color-success)',
+            fontSize: 'var(--text-xs)',
+            marginBottom: 'var(--space-4)',
+            alignItems: 'flex-start',
+          }}
+        >
+          <MessageSquare size={16} style={{ flexShrink: 0, marginTop: 1 }} aria-hidden="true" />
+          <span>
+            Kasir sudah mengkonfirmasi tukar shift via <strong>WhatsApp</strong>. Sistem akan langsung memperbarui jadwal kedua kasir.
+          </span>
         </div>
 
         {slotsLoading ? (
           <div style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
-            <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', marginBottom: 8 }} />
-            <p style={{ margin: 0, fontSize: '0.85rem' }}>Memuat jadwal...</p>
+            <Loader2 size={24} className="spin-icon" style={{ marginBottom: 8 }} />
+            <p style={{ margin: 0, fontSize: 'var(--text-xs)' }}>Memuat jadwal...</p>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
             {/* Slot asal */}
-            <div>
-              <label htmlFor={`${uid}-from`} style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-                Slot Asal <span style={{ color: 'var(--color-danger)' }}>*</span>
-                <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', marginLeft: 6 }}>(kasir yang minta pindah)</span>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor={`${uid}-from`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>
+                Slot Asal <span style={{ color: 'var(--color-error)' }}>*</span>
+                <span style={{ fontWeight: 'normal', color: 'var(--color-text-muted)', marginLeft: 6 }}>
+                  (jadwal kasir yang minta pindah)
+                </span>
               </label>
-              <select id={`${uid}-from`} value={fromId} onChange={e => { setFromId(e.target.value); if (e.target.value === toId) setToId(''); }} required
-                style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-surface)', color: 'var(--color-text-primary)', fontSize: '0.875rem', cursor: 'pointer' }}>
-                <option value="">-- Pilih slot asal (kasir terisi) --</option>
-                {dayOrder.filter(d => groupFrom[d]).map(day => (
+              <select
+                id={`${uid}-from`}
+                className="form-input form-select"
+                value={fromId}
+                onChange={(e) => {
+                  setFromId(e.target.value);
+                  if (e.target.value === toId) setToId('');
+                }}
+                required
+              >
+                <option value="">-- Pilih slot asal --</option>
+                {dayOrder.filter((d) => groupFrom[d]).map((day) => (
                   <optgroup key={day} label={day}>
-                    {groupFrom[day]!.map(s => (
+                    {groupFrom[day]!.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.slotStart} - {s.slotEnd} | {s.employeeName}
                       </option>
@@ -190,28 +248,27 @@ function TambahManualModal({
                   </optgroup>
                 ))}
               </select>
-              {fromSlot && (
-                <div style={{ marginTop: 6, fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'flex', gap: 6 }}>
-                  <span style={{ background: 'hsl(0 70% 55% / 0.1)', color: 'hsl(0 70% 60%)', padding: '2px 8px', borderRadius: '999px', fontWeight: 600 }}>
-                    {fromSlot.dayOfWeek} {fromSlot.slotStart} - {fromSlot.slotEnd}
-                  </span>
-                  {fromSlot.employeeName && <span>{fromSlot.employeeName}</span>}
-                </div>
-              )}
             </div>
 
             {/* Slot tujuan */}
-            <div>
-              <label htmlFor={`${uid}-to`} style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-                Slot Tujuan <span style={{ color: 'var(--color-danger)' }}>*</span>
-                <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', marginLeft: 6 }}>(akan ditukar ke sini)</span>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor={`${uid}-to`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>
+                Slot Tujuan <span style={{ color: 'var(--color-error)' }}>*</span>
+                <span style={{ fontWeight: 'normal', color: 'var(--color-text-muted)', marginLeft: 6 }}>
+                  (jadwal kasir yang akan ditukar)
+                </span>
               </label>
-              <select id={`${uid}-to`} value={toId} onChange={e => setToId(e.target.value)} required
-                style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-surface)', color: 'var(--color-text-primary)', fontSize: '0.875rem', cursor: 'pointer' }}>
-                <option value="">-- Pilih slot tujuan (kasir terisi) --</option>
-                {dayOrder.filter(d => groupTo[d]).map(day => (
+              <select
+                id={`${uid}-to`}
+                className="form-input form-select"
+                value={toId}
+                onChange={(e) => setToId(e.target.value)}
+                required
+              >
+                <option value="">-- Pilih slot tujuan --</option>
+                {dayOrder.filter((d) => groupTo[d]).map((day) => (
                   <optgroup key={day} label={day}>
-                    {groupTo[day]!.map(s => (
+                    {groupTo[day]!.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.slotStart} - {s.slotEnd} | {s.employeeName}
                       </option>
@@ -219,66 +276,107 @@ function TambahManualModal({
                   </optgroup>
                 ))}
               </select>
-              {toSlot && (
-                <div style={{ marginTop: 6, fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'flex', gap: 6 }}>
-                  <span style={{ background: 'hsl(142 70% 45% / 0.1)', color: 'hsl(142 70% 45%)', padding: '2px 8px', borderRadius: '999px', fontWeight: 600 }}>
-                    {toSlot.dayOfWeek} {toSlot.slotStart} - {toSlot.slotEnd}
-                  </span>
-                  {toSlot.employeeName && <span>{toSlot.employeeName}</span>}
-                </div>
-              )}
             </div>
 
             {/* Preview swap */}
             {fromSlot && toSlot && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--color-surface-elevated)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-3)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  background: 'var(--color-surface-alt)',
+                  borderRadius: 'var(--radius-lg)',
+                  border: '1px solid var(--color-border)',
+                }}
+              >
                 <div style={{ flex: 1, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Dari</div>
-                  <div style={{ fontWeight: 700, color: 'hsl(0 70% 60%)', fontSize: '0.9rem' }}>{fromSlot.dayOfWeek}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>{fromSlot.slotStart} - {fromSlot.slotEnd}</div>
-                  {fromSlot.employeeName && <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{fromSlot.employeeName}</div>}
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontWeight: 'var(--weight-bold)', textTransform: 'uppercase' }}>
+                    Dari
+                  </div>
+                  <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-error)', fontSize: 'var(--text-sm)' }}>
+                    {fromSlot.dayOfWeek}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text)' }}>
+                    {fromSlot.slotStart} - {fromSlot.slotEnd}
+                  </div>
+                  {fromSlot.employeeName && (
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                      {fromSlot.employeeName}
+                    </div>
+                  )}
                 </div>
-                <ArrowLeftRight size={18} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
+                <ArrowLeftRight size={18} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} aria-hidden="true" />
                 <div style={{ flex: 1, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Ke</div>
-                  <div style={{ fontWeight: 700, color: 'hsl(142 70% 45%)', fontSize: '0.9rem' }}>{toSlot.dayOfWeek}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>{toSlot.slotStart} - {toSlot.slotEnd}</div>
-                  {toSlot.employeeName && <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{toSlot.employeeName}</div>}
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontWeight: 'var(--weight-bold)', textTransform: 'uppercase' }}>
+                    Ke
+                  </div>
+                  <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-success)', fontSize: 'var(--text-sm)' }}>
+                    {toSlot.dayOfWeek}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text)' }}>
+                    {toSlot.slotStart} - {toSlot.slotEnd}
+                  </div>
+                  {toSlot.employeeName && (
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                      {toSlot.employeeName}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
             {/* Alasan */}
-            <div>
-              <label htmlFor={`${uid}-reason`} style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-                Alasan <span style={{ color: 'var(--color-danger)' }}>*</span>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor={`${uid}-reason`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>
+                Alasan Tukar <span style={{ color: 'var(--color-error)' }}>*</span>
               </label>
-              <textarea id={`${uid}-reason`} value={reason} onChange={e => setReason(e.target.value)}
-                placeholder="Contoh: Kasir ada keperluan kuliah, minta tukar dengan rekan..." required minLength={5} rows={2}
-                style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-surface-elevated)', color: 'var(--color-text-primary)', fontSize: '0.875rem', resize: 'vertical', boxSizing: 'border-box' }} />
+              <textarea
+                id={`${uid}-reason`}
+                className="form-input"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Contoh: Ada jadwal praktikum kuliah, sudah konfirmasi tukar dengan rekan..."
+                required
+                minLength={5}
+                rows={2}
+                style={{ resize: 'vertical' }}
+              />
             </div>
 
             {/* Catatan admin */}
-            <div>
-              <label htmlFor={`${uid}-note`} style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-                Catatan Admin <span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}>(opsional)</span>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor={`${uid}-note`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>
+                Catatan Admin <span style={{ fontWeight: 'normal', color: 'var(--color-text-muted)' }}>(opsional)</span>
               </label>
-              <input id={`${uid}-note`} type="text" value={adminNote} onChange={e => setAdminNote(e.target.value)}
-                placeholder="Contoh: Sudah dikonfirmasi via WA tanggal 30 Sep"
-                style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-surface-elevated)', color: 'var(--color-text-primary)', fontSize: '0.875rem', boxSizing: 'border-box' }} />
+              <input
+                id={`${uid}-note`}
+                type="text"
+                className="form-input"
+                value={adminNote}
+                onChange={(e) => setAdminNote(e.target.value)}
+                placeholder="Contoh: Sudah dikonfirmasi via WA kedua belah pihak"
+              />
             </div>
 
             {error && (
-              <div role="alert" style={{ display: 'flex', gap: 8, padding: '10px 14px', background: 'hsl(0 70% 55% / 0.12)', border: '1px solid hsl(0 70% 55% / 0.3)', borderRadius: 'var(--radius-md)', color: 'hsl(0 70% 65%)', fontSize: '0.85rem', alignItems: 'center' }}>
-                <AlertTriangle size={14} /> {error}
+              <div role="alert" style={{ display: 'flex', gap: 8, padding: 'var(--space-2) var(--space-3)', background: 'var(--color-error-light)', border: '1px solid var(--color-error)', borderRadius: 'var(--radius-md)', color: 'var(--color-error)', fontSize: 'var(--text-xs)', alignItems: 'center' }}>
+                <AlertTriangle size={14} aria-hidden="true" /> {error}
               </div>
             )}
 
             <div style={{ display: 'flex', gap: 'var(--space-3)', paddingTop: 'var(--space-2)' }}>
-              <button type="button" onClick={onClose} style={{ flex: 1, padding: '10px', background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-secondary)', cursor: 'pointer', fontWeight: 600 }}>Batal</button>
-              <button type="submit" disabled={loading || !fromId || !toId || reason.length < 5}
-                style={{ flex: 2, padding: '10px', background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-md)', color: '#fff', cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: (loading || !fromId || !toId || reason.length < 5) ? 0.6 : 1, transition: 'opacity 0.2s' }}>
-                {loading ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Memproses...</> : <><CheckCircle2 size={15} /> Simpan &amp; Setujui</>}
+              <button type="button" onClick={onClose} className="btn btn-secondary" style={{ flex: 1 }}>
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={loading || !fromId || !toId || reason.length < 5}
+                className="btn btn-primary"
+                style={{ flex: 2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-2)' }}
+              >
+                {loading ? <><Loader2 size={16} className="spin-icon" /> Memproses...</> : <><CheckCircle2 size={16} /> Simpan &amp; Setujui</>}
               </button>
             </div>
           </form>
@@ -288,7 +386,9 @@ function TambahManualModal({
   );
 }
 
-// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Review Modal ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+// ─────────────────────────────────────────────────────────────
+// Review Modal
+// ─────────────────────────────────────────────────────────────
 function ReviewModal({
   swap,
   onClose,
@@ -306,102 +406,197 @@ function ReviewModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true); setError('');
+    setLoading(true);
+    setError('');
     try {
       const res = await fetch(`/api/admin/swap-request/${swap.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, adminNote: adminNote || undefined }),
       });
-      const json = await res.json();
+      const json = await res.json() as { success?: boolean; error?: string };
       if (!res.ok) { setError(typeof json.error === 'string' ? json.error : 'Gagal menyimpan'); return; }
-      onSuccess(); onClose();
-    } catch { setError('Kesalahan jaringan.'); }
-    finally { setLoading(false); }
+      onSuccess();
+      onClose();
+    } catch {
+      setError('Kesalahan jaringan.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby={`${uid}-title`}
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-4)', backgroundColor: 'var(--color-overlay)', backdropFilter: 'blur(4px)', animation: 'fade-in 0.2s ease' }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--color-border)', padding: 'var(--space-6)', width: '100%', maxWidth: '480px', boxShadow: '0 24px 48px -12px hsl(0 0% 0% / 0.35)' }}>
-
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`${uid}-title`}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 'var(--space-4)',
+        backgroundColor: 'var(--color-overlay)',
+        backdropFilter: 'blur(4px)',
+        animation: 'fade-in 0.2s ease',
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        style={{
+          background: 'var(--color-surface)',
+          borderRadius: 'var(--radius-xl)',
+          border: '1px solid var(--color-border)',
+          padding: 'var(--space-6)',
+          width: '100%',
+          maxWidth: '480px',
+          boxShadow: 'var(--shadow-xl)',
+        }}
+      >
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-5)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-4)' }}>
           <div>
-            <h2 id={`${uid}-title`} style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>Review Pengajuan Swap</h2>
-            <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>oleh {swap.requester.fullName}</p>
+            <h2 id={`${uid}-title`} style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
+              Review Pengajuan Swap
+            </h2>
+            <p style={{ margin: '4px 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              Diajukan oleh {swap.requester.fullName} ({swap.requester.nim})
+            </p>
           </div>
-          <button onClick={onClose} aria-label="Tutup" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '4px' }}><X size={20} /></button>
+          <button
+            onClick={onClose}
+            aria-label="Tutup"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '4px' }}
+          >
+            <X size={20} />
+          </button>
         </div>
 
         {/* Swap Info */}
-        <div style={{ background: 'var(--color-surface-elevated)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-4)', marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+        <div
+          style={{
+            background: 'var(--color-surface-alt)',
+            borderRadius: 'var(--radius-lg)',
+            padding: 'var(--space-4)',
+            marginBottom: 'var(--space-4)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-3)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
           <div style={{ flex: 1, textAlign: 'center' }}>
-            <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Dari</div>
-            <div style={{ fontWeight: 700, color: 'var(--color-danger)', fontSize: '0.9rem' }}>{swap.fromSchedule.dayOfWeek}</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{swap.fromSchedule.slotStart}├óΓé¼ΓÇ£{swap.fromSchedule.slotEnd}</div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 'var(--weight-bold)', marginBottom: 2 }}>
+              Dari
+            </div>
+            <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-error)', fontSize: 'var(--text-sm)' }}>
+              {swap.fromSchedule.dayOfWeek}
+            </div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text)' }}>
+              {swap.fromSchedule.slotStart} – {swap.fromSchedule.slotEnd}
+            </div>
           </div>
-          <div style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center' }}>
-            <ArrowLeftRight size={20} />
-          </div>
+          <ArrowLeftRight size={18} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} aria-hidden="true" />
           <div style={{ flex: 1, textAlign: 'center' }}>
-            <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '4px' }}>Ke</div>
-            <div style={{ fontWeight: 700, color: 'var(--color-success)', fontSize: '0.9rem' }}>{swap.toSchedule.dayOfWeek}</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{swap.toSchedule.slotStart}├óΓé¼ΓÇ£{swap.toSchedule.slotEnd}</div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 'var(--weight-bold)', marginBottom: 2 }}>
+              Ke
+            </div>
+            <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-success)', fontSize: 'var(--text-sm)' }}>
+              {swap.toSchedule.dayOfWeek}
+            </div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text)' }}>
+              {swap.toSchedule.slotStart} – {swap.toSchedule.slotEnd}
+            </div>
           </div>
         </div>
 
         {/* Reason */}
-        <div style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', background: 'hsl(210 100% 60% / 0.06)', borderRadius: 'var(--radius-md)', borderLeft: '3px solid hsl(210 80% 60%)' }}>
-          <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Alasan</div>
-          <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--color-text-primary)' }}>{swap.reason}</p>
+        <div
+          style={{
+            marginBottom: 'var(--space-4)',
+            padding: 'var(--space-3)',
+            background: 'var(--color-info-light)',
+            borderRadius: 'var(--radius-md)',
+            borderLeft: '3px solid var(--color-info)',
+          }}
+        >
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-info)', fontWeight: 'var(--weight-bold)', textTransform: 'uppercase', marginBottom: 2 }}>
+            Alasan Pemohon
+          </div>
+          <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>{swap.reason}</p>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
           {/* Action selector */}
           <div>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: '8px' }}>Keputusan *</div>
+            <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)', marginBottom: 'var(--space-2)' }}>
+              Keputusan Admin *
+            </div>
             <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-              {(['APPROVE', 'REJECT'] as const).map(a => (
-                <label key={a} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', borderRadius: 'var(--radius-md)', border: `2px solid ${action === a ? (a === 'APPROVE' ? 'var(--color-success)' : 'var(--color-danger)') : 'var(--color-border)'}`, background: action === a ? (a === 'APPROVE' ? 'hsl(142 70% 45% / 0.1)' : 'hsl(0 70% 55% / 0.1)') : 'transparent', cursor: 'pointer', transition: 'all 0.15s', fontWeight: 700, fontSize: '0.875rem', color: action === a ? (a === 'APPROVE' ? 'var(--color-success)' : 'var(--color-danger)') : 'var(--color-text-muted)' }}>
-                  <input type="radio" name="action" value={a} checked={action === a} onChange={() => setAction(a)} style={{ display: 'none' }} />
-                  {a === 'APPROVE' ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
+              {(['APPROVE', 'REJECT'] as const).map((a) => (
+                <button
+                  type="button"
+                  key={a}
+                  onClick={() => setAction(a)}
+                  className={`btn ${action === a ? (a === 'APPROVE' ? 'btn-primary' : 'btn-danger') : 'btn-secondary'}`}
+                  style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-2)' }}
+                >
+                  {a === 'APPROVE' ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
                   {a === 'APPROVE' ? 'Setujui' : 'Tolak'}
-                </label>
+                </button>
               ))}
             </div>
           </div>
 
           {/* Admin note */}
-          <div>
-            <label htmlFor={`${uid}-note`} style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'block', marginBottom: '6px' }}>
-              Catatan Admin {action === 'REJECT' && <span style={{ color: 'var(--color-danger)' }}>*</span>}
+          <div className="form-group" style={{ margin: 0 }}>
+            <label htmlFor={`${uid}-note`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>
+              Catatan Admin {action === 'REJECT' && <span style={{ color: 'var(--color-error)' }}>*</span>}
             </label>
-            <textarea id={`${uid}-note`} value={adminNote} onChange={e => setAdminNote(e.target.value)}
-              placeholder={action === 'APPROVE' ? 'Opsional ├óΓé¼ΓÇ¥ misal: sudah berkoordinasi dengan koordinator' : 'Wajib ├óΓé¼ΓÇ¥ jelaskan alasan penolakan'}
-              required={action === 'REJECT'} rows={3}
-              style={{ width: '100%', padding: '10px 12px', background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)', fontSize: '0.875rem', resize: 'vertical', boxSizing: 'border-box' }} />
+            <textarea
+              id={`${uid}-note`}
+              className="form-input"
+              value={adminNote}
+              onChange={(e) => setAdminNote(e.target.value)}
+              placeholder={action === 'APPROVE' ? 'Opsional — misal: sudah dikonfirmasi dengan koordinator' : 'Wajib — jelaskan alasan penolakan swap'}
+              required={action === 'REJECT'}
+              rows={3}
+              style={{ resize: 'vertical' }}
+            />
           </div>
 
           {action === 'APPROVE' && (
-            <div style={{ display: 'flex', gap: '8px', padding: '10px 14px', background: 'hsl(38 90% 55% / 0.1)', border: '1px solid hsl(38 90% 55% / 0.3)', borderRadius: 'var(--radius-md)', color: 'hsl(38 90% 55%)', fontSize: '0.8rem', alignItems: 'flex-start' }}>
-              <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: '1px' }} />
-              <span>Jika disetujui, jadwal <strong>{swap.fromSchedule.dayOfWeek}</strong> dan <strong>{swap.toSchedule.dayOfWeek}</strong> akan ditukar secara permanen.</span>
+            <div style={{ display: 'flex', gap: 8, padding: 'var(--space-2) var(--space-3)', background: 'var(--color-warning-light)', border: '1px solid var(--color-warning)', borderRadius: 'var(--radius-md)', color: 'var(--color-accent-text)', fontSize: 'var(--text-xs)', alignItems: 'flex-start' }}>
+              <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} aria-hidden="true" />
+              <span>Jika disetujui, jadwal kasir <strong>{swap.fromSchedule.dayOfWeek}</strong> dan <strong>{swap.toSchedule.dayOfWeek}</strong> akan langsung ditukar secara permanen.</span>
             </div>
           )}
 
           {error && (
-            <div role="alert" style={{ display: 'flex', gap: '8px', padding: '10px 14px', background: 'hsl(0 70% 55% / 0.12)', border: '1px solid hsl(0 70% 55% / 0.3)', borderRadius: 'var(--radius-md)', color: 'hsl(0 70% 65%)', fontSize: '0.85rem', alignItems: 'center' }}>
-              <AlertTriangle size={14} /> {error}
+            <div role="alert" style={{ display: 'flex', gap: 8, padding: 'var(--space-2) var(--space-3)', background: 'var(--color-error-light)', border: '1px solid var(--color-error)', borderRadius: 'var(--radius-md)', color: 'var(--color-error)', fontSize: 'var(--text-xs)', alignItems: 'center' }}>
+              <AlertTriangle size={14} aria-hidden="true" /> {error}
             </div>
           )}
 
           <div style={{ display: 'flex', gap: 'var(--space-3)', paddingTop: 'var(--space-2)' }}>
-            <button type="button" onClick={onClose} style={{ flex: 1, padding: '10px', background: 'var(--color-surface-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-secondary)', cursor: 'pointer', fontWeight: 600 }}>Batal</button>
-            <button type="submit" disabled={loading}
-              style={{ flex: 2, padding: '10px', background: action === 'APPROVE' ? 'var(--color-success)' : 'var(--color-danger)', border: 'none', borderRadius: 'var(--radius-md)', color: '#fff', cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', opacity: loading ? 0.7 : 1, transition: 'opacity 0.2s' }}>
-              {loading ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Memproses...</> : (action === 'APPROVE' ? <><CheckCircle2 size={15} /> Setujui Swap</> : <><XCircle size={15} /> Tolak Pengajuan</>)}
+            <button type="button" onClick={onClose} className="btn btn-secondary" style={{ flex: 1 }}>
+              Batal
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className={`btn ${action === 'APPROVE' ? 'btn-primary' : 'btn-danger'}`}
+              style={{ flex: 2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-2)' }}
+            >
+              {loading ? (
+                <><Loader2 size={16} className="spin-icon" /> Memproses...</>
+              ) : action === 'APPROVE' ? (
+                <><CheckCircle2 size={16} /> Setujui Swap</>
+              ) : (
+                <><XCircle size={16} /> Tolak Pengajuan</>
+              )}
             </button>
           </div>
         </form>
@@ -410,7 +605,9 @@ function ReviewModal({
   );
 }
 
-// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Main Page ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+// ─────────────────────────────────────────────────────────────
+// Main Page
+// ─────────────────────────────────────────────────────────────
 const FILTER_OPTIONS: { label: string; value: string }[] = [
   { label: 'Menunggu', value: 'PENDING' },
   { label: 'Semua', value: 'ALL' },
@@ -429,115 +626,197 @@ export default function SwapRequestPage() {
     setLoading(true);
     try {
       const res = await fetch(`/api/admin/swap-request?status=${filter}`);
-      const json = await res.json();
+      const json = await res.json() as { data?: SwapRequest[] };
       setRequests(json.data ?? []);
-    } catch { /* silent */ }
-    finally { setLoading(false); }
+    } catch {
+      /* silent */
+    } finally {
+      setLoading(false);
+    }
   }, [filter]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
-  const pendingCount = requests.filter(r => r.status === 'PENDING').length;
+  const pendingCount = requests.filter((r) => r.status === 'PENDING').length;
 
   return (
-    <div style={{ padding: 'var(--space-6)', maxWidth: '1000px' }}>
+    <div>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 'var(--space-6)', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-lg)', background: 'hsl(280 70% 65% / 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'hsl(280 70% 65%)' }}>
-            <ArrowLeftRight size={20} />
+      <div className="page-header">
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <h1 className="page-title">Riwayat Tukar Shift</h1>
+            {pendingCount > 0 && filter === 'PENDING' && (
+              <span className="badge badge-warning" style={{ fontSize: 'var(--text-xs)' }}>
+                {pendingCount} Menunggu
+              </span>
+            )}
           </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-              <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>Riwayat Tukar Shift</h1>
-              {pendingCount > 0 && filter === 'PENDING' && (
-                <span style={{ background: 'var(--color-danger)', color: '#fff', borderRadius: '999px', fontSize: '0.7rem', fontWeight: 800, padding: '2px 8px', minWidth: '20px', textAlign: 'center' }}>
-                  {pendingCount}
-                </span>
-              )}
-            </div>
-            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>Review pengajuan kasir dan catat swap yang dikonfirmasi via WhatsApp</p>
-          </div>
+          <p className="page-subtitle">Review pengajuan kasir dan catat permohonan tukar jadwal shift</p>
         </div>
 
         {/* Tombol Tambah Manual */}
         <button
           id="btn-tambah-swap-manual"
           onClick={() => setShowManual(true)}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-lg)', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: '0.875rem', whiteSpace: 'nowrap', boxShadow: '0 2px 8px hsl(220 80% 60% / 0.3)', transition: 'all 0.15s' }}
+          className="btn btn-primary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}
         >
-          <PlusCircle size={16} /> Tambah Manual
+          <PlusCircle size={16} aria-hidden="true" /> Tambah Manual
         </button>
       </div>
 
       {/* Filter Tabs */}
-      <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-5)', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: '4px', width: 'fit-content' }}>
-        {FILTER_OPTIONS.map(opt => (
-          <button key={opt.value} onClick={() => setFilter(opt.value)}
-            style={{ padding: '7px 16px', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, transition: 'all 0.15s', background: filter === opt.value ? 'var(--color-primary)' : 'transparent', color: filter === opt.value ? '#fff' : 'var(--color-text-secondary)' }}>
-            {opt.label}
-          </button>
-        ))}
+      <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
+        <div className="card-body" style={{ padding: 'var(--space-3) var(--space-4)' }}>
+          <div
+            role="group"
+            aria-label="Pilih filter status pengajuan"
+            style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}
+          >
+            {FILTER_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setFilter(opt.value)}
+                className={`btn btn-sm ${filter === opt.value ? 'btn-primary' : 'btn-secondary'}`}
+                aria-pressed={filter === opt.value}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* List */}
       {loading ? (
-        <div className="empty-state" aria-live="polite" aria-busy="true">
-          <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', opacity: 1 }} />
-          <p style={{ margin: 0, fontSize: '0.875rem' }}>Memuat pengajuan...</p>
+        <div className="empty-state" aria-live="polite" aria-busy="true" style={{ padding: 'var(--space-12)' }}>
+          <Loader2 size={28} className="spin-icon" style={{ opacity: 1 }} />
+          <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>Memuat pengajuan tukar shift...</p>
         </div>
       ) : requests.length === 0 ? (
-        <div className="empty-state" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-xl)' }}>
-          <ArrowLeftRight size={40} />
-          <p style={{ margin: 0, fontWeight: 600 }}>Tidak ada pengajuan</p>
-          <p style={{ margin: 0, fontSize: '0.8rem' }}>
-            {filter === 'PENDING' ? 'Semua pengajuan sudah diproses' : 'Tidak ada pengajuan dengan status ini'}
-          </p>
+        <div className="card">
+          <div className="empty-state" style={{ padding: 'var(--space-12)' }}>
+            <ArrowLeftRight size={36} aria-hidden="true" />
+            <p style={{ margin: 0, fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
+              Tidak ada pengajuan tukar shift
+            </p>
+            <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              {filter === 'PENDING'
+                ? 'Semua permohonan tukar shift kasir telah diproses.'
+                : 'Belum ada data pengajuan untuk kategori filter ini.'}
+            </p>
+          </div>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          {requests.map(r => (
-            <div key={r.id} style={{ background: 'var(--color-surface)', border: `1px solid ${r.status === 'PENDING' ? 'hsl(38 90% 55% / 0.4)' : 'var(--color-border)'}`, borderRadius: 'var(--radius-xl)', padding: 'var(--space-4) var(--space-5)', display: 'flex', alignItems: 'center', gap: 'var(--space-4)', flexWrap: 'wrap', transition: 'box-shadow 0.15s', boxShadow: r.status === 'PENDING' ? '0 0 0 3px hsl(38 90% 55% / 0.08)' : 'none' }}>
-
-              {/* Requester info */}
-              <div style={{ flex: '1 1 160px', minWidth: 0 }}>
-                <div style={{ fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: '2px' }}>{r.requester.fullName}</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>{r.requester.nim} ├é┬╖ {r.requester.programStudi}</div>
-              </div>
-
-              {/* Swap arrow */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flex: '0 0 auto' }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Dari</div>
-                  <div style={{ fontWeight: 700, color: 'var(--color-danger)', fontSize: '0.9rem' }}>{r.fromSchedule.dayOfWeek}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>{r.fromSchedule.slotStart}├óΓé¼ΓÇ£{r.fromSchedule.slotEnd}</div>
+          {requests.map((r) => (
+            <div
+              key={r.id}
+              className="card"
+              style={{
+                borderLeft: r.status === 'PENDING' ? '3px solid var(--color-warning)' : '1px solid var(--color-border)',
+                boxShadow: r.status === 'PENDING' ? 'var(--shadow-sm)' : 'none',
+              }}
+            >
+              <div
+                className="card-body"
+                style={{
+                  padding: 'var(--space-4) var(--space-5)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 'var(--space-4)',
+                  flexWrap: 'wrap',
+                }}
+              >
+                {/* 1. Pemohon */}
+                <div style={{ flex: '1 1 200px', minWidth: '180px' }}>
+                  <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', fontSize: 'var(--text-sm)' }}>
+                    {r.requester.fullName}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                    {r.requester.nim} • {r.requester.programStudi}
+                  </div>
                 </div>
-                <ArrowLeftRight size={16} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Ke</div>
-                  <div style={{ fontWeight: 700, color: 'var(--color-success)', fontSize: '0.9rem' }}>{r.toSchedule.dayOfWeek}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>{r.toSchedule.slotStart}├óΓé¼ΓÇ£{r.toSchedule.slotEnd}</div>
-                </div>
-              </div>
 
-              {/* Reason snippet */}
-              <div style={{ flex: '1 1 160px', minWidth: 0 }}>
-                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', fontWeight: 700, marginBottom: '2px', textTransform: 'uppercase' }}>Alasan</div>
-                <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>{r.reason}</div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                  {new Date(r.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
-                </div>
-              </div>
+                {/* 2. Alur Swap */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-3)',
+                    background: 'var(--color-surface-alt)',
+                    padding: 'var(--space-2) var(--space-4)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-border)',
+                  }}
+                >
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 'var(--weight-bold)' }}>
+                      Dari
+                    </div>
+                    <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-error)', fontSize: 'var(--text-xs)' }}>
+                      {r.fromSchedule.dayOfWeek}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                      {r.fromSchedule.slotStart}–{r.fromSchedule.slotEnd}
+                    </div>
+                  </div>
 
-              {/* Status + action */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flex: '0 0 auto' }}>
-                <SwapBadge status={r.status} />
-                {r.status === 'PENDING' && (
-                  <button onClick={() => setSelected(r)}
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px', minHeight: '44px', background: 'var(--color-primary)', border: 'none', borderRadius: 'var(--radius-md)', color: '#fff', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                    <UserCheck size={14} /> Review
-                  </button>
-                )}
+                  <ArrowLeftRight size={14} style={{ color: 'var(--color-text-muted)' }} aria-hidden="true" />
+
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 'var(--weight-bold)' }}>
+                      Ke
+                    </div>
+                    <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-success)', fontSize: 'var(--text-xs)' }}>
+                      {r.toSchedule.dayOfWeek}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                      {r.toSchedule.slotStart}–{r.toSchedule.slotEnd}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Alasan */}
+                <div style={{ flex: '1 1 200px', minWidth: '160px' }}>
+                  <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', fontWeight: 'var(--weight-bold)', textTransform: 'uppercase' }}>
+                    Alasan
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 'var(--text-xs)',
+                      color: 'var(--color-text)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      maxWidth: '220px',
+                    }}
+                    title={r.reason}
+                  >
+                    {r.reason}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                    Diajukan: {new Date(r.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </div>
+                </div>
+
+                {/* 4. Status Badge & Action */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                  <SwapBadge status={r.status} />
+                  {r.status === 'PENDING' && (
+                    <button
+                      onClick={() => setSelected(r)}
+                      className="btn btn-sm btn-primary"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)', whiteSpace: 'nowrap' }}
+                    >
+                      <UserCheck size={14} aria-hidden="true" /> Review
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
@@ -557,7 +836,10 @@ export default function SwapRequestPage() {
       {showManual && (
         <TambahManualModal
           onClose={() => setShowManual(false)}
-          onSuccess={() => { fetchData(); setFilter('APPROVED'); }}
+          onSuccess={() => {
+            fetchData();
+            setFilter('APPROVED');
+          }}
         />
       )}
     </div>

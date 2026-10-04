@@ -27,11 +27,61 @@ function getLatestBackupFile(backupsDir: string): string | null {
   return files[0] ?? null;
 }
 
+/**
+ * Pengaman target (Fase 0.2).
+ * Restore MENGHAPUS lalu mengisi ulang data. Skrip ini membaca .env.local yang secara
+ * default menunjuk PRODUKSI, jadi target harus dikonfirmasi eksplisit:
+ *   RESTORE_TARGET_REF=<project-ref-target>  harus sama persis dengan ref di DATABASE_URL.
+ * Tanpa itu skrip berhenti SEBELUM menyentuh database. Kredensial tidak pernah dicetak.
+ */
+function extractProjectRef(databaseUrl: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(databaseUrl);
+  } catch {
+    return null;
+  }
+  const user = decodeURIComponent(parsed.username);
+  const dot = user.indexOf('.');
+  if (dot > 0 && dot < user.length - 1) return user.slice(dot + 1); // pooler: postgres.<ref>
+  const direct = /^db\.([a-z0-9]+)\.supabase\.co$/.exec(parsed.hostname); // koneksi langsung
+  return direct?.[1] ?? null;
+}
+
+function assertRestoreTarget(): void {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) throw new Error('DATABASE_URL kosong. Restore dibatalkan.');
+
+  const actualRef = extractProjectRef(databaseUrl);
+  if (!actualRef) {
+    throw new Error('Tidak bisa menentukan project ref dari DATABASE_URL. Restore dibatalkan demi keamanan.');
+  }
+
+  const masked = `${actualRef.slice(0, 3)}***${actualRef.slice(-2)}`;
+  process.stdout.write(`🎯 Target restore (project ref): ${masked}\n`);
+
+  const declared = process.env.RESTORE_TARGET_REF?.trim();
+  if (!declared) {
+    throw new Error(
+      'RESTORE_TARGET_REF belum diisi. Restore MENGHAPUS data pada target di atas. ' +
+        'Isi RESTORE_TARGET_REF dengan project ref LENGKAP target yang dimaksud, lalu jalankan ulang. ' +
+        '(Untuk staging: set DATABASE_URL dan RESTORE_TARGET_REF ke nilai staging di shell, bukan .env.local.)'
+    );
+  }
+  if (declared !== actualRef) {
+    throw new Error(
+      'RESTORE_TARGET_REF tidak cocok dengan project ref pada DATABASE_URL. Restore dibatalkan: ' +
+        'kemungkinan salah target.'
+    );
+  }
+}
+
 async function runCliRestore() {
   process.stdout.write('\n⚠️ [DEVOPS RESTORE] Memulai inisialisasi pemulihan database...\n');
   const startTime = Date.now();
 
   try {
+    assertRestoreTarget();
     const backupsDir = path.resolve(process.cwd(), 'backups');
     const customFilePath = process.argv[2];
     const targetFilePath = customFilePath ? path.resolve(customFilePath) : getLatestBackupFile(backupsDir);

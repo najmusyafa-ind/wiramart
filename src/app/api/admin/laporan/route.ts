@@ -1,67 +1,56 @@
 // =============================================================
-// GET /api/admin/laporan — Rekap transaksi per periode
+// GET /api/admin/laporan — Rekap keuangan per periode
 // Query params: period=daily|weekly|monthly|semi_annual
-//               dateFrom=YYYY-MM-DD (opsional override)
-//               dateTo=YYYY-MM-DD
+//               dateFrom=YYYY-MM-DD & dateTo=YYYY-MM-DD (override, WIB, maks 400 hari)
+//
+// Semua angka keuangan berasal dari lib/finance/report.ts (satu sumber kebenaran):
+// batas hari WIB, data uji (is_test) dikecualikan, laba hanya dari item ber-HPP,
+// Laba Bersih = Laba Kotor − Biaya Operasional.
+// Nama field lama (grossAmount, grossProfit, amountCash, …) dipertahankan
+// untuk kompatibilitas dengan widget dashboard.
 // =============================================================
 
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import { transactions, transactionItems, employees, shifts } from '@/lib/db/schema';
-import { eq, and, gte, lte, sql, count, isNotNull } from 'drizzle-orm';
+import { eq, and, gte, lt, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
-import { getPeriodRange } from '@/lib/utils/helpers';
+import {
+  getFinancialReport,
+  resolveReportRange,
+  InvalidRangeError,
+  type PeriodKey,
+} from '@/lib/finance/report';
 
 export const runtime = 'nodejs';
+
+const PERIODS: readonly PeriodKey[] = ['daily', 'weekly', 'monthly', 'semi_annual'];
 
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
 
-  const { searchParams } = new URL(req.url);
-  const period = searchParams.get('period') as 'daily' | 'weekly' | 'monthly' | 'semi_annual' | null;
-  const dateFrom = searchParams.get('dateFrom');
-  const dateTo   = searchParams.get('dateTo');
+  const sp = new URL(req.url).searchParams;
+  const rawPeriod = sp.get('period');
+  const period = PERIODS.find((p) => p === rawPeriod) ?? null;
 
-  let start: Date, end: Date, label: string;
-
-  if (dateFrom && dateTo) {
-    start = new Date(dateFrom + 'T00:00:00+07:00');
-    end   = new Date(dateTo + 'T23:59:59+07:00');
-    label = `${dateFrom} s/d ${dateTo}`;
-  } else {
-    const range = getPeriodRange(period ?? 'daily');
-    start = range.start;
-    end   = range.end;
-    label = range.label;
+  let range;
+  try {
+    range = resolveReportRange({
+      period,
+      dateFrom: sp.get('dateFrom'),
+      dateTo: sp.get('dateTo'),
+    });
+  } catch (err) {
+    if (err instanceof InvalidRangeError) return apiError(err.message, 400);
+    throw err;
   }
 
   try {
-    // ── Summary (omzet, laba, jumlah transaksi, breakdown Cash/QRIS) ──
-    const [summary] = await db
-      .select({
-        // Total omzet dan profit (COMPLETED only)
-        grossAmount:  sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED'), 0)`,
-        grossProfit:  sql<string>`COALESCE(SUM(${transactions.grossProfit}) FILTER (WHERE ${transactions.status} = 'COMPLETED'), 0)`,
-        totalHpp:     sql<string>`COALESCE(SUM(${transactions.totalHpp}) FILTER (WHERE ${transactions.status} = 'COMPLETED'), 0)`,
-        // Jumlah transaksi per status
-        totalCount:   count(transactions.id),
-        countCash:    sql<number>`COUNT(*) FILTER (WHERE ${transactions.paymentMethod} = 'CASH' AND ${transactions.status} = 'COMPLETED')`,
-        countQris:    sql<number>`COUNT(*) FILTER (WHERE ${transactions.paymentMethod} = 'QRIS' AND ${transactions.status} = 'COMPLETED')`,
-        countVoid:    sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'VOID')`,
-        // ── BARU: Nominal Cash vs QRIS (breakdown per metode pembayaran) ──
-        amountCash:   sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'CASH' AND ${transactions.status} = 'COMPLETED'), 0)`,
-        amountQris:   sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'QRIS' AND ${transactions.status} = 'COMPLETED'), 0)`,
-      })
-      .from(transactions)
-      .where(
-        and(
-          gte(transactions.createdAt, start),
-          lte(transactions.createdAt, end),
-        ),
-      );
+    const report = await getFinancialReport(range);
+    const s = report.summary;
 
-    // ── Top 5 produk terlaris ────────────────────────────────────
+    // ── Top 5 produk terlaris (COMPLETED, bukan data uji) ──────
     const topProducts = await db
       .select({
         productName:  transactionItems.productNameSnapshot,
@@ -73,112 +62,108 @@ export async function GET(req: NextRequest) {
       .where(
         and(
           eq(transactions.status, 'COMPLETED'),
-          gte(transactions.createdAt, start),
-          lte(transactions.createdAt, end),
+          eq(transactions.isTest, false),
+          gte(transactions.createdAt, range.start),
+          lt(transactions.createdAt, range.endExclusive),
         ),
       )
       .groupBy(transactionItems.productNameSnapshot)
       .orderBy(sql`SUM(${transactionItems.qty}) DESC`)
       .limit(5);
 
-    // ── Transaksi per hari (untuk chart) ────────────────────────
-    const dailyChart = await db
-      .select({
-        day:         sql<string>`DATE(${transactions.createdAt} AT TIME ZONE 'Asia/Jakarta')`,
-        revenue:     sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED'), 0)`,
-        amountCash:  sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'CASH' AND ${transactions.status} = 'COMPLETED'), 0)`,
-        amountQris:  sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'QRIS' AND ${transactions.status} = 'COMPLETED'), 0)`,
-        profit:      sql<string>`COALESCE(SUM(${transactions.grossProfit}) FILTER (WHERE ${transactions.status} = 'COMPLETED'), 0)`,
-        txCount:     count(transactions.id),
-      })
-      .from(transactions)
-      .where(
-        and(
-          gte(transactions.createdAt, start),
-          lte(transactions.createdAt, end),
-        ),
-      )
-      .groupBy(sql`DATE(${transactions.createdAt} AT TIME ZONE 'Asia/Jakarta')`)
-      .orderBy(sql`DATE(${transactions.createdAt} AT TIME ZONE 'Asia/Jakarta')`);
-
-    // ── 20 Transaksi terbaru (untuk tabel + tombol Void) ─────────
+    // ── 20 transaksi terbaru (tabel + tombol Void), bukan data uji ──
     const recentTransactions = await db
       .select({
-        id:              transactions.id,
-        invoiceNumber:   transactions.invoiceNumber,
-        paymentMethod:   transactions.paymentMethod,
-        status:          transactions.status,
-        grossAmount:     transactions.grossAmount,
-        cashReceived:    transactions.cashReceived,
-        changeAmount:    transactions.changeAmount,
-        voidReason:      transactions.voidReason,
-        voidedAt:        transactions.voidedAt,
-        createdAt:       transactions.createdAt,
-        // Nama kasir dari tabel employees
-        employeeName:    employees.fullName,
-        employeeId:      employees.id,
+        id:            transactions.id,
+        invoiceNumber: transactions.invoiceNumber,
+        paymentMethod: transactions.paymentMethod,
+        status:        transactions.status,
+        grossAmount:   transactions.grossAmount,
+        cashReceived:  transactions.cashReceived,
+        changeAmount:  transactions.changeAmount,
+        voidReason:    transactions.voidReason,
+        voidedAt:      transactions.voidedAt,
+        createdAt:     transactions.createdAt,
+        employeeName:  employees.fullName,
+        employeeId:    employees.id,
       })
       .from(transactions)
       .innerJoin(employees, eq(transactions.employeeId, employees.id))
       .where(
         and(
-          gte(transactions.createdAt, start),
-          lte(transactions.createdAt, end),
+          eq(transactions.isTest, false),
+          gte(transactions.createdAt, range.start),
+          lt(transactions.createdAt, range.endExclusive),
         ),
       )
       .orderBy(sql`${transactions.createdAt} DESC`)
       .limit(20);
 
-    // ── Shift dalam periode (dengan modal awal) ───────────────────────
+    // ── Shift dalam periode (dengan modal awal) ────────────────
     const shiftList = await db
       .select({
-        shiftId:     shifts.id,
-        clockIn:     shifts.clockIn,
-        clockOut:    shifts.clockOut,
-        status:      shifts.status,
-        modalAwal:   shifts.modalAwal,
-        kasirName:   employees.fullName,
-        kasirNim:    employees.nim,
+        shiftId:   shifts.id,
+        clockIn:   shifts.clockIn,
+        clockOut:  shifts.clockOut,
+        status:    shifts.status,
+        modalAwal: shifts.modalAwal,
+        kasirName: employees.fullName,
+        kasirNim:  employees.nim,
       })
       .from(shifts)
       .innerJoin(employees, eq(shifts.employeeId, employees.id))
-      .where(
-        and(
-          gte(shifts.clockIn, start),
-          lte(shifts.clockIn, end),
-        ),
-      )
+      .where(and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)))
       .orderBy(sql`${shifts.clockIn} DESC`)
       .limit(100);
 
     return apiOk({
       period: period ?? 'custom',
-      label,
-      dateFrom: start.toISOString(),
-      dateTo:   end.toISOString(),
+      label: range.label,
+      dateFrom: range.start.toISOString(),
+      dateTo:   range.endExclusive.toISOString(),
+      rangeStartDate: range.startDate,
+      rangeEndDate:   range.endDate,
       summary: {
-        grossAmount:  parseFloat(summary?.grossAmount ?? '0'),
-        grossProfit:  parseFloat(summary?.grossProfit ?? '0'),
-        totalHpp:     parseFloat(summary?.totalHpp ?? '0'),
-        totalCount:   summary?.totalCount ?? 0,
-        countCash:    Number(summary?.countCash ?? 0),
-        countQris:    Number(summary?.countQris ?? 0),
-        countVoid:    Number(summary?.countVoid ?? 0),
-        // ── BARU: Breakdown nominal per metode ──
-        amountCash:   parseFloat(summary?.amountCash ?? '0'),
-        amountQris:   parseFloat(summary?.amountQris ?? '0'),
+        // — nama lama (kompatibel) —
+        grossAmount: s.omzet,
+        grossProfit: s.labaKotor,
+        totalHpp:    s.hppTerjual,
+        totalCount:  s.txCount,
+        countCash:   s.txCountCash,
+        countQris:   s.txCountQris,
+        countVoid:   s.voidCount,
+        amountCash:  s.omzetCash,
+        amountQris:  s.omzetQris,
+        // — baru —
+        voidAmount:       s.voidAmount,
+        omzetTanpaHpp:    s.omzetTanpaHpp,
+        unitTanpaHpp:     s.unitTanpaHpp,
+        labaLengkap:      s.labaLengkap,
+        biayaOperasional: s.biayaOperasional,
+        labaBersih:       s.labaBersih,
+        biayaPerKategori: s.biayaPerKategori,
       },
+      daily: report.daily,
+      checks: report.checks,
+      // Kompatibilitas grafik lama
+      dailyChart: report.daily.map((d) => ({
+        day:        d.date,
+        revenue:    String(d.omzet),
+        amountCash: String(d.omzetCash),
+        amountQris: String(d.omzetQris),
+        profit:     String(d.labaKotor),
+        txCount:    d.txCount,
+      })),
       topProducts,
-      dailyChart,
       recentTransactions,
-      shifts: shiftList.map(s => ({
-        shiftId:   s.shiftId,
-        clockIn:   s.clockIn,
-        clockOut:  s.clockOut,
-        status:    s.status,
-        modalAwal: s.modalAwal ? parseFloat(s.modalAwal) : null,
-        kasirName: s.kasirName,
-        kasirNim:  s.kasirNim,
+      shifts: shiftList.map((sh) => ({
+        shiftId:   sh.shiftId,
+        clockIn:   sh.clockIn,
+        clockOut:  sh.clockOut,
+        status:    sh.status,
+        modalAwal: sh.modalAwal ? parseFloat(sh.modalAwal) : null,
+        kasirName: sh.kasirName,
+        kasirNim:  sh.kasirNim,
       })),
     });
   } catch {

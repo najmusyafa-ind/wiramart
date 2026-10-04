@@ -1,18 +1,34 @@
 // =============================================================
 // POST /api/kasir/transaksi — Buat transaksi baru
 // Body: { items: [{productId, qty}], paymentMethod: 'CASH'|'QRIS', cashReceived?: number }
+// Header (opsional): Idempotency-Key — 16–64 karakter [A-Za-z0-9_-], 1 kunci per percobaan checkout
 // Auth: employee JWT required
 //
 // v1.2 — RACE CONDITION FIX: Stok di-revalidasi ulang di dalam db.transaction()
 // dengan fresh read. Jika stok berubah sejak pre-check, transaksi di-rollback.
 // Semua mutasi (insert transaksi + items + update stok) atomic.
+//
+// v1.3 — Fase 0.4a:
+//  • Stok dikurangi lewat UPDATE atomik `stock_qty = stock_qty - n WHERE stock_qty >= n`
+//    (bukan nilai JS basi). Baris yang gagal guard → rollback seluruh transaksi.
+//  • Item di-update berurutan menurut productId (lock ordering → tanpa deadlock).
+//  • Nomor invoice memakai jam WIB (Asia/Jakarta) + acak kriptografis; bentrok → retry.
+//
+// v1.4 — Fase 0.4b (idempotensi, D17):
+//  • Kunci idempotensi unik per karyawan (unique index parsial di DB).
+//  • Kunci sama + isi belanja sama  → hasil transaksi yang sama (replay, tanpa stok ganda).
+//  • Kunci sama + isi belanja beda  → 409.
+//  • Urutan tx: INSERT transaksi dulu (merebut kunci), baru kurangi stok. Dengan begitu
+//    request kembar yang kalah balapan mendapat replay, bukan "stok tidak cukup".
+//  • Header opsional → klien lama tetap berfungsi selama masa transisi.
 // =============================================================
 
+import { createHash, randomInt } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { products, transactions, transactionItems, shifts } from '@/lib/db/schema';
-import { eq, and, isNull, inArray } from 'drizzle-orm';
+import { eq, and, isNull, inArray, gte, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export const runtime = 'nodejs';
@@ -35,18 +51,98 @@ const TransaksiSchema = z.object({
 
 // ─────────────────────────────────────────────────────────────
 // Invoice Number Generator
-// Format: INV-YYYYMMDD-HHmmss-RRR (tanggal + waktu + random 3 digit)
-// Random suffix untuk mencegah collision jika 2 transaksi di detik yang sama
+// Format: INVYYYYMMDDHHmmssRRR (tanggal + waktu WIB + random 3 digit)
+// Server (Vercel) berjalan di UTC, jadi zona waktu WIB dipaksa eksplisit.
+// Random suffix (crypto) untuk mencegah collision jika 2 transaksi di detik yang sama;
+// jika tetap bentrok (unique violation), transaksi diulang dengan nomor baru.
 // ─────────────────────────────────────────────────────────────
+const WIB_PARTS = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Jakarta',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+
 function generateInvoiceNumber(): string {
-  const now = new Date();
-  const pad = (n: number, len = 2) => String(n).padStart(len, '0');
+  const p: Record<string, string> = {};
+  for (const part of WIB_PARTS.formatToParts(new Date())) {
+    if (part.type !== 'literal') p[part.type] = part.value;
+  }
+  const rand = String(randomInt(0, 1000)).padStart(3, '0');
+  return `INV${p.year}${p.month}${p.day}${p.hour}${p.minute}${p.second}${rand}`;
+}
 
-  const date = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
-  const time = `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  const rand = pad(Math.floor(Math.random() * 1000), 3);
+const MAX_INVOICE_ATTEMPTS = 3;
 
-  return `INV${date}${time}${rand}`;
+// ─────────────────────────────────────────────────────────────
+// Idempotensi
+// ─────────────────────────────────────────────────────────────
+const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{16,64}$/;
+
+/** Sidik jari isi belanja (urutan item tidak berpengaruh) → 64 hex, muat di varchar(64). */
+function hashRequest(
+  items: ReadonlyArray<{ productId: string; qty: number }>,
+  paymentMethod: 'CASH' | 'QRIS',
+  cashReceived: number | undefined,
+): string {
+  const lines = items
+    .map((i): [string, number] => [i.productId, i.qty])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]));
+  return createHash('sha256')
+    .update(JSON.stringify({ lines, paymentMethod, cashReceived: cashReceived ?? null }))
+    .digest('hex');
+}
+
+/** Ambil kode error Postgres, baik langsung maupun terbungkus lewat rantai `cause`. */
+function readPgCode(err: unknown): string | undefined {
+  let cur: unknown = err;
+  for (let depth = 0; depth < 5 && typeof cur === 'object' && cur !== null; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+/** Cari transaksi hasil kunci ini. null = belum ada. */
+async function findReplay(employeeId: string, key: string, requestHash: string) {
+  const [row] = await db
+    .select({
+      id:            transactions.id,
+      invoiceNumber: transactions.invoiceNumber,
+      grossAmount:   transactions.grossAmount,
+      changeAmount:  transactions.changeAmount,
+      paymentMethod: transactions.paymentMethod,
+      requestHash:   transactions.requestHash,
+    })
+    .from(transactions)
+    .where(and(eq(transactions.employeeId, employeeId), eq(transactions.idempotencyKey, key)))
+    .limit(1);
+
+  if (!row) return null;
+
+  if (row.requestHash !== requestHash) {
+    return apiError(
+      'Kunci transaksi ini sudah dipakai untuk belanja yang berbeda. Muat ulang halaman kasir lalu coba lagi.',
+      409,
+    );
+  }
+
+  return apiOk(
+    {
+      transactionId: row.id,
+      invoiceNumber: row.invoiceNumber,
+      grossAmount:   Number(row.grossAmount),
+      changeAmount:  row.changeAmount === null ? null : Number(row.changeAmount),
+      paymentMethod: row.paymentMethod,
+      replayed:      true,
+    },
+    200,
+  );
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -57,6 +153,7 @@ export async function POST(req: NextRequest) {
   if (!payload || payload.role !== 'employee') {
     return apiError('Unauthorized', 401);
   }
+  const employeeId = payload.sub as string;
 
   // ── Parse & validasi body ───────────────────────────────────
   let body: unknown;
@@ -73,13 +170,31 @@ export async function POST(req: NextRequest) {
 
   const { items, paymentMethod, cashReceived } = parsed.data;
 
+  // ── Idempotensi: replay SEBELUM pre-check stok/shift ────────
+  // (setelah sukses, stok sudah berkurang & shift bisa saja sudah ditutup —
+  //  replay harus tetap mengembalikan hasil yang sama)
+  const rawKey = req.headers.get('idempotency-key');
+  let idempotencyKey: string | null = null;
+  if (rawKey !== null) {
+    if (!IDEMPOTENCY_KEY_RE.test(rawKey)) {
+      return apiError('Idempotency-Key tidak valid', 400);
+    }
+    idempotencyKey = rawKey;
+  }
+  const requestHash = hashRequest(items, paymentMethod, cashReceived);
+
+  if (idempotencyKey) {
+    const replay = await findReplay(employeeId, idempotencyKey, requestHash);
+    if (replay) return replay;
+  }
+
   // ── Cek shift aktif karyawan (di luar tx — READ ONLY check) ─
   const [activeShift] = await db
     .select({ id: shifts.id })
     .from(shifts)
     .where(
       and(
-        eq(shifts.employeeId, payload.sub as string),
+        eq(shifts.employeeId, employeeId),
         eq(shifts.status, 'ACTIVE'),
       ),
     )
@@ -164,41 +279,28 @@ export async function POST(req: NextRequest) {
 
   // ─────────────────────────────────────────────────────────────
   // ATOMIC TRANSACTION — semua mutasi dalam satu DB transaction
-  // v1.2: Stok di-read ulang di dalam tx (fresh read) untuk mendeteksi
-  // race condition. Jika stok berubah antara pre-check dan tx → rollback.
+  // v1.3: Pengurangan stok = satu UPDATE atomik bersyarat per produk.
+  // Postgres mengunci baris saat UPDATE; transaksi konkuren menunggu lalu
+  // mengevaluasi ulang guard `stock_qty >= qty` terhadap nilai TERBARU.
+  // Guard gagal → throw → seluruh transaksi di-rollback (tanpa stok negatif).
+  // v1.4: INSERT transaksi lebih dulu agar kunci idempotensi direbut sebelum
+  // baris produk dikunci.
   // ─────────────────────────────────────────────────────────────
-  try {
-    const result = await db.transaction(async (tx) => {
-      // Step 1: Re-validasi stok FRESH di dalam transaksi
-      // Membaca stok terbaru untuk mencegah race condition concurrent transaksi
-      for (const item of items) {
-        const [freshProd] = await tx
-          .select({ id: products.id, name: products.name, stockQty: products.stockQty })
-          .from(products)
-          .where(
-            and(
-              eq(products.id, item.productId),
-              eq(products.isActive, true),
-              isNull(products.deletedAt),
-            ),
-          )
-          .limit(1);
+  // Urutan lock deterministik (by productId) agar 2 transaksi dengan produk
+  // sama tetapi urutan scan berbeda tidak saling deadlock.
+  const itemsByLockOrder = [...items].sort((a, b) =>
+    a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0,
+  );
 
-        if (!freshProd) {
-          throw new Error(`PRODUCT_NOT_FOUND:${item.productId}`);
-        }
-        if (freshProd.stockQty < item.qty) {
-          throw new Error(`INSUFFICIENT_STOCK:${freshProd.name}:${freshProd.stockQty}`);
-        }
-      }
-
-      // Step 2: Insert transaksi
+  const runTransaction = (invoiceNumber: string) =>
+    db.transaction(async (tx) => {
+      // Step 1: Insert transaksi (merebut kunci idempotensi bila ada)
       const [newTransaction] = await tx
         .insert(transactions)
         .values({
-          invoiceNumber:  generateInvoiceNumber(),
+          invoiceNumber,
           shiftId:        activeShift.id,
-          employeeId:     payload.sub as string,
+          employeeId,
           paymentMethod,
           status:         'COMPLETED',
           grossAmount:    grossAmount.toString(),
@@ -206,13 +308,15 @@ export async function POST(req: NextRequest) {
           grossProfit:    grossProfit.toString(),
           cashReceived:   cashReceived?.toString(),
           changeAmount:   changeAmount?.toString(),
+          idempotencyKey,
+          requestHash:    idempotencyKey ? requestHash : null,
         })
         .returning({
           id:            transactions.id,
           invoiceNumber: transactions.invoiceNumber,
         });
 
-      // Step 3: Insert semua transaction items (bulk insert)
+      // Step 2: Insert semua transaction items (bulk insert)
       await tx.insert(transactionItems).values(
         itemsToInsert.map((item) => ({
           ...item,
@@ -220,27 +324,69 @@ export async function POST(req: NextRequest) {
         })),
       );
 
-      // Step 4: Decrement stok setiap produk
-      for (const item of items) {
-        const prod = productRows.find((p) => p.id === item.productId)!;
-        await tx
+      // Step 3: Decrement stok atomik + guard
+      for (const item of itemsByLockOrder) {
+        const updated = await tx
           .update(products)
           .set({
-            // Gunakan DB expression untuk atomic decrement — lebih aman dari nilai JS
-            stockQty:  prod.stockQty - item.qty,
+            stockQty:  sql`${products.stockQty} - ${item.qty}`,
             updatedAt: new Date(),
           })
           .where(
             and(
               eq(products.id, item.productId),
-              // Guard tambahan: pastikan stok masih cukup saat update
-              // (defense in depth — seharusnya sudah terjaga di Step 1)
+              eq(products.isActive, true),
+              isNull(products.deletedAt),
+              gte(products.stockQty, item.qty),
             ),
-          );
+          )
+          .returning({ id: products.id });
+
+        if (updated.length === 0) {
+          // Bedakan penyebab agar pesan ke kasir akurat
+          const [fresh] = await tx
+            .select({ name: products.name, stockQty: products.stockQty })
+            .from(products)
+            .where(
+              and(
+                eq(products.id, item.productId),
+                eq(products.isActive, true),
+                isNull(products.deletedAt),
+              ),
+            )
+            .limit(1);
+          if (!fresh) throw new Error(`PRODUCT_NOT_FOUND:${item.productId}`);
+          throw new Error(`INSUFFICIENT_STOCK:${fresh.name}:${fresh.stockQty}`);
+        }
       }
 
       return newTransaction;
     });
+
+  try {
+    // Unique violation (23505) punya dua kemungkinan penyebab:
+    //  (a) kunci idempotensi sudah direbut request kembar → kembalikan hasilnya (replay)
+    //  (b) nomor invoice bentrok → ulang dengan nomor baru
+    // Stok ikut di-rollback oleh transaksi yang gagal, jadi aman diulang.
+    let result: Awaited<ReturnType<typeof runTransaction>> | undefined;
+    for (let attempt = 1; attempt <= MAX_INVOICE_ATTEMPTS; attempt++) {
+      try {
+        result = await runTransaction(generateInvoiceNumber());
+        break;
+      } catch (err) {
+        if (readPgCode(err) === '23505') {
+          if (idempotencyKey) {
+            const replay = await findReplay(employeeId, idempotencyKey, requestHash);
+            if (replay) return replay;
+          }
+          if (attempt < MAX_INVOICE_ATTEMPTS) continue;
+        }
+        throw err;
+      }
+    }
+    if (!result) {
+      return apiError('Transaksi gagal. Silakan coba lagi.', 500);
+    }
 
     return apiOk(
       {
@@ -253,20 +399,19 @@ export async function POST(req: NextRequest) {
       201,
     );
   } catch (err) {
-    const error = err as { code?: string; message?: string };
-
-    // Handle unique constraint violation (invoice number collision — sangat jarang)
-    if (error.code === '23505') {
+    // Unique constraint violation yang tidak terselesaikan (invoice bentrok berulang)
+    if (readPgCode(err) === '23505') {
       return apiError('Nomor invoice duplikat. Silakan coba lagi.', 503);
     }
 
     // Handle race condition: stok berubah di antara pre-check dan tx
-    if (typeof error.message === 'string') {
-      if (error.message.startsWith('PRODUCT_NOT_FOUND')) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === 'string') {
+      if (message.startsWith('PRODUCT_NOT_FOUND')) {
         return apiError('Produk tidak ditemukan atau sudah dihapus.', 400);
       }
-      if (error.message.startsWith('INSUFFICIENT_STOCK')) {
-        const parts = error.message.split(':');
+      if (message.startsWith('INSUFFICIENT_STOCK')) {
+        const parts = message.split(':');
         const prodName = parts[1] ?? 'produk';
         const remaining = parts[2] ?? '0';
         return apiError(

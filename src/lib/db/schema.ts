@@ -16,6 +16,7 @@ import {
   date,
   pgEnum,
   uniqueIndex,
+  unique,
   index,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -57,7 +58,8 @@ export const admins = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     // NIDN = Nomor Induk Dosen Nasional (login utama)
-    nidn: varchar('nidn', { length: 20 }).notNull().unique(),
+    // Produksi: varchar(100) (selaras Fase 0.3). Constraint produksi bernama admins_username_unique.
+    nidn: varchar('nidn', { length: 100 }).notNull().unique('admins_username_unique'),
     // NIDK = Nomor Induk Dosen Khusus (alternatif, opsional)
     nidk: varchar('nidk', { length: 20 }),
     // NULL = belum aktivasi akun (belum set password)
@@ -71,8 +73,12 @@ export const admins = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex('idx_admins_nidn_unique').on(table.nidn),
-    index('idx_admins_active').on(table.isActive, table.deletedAt),
+    // Produksi: unik hanya di antara admin yang belum dihapus (partial)
+    uniqueIndex('idx_admins_nidn_unique').on(table.nidn).where(sql`${table.deletedAt} IS NULL`),
+    uniqueIndex('idx_admins_nidk_unique')
+      .on(table.nidk)
+      .where(sql`${table.nidk} IS NOT NULL AND ${table.deletedAt} IS NULL`),
+    // Catatan Fase 0.3: idx_admins_active ada di deklarasi lama tetapi TIDAK ada di produksi.
   ],
 );
 
@@ -103,8 +109,9 @@ export const employees = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex('employees_nim_prodi_unique').on(table.nim, table.programStudi),
-    index('idx_employees_login').on(table.nim, table.isActive, table.deletedAt),
+    // Produksi: constraint UNIQUE bernama employees_nim_program_studi_key (bukan index)
+    unique('employees_nim_program_studi_key').on(table.nim, table.programStudi),
+    // Catatan Fase 0.3: idx_employees_login ada di deklarasi lama tetapi TIDAK ada di produksi.
   ],
 );
 
@@ -134,11 +141,12 @@ export const shifts = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // CRITICAL: Satu karyawan hanya bisa punya 1 shift ACTIVE sekaligus
-    // (enforced di application layer via check sebelum insert)
-    uniqueIndex('shifts_employee_one_active').on(table.employeeId, table.status),
+    // KOREKSI Fase 0.3: deklarasi lama `shifts_employee_one_active` UNIQUE(employee_id, status)
+    // TIDAK ada di produksi dan akan salah bila dibuat (menolak lebih dari satu shift CLOSED
+    // per karyawan). Aturan "satu shift ACTIVE" ditegakkan di application layer; index parsial
+    // yang benar akan ditambahkan lewat migrasi di Fase 2 setelah data dirapikan.
     index('idx_shifts_employee').on(table.employeeId, table.createdAt),
-    index('idx_shifts_clock_in').on(table.clockIn),
+    index('idx_shifts_clock_in').on(table.clockIn.desc()),
   ],
 );
 
@@ -202,10 +210,13 @@ export const products = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
-    index('idx_products_category').on(table.categoryId, table.deletedAt),
-    index('idx_products_active').on(table.isActive, table.stockQty, table.deletedAt),
-    // Partial unique index: barcode unik di antara produk yang belum dihapus
-    uniqueIndex('idx_products_barcode_unique').on(table.barcode),
+    // Produksi (setelah P3, 4 Okt 2026): barcode unik di antara produk yang belum dihapus.
+    // Mengganti idx_products_barcode_unique yang tidak mengecualikan produk terhapus.
+    uniqueIndex('idx_products_barcode_active_unique')
+      .on(table.barcode)
+      .where(sql`${table.barcode} IS NOT NULL AND ${table.deletedAt} IS NULL`),
+    // Catatan Fase 0.3: idx_products_category dan idx_products_active ada di deklarasi lama
+    // tetapi TIDAK ada di produksi.
   ],
 );
 
@@ -273,6 +284,13 @@ export const transactions = pgTable(
     voidedAt: timestamp('voided_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    // Penanda data uji coba (P3, 4 Okt 2026). Laporan keuangan akan mengecualikan is_test = true.
+    isTest: boolean('is_test').notNull().default(false),
+    // Idempotensi checkout (migration v1.5, Fase 0.4b). NULL untuk transaksi lama.
+    // Unik per karyawan; request_hash = sidik jari isi belanja agar kunci yang sama
+    // tidak bisa dipakai ulang untuk belanja berbeda.
+    idempotencyKey: varchar('idempotency_key', { length: 64 }),
+    requestHash: varchar('request_hash', { length: 64 }),
   },
   (table) => [
     // Critical for reports — most queries filter by date + status
@@ -280,6 +298,9 @@ export const transactions = pgTable(
     index('idx_trx_employee').on(table.employeeId, table.createdAt),
     index('idx_trx_shift').on(table.shiftId),
     index('idx_trx_payment').on(table.paymentMethod, table.createdAt),
+    uniqueIndex('idx_trx_employee_idempotency')
+      .on(table.employeeId, table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} IS NOT NULL`),
   ],
 );
 
@@ -394,6 +415,13 @@ export const shiftSchedules = pgTable(
   (table) => [
     index('idx_schedule_day_slot').on(table.dayOfWeek, table.slotStart, table.slotEnd),
     index('idx_schedule_employee').on(table.employeeId),
+    // Produksi: satu urutan per slot (constraint uq_schedule_slot_order)
+    unique('uq_schedule_slot_order').on(
+      table.dayOfWeek,
+      table.slotStart,
+      table.slotEnd,
+      table.orderInSlot,
+    ),
   ],
 );
 
@@ -427,6 +455,52 @@ export const auditLogs = pgTable(
 
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type NewAuditLog = typeof auditLogs.$inferInsert;
+
+// =============================================================
+// 12. OPERATING_EXPENSES (Biaya operasional — pengurang Laba Bersih)
+// migration_v1_6_operating_expenses.sql
+// amount = bilangan bulat rupiah. Soft-delete (deleted_at) — tidak di-hard-delete.
+// CHECK constraint (amount, kategori, kelengkapan soft-delete) & RLS ada di SQL.
+// =============================================================
+
+export const EXPENSE_CATEGORIES = [
+  'LISTRIK',
+  'PLASTIK_KEMASAN',
+  'HONOR',
+  'SEWA',
+  'TRANSPORT',
+  'KERUGIAN_BARANG',
+  'FEE_QRIS_BANK',
+  'LAINNYA',
+] as const;
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+export const operatingExpenses = pgTable(
+  'operating_expenses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Tanggal bisnis (WIB) 'YYYY-MM-DD'
+    expenseDate: date('expense_date', { mode: 'string' }).notNull(),
+    category: varchar('category', { length: 30 }).$type<ExpenseCategory>().notNull(),
+    description: varchar('description', { length: 200 }).notNull(),
+    amount: integer('amount').notNull(),
+    createdByAdminId: uuid('created_by_admin_id')
+      .notNull()
+      .references(() => admins.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedByAdminId: uuid('deleted_by_admin_id').references(() => admins.id),
+    deleteReason: varchar('delete_reason', { length: 200 }),
+  },
+  (table) => [
+    index('idx_opex_date_active')
+      .on(table.expenseDate)
+      .where(sql`${table.deletedAt} IS NULL`),
+  ],
+);
+
+export type OperatingExpense = typeof operatingExpenses.$inferSelect;
+export type NewOperatingExpense = typeof operatingExpenses.$inferInsert;
 
 // =============================================================
 // RELATIONS (for Drizzle query builder)
@@ -547,9 +621,9 @@ export const shiftSwapRequests = pgTable(
   },
   (table) => [
     // Query pending requests untuk dashboard admin
-    index('idx_swap_status_created').on(table.status, table.createdAt),
+    index('idx_swap_status_created').on(table.status, table.createdAt.desc()),
     // History swap per mahasiswa
-    index('idx_swap_requester').on(table.requesterId, table.createdAt),
+    index('idx_swap_requester').on(table.requesterId, table.createdAt.desc()),
   ],
 );
 
@@ -617,7 +691,7 @@ export const attendances = pgTable(
     // Query laporan per tanggal — paling sering dipakai dosen
     index('idx_attendance_date').on(table.attendanceDate, table.status),
     // Query riwayat per mahasiswa
-    index('idx_attendance_employee').on(table.employeeId, table.attendanceDate),
+    index('idx_attendance_employee').on(table.employeeId, table.attendanceDate.desc()),
   ],
 );
 
