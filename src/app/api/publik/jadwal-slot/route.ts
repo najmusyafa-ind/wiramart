@@ -5,7 +5,7 @@
 //         mengisi (nama) dan mana yang masih kosong
 // =============================================================
 
-import { eq, asc } from 'drizzle-orm';
+import { eq, asc, and, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { shiftSchedules, employees } from '@/lib/db/schema';
 import { apiOk, apiError } from '@/lib/utils/helpers';
@@ -18,7 +18,7 @@ const DAY_ORDER: Record<string, number> = {
 
 export async function GET(): Promise<Response> {
   try {
-    // Fetch semua slot aktif + nama karyawan jika sudah diisi
+    // Fetch semua slot aktif + nama karyawan jika sudah diisi dan belum dihapus
     const slots = await db
       .select({
         id:              shiftSchedules.id,
@@ -28,12 +28,19 @@ export async function GET(): Promise<Response> {
         orderInSlot:     shiftSchedules.orderInSlot,
         coordinatorName: shiftSchedules.coordinatorName,
         employeeId:      shiftSchedules.employeeId,
-        // Nama karyawan yang sudah mengisi (null jika kosong)
+        // Nama karyawan yang sudah mengisi (null jika kosong atau karyawan sudah dihapus)
         employeeName:    employees.fullName,
         employeeNim:     employees.nim,
       })
       .from(shiftSchedules)
-      .leftJoin(employees, eq(shiftSchedules.employeeId, employees.id))
+      .leftJoin(
+        employees,
+        and(
+          eq(shiftSchedules.employeeId, employees.id),
+          isNull(employees.deletedAt),
+          eq(employees.isActive, true),
+        ),
+      )
       .where(eq(shiftSchedules.isActive, true))
       .orderBy(
         asc(shiftSchedules.dayOfWeek),
@@ -93,17 +100,18 @@ export async function GET(): Promise<Response> {
         dayGroup.slots.push(slotGroup);
       }
 
+      const isFilled = Boolean(row.employeeId && row.employeeName);
       slotGroup.entries.push({
         id:           row.id,
         orderInSlot:  row.orderInSlot,
-        employeeId:   row.employeeId,
-        employeeName: row.employeeName ?? null,
-        employeeNim:  row.employeeNim ?? null,
-        isFilled:     !!row.employeeId,
+        employeeId:   isFilled ? row.employeeId : null,
+        employeeName: isFilled ? row.employeeName : null,
+        employeeNim:  isFilled ? row.employeeNim : null,
+        isFilled,
       });
 
       slotGroup.totalCount++;
-      if (row.employeeId) slotGroup.filledCount++;
+      if (isFilled) slotGroup.filledCount++;
     }
 
     // Sort by day order

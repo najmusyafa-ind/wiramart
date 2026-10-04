@@ -6,7 +6,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { employees } from '@/lib/db/schema';
+import { employees, shifts, shiftSchedules } from '@/lib/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
@@ -67,10 +67,23 @@ export async function DELETE(req: NextRequest, ctx: Context) {
 
   if (!existing) return apiError('Karyawan tidak ditemukan', 404);
 
+  // 1. Soft-delete employee
   await db
     .update(employees)
     .set({ deletedAt: new Date(), isActive: false, updatedAt: new Date() })
     .where(eq(employees.id, id));
 
-  return apiOk({ message: 'Karyawan berhasil dihapus' });
+  // 2. Force-close semua sesi shift yang masih aktif
+  await db
+    .update(shifts)
+    .set({ clockOut: new Date(), status: 'CLOSED' })
+    .where(and(eq(shifts.employeeId, id), eq(shifts.status, 'ACTIVE')));
+
+  // 3. Lepaskan slot jadwal mingguan agar kembali kosong untuk pendaftar lain
+  await db
+    .update(shiftSchedules)
+    .set({ employeeId: null })
+    .where(eq(shiftSchedules.employeeId, id));
+
+  return apiOk({ message: 'Karyawan berhasil dihapus dan slot jadwal telah dikosongkan' });
 }
