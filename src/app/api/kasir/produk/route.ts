@@ -43,6 +43,7 @@ export async function GET(req: NextRequest) {
           ? or(
               ilike(products.name, `%${q}%`),
               ilike(categories.name, `%${q}%`),
+              ilike(products.barcode, `%${q}%`),
             )
           : undefined,
         categoryId ? eq(products.categoryId, categoryId) : undefined,

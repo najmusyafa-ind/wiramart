@@ -888,22 +888,102 @@ export default function PosPage() {
     setShowPosScanner(false);
   }
 
+  // Beep sound supermarket untuk feedback audio saat barcode berhasil discan
+  function playScanBeep() {
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1800, ctx.currentTime);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.08);
+    } catch {
+      // AudioContext blocked / unsupported
+    }
+  }
+
+  // Ref guard debounce mencegah double scan dalam interval singkat (< 400ms)
+  const lastScanRef = useRef<{ code: string; time: number }>({ code: '', time: 0 });
+
   async function handleBarcodeScanned(barcode: string) {
+    const cleanCode = barcode.trim();
+    if (!cleanCode) return;
+
+    const now = Date.now();
+    if (lastScanRef.current.code === cleanCode && now - lastScanRef.current.time < 400) {
+      return; // abaikan duplicate event
+    }
+    lastScanRef.current = { code: cleanCode, time: now };
+
     // 1. Cari di DB lokal dulu (produk yang sudah diinput admin)
     try {
-      const res = await fetch(`/api/kasir/produk/barcode?code=${encodeURIComponent(barcode)}`);
+      const res = await fetch(`/api/kasir/produk/barcode?code=${encodeURIComponent(cleanCode)}`);
       const json = await res.json() as { success: boolean; data?: { found: boolean; product?: Product } };
       if (json.success && json.data?.found && json.data.product) {
         addToCart(json.data.product);
+        playScanBeep();
         setScanToast(`Ditambahkan: ${json.data.product.name}`);
         setTimeout(() => setScanToast(null), 2500);
         return;
       }
     } catch { /* jaringan error */ }
     // 2. Tidak ada di DB
-    setScanToast(`Barcode ${barcode} belum terdaftar. Hubungi admin.`);
+    setScanToast(`Barcode ${cleanCode} belum terdaftar. Hubungi admin.`);
     setTimeout(() => setScanToast(null), 4000);
   }
+
+  // ── Hardware USB Barcode Scanner Listener (HID Keyboard Mode) ─────────
+  // Clabel T27H mengirim digit sangat cepat lalu diakhiri Enter.
+  // Kasir bisa langsung scan produk kapan saja tanpa harus klik kolom cari.
+  useEffect(() => {
+    let buffer = '';
+    let lastTime = 0;
+
+    const handleHardwareScan = (e: KeyboardEvent) => {
+      // Abaikan jika modal sedang terbuka
+      if (showPayment || showSuccess || showTutupConfirm || showPosScanner) return;
+
+      // Jika user sedang mengetik di input lain selain search bar, jangan intercept
+      const target = e.target as HTMLElement | null;
+      const isOtherInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') && target !== searchRef.current;
+      if (isOtherInput) return;
+
+      const now = Date.now();
+      const interval = now - lastTime;
+      lastTime = now;
+
+      // Hardware barcode scanner mengirim keystroke < 60ms antar-karakter
+      if (interval > 60) {
+        buffer = '';
+      }
+
+      if (e.key === 'Enter') {
+        const trimmed = buffer.trim();
+        if (trimmed.length >= 3) {
+          e.preventDefault();
+          buffer = '';
+          handleBarcodeScanned(trimmed);
+          setSearch('');
+          if (searchRef.current) searchRef.current.blur();
+        }
+        return;
+      }
+
+      if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleHardwareScan);
+    return () => window.removeEventListener('keydown', handleHardwareScan);
+  }, [showPayment, showSuccess, showTutupConfirm, showPosScanner]);
 
   // Cart ops
   const addToCart = (product: Product) => {
@@ -1190,10 +1270,20 @@ export default function PosPage() {
             ref={searchRef}
             id={`${uid}-search`}
             type="search"
-            placeholder="Cari produk... (Ctrl+K)"
+            placeholder="Cari produk / scan barcode... (Ctrl+K)"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            aria-label="Cari produk"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                const code = search.trim();
+                if (code.length >= 3) {
+                  handleBarcodeScanned(code);
+                  setSearch('');
+                }
+              }
+            }}
+            aria-label="Cari produk atau scan barcode"
             style={{
               width: '100%',
               background: 'rgba(255,255,255,0.1)',
