@@ -343,7 +343,7 @@ function ProdukModal({
     try {
       const payload = {
         ...form,
-        barcode: form.barcode?.trim() || undefined,
+        barcode: form.barcode?.trim() || null,
       };
 
       let productId = editData?.id ?? '';

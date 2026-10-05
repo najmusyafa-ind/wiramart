@@ -7,7 +7,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { products } from '@/lib/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, ne } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 type Context = { params: Promise<{ id: string }> };
@@ -15,6 +15,7 @@ type Context = { params: Promise<{ id: string }> };
 const PatchSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(500).optional(),
+  barcode: z.string().max(100).nullable().optional(),
   costPrice: z.number().nonnegative().optional(),
   sellingPrice: z.number().positive().optional(),
   stockQty: z.number().int().nonnegative().optional(),
@@ -53,6 +54,27 @@ export async function PATCH(req: NextRequest, ctx: Context) {
   if (parsed.data.unit !== undefined) updateData.unit = parsed.data.unit;
   if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
   if (parsed.data.categoryId !== undefined) updateData.categoryId = parsed.data.categoryId;
+
+  if (parsed.data.barcode !== undefined) {
+    const newBarcode = parsed.data.barcode?.trim() || null;
+    if (newBarcode) {
+      const [duplicate] = await db
+        .select({ id: products.id, name: products.name })
+        .from(products)
+        .where(
+          and(
+            eq(products.barcode, newBarcode),
+            ne(products.id, id),
+            isNull(products.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (duplicate) {
+        return apiError(`Barcode sudah digunakan oleh produk "${duplicate.name}"`, 409);
+      }
+    }
+    updateData.barcode = newBarcode;
+  }
 
   const [updated] = await db
     .update(products)

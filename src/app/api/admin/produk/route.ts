@@ -69,7 +69,7 @@ const CreateProductSchema = z.object({
   categoryId: z.string().uuid(),
   name: z.string().min(1).max(200),
   description: z.string().max(500).optional(),
-  barcode: z.string().max(100).optional(),
+  barcode: z.string().max(100).nullable().optional(),
   costPrice: z.number().nonnegative(),
   sellingPrice: z.number().positive(),
   stockQty: z.number().int().nonnegative().default(0),
