@@ -1021,7 +1021,7 @@ export default function ProdukPage() {
               <input
                 type="search"
                 className="form-input form-input-icon__input"
-                placeholder="Cari nama produk..."
+                placeholder="Cari nama atau barcode produk..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 aria-label="Cari produk"

@@ -633,7 +633,7 @@ export default function KasirProdukPage() {
           <input
             className="form-input form-input-icon__input"
             type="search"
-            placeholder="Cari nama produk..."
+            placeholder="Cari nama atau barcode produk..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             aria-label="Cari produk"

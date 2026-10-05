@@ -42,7 +42,13 @@ export async function GET(req: NextRequest) {
     .where(
       and(
         showAll ? undefined : isNull(products.deletedAt),
-        q ? or(ilike(products.name, `%${q}%`)) : undefined,
+        q
+          ? or(
+              ilike(products.name, `%${q}%`),
+              ilike(categories.name, `%${q}%`),
+              ilike(products.barcode, `%${q}%`),
+            )
+          : undefined,
         categoryId ? eq(products.categoryId, categoryId) : undefined,
       ),
     )
