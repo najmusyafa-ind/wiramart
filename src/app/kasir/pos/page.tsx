@@ -429,7 +429,7 @@ function PaymentModal({
         animation: 'fade-in 0.15s ease',
       }}
     >
-      <div className="card" style={{ width: '100%', maxWidth: 440, margin: 0, boxShadow: 'var(--shadow-xl)' }}>
+      <div className="card" style={{ width: '100%', maxWidth: 440, maxHeight: '92vh', overflowY: 'auto', margin: 0, boxShadow: 'var(--shadow-xl)' }}>
         <div className="card-header">
           <h2 id={`${uid}-title`} className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             {method === 'CASH'
@@ -508,17 +508,30 @@ function PaymentModal({
               {qrisInfo?.qrImageUrl ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)' }}>
                   <div style={{
-                    border: '3px solid var(--color-primary)',
+                    border: '2px solid var(--color-primary)',
                     borderRadius: 'var(--radius-lg)',
                     padding: 'var(--space-3)',
                     background: 'white',
-                    display: 'inline-block',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '100%',
+                    maxWidth: 290,
+                    margin: '0 auto',
+                    boxShadow: 'var(--shadow-sm)',
                   }}>
-                    <Image
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
                       src={qrisInfo.qrImageUrl}
-                      alt="QR Code Pembayaran"
-                      width={200} height={200}
-                      style={{ display: 'block', borderRadius: 'var(--radius-sm)' }}
+                      alt="QR Code Pembayaran QRIS"
+                      style={{
+                        width: '100%',
+                        height: 'auto',
+                        maxHeight: 340,
+                        objectFit: 'contain',
+                        display: 'block',
+                        borderRadius: 'var(--radius-sm)',
+                      }}
                     />
                   </div>
                   {(qrisInfo.bankName || qrisInfo.accountName) && (
