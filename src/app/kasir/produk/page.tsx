@@ -344,6 +344,8 @@ function ProdukModal({
       const payload = {
         ...form,
         barcode: form.barcode?.trim() || null,
+        // Hanya relevan saat edit: server memakainya agar stok tak tertimpa angka basi
+        ...(isEdit ? { expectedStockQty: editData!.stockQty } : {}),
       };
 
       let productId = editData?.id ?? '';

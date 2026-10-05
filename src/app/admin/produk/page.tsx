@@ -628,6 +628,8 @@ function ProdukModal({
         costPrice:    parseFloat(form.costPrice),
         sellingPrice: parseFloat(form.sellingPrice),
         stockQty:     parseInt(form.stockQty),
+        // Hanya relevan saat edit: server memakainya agar stok tak tertimpa angka basi
+        ...(isEdit ? { expectedStockQty: editData!.stockQty } : {}),
       };
       const res = await fetch(
         isEdit ? `/api/admin/produk/${editData!.id}` : '/api/admin/produk',

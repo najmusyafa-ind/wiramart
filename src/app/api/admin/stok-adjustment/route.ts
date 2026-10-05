@@ -58,32 +58,35 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     const { productId, qtyAfter, reason } = parsed.data;
 
-    // ── Fetch produk saat ini ──────────────────────────────
-    const product = await db.query.products.findFirst({
-      where: eq(products.id, productId),
-      columns: { id: true, name: true, stockQty: true, deletedAt: true },
-    });
-
-    if (!product || product.deletedAt !== null) {
-      return apiError('Produk tidak ditemukan.', 'NOT_FOUND', 404);
-    }
-
-    const qtyBefore = product.stockQty;
-    const qtyDiff   = qtyAfter - qtyBefore;
-
-    // Jika tidak ada perubahan — tolak agar tidak membuat record kosong
-    if (qtyDiff === 0) {
-      return apiError(
-        `Stok ${product.name} sudah ${qtyBefore}. Tidak ada perubahan.`,
-        'NO_CHANGE',
-        422,
-      );
-    }
-
-    // ── ATOMIC: update stok + insert log ──────────────────
+    // ── ATOMIC: kunci baris → baca stok → update → log ─────
+    // SELECT ... FOR UPDATE memastikan penjualan/restock konkuren menunggu,
+    // sehingga qtyBefore & qtyDiff pada log audit selalu akurat.
     const now = new Date();
 
-    await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
+      const [product] = await tx
+        .select({ id: products.id, name: products.name, stockQty: products.stockQty, deletedAt: products.deletedAt })
+        .from(products)
+        .where(eq(products.id, productId))
+        .limit(1)
+        .for('update');
+
+      if (!product || product.deletedAt !== null) {
+        throw new AppError('Produk tidak ditemukan.', 'NOT_FOUND', 404);
+      }
+
+      const qtyBefore = product.stockQty;
+      const qtyDiff   = qtyAfter - qtyBefore;
+
+      // Jika tidak ada perubahan — tolak agar tidak membuat record kosong
+      if (qtyDiff === 0) {
+        throw new AppError(
+          `Stok ${product.name} sudah ${qtyBefore}. Tidak ada perubahan.`,
+          'NO_CHANGE',
+          422,
+        );
+      }
+
       // Step 1: Update stok produk
       await tx
         .update(products)
@@ -100,15 +103,19 @@ export async function POST(req: NextRequest): Promise<Response> {
         adjustedByAdminId: session.sub,
         createdAt: now,
       });
+
+      return { name: product.name, qtyBefore, qtyDiff };
     });
+
+    const { name, qtyBefore, qtyDiff } = result;
 
     return apiOk({
       productId,
-      productName: product.name,
+      productName: name,
       qtyBefore,
       qtyAfter,
       qtyDiff,
-      message: `Stok "${product.name}" berhasil disesuaikan: ${qtyBefore} → ${qtyAfter} (${qtyDiff > 0 ? '+' : ''}${qtyDiff})`,
+      message: `Stok "${name}" berhasil disesuaikan: ${qtyBefore} → ${qtyAfter} (${qtyDiff > 0 ? '+' : ''}${qtyDiff})`,
     });
   } catch (err) {
     if (err instanceof AppError) {

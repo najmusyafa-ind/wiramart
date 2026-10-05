@@ -7,7 +7,7 @@
 // =============================================================
 
 import { NextRequest } from 'next/server';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { products, stockAdjustments } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/utils/auth';
@@ -55,17 +55,24 @@ export async function POST(req: NextRequest): Promise<Response> {
         );
       }
 
-      const beforeQty = product.stockQty;
-      const afterQty  = beforeQty + qty;
-
-      // 2. Update stok
-      await tx
+      // 2. Tambah stok ATOMIK di level SQL (baris terkunci selama UPDATE).
+      //    Jangan hitung di JS dari hasil SELECT di atas: penjualan yang masuk di
+      //    sela SELECT dan UPDATE akan tertimpa (lost update).
+      const [updated] = await tx
         .update(products)
         .set({
-          stockQty:  afterQty,
+          stockQty:  sql`${products.stockQty} + ${qty}`,
           updatedAt: new Date(),
         })
-        .where(eq(products.id, product.id));
+        .where(eq(products.id, product.id))
+        .returning({ stockQty: products.stockQty });
+
+      if (!updated) {
+        throw new AppError('Produk tidak ditemukan saat update stok.', 'PRODUCT_NOT_FOUND', 404);
+      }
+
+      const afterQty  = updated.stockQty;
+      const beforeQty = afterQty - qty;
 
       // 3. Catat di stockAdjustments (audit trail)
       await tx.insert(stockAdjustments).values({

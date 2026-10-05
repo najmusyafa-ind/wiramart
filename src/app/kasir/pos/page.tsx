@@ -766,6 +766,13 @@ export default function PosPage() {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
+  // Sumber kebenaran keranjang yang diperbarui SINKRON (anti closure basi saat scan beruntun)
+  const cartRef = useRef<CartItem[]>([]);
+  const applyCart = (fn: (prev: CartItem[]) => CartItem[]) => {
+    const next = fn(cartRef.current);
+    cartRef.current = next;
+    setCart(next);
+  };
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
   const [showPayment, setShowPayment] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -927,16 +934,18 @@ export default function PosPage() {
       const res = await fetch(`/api/kasir/produk/barcode?code=${encodeURIComponent(cleanCode)}`);
       const json = await res.json() as { success: boolean; data?: { found: boolean; product?: Product } };
       if (json.success && json.data?.found && json.data.product) {
-        addToCart(json.data.product);
-        playScanBeep();
-        setScanToast(`Ditambahkan: ${json.data.product.name}`);
-        setTimeout(() => setScanToast(null), 2500);
+        // addToCart sudah menampilkan pesan sendiri jika stok habis / melebihi stok
+        if (addToCart(json.data.product)) {
+          playScanBeep();
+          setScanToast(`Ditambahkan: ${json.data.product.name}`);
+          setTimeout(() => setScanToast(null), 2500);
+        }
         return;
       }
     } catch { /* jaringan error */ }
     // 2. Tidak ada di DB
-    setScanToast(`Barcode ${cleanCode} belum terdaftar. Hubungi admin.`);
-    setTimeout(() => setScanToast(null), 4000);
+    setScanToast(`Barcode ${cleanCode} belum terdaftar. Cari manual lewat nama produk, atau hubungi admin.`);
+    setTimeout(() => setScanToast(null), 4500);
   }
 
   // ── Hardware USB Barcode Scanner Listener (HID Keyboard Mode) ─────────
@@ -986,26 +995,39 @@ export default function PosPage() {
   }, [showPayment, showSuccess, showTutupConfirm, showPosScanner]);
 
   // Cart ops
-  const addToCart = (product: Product) => {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.id === product.id);
-      if (existing) {
-        if (existing.qty >= product.stockQty) return prev;
-        return prev.map((i) => i.id === product.id ? { ...i, qty: i.qty + 1 } : i);
-      }
+  const showCartToast = (msg: string) => {
+    setScanToast(msg);
+    setTimeout(() => setScanToast(null), 3500);
+  };
+
+  /** @returns true jika item berhasil ditambahkan ke keranjang */
+  const addToCart = (product: Product): boolean => {
+    if (product.stockQty <= 0) {
+      showCartToast(`"${product.name}" stok habis di sistem. Cek fisik barang / hubungi admin.`);
+      return false;
+    }
+    const existing = cartRef.current.find((i) => i.id === product.id);
+    if (existing && existing.qty >= product.stockQty) {
+      showCartToast(`Stok "${product.name}" di sistem hanya ${product.stockQty}. Tidak bisa ditambah lagi.`);
+      return false;
+    }
+    applyCart((prev) => {
+      const found = prev.find((i) => i.id === product.id);
+      if (found) return prev.map((i) => i.id === product.id ? { ...i, qty: i.qty + 1 } : i);
       return [...prev, { ...product, qty: 1 }];
     });
+    return true;
   };
 
   const updateQty = (id: string, delta: number) => {
-    setCart((prev) =>
+    applyCart((prev) =>
       prev
         .map((i) => i.id === id ? { ...i, qty: Math.max(0, Math.min(i.qty + delta, i.stockQty)) } : i)
         .filter((i) => i.qty > 0),
     );
   };
 
-  const clearCart = () => setCart([]);
+  const clearCart = () => applyCart(() => []);
   const total = cart.reduce((sum, i) => sum + parseFloat(i.sellingPrice) * i.qty, 0);
   const totalItems = cart.reduce((sum, i) => sum + i.qty, 0);
 
@@ -1646,7 +1668,7 @@ export default function PosPage() {
                     </button>
                   </div>
                   <button
-                    onClick={() => setCart((prev) => prev.filter((i) => i.id !== item.id))}
+                    onClick={() => applyCart((prev) => prev.filter((i) => i.id !== item.id))}
                     aria-label={`Hapus ${item.name}`}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-error)', display: 'flex', opacity: 0.6, padding: 4, flexShrink: 0 }}
                   >

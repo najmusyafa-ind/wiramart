@@ -7,7 +7,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { products } from '@/lib/db/schema';
-import { eq, and, isNull, ne } from 'drizzle-orm';
+import { eq, and, isNull, ne, type SQL } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 type Context = { params: Promise<{ id: string }> };
@@ -19,6 +19,9 @@ const PatchSchema = z.object({
   costPrice: z.number().nonnegative().optional(),
   sellingPrice: z.number().positive().optional(),
   stockQty: z.number().int().nonnegative().optional(),
+  // Stok yang dilihat user saat form dibuka. Dipakai untuk mendeteksi tabrakan
+  // dengan penjualan/restock yang terjadi selama form terbuka.
+  expectedStockQty: z.number().int().nonnegative().optional(),
   unit: z.string().max(20).optional(),
   isActive: z.boolean().optional(),
   categoryId: z.string().uuid().optional(),
@@ -50,7 +53,22 @@ export async function PATCH(req: NextRequest, ctx: Context) {
   if (parsed.data.description !== undefined) updateData.description = parsed.data.description.trim();
   if (parsed.data.costPrice !== undefined) updateData.costPrice = parsed.data.costPrice.toString();
   if (parsed.data.sellingPrice !== undefined) updateData.sellingPrice = parsed.data.sellingPrice.toString();
-  if (parsed.data.stockQty !== undefined) updateData.stockQty = parsed.data.stockQty;
+  // ── Stok: lindungi dari 'lost update' ────────────────────────
+  // Tanpa expectedStockQty (klien lama) → perilaku lama.
+  // stockQty == expectedStockQty → stok TIDAK diedit user → jangan disentuh sama sekali
+  //   (inilah yang mencegah penjualan yang terjadi selama form terbuka tertimpa).
+  // stockQty != expectedStockQty → user sengaja mengubah stok → hanya berlaku
+  //   bila stok di DB masih sama dengan yang dilihat user (UPDATE bersyarat atomik).
+  let stockGuard: SQL | undefined;
+  const { stockQty, expectedStockQty } = parsed.data;
+  if (stockQty !== undefined) {
+    if (expectedStockQty === undefined) {
+      updateData.stockQty = stockQty;
+    } else if (stockQty !== expectedStockQty) {
+      updateData.stockQty = stockQty;
+      stockGuard = eq(products.stockQty, expectedStockQty);
+    }
+  }
   if (parsed.data.unit !== undefined) updateData.unit = parsed.data.unit;
   if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
   if (parsed.data.categoryId !== undefined) updateData.categoryId = parsed.data.categoryId;
@@ -79,8 +97,23 @@ export async function PATCH(req: NextRequest, ctx: Context) {
   const [updated] = await db
     .update(products)
     .set(updateData)
-    .where(eq(products.id, id))
+    .where(and(eq(products.id, id), isNull(products.deletedAt), stockGuard))
     .returning();
+
+  if (!updated) {
+    // Bedakan: produk hilang vs stok bergeser saat form terbuka
+    const [fresh] = await db
+      .select({ stockQty: products.stockQty })
+      .from(products)
+      .where(and(eq(products.id, id), isNull(products.deletedAt)))
+      .limit(1);
+    if (!fresh) return apiError('Produk tidak ditemukan', 404);
+    return apiError(
+      `Stok produk berubah sejak halaman dimuat (stok sekarang: ${fresh.stockQty}). ` +
+      'Muat ulang halaman, lalu ulangi perubahan stok.',
+      409,
+    );
+  }
 
   return apiOk(updated);
 }

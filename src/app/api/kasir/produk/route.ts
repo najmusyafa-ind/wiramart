@@ -7,7 +7,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import { products, categories } from '@/lib/db/schema';
-import { eq, and, isNull, gt, ilike, or } from 'drizzle-orm';
+import { eq, and, isNull, ilike, or } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export async function GET(req: NextRequest) {
@@ -38,7 +38,8 @@ export async function GET(req: NextRequest) {
       and(
         eq(products.isActive, true),
         isNull(products.deletedAt),
-        gt(products.stockQty, 0), // hanya tampilkan yang ada stok
+        // Produk stok 0 TETAP ditampilkan (ditandai "Habis" di UI) agar kasir
+        // tidak mengira produk belum terdaftar. Penjualan tetap dijaga di POST transaksi.
         q
           ? or(
               ilike(products.name, `%${q}%`),
