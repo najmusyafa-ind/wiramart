@@ -15,7 +15,7 @@ export const runtime = 'nodejs';
 const presensiSchema = z.object({
   employeeId: z.string().uuid('ID Karyawan tidak valid'),
   scheduleId: z.string().uuid('ID Jadwal tidak valid'),
-  roleTask:   z.enum(['Kasir', 'Kepala Gudang', 'Admin Kasir']),
+  roleTask:   z.enum(['Kasir', 'Customer Service', 'Kepala Gudang', 'Admin Kasir']),
   notes:      z.string().max(255).optional(),
 });
 

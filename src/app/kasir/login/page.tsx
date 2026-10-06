@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   LogIn, AlertCircle, User, Hash, GraduationCap, CheckCircle2,
   Clock, Calendar, UserCheck, ChevronRight, RefreshCw, Sparkles,
-  ShoppingBag, Package, ShieldCheck
+  ShoppingBag, Package, ShieldCheck, HeartHandshake
 } from 'lucide-react';
 
 type ShiftPersonnel = {
@@ -43,7 +43,7 @@ type PresensiData = {
   shifts: ShiftGroup[];
 };
 
-type RoleOption = 'Kasir' | 'Kepala Gudang' | 'Admin Kasir';
+type RoleOption = 'Kasir' | 'Customer Service' | 'Kepala Gudang' | 'Admin Kasir';
 
 export default function KasirLoginPage() {
   const router = useRouter();
@@ -540,6 +540,7 @@ export default function KasirLoginPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {[
                     { role: 'Kasir', desc: 'Melayani transaksi & laci uang POS', icon: <ShoppingBag size={16} /> },
+                    { role: 'Customer Service', desc: 'Melayani pembeli & pramuniaga bagian depan', icon: <HeartHandshake size={16} /> },
                     { role: 'Kepala Gudang', desc: 'Kelola stok, barang masuk & tata rak', icon: <Package size={16} /> },
                     { role: 'Admin Kasir', desc: 'Pendamping, bantu antrean & rekap', icon: <ShieldCheck size={16} /> },
                   ].map((item) => (
