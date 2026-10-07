@@ -395,11 +395,16 @@ function ProdukModal({
         borderRadius: '20px 20px 0 0', padding: 'var(--space-6)',
         maxHeight: '92dvh', overflowY: 'auto',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-5)' }}>
-          <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)' }}>
-            {isEdit ? 'Edit Produk' : 'Tambah Produk Baru'}
-          </h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
+          <div>
+            <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', margin: 0 }}>
+              {isEdit ? 'Ubah Stok & Harga Produk' : 'Tambah Produk Baru'}
+            </h2>
+            <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: '4px 0 0 0' }}>
+              {isEdit ? 'Perbarui stok fisik barang, harga jual, atau modal kulakan (HPP)' : 'Lengkapi data barang baru agar langsung bisa dijual di kasir'}
+            </p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }} aria-label="Tutup modal">
             <X size={20} />
           </button>
         </div>
@@ -481,23 +486,35 @@ function ProdukModal({
           {/* Harga */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
-              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Harga Beli (Rp)</label>
-              <input className="form-input" type="number" min={0} value={f.costPrice} onChange={e => set('costPrice', Number(e.target.value))} placeholder="0" />
+              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                Harga Beli / HPP
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>Modal kulakan</span>
+              </label>
+              <input className="form-input" type="number" min={0} value={f.costPrice} onChange={e => set('costPrice', Number(e.target.value))} placeholder="Contoh: 3000" />
             </div>
             <div>
-              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Harga Jual (Rp) *</label>
-              <input className="form-input" type="number" min={1} value={f.sellingPrice} onChange={e => set('sellingPrice', Number(e.target.value))} placeholder="0" required />
+              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                Harga Jual (Rp) *
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>Harga ke pembeli</span>
+              </label>
+              <input className="form-input" type="number" min={1} value={f.sellingPrice} onChange={e => set('sellingPrice', Number(e.target.value))} placeholder="Contoh: 4000" required />
             </div>
           </div>
 
           {/* Stok & Satuan */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
-              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Stok Awal</label>
-              <input className="form-input" type="number" min={0} value={f.stockQty} onChange={e => set('stockQty', Number(e.target.value))} />
+              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                {isEdit ? 'Ubah Sisa Stok' : 'Stok Awal'}
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>Hitungan fisik di rak</span>
+              </label>
+              <input className="form-input" type="number" min={0} value={f.stockQty} onChange={e => set('stockQty', Number(e.target.value))} placeholder="0" />
             </div>
             <div>
-              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Satuan</label>
+              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                Satuan
+                <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>Bentuk kemasan</span>
+              </label>
               <select className="form-input" value={f.unit} onChange={e => set('unit', e.target.value)}>
                 <option value="pcs">pcs</option>
                 <option value="kg">kg</option>
@@ -509,8 +526,8 @@ function ProdukModal({
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary" disabled={saving} style={{ marginTop: 8 }}>
-            {saving ? <><Loader2 size={15} className="spin-icon" /> Menyimpan...</> : (isEdit ? 'Simpan Perubahan' : '+ Tambah Produk')}
+          <button type="submit" className="btn btn-primary" disabled={saving} style={{ marginTop: 8, padding: '12px 16px', fontSize: 14, fontWeight: 700 }}>
+            {saving ? <><Loader2 size={16} className="spin-icon" /> Menyimpan...</> : (isEdit ? '💾 Simpan Perubahan Stok & Harga' : '+ Simpan & Masukkan ke Katalog')}
           </button>
         </form>
       </div>
@@ -616,20 +633,71 @@ export default function KasirProdukPage() {
         </button>
       </div>
 
-      {/* Tip scan barcode */}
+      {/* Banner 2 Tombol Aksi Utama (Sangat Jelas & Mencolok untuk Mahasiswa Shift) */}
       <div style={{
-        margin: '10px 16px 0',
-        background: 'var(--color-primary-light)',
-        borderRadius: 10, padding: '8px 14px',
-        display: 'flex', alignItems: 'center', gap: 8,
-        fontSize: 12, color: 'var(--color-primary)',
+        margin: '12px 16px 6px',
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: 10,
       }}>
-        <ScanLine size={14} />
-        <span>Klik <strong>ikon scan</strong> untuk tambah produk via kamera — nama produk otomatis terisi dari database!</span>
+        <button
+          id="btn-tambah-produk-banner"
+          onClick={() => { setEditData(null); setPrefillBarcode(undefined); setPrefillName(undefined); setShowModal(true); }}
+          style={{
+            background: 'var(--color-primary)',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 12,
+            padding: '12px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 4,
+            fontWeight: 700,
+            fontSize: 13,
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            transition: 'transform 0.1s ease',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Plus size={18} />
+            <span>+ Tambah Produk</span>
+          </div>
+          <span style={{ fontSize: 11, opacity: 0.9, fontWeight: 400 }}>Input barang baru</span>
+        </button>
+
+        <button
+          id="btn-scan-barcode-banner"
+          onClick={() => { setEditData(null); setShowScanner(true); }}
+          style={{
+            background: 'var(--color-surface)',
+            color: 'var(--color-primary)',
+            border: '1.5px solid var(--color-primary)',
+            borderRadius: 12,
+            padding: '12px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 4,
+            fontWeight: 700,
+            fontSize: 13,
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ScanLine size={18} />
+            <span>📷 Scan Barcode</span>
+          </div>
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 400 }}>Via kamera HP</span>
+        </button>
       </div>
 
       {/* Search */}
-      <div style={{ padding: '10px 16px' }}>
+      <div style={{ padding: '8px 16px' }}>
         <div className="form-input-icon">
           <Search size={16} className="form-input-icon__icon" />
           <input
@@ -678,6 +746,13 @@ export default function KasirProdukPage() {
           >
             <Package size={36} style={{ margin: '0 auto var(--space-2)', opacity: 0.35 }} />
             <span style={{ fontSize: 14, textAlign: 'center' }}>{search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada produk.'}</span>
+            <button
+              onClick={() => { setEditData(null); setPrefillBarcode(undefined); setPrefillName(search); setShowModal(true); }}
+              className="btn btn-primary btn-sm"
+              style={{ marginTop: 12 }}
+            >
+              <Plus size={14} /> + Tambah Produk "{search || 'Baru'}"
+            </button>
           </div>
         ) : (
           products.map(p => (
@@ -688,38 +763,83 @@ export default function KasirProdukPage() {
             }}>
               {/* Foto */}
               <div style={{
-                width: 72, height: 72, borderRadius: 10, flexShrink: 0,
+                width: 64, height: 64, borderRadius: 10, flexShrink: 0,
                 background: 'var(--color-surface-muted)', overflow: 'hidden',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 {p.photoUrl
                   ? <img src={p.photoUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : <Package size={32} color="var(--color-text-muted)" />}
+                  : <Package size={28} color="var(--color-text-muted)" />}
               </div>
               {/* Info */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                  {p.categoryName ?? '—'} · Stok: {p.stockQty} {p.unit}
+                  {p.categoryName ?? '—'} · Stok: <strong style={{ color: p.stockQty <= 2 ? 'var(--color-error)' : 'inherit' }}>{p.stockQty} {p.unit}</strong>
                   {p.barcode && <span> · <code style={{ fontSize: 10 }}>{p.barcode}</code></span>}
                 </div>
-                <div style={{ fontSize: 13, color: 'var(--color-primary)', fontWeight: 700 }}>
+                <div style={{ fontSize: 13, color: 'var(--color-primary)', fontWeight: 700, marginTop: 2 }}>
                   Rp {Number(p.sellingPrice).toLocaleString('id-ID')}
                 </div>
               </div>
-              {/* Edit */}
+              {/* Tombol Aksi Ubah Stok & Harga (Sangat Jelas Ada Tulisannya) */}
               <button
+                id={`btn-edit-produk-${p.id}`}
                 onClick={() => { setEditData(p); setShowModal(true); }}
-                className="btn btn-ghost btn-sm"
-                title="Edit produk"
-                aria-label={`Edit ${p.name}`}
+                style={{
+                  background: 'var(--color-primary-light)',
+                  border: '1px solid var(--color-primary)',
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: 'var(--color-primary)',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  transition: 'all 0.15s ease',
+                  whiteSpace: 'nowrap',
+                }}
+                title="Ubah stok fisik atau harga produk"
+                aria-label={`Ubah stok dan harga ${p.name}`}
               >
-                <Edit2 size={15} />
+                <Edit2 size={13} />
+                <span>Ubah Stok / Harga</span>
               </button>
             </div>
           ))
         )}
       </div>
+
+      {/* Floating Action Button (FAB) Tambah Produk untuk Kemudahan di HP Kasir */}
+      <button
+        id="fab-tambah-produk-kasir"
+        onClick={() => { setEditData(null); setPrefillBarcode(undefined); setPrefillName(undefined); setShowModal(true); }}
+        style={{
+          position: 'fixed',
+          bottom: 24,
+          right: 16,
+          zIndex: 30,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '12px 18px',
+          borderRadius: 9999,
+          background: 'var(--color-primary)',
+          color: '#fff',
+          border: 'none',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.28)',
+          fontWeight: 700,
+          fontSize: 13,
+          cursor: 'pointer',
+        }}
+        aria-label="Tambah produk baru"
+      >
+        <Plus size={18} />
+        <span>+ Tambah Produk</span>
+      </button>
 
       {/* Scanner Modal */}
       {showScanner && (
