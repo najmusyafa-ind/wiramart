@@ -118,7 +118,8 @@ function BukaShiftOverlay({
   otherActiveShifts: SessionInfo['otherActiveShifts'];
   onSuccess: (modalAwal: number) => void;
 }) {
-  const [modalInput, setModalInput] = useState('');
+  // Default modal awal paten dari owner: Rp 100.000
+  const [modalInput, setModalInput] = useState('100000');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Fase handover: jika ada kasir lain aktif, tampilkan konfirmasi dulu
@@ -314,7 +315,7 @@ function BukaShiftOverlay({
                 border: '1px solid var(--color-warning)',
                 fontSize: '0.72rem', color: 'var(--color-text)', lineHeight: 1.4,
               }}>
-                <strong>ℹ️</strong> Shift pertama? Masukkan <strong>0</strong> jika laci kosong. Serah terima? Masukkan saldo yang diterima.
+                <strong>ℹ️ Modal Paten Owner:</strong> Default modal uang kembalian di laci kasir adalah <strong>Rp 100.000</strong>. Sesuaikan nominal jika menerima serah terima saldo berbeda.
               </div>
 
               {/* Input nominal */}
@@ -797,6 +798,10 @@ export default function PosPage() {
   const [tutupResult, setTutupResult] = useState<{
     totalCash: number; totalQris: number; txCount: number;
     modalAwal: number; saldoAkhirLaci: number;
+    totalOmzet?: number; totalHpp?: number;
+    labaKotorShift?: number; alokasiGajiShift?: number;
+    personCount?: number; perPersonShare?: number;
+    attendeeNames?: string[];
   } | null>(null);
   const [lastTx, setLastTx] = useState<{
     invoiceNumber: string;
@@ -1106,7 +1111,13 @@ export default function PosPage() {
       const res = await fetch('/api/kasir/shift/tutup', { method: 'PATCH' });
       const json = await res.json() as {
         success: boolean;
-        data?: { totalCash: number; totalQris: number; txCount: number; modalAwal: number; saldoAkhirLaci: number };
+        data?: {
+          totalCash: number; totalQris: number; txCount: number;
+          modalAwal: number; saldoAkhirLaci: number;
+          totalOmzet?: number; totalHpp?: number;
+          labaKotorShift?: number; alokasiGajiShift?: number;
+          personCount?: number; perPersonShare?: number;
+        };
         error?: string;
       };
       if (!res.ok) {
@@ -1212,6 +1223,7 @@ export default function PosPage() {
                 { label: 'Modal Awal Laci', val: rp(tutupResult.modalAwal) },
                 { label: 'Total Cash Masuk', val: rp(tutupResult.totalCash), green: true },
                 { label: 'Total QRIS', val: rp(tutupResult.totalQris) },
+                { label: 'Total Omzet Shift', val: rp(tutupResult.totalOmzet ?? (tutupResult.totalCash + tutupResult.totalQris)) },
                 { label: 'Total Transaksi', val: `${tutupResult.txCount} txn` },
               ]).map(row => (
                 <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-sm)', padding: 'var(--space-2) 0', borderBottom: '1px solid var(--color-border)' }}>
@@ -1219,6 +1231,29 @@ export default function PosPage() {
                   <span style={{ fontWeight: 'var(--weight-semibold)', color: row.green ? 'var(--color-success)' : 'var(--color-text)' }}>{row.val}</span>
                 </div>
               ))}
+
+              {/* Box Bagi Hasil 50% Shift Karyawan */}
+              {tutupResult.alokasiGajiShift !== undefined && (
+                <div style={{ padding: 'var(--space-3)', background: 'var(--color-primary-light)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-primary)', fontWeight: 'var(--weight-semibold)' }}>
+                      👥 Hak Bagi Hasil Tim Shift (50%)
+                    </span>
+                    <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
+                      {rp(tutupResult.alokasiGajiShift)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                    Laba kotor shift: {rp(tutupResult.labaKotorShift ?? 0)}
+                  </div>
+                  {tutupResult.personCount && tutupResult.personCount > 0 && (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-primary)', fontWeight: 'var(--weight-medium)', marginTop: 2 }}>
+                      Dibagi ke {tutupResult.personCount} personel {tutupResult.attendeeNames && tutupResult.attendeeNames.length > 0 ? `(${tutupResult.attendeeNames.join(', ')})` : ''} = <strong>{rp(tutupResult.perPersonShare ?? 0)}</strong> / orang
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Saldo akhir */}
               <div style={{ padding: 'var(--space-3)', background: 'var(--color-success-light)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>💰 Saldo Expected di Laci</div>

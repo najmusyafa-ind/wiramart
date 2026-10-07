@@ -692,18 +692,44 @@ export default function SwapRequestPage() {
 
       {/* List */}
       {loading ? (
-        <div className="empty-state" aria-live="polite" aria-busy="true" style={{ padding: 'var(--space-12)' }}>
-          <Loader2 size={28} className="spin-icon" style={{ opacity: 1 }} />
-          <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>Memuat pengajuan tukar shift...</p>
+        <div className="card">
+          <div
+            className="empty-state"
+            aria-live="polite"
+            aria-busy="true"
+            style={{
+              padding: 'var(--space-12) var(--space-4)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              width: '100%',
+            }}
+          >
+            <Loader2 size={28} className="spin-icon" style={{ opacity: 1, margin: '0 auto var(--space-3)' }} />
+            <p style={{ margin: 0, fontSize: 'var(--text-sm)', textAlign: 'center' }}>Memuat pengajuan tukar shift...</p>
+          </div>
         </div>
       ) : requests.length === 0 ? (
         <div className="card">
-          <div className="empty-state" style={{ padding: 'var(--space-12)' }}>
-            <ArrowLeftRight size={36} aria-hidden="true" />
-            <p style={{ margin: 0, fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
+          <div
+            className="empty-state"
+            style={{
+              padding: 'var(--space-12) var(--space-4)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              width: '100%',
+            }}
+          >
+            <ArrowLeftRight size={36} aria-hidden="true" style={{ margin: '0 auto var(--space-3)', opacity: 0.35 }} />
+            <p style={{ margin: 0, fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)', textAlign: 'center' }}>
               Tidak ada pengajuan tukar shift
             </p>
-            <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+            <p style={{ margin: 'var(--space-1) 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'center' }}>
               {filter === 'PENDING'
                 ? 'Semua permohonan tukar shift kasir telah diproses.'
                 : 'Belum ada data pengajuan untuk kategori filter ini.'}

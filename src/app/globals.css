@@ -518,34 +518,15 @@ p, h1, h2, h3, h4, h5, h6 {
    SEARCH BOX & EMPTY STATE UTILITIES
    ========================================================== */
 
-/* Search box: icon overlay pattern — cross-browser safe */
-.search-box {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-.search-box .search-icon {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--color-text-muted);
-  pointer-events: none;
-  display: flex;            /* Pastikan SVG tidak meleset */
-  align-items: center;
-  line-height: 0;
-}
-.search-box input {
-  width: 100%;
-  padding-left: 38px;
-}
-
-/* form-input-icon: alias dari search-box — dipakai di karyawan page */
+/* Search box & Input Icon: cross-browser safe overlay pattern */
+.search-box,
 .form-input-icon {
   position: relative;
   display: flex;
   align-items: center;
+  width: 100%;
 }
+.search-box .search-icon,
 .form-input-icon__icon {
   position: absolute;
   left: 12px;
@@ -555,28 +536,39 @@ p, h1, h2, h3, h4, h5, h6 {
   pointer-events: none;
   display: flex;
   align-items: center;
+  justify-content: center;
   line-height: 0;
-  z-index: 1;
+  z-index: 2;
 }
+.search-box input,
 .form-input-icon__input {
   width: 100%;
   padding-left: 38px !important;
 }
 
-/* Empty state: selalu flex column center — mencegah SVG meleset */
+/* Empty state: selalu flex column center — mencegah SVG / teks meleset */
 .empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  width: 100% !important;
   color: var(--color-text-muted);
-  padding: var(--space-12);
+  padding: var(--space-12) var(--space-4);
   gap: var(--space-2);
 }
 .empty-state svg {
-  opacity: 0.3;
+  margin: 0 auto !important;
+  display: block !important;
+  opacity: 0.35;
   flex-shrink: 0;
+}
+.empty-state p,
+.empty-state span {
+  text-align: center !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
 }
 
 /* ==========================================================
@@ -1793,6 +1785,12 @@ p, h1, h2, h3, h4, h5, h6 {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+  transform-origin: center;
+  display: inline-block;
 }
 
 @keyframes fade-in {

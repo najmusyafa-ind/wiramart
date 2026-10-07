@@ -21,13 +21,14 @@ function sumRows(rows: DailyRowUi[]): Totals {
       omzetQris: acc.omzetQris + r.omzetQris,
       hppTerjual: acc.hppTerjual + r.hppTerjual,
       labaKotor: acc.labaKotor + r.labaKotor,
+      alokasiGajiKaryawan: acc.alokasiGajiKaryawan + (r.alokasiGajiKaryawan ?? 0),
       omzetTanpaHpp: acc.omzetTanpaHpp + r.omzetTanpaHpp,
       biayaOperasional: acc.biayaOperasional + r.biayaOperasional,
       labaBersih: acc.labaBersih + r.labaBersih,
     }),
     {
       txCount: 0, voidCount: 0, omzet: 0, omzetCash: 0, omzetQris: 0, hppTerjual: 0,
-      labaKotor: 0, omzetTanpaHpp: 0, biayaOperasional: 0, labaBersih: 0,
+      labaKotor: 0, alokasiGajiKaryawan: 0, omzetTanpaHpp: 0, biayaOperasional: 0, labaBersih: 0,
     },
   );
 }
@@ -64,7 +65,7 @@ export default function RekapHarian({ rows, labaLengkap }: Props) {
         <div className="table-wrapper">
           <table className="table" style={{ fontSize: 'var(--text-xs)', whiteSpace: 'nowrap' }}>
             <caption style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
-              Rekap omzet, laba, dan biaya per hari (zona waktu WIB)
+              Rekap omzet, laba, bagi hasil karyawan, dan biaya per hari (zona waktu WIB)
             </caption>
             <thead>
               <tr>
@@ -76,8 +77,9 @@ export default function RekapHarian({ rows, labaLengkap }: Props) {
                 <th scope="col" style={{ textAlign: 'right' }}>QRIS</th>
                 <th scope="col" style={{ textAlign: 'right' }}>HPP</th>
                 <th scope="col" style={{ textAlign: 'right' }}>Laba Kotor{mark}</th>
+                <th scope="col" style={{ textAlign: 'right', color: 'var(--color-primary)' }}>Bagi Hasil (50%)</th>
                 <th scope="col" style={{ textAlign: 'right' }}>Biaya</th>
-                <th scope="col" style={{ textAlign: 'right' }}>Laba Bersih{mark}</th>
+                <th scope="col" style={{ textAlign: 'right' }}>Laba Bersih Toko{mark}</th>
               </tr>
             </thead>
             <tbody>
@@ -96,6 +98,9 @@ export default function RekapHarian({ rows, labaLengkap }: Props) {
                   <td className="text-right">{formatRupiah(r.omzetQris)}</td>
                   <td className="text-right">{formatRupiah(r.hppTerjual)}</td>
                   <td className="text-right" style={{ color: profitColor(r.labaKotor) }}>{formatRupiah(r.labaKotor)}</td>
+                  <td className="text-right" style={{ color: 'var(--color-primary)', fontWeight: 'var(--weight-medium)' }}>
+                    {formatRupiah(r.alokasiGajiKaryawan ?? Math.round(r.labaKotor * 0.5))}
+                  </td>
                   <td className="text-right">{formatRupiah(r.biayaOperasional)}</td>
                   <td
                     className="text-right"
@@ -117,6 +122,9 @@ export default function RekapHarian({ rows, labaLengkap }: Props) {
                 <td className="text-right" style={{ padding: 'var(--space-3) var(--space-4)' }}>{formatRupiah(totals.hppTerjual)}</td>
                 <td className="text-right" style={{ padding: 'var(--space-3) var(--space-4)', color: profitColor(totals.labaKotor) }}>
                   {formatRupiah(totals.labaKotor)}
+                </td>
+                <td className="text-right" style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-primary)' }}>
+                  {formatRupiah(totals.alokasiGajiKaryawan)}
                 </td>
                 <td className="text-right" style={{ padding: 'var(--space-3) var(--space-4)' }}>{formatRupiah(totals.biayaOperasional)}</td>
                 <td className="text-right" style={{ padding: 'var(--space-3) var(--space-4)', color: profitColor(totals.labaBersih) }}>

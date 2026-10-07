@@ -43,6 +43,7 @@ export type DailyRowUi = {
   omzetQris: number;
   hppTerjual: number;
   labaKotor: number;
+  alokasiGajiKaryawan: number;
   omzetTanpaHpp: number;
   biayaOperasional: number;
   labaBersih: number;

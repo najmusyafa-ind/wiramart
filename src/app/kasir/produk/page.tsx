@@ -646,14 +646,38 @@ export default function KasirProdukPage() {
       {/* Produk List */}
       <div style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {loading ? (
-          <div className="empty-state" style={{ padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
-            <Loader2 size={24} className="spin-icon" />
-            <span style={{ fontSize: 14 }}>Memuat produk...</span>
+          <div
+            className="empty-state"
+            style={{
+              padding: 'var(--space-12)',
+              color: 'var(--color-text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              width: '100%',
+            }}
+          >
+            <Loader2 size={24} className="spin-icon" style={{ margin: '0 auto var(--space-2)' }} />
+            <span style={{ fontSize: 14, textAlign: 'center' }}>Memuat produk...</span>
           </div>
         ) : products.length === 0 ? (
-          <div className="empty-state" style={{ padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
-            <Package size={36} />
-            <span style={{ fontSize: 14 }}>{search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada produk.'}</span>
+          <div
+            className="empty-state"
+            style={{
+              padding: 'var(--space-12)',
+              color: 'var(--color-text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              width: '100%',
+            }}
+          >
+            <Package size={36} style={{ margin: '0 auto var(--space-2)', opacity: 0.35 }} />
+            <span style={{ fontSize: 14, textAlign: 'center' }}>{search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada produk.'}</span>
           </div>
         ) : (
           products.map(p => (

@@ -703,10 +703,10 @@ export default function AbsensiPage() {
 
       {/* Search & Filter */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-        <div className="search-box" style={{ maxWidth: '360px', flex: '1 1 260px' }}>
-          <span className="search-icon" aria-hidden="true"><Search size={16} /></span>
+        <div className="form-input-icon" style={{ maxWidth: '360px', flex: '1 1 260px' }}>
+          <Search size={16} className="form-input-icon__icon" aria-hidden="true" />
           <input
-            className="form-input"
+            className="form-input form-input-icon__input"
             type="search"
             value={searchQ}
             onChange={(e) => setSearchQ(e.target.value)}
@@ -722,19 +722,43 @@ export default function AbsensiPage() {
       {/* Table */}
       {loading ? (
         <div className="card">
-          <div className="empty-state" aria-live="polite" aria-busy="true" style={{ padding: 'var(--space-12)' }}>
-            <Loader2 size={28} className="spin-icon" style={{ opacity: 1 }} />
-            <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>Memuat data absensi...</p>
+          <div
+            className="empty-state"
+            aria-live="polite"
+            aria-busy="true"
+            style={{
+              padding: 'var(--space-12) var(--space-4)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              width: '100%',
+            }}
+          >
+            <Loader2 size={28} className="spin-icon" style={{ opacity: 1, margin: '0 auto var(--space-3)' }} />
+            <p style={{ margin: 0, fontSize: 'var(--text-sm)', textAlign: 'center' }}>Memuat data absensi...</p>
           </div>
         </div>
       ) : filtered.length === 0 ? (
         <div className="card">
-          <div className="empty-state" style={{ padding: 'var(--space-12)' }}>
-            <ClipboardList size={36} aria-hidden="true" />
-            <p style={{ margin: 0, fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
+          <div
+            className="empty-state"
+            style={{
+              padding: 'var(--space-12) var(--space-4)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              width: '100%',
+            }}
+          >
+            <ClipboardList size={36} aria-hidden="true" style={{ margin: '0 auto var(--space-3)', opacity: 0.35 }} />
+            <p style={{ margin: 0, fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)', textAlign: 'center' }}>
               Belum ada data absensi
             </p>
-            <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+            <p style={{ margin: 'var(--space-1) 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'center' }}>
               {searchQ ? 'Tidak ada hasil yang cocok dengan kata kunci pencarian.' : 'Kasir belum melakukan clock in hari ini, atau belum ada jadwal terdaftar.'}
             </p>
           </div>

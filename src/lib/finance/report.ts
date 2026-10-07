@@ -167,6 +167,9 @@ export type FinancialSummary = {
   voidAmount: number;
   hppTerjual: number;
   labaKotor: number;
+  /** Alokasi gaji / hak bagi hasil karyawan shift (paten 50% dari Laba Kotor) */
+  alokasiGajiKaryawan: number;
+  persenBagiHasil: number;
   /** Omzet dari item yang HPP-nya belum diisi (tidak dihitung dalam laba) */
   omzetTanpaHpp: number;
   /** Jumlah unit terjual yang HPP-nya belum diisi */
@@ -175,6 +178,7 @@ export type FinancialSummary = {
   labaLengkap: boolean;
   biayaOperasional: number;
   biayaPerKategori: ExpenseByCategory[];
+  /** Laba Bersih Hak Toko = Laba Kotor − Alokasi Gaji Karyawan − Biaya Operasional */
   labaBersih: number;
 };
 
@@ -187,6 +191,7 @@ export type DailyRow = {
   omzetQris: number;
   hppTerjual: number;
   labaKotor: number;
+  alokasiGajiKaryawan: number;
   omzetTanpaHpp: number;
   biayaOperasional: number;
   labaBersih: number;
@@ -315,6 +320,9 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
   const labaKotor  = money(num(it?.salesVerified) - hpp);
   const salesNoHpp = money(num(it?.salesNoHpp));
   const biaya      = money(expenseByCat.reduce((s, r) => s + num(r.total), 0));
+  // Sistem Paten Wiramart: 50% Laba Kotor untuk Hak Karyawan Shift, 50% untuk Toko
+  const alokasiGajiKaryawan = money(Math.round(labaKotor * 0.5));
+  const labaBersih          = money(labaKotor - alokasiGajiKaryawan - biaya);
 
   const summary: FinancialSummary = {
     omzet,
@@ -327,6 +335,8 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     voidAmount:  money(num(tx?.voidAmount)),
     hppTerjual:  hpp,
     labaKotor,
+    alokasiGajiKaryawan,
+    persenBagiHasil: 50,
     omzetTanpaHpp: salesNoHpp,
     unitTanpaHpp:  num(it?.unitNoHpp),
     labaLengkap:   salesNoHpp === 0,
@@ -334,7 +344,7 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     biayaPerKategori: expenseByCat
       .map((r) => ({ category: r.category, total: money(num(r.total)) }))
       .sort((a, b) => b.total - a.total),
-    labaBersih: money(labaKotor - biaya),
+    labaBersih,
   };
 
   // ── Susun harian ────────────────────────────────────────
@@ -344,7 +354,7 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     if (!r) {
       r = {
         date, txCount: 0, voidCount: 0, omzet: 0, omzetCash: 0, omzetQris: 0,
-        hppTerjual: 0, labaKotor: 0, omzetTanpaHpp: 0, biayaOperasional: 0, labaBersih: 0,
+        hppTerjual: 0, labaKotor: 0, alokasiGajiKaryawan: 0, omzetTanpaHpp: 0, biayaOperasional: 0, labaBersih: 0,
       };
       days.set(date, r);
     }
@@ -362,17 +372,33 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     const r = row(i.day);
     r.hppTerjual = money(num(i.hppVerified));
     r.labaKotor = money(num(i.salesVerified) - num(i.hppVerified));
+    r.alokasiGajiKaryawan = money(Math.round(r.labaKotor * 0.5));
     r.omzetTanpaHpp = money(num(i.salesNoHpp));
   }
   for (const e of expenseDaily) {
     row(e.day).biayaOperasional = money(num(e.total));
   }
   const daily = [...days.values()]
-    .map((r) => ({ ...r, labaBersih: money(r.labaKotor - r.biayaOperasional) }))
+    .map((r) => {
+      const gaji = r.alokasiGajiKaryawan ?? money(Math.round(r.labaKotor * 0.5));
+      return {
+        ...r,
+        alokasiGajiKaryawan: gaji,
+        labaBersih: money(r.labaKotor - gaji - r.biayaOperasional),
+      };
+    })
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
-  // ── Invarian ────────────────────────────────────────────
+  // ── Invarian & Konsistensi Matematis ─────────────────────
   const sum = (f: (r: DailyRow) => number) => daily.reduce((s, r) => s + f(r), 0);
+
+  // Jika ada baris harian, sinkronkan alokasi gaji & laba bersih di ringkasan
+  // dengan akumulasi harian agar bebas selisih pembulatan (rounding drift)
+  if (daily.length > 0) {
+    summary.alokasiGajiKaryawan = money(sum((r) => r.alokasiGajiKaryawan));
+    summary.labaBersih          = money(summary.labaKotor - summary.alokasiGajiKaryawan - summary.biayaOperasional);
+  }
+
   const checks: IntegrityChecks = {
     methodSplitMatches: approx(summary.omzetCash + summary.omzetQris, summary.omzet),
     itemsMatchOmzet:    approx(num(it?.salesVerified) + num(it?.salesNoHpp), summary.omzet),
