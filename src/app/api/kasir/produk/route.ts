@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
     .select({
       id: products.id,
       name: products.name,
+      barcode: products.barcode,
       // SECURITY: costPrice TIDAK di-select — employee tidak boleh tahu HPP
       sellingPrice: products.sellingPrice,
       stockQty: products.stockQty,

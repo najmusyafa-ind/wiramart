@@ -6,11 +6,12 @@ import {
   ShoppingCart, Search, Plus, Minus, Trash2, Banknote,
   CheckCircle, X, Loader2, Package, LogOut, ArrowLeftRight,
   User, Clock, AlertTriangle, ScanLine, MoreVertical, ChevronRight,
-  Receipt, Calculator, Coins,
+  Receipt, Calculator, Coins, Utensils,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import KalkulatorPecahan, { type DenominasiMap } from './KalkulatorPecahan';
 import KasGerakModal from './KasGerakModal';
+import SisaMakananModal from './SisaMakananModal';
 
 // BarcodeDetector Type — Shape Detection API (belum di TS stdlib)
 declare class BarcodeDetector {
@@ -24,6 +25,7 @@ type Category = { id: string; name: string };
 type Product = {
   id: string;
   name: string;
+  barcode?: string | null;
   sellingPrice: string;
   stockQty: number;
   unit: string;
@@ -1130,6 +1132,7 @@ export default function PosPage() {
   const [tutupLoading, setTutupLoading] = useState(false);
   const [showTutupConfirm, setShowTutupConfirm] = useState(false);
   const [showKasGerak, setShowKasGerak] = useState(false);
+  const [showSisaMakanan, setShowSisaMakanan] = useState(false);
   const [tutupActualCash, setTutupActualCash] = useState<string>('');
   const [tutupBreakdown, setTutupBreakdown] = useState<DenominasiMap>({});
   const [tutupNotes, setTutupNotes] = useState<string>('');
@@ -1196,7 +1199,9 @@ export default function PosPage() {
   // Fetch produk
   const fetchProducts = useCallback(async (q = '', catId = '') => {
     try {
-      const params = new URLSearchParams({ q, ...(catId && { categoryId: catId }) });
+      const isQuickFood = catId === 'QUICK_NON_BARCODE';
+      const actualCatId = isQuickFood ? '' : catId;
+      const params = new URLSearchParams({ q, ...(actualCatId && { categoryId: actualCatId }) });
       const res = await fetch(`/api/kasir/produk?${params}`);
       if (res.status === 401) { router.push('/kasir/login'); return; }
       const json = await res.json();
@@ -1215,6 +1220,26 @@ export default function PosPage() {
     const t = setTimeout(() => fetchProducts(search, activeCategory), 300);
     return () => clearTimeout(t);
   }, [search, activeCategory, fetchProducts]);
+
+  const displayedProducts = products.filter((p) => {
+    if (activeCategory === 'QUICK_NON_BARCODE') {
+      const isNoBarcode = !p.barcode;
+      const catLower = (p.categoryName ?? '').toLowerCase();
+      const nameLower = p.name.toLowerCase();
+      const isFood =
+        catLower.includes('makan') ||
+        catLower.includes('kue') ||
+        catLower.includes('snack') ||
+        catLower.includes('basah') ||
+        catLower.includes('konsinyasi') ||
+        nameLower.includes('cilok') ||
+        nameLower.includes('siomai') ||
+        nameLower.includes('gorengan') ||
+        nameLower.includes('ricebowl');
+      return isNoBarcode || isFood;
+    }
+    return true;
+  });
 
   // ── Barcode POS scanner (DB-first -> notif) ─────────────
   async function startPosScanner() {
@@ -2044,6 +2069,32 @@ export default function PosPage() {
               </button>
             )}
 
+            {/* Tombol Opname Sisa Makanan Jam 15:00 — hanya jika ada shift aktif */}
+            {session?.shift && (
+              <button
+                id="btn-opname-makanan"
+                onClick={() => setShowSisaMakanan(true)}
+                title="Opname Sisa Makanan Harian & Non-Barcode Jam 15:00"
+                aria-label="Opname Makanan Jam 15:00"
+                style={{
+                  background: 'rgba(249, 115, 22, 0.15)',
+                  border: '1px solid rgba(249, 115, 22, 0.35)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'hsl(24 95% 75%)',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                  padding: '6px 10px',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: 'var(--weight-semibold)',
+                  transition: 'all var(--duration-fast)',
+                  minHeight: 36,
+                }}
+              >
+                <Utensils size={14} />
+                <span>Opname 15:00</span>
+              </button>
+            )}
+
             {/* Tombol Tutup Kasir — hanya jika ada shift aktif */}
             {session?.shift && (
               <button
@@ -2141,6 +2192,22 @@ export default function PosPage() {
           >
             Semua
           </button>
+          <button
+            role="tab"
+            aria-selected={activeCategory === 'QUICK_NON_BARCODE'}
+            onClick={() => setActiveCategory(activeCategory === 'QUICK_NON_BARCODE' ? '' : 'QUICK_NON_BARCODE')}
+            className={`pos-cat-btn${activeCategory === 'QUICK_NON_BARCODE' ? ' active' : ''}`}
+            id={`${uid}-cat-makanan-cepat`}
+            style={{
+              whiteSpace: 'nowrap',
+              fontWeight: 700,
+              background: activeCategory === 'QUICK_NON_BARCODE' ? 'hsl(32, 95%, 44%)' : 'hsl(32, 95%, 94%)',
+              color: activeCategory === 'QUICK_NON_BARCODE' ? 'white' : 'hsl(32, 95%, 30%)',
+              border: '1px solid hsl(32, 90%, 75%)',
+            }}
+          >
+            ⚡ Makanan &amp; Non-Barcode
+          </button>
           {categories.map((c) => (
             <button
               key={c.id}
@@ -2163,7 +2230,7 @@ export default function PosPage() {
               <Loader2 size={32} style={{ margin: '0 auto', animation: 'spin 1s linear infinite' }} />
               <p style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>Memuat produk...</p>
             </div>
-          ) : products.length === 0 ? (
+          ) : displayedProducts.length === 0 ? (
             <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
               <Package size={48} style={{ margin: '0 auto var(--space-4)', opacity: 0.2 }} />
               <p style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-medium)' }}>
@@ -2185,7 +2252,7 @@ export default function PosPage() {
               )}
             </div>
           ) : (
-            products.map((p) => (
+            displayedProducts.map((p) => (
               <div key={p.id} role="listitem">
                 <ProductCard product={p} onAdd={addToCart} />
               </div>
@@ -2503,6 +2570,27 @@ export default function PosPage() {
                 </button>
               )}
 
+              {session?.shift && (
+                <button
+                  type="button"
+                  className="pos-drawer-link"
+                  onClick={() => {
+                    setShowKasirMenu(false);
+                    setShowSisaMakanan(true);
+                  }}
+                  style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                >
+                  <div className="pos-drawer-icon-box" style={{ background: 'hsl(32 95% 90%)', color: 'hsl(32 90% 35%)' }}>
+                    <Utensils size={20} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="pos-drawer-link-title">Opname Makanan Jam 15:00</div>
+                    <div className="pos-drawer-link-sub">Catat sisa cilok, siomai, gorengan sebelum tutup</div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+                </button>
+              )}
+
               <div className="pos-drawer-divider" />
 
               {session?.shift && (
@@ -2559,6 +2647,13 @@ export default function PosPage() {
       <KasGerakModal
         isOpen={showKasGerak}
         onClose={() => setShowKasGerak(false)}
+      />
+
+      {/* ── Modal Cut-Off Sisa Makanan Jam 15:00 ────────────────── */}
+      <SisaMakananModal
+        isOpen={showSisaMakanan}
+        onClose={() => setShowSisaMakanan(false)}
+        onSuccess={() => fetchProducts(search, activeCategory)}
       />
     </div>
   );
