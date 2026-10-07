@@ -27,7 +27,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { products, transactions, transactionItems, shifts } from '@/lib/db/schema';
+import { products, transactions, transactionItems, transactionPayments, shifts } from '@/lib/db/schema';
 import { eq, and, isNull, inArray, gte, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
@@ -36,6 +36,12 @@ export const runtime = 'nodejs';
 // ─────────────────────────────────────────────────────────────
 // Validation Schema
 // ─────────────────────────────────────────────────────────────
+const PaymentSplitItemSchema = z.object({
+  paymentMethod: z.enum(['CASH', 'QRIS']),
+  amount: z.number().positive('Nominal pembayaran harus lebih dari 0'),
+  cashReceived: z.number().nonnegative().optional(),
+});
+
 const TransaksiSchema = z.object({
   items: z
     .array(
@@ -45,8 +51,11 @@ const TransaksiSchema = z.object({
       }),
     )
     .min(1, 'Minimal 1 item'),
-  paymentMethod: z.enum(['CASH', 'QRIS']),
+  // paymentMethod tunggal (backward compatibility untuk klien lama)
+  paymentMethod: z.enum(['CASH', 'QRIS']).optional(),
   cashReceived: z.number().nonnegative().optional(),
+  // Array pembayaran multi-metode (Split Payment baru)
+  payments: z.array(PaymentSplitItemSchema).min(1).optional(),
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -83,17 +92,19 @@ const MAX_INVOICE_ATTEMPTS = 3;
 // ─────────────────────────────────────────────────────────────
 const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
-/** Sidik jari isi belanja (urutan item tidak berpengaruh) → 64 hex, muat di varchar(64). */
+/** Sidik jari isi belanja dan pembayaran (urutan item & metode tidak berpengaruh) → 64 hex, muat di varchar(64). */
 function hashRequest(
   items: ReadonlyArray<{ productId: string; qty: number }>,
-  paymentMethod: 'CASH' | 'QRIS',
-  cashReceived: number | undefined,
+  payments: ReadonlyArray<{ paymentMethod: 'CASH' | 'QRIS'; amount: number; cashReceived?: number }>,
 ): string {
   const lines = items
     .map((i): [string, number] => [i.productId, i.qty])
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]));
+  const paymentLines = payments
+    .map((p): [string, number, number] => [p.paymentMethod, p.amount, p.cashReceived ?? 0])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   return createHash('sha256')
-    .update(JSON.stringify({ lines, paymentMethod, cashReceived: cashReceived ?? null }))
+    .update(JSON.stringify({ lines, payments: paymentLines }))
     .digest('hex');
 }
 
@@ -168,7 +179,18 @@ export async function POST(req: NextRequest) {
     return apiError(parsed.error.flatten().fieldErrors, 422);
   }
 
-  const { items, paymentMethod, cashReceived } = parsed.data;
+  const { items, paymentMethod, cashReceived, payments } = parsed.data;
+
+  // Siapkan ringkasan pembayaran awal untuk hash request idempotensi
+  const initialPayments: Array<{
+    paymentMethod: 'CASH' | 'QRIS';
+    amount: number;
+    cashReceived?: number;
+  }> = payments && payments.length > 0
+    ? payments
+    : paymentMethod
+    ? [{ paymentMethod, amount: 0, cashReceived }]
+    : [];
 
   // ── Idempotensi: replay SEBELUM pre-check stok/shift ────────
   // (setelah sukses, stok sudah berkurang & shift bisa saja sudah ditutup —
@@ -181,7 +203,7 @@ export async function POST(req: NextRequest) {
     }
     idempotencyKey = rawKey;
   }
-  const requestHash = hashRequest(items, paymentMethod, cashReceived);
+  const requestHash = hashRequest(items, initialPayments);
 
   if (idempotencyKey) {
     const replay = await findReplay(employeeId, idempotencyKey, requestHash);
@@ -264,18 +286,71 @@ export async function POST(req: NextRequest) {
 
   const grossProfit = grossAmount - totalHpp;
 
-  // ── Validasi cash received ──────────────────────────────────
-  if (paymentMethod === 'CASH') {
-    if (!cashReceived || cashReceived < grossAmount) {
-      return apiError(
-        `Uang yang diterima kurang. Total: Rp ${grossAmount.toLocaleString('id-ID')}`,
-        400,
-      );
+  // ── Normalisasi & Validasi Pecahan Pembayaran (Split Payment) ──
+  let normalizedPayments: Array<{
+    paymentMethod: 'CASH' | 'QRIS';
+    amount: number;
+    cashReceived?: number;
+    changeAmount?: number;
+  }> = [];
+
+  if (payments && payments.length > 0) {
+    normalizedPayments = payments.map((p) => ({ ...p }));
+  } else if (paymentMethod) {
+    normalizedPayments = [
+      {
+        paymentMethod,
+        amount: grossAmount,
+        cashReceived,
+      },
+    ];
+  } else {
+    return apiError('Metode pembayaran wajib ditentukan.', 422);
+  }
+
+  // 1. Validasi total nominal pembayaran harus tepat sama dengan tagihan (grossAmount)
+  const totalPaidAmount = normalizedPayments.reduce((acc, p) => acc + p.amount, 0);
+  if (Math.abs(totalPaidAmount - grossAmount) > 0.01) {
+    return apiError(
+      `Total pembayaran (Rp ${totalPaidAmount.toLocaleString('id-ID')}) tidak cocok dengan tagihan (Rp ${grossAmount.toLocaleString('id-ID')}).`,
+      400,
+    );
+  }
+
+  // 2. Validasi per pecahan metode pembayaran
+  let totalCashChange = 0;
+  let primaryPaymentMethod: 'CASH' | 'QRIS' = 'CASH';
+
+  const cashPart = normalizedPayments.find((p) => p.paymentMethod === 'CASH');
+  const qrisPart = normalizedPayments.find((p) => p.paymentMethod === 'QRIS');
+
+  if (cashPart && !qrisPart) {
+    primaryPaymentMethod = 'CASH';
+  } else if (qrisPart && !cashPart) {
+    primaryPaymentMethod = 'QRIS';
+  } else {
+    // Kombinasi CASH + QRIS
+    primaryPaymentMethod = 'CASH';
+  }
+
+  for (const p of normalizedPayments) {
+    if (p.paymentMethod === 'QRIS') {
+      p.cashReceived = undefined;
+      p.changeAmount = undefined;
+    } else if (p.paymentMethod === 'CASH') {
+      if (p.cashReceived === undefined || p.cashReceived < p.amount) {
+        return apiError(
+          `Uang tunai diterima (Rp ${(p.cashReceived || 0).toLocaleString('id-ID')}) kurang dari porsi tunai (Rp ${p.amount.toLocaleString('id-ID')}).`,
+          400,
+        );
+      }
+      p.changeAmount = p.cashReceived - p.amount;
+      totalCashChange += p.changeAmount;
     }
   }
 
-  const changeAmount =
-    paymentMethod === 'CASH' && cashReceived ? cashReceived - grossAmount : null;
+  const changeAmount = cashPart ? totalCashChange : null;
+  const cashReceivedTotal = cashPart?.cashReceived ?? null;
 
   // ─────────────────────────────────────────────────────────────
   // ATOMIC TRANSACTION — semua mutasi dalam satu DB transaction
@@ -301,13 +376,13 @@ export async function POST(req: NextRequest) {
           invoiceNumber,
           shiftId:        activeShift.id,
           employeeId,
-          paymentMethod,
+          paymentMethod:  primaryPaymentMethod,
           status:         'COMPLETED',
           grossAmount:    grossAmount.toString(),
           totalHpp:       totalHpp.toString(),
           grossProfit:    grossProfit.toString(),
-          cashReceived:   cashReceived?.toString(),
-          changeAmount:   changeAmount?.toString(),
+          cashReceived:   cashReceivedTotal !== null ? cashReceivedTotal.toString() : null,
+          changeAmount:   changeAmount !== null ? changeAmount.toString() : null,
           idempotencyKey,
           requestHash:    idempotencyKey ? requestHash : null,
         })
@@ -321,6 +396,17 @@ export async function POST(req: NextRequest) {
         itemsToInsert.map((item) => ({
           ...item,
           transactionId: newTransaction.id,
+        })),
+      );
+
+      // Step 2b: Insert pecahan pembayaran ke transactionPayments (Split Payment)
+      await tx.insert(transactionPayments).values(
+        normalizedPayments.map((p) => ({
+          transactionId: newTransaction.id,
+          paymentMethod: p.paymentMethod,
+          amount:        p.amount.toString(),
+          cashReceived:  p.cashReceived !== undefined ? p.cashReceived.toString() : null,
+          changeAmount:  p.changeAmount !== undefined ? p.changeAmount.toString() : null,
         })),
       );
 
@@ -394,7 +480,8 @@ export async function POST(req: NextRequest) {
         invoiceNumber:  result.invoiceNumber,
         grossAmount,
         changeAmount,
-        paymentMethod,
+        paymentMethod:  primaryPaymentMethod,
+        payments:       normalizedPayments,
       },
       201,
     );
