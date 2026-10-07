@@ -343,6 +343,34 @@ export type TransactionItem = typeof transactionItems.$inferSelect;
 export type NewTransactionItem = typeof transactionItems.$inferInsert;
 
 // =============================================================
+// 8b. TRANSACTION_PAYMENTS (Pecahan Pembayaran per Transaksi)
+// Mendukung Split Payment (Campuran CASH + QRIS dalam 1 transaksi)
+// =============================================================
+
+export const transactionPayments = pgTable(
+  'transaction_payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    transactionId: uuid('transaction_id')
+      .notNull()
+      .references(() => transactions.id, { onDelete: 'cascade' }),
+    // 'CASH' | 'QRIS'
+    paymentMethod: varchar('payment_method', { length: 20 }).notNull(),
+    amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+    cashReceived: decimal('cash_received', { precision: 15, scale: 2 }),
+    changeAmount: decimal('change_amount', { precision: 15, scale: 2 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_trx_payments_trx').on(table.transactionId),
+    index('idx_trx_payments_method').on(table.paymentMethod, table.createdAt),
+  ],
+);
+
+export type TransactionPayment = typeof transactionPayments.$inferSelect;
+export type NewTransactionPayment = typeof transactionPayments.$inferInsert;
+
+// =============================================================
 // 9. QRIS_SETTINGS (Static QR Code dari Bank Dosen)
 // Singleton — satu baris, Admin upload gambar QR
 // =============================================================
