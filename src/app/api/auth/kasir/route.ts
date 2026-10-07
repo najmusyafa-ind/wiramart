@@ -75,87 +75,98 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  // 4. Check if employee already has an ACTIVE shift (prevent concurrent login)
+  // 4. Periksa shift aktif karyawan (dukung resume sesi aktif <12 jam)
+  let shiftToUseId: string;
+
   const existingShift = await db.query.shifts.findFirst({
     where: and(eq(shifts.employeeId, employee.id), eq(shifts.status, 'ACTIVE')),
   });
 
-  if (existingShift) {
-    // Auto-close shift yang sudah >12 jam (stale / lupa logout)
-    const shiftAge = Date.now() - new Date(existingShift.clockIn).getTime();
-    const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+  const TWELVE_HOURS = 12 * 60 * 60 * 1000;
 
+  if (existingShift) {
+    const shiftAge = Date.now() - new Date(existingShift.clockIn).getTime();
     if (shiftAge > TWELVE_HOURS) {
-      // Close shift lama secara otomatis
+      // Auto-close shift lama yang sudah basi (>12 jam)
       await db
         .update(shifts)
         .set({ clockOut: new Date(), status: 'CLOSED' })
         .where(eq(shifts.id, existingShift.id));
-    } else {
-      return apiError(
-        'Akun ini masih aktif di sesi lain. Lakukan logout terlebih dahulu, atau hubungi Admin untuk mereset sesi.',
-        'CONCURRENT_SESSION',
-        409,
-      );
-    }
-  }
 
-  // 5. Create new shift (clock-in)
-  const [newShift] = await db
-    .insert(shifts)
-    .values({
-      employeeId: employee.id,
-      status: 'ACTIVE',
-    })
-    .returning({ id: shifts.id });
-
-  if (!newShift) {
-    return apiError('Gagal membuat sesi kerja. Coba lagi.', 'SHIFT_CREATE_FAILED', 500);
-  }
-
-  // 5b. Auto-record attendance (HADIR / TELAT) — fire and forget
-  // Tidak blocking login jika gagal (jadwal mungkin belum disetup admin)
-  void (async () => {
-    try {
-      const nowWib = new Date();
-      // Nama hari dalam Bahasa Indonesia (sesuai enum day_of_week)
-      const hariMap: Record<number, string> = {
-        0: 'MINGGU', 1: 'SENIN', 2: 'SELASA', 3: 'RABU',
-        4: 'KAMIS',  5: 'JUMAT', 6: 'SABTU',
-      };
-      const hariIni = hariMap[nowWib.getDay()] as
-        'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU';
-      const tanggalHari = nowWib.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-      const jamMenitSekarang = nowWib.toLocaleTimeString('en-GB', {
-        timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
-      }); // 'HH:MM'
-
-      // BUGFIX: Query SEMUA slot hari ini, lalu pilih yang paling cocok dengan waktu login.
-      // Tanpa ini: kasir shift SIANG (11:30) bisa dianggap 3+ jam TELAT karena findFirst()
-      // mengambil slot pagi (08:00) secara random dari DB.
-      const allSlotsHariIni = await db
-        .select({
-          id:        shiftSchedules.id,
-          slotStart: shiftSchedules.slotStart,
-          slotEnd:   shiftSchedules.slotEnd,
+      // Buat shift baru
+      const [newShift] = await db
+        .insert(shifts)
+        .values({
+          employeeId: employee.id,
+          status: 'ACTIVE',
         })
-        .from(shiftSchedules)
-        .where(and(
-          eq(shiftSchedules.employeeId, employee.id),
-          eq(shiftSchedules.dayOfWeek, hariIni),
-          eq(shiftSchedules.isActive, true),
-        ));
+        .returning({ id: shifts.id });
 
-      if (allSlotsHariIni.length === 0) return; // Tidak ada jadwal hari ini — skip
+      if (!newShift) {
+        return apiError('Gagal membuat sesi kerja. Coba lagi.', 'SHIFT_CREATE_FAILED', 500);
+      }
+      shiftToUseId = newShift.id;
+    } else {
+      // Resume sesi shift yang sedang aktif (misal kasir me-refresh tab atau buka browser baru)
+      shiftToUseId = existingShift.id;
+    }
+  } else {
+    // 5. Buat shift baru (clock-in)
+    const [newShift] = await db
+      .insert(shifts)
+      .values({
+        employeeId: employee.id,
+        status: 'ACTIVE',
+      })
+      .returning({ id: shifts.id });
 
+    if (!newShift) {
+      return apiError('Gagal membuat sesi kerja. Coba lagi.', 'SHIFT_CREATE_FAILED', 500);
+    }
+    shiftToUseId = newShift.id;
+  }
+
+  // 5b. Catat absensi (HADIR / TELAT) — sinkron (await) dengan error guard terisolasi
+  // Menjamin baris absensi tidak hilang diam-diam di lingkungan serverless Vercel
+  try {
+    const nowWib = new Date();
+    // Tentukan hari dalam Bahasa Indonesia (Asia/Jakarta)
+    const hariWib = new Intl.DateTimeFormat('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      weekday: 'long',
+    }).format(nowWib).toUpperCase() as
+      'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU';
+
+    const tanggalHari = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+    }).format(nowWib);
+
+    const jamMenitSekarang = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Jakarta',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(nowWib); // 'HH:MM'
+
+    // Ambil SEMUA slot jadwal karyawan hari ini
+    const allSlotsHariIni = await db
+      .select({
+        id:        shiftSchedules.id,
+        slotStart: shiftSchedules.slotStart,
+        slotEnd:   shiftSchedules.slotEnd,
+      })
+      .from(shiftSchedules)
+      .where(and(
+        eq(shiftSchedules.employeeId, employee.id),
+        eq(shiftSchedules.dayOfWeek, hariWib),
+        eq(shiftSchedules.isActive, true),
+      ));
+
+    if (allSlotsHariIni.length > 0) {
       // Konversi login time ke total menit sejak tengah malam
       const [jamAktual, menitAktual] = jamMenitSekarang.split(':').map(Number);
       const loginMenit = (jamAktual ?? 0) * 60 + (menitAktual ?? 0);
 
-      // Algoritma pilih slot paling cocok:
-      // → Slot dengan slotStart ≤ loginTime → ambil yang TERBESAR (paling dekat ke atas)
-      // → Jika login sebelum semua slot mulai → gunakan slot pertama (paling pagi)
-      let jadwalHariIni = allSlotsHariIni[0]!; // fallback: slot pertama
+      let jadwalHariIni = allSlotsHariIni[0]!;
       let bestStartMenit = -1;
 
       for (const slot of allSlotsHariIni) {
@@ -167,8 +178,6 @@ export async function POST(request: Request): Promise<Response> {
         }
       }
 
-      // BUG-3 FIX: Toleransi dari DB (admin-configurable), bukan hardcoded
-      // Ambil dari qrisSettings singleton — fallback 15 menit jika gagal
       const settingsRow = await db.query.qrisSettings.findFirst({
         where: eq(qrisSettings.id, '00000000-0000-0000-0000-000000000002'),
         columns: { attendanceTolerance: true },
@@ -189,21 +198,22 @@ export async function POST(request: Request): Promise<Response> {
           scheduleId:     jadwalHariIni.id,
           attendanceDate: tanggalHari,
           status:         isTelat ? 'TELAT' : 'HADIR',
-          shiftId:        newShift.id,
+          shiftId:        shiftToUseId,
           clockInActual:  nowWib,
           lateMinutes,
         })
-        .onConflictDoNothing(); // Jika sudah ada record (mis. re-login) → skip
-    } catch {
-      // Gagal catat absensi tidak boleh block login kasir
+        .onConflictDoNothing();
     }
-  })();
+  } catch (attErr) {
+    // Toleran: kegagalan presensi tidak boleh memblokir kasir untuk bertugas
+    console.error('[Attendance] Gagal mencatat absensi kasir:', attErr);
+  }
 
   // 6. Generate tokens
   const accessToken = await signAccessToken({
     sub: employee.id,
     role: 'employee',
-    shiftId: newShift.id,
+    shiftId: shiftToUseId,
     name: employee.fullName,
   });
   const refreshToken = await signRefreshToken(employee.id, 'employee');
@@ -214,7 +224,7 @@ export async function POST(request: Request): Promise<Response> {
     data: {
       role: 'employee',
       name: employee.fullName,
-      shiftId: newShift.id,
+      shiftId: shiftToUseId,
       redirect: '/kasir/pos',
     },
   });
