@@ -19,6 +19,7 @@ import {
   Receipt,
   Wallet,
   Users,
+  ArrowLeftRight,
 } from 'lucide-react';
 import RekapHarian from './RekapHarian';
 import BiayaOperasionalPanel from './BiayaOperasionalPanel';
@@ -40,7 +41,8 @@ type PeriodKey = 'daily' | 'weekly' | 'monthly' | 'semi_annual';
 type RecentTransaction = {
   id: string;
   invoiceNumber: string;
-  paymentMethod: 'CASH' | 'QRIS';
+  paymentMethod: 'CASH' | 'QRIS' | 'SPLIT';
+  payments?: { paymentMethod: 'CASH' | 'QRIS'; amount: string }[];
   status: 'COMPLETED' | 'VOID';
   grossAmount: string;
   cashReceived: string | null;
@@ -1176,18 +1178,35 @@ export default function LaporanPage() {
                             {t.employeeName}
                           </td>
                           <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                            <span style={{
-                              display: 'inline-flex', alignItems: 'center', gap: 4,
-                              padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                              fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
-                              backgroundColor: t.paymentMethod === 'CASH' ? 'var(--color-success-light)' : 'var(--color-info-light)',
-                              color: t.paymentMethod === 'CASH' ? 'var(--color-success)' : 'var(--color-info)',
-                            }}>
-                              {t.paymentMethod === 'CASH'
-                                ? <Banknote size={11} aria-hidden="true" />
-                                : <QrCode size={11} aria-hidden="true" />
+                            <span
+                              title={
+                                t.paymentMethod === 'SPLIT' && t.payments && t.payments.length > 0
+                                  ? t.payments.map((p) => `${p.paymentMethod}: ${formatRp(p.amount)}`).join(' + ')
+                                  : undefined
                               }
-                              {t.paymentMethod}
+                              style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
+                                backgroundColor: t.paymentMethod === 'CASH'
+                                  ? 'var(--color-success-light)'
+                                  : t.paymentMethod === 'QRIS'
+                                  ? 'var(--color-info-light)'
+                                  : 'hsl(var(--color-primary-h, 220), 80%, 93%)',
+                                color: t.paymentMethod === 'CASH'
+                                  ? 'var(--color-success)'
+                                  : t.paymentMethod === 'QRIS'
+                                  ? 'var(--color-info)'
+                                  : 'var(--color-primary)',
+                              }}>
+                              {t.paymentMethod === 'CASH' ? (
+                                <Banknote size={11} aria-hidden="true" />
+                              ) : t.paymentMethod === 'QRIS' ? (
+                                <QrCode size={11} aria-hidden="true" />
+                              ) : (
+                                <ArrowLeftRight size={11} aria-hidden="true" />
+                              )}
+                              {t.paymentMethod === 'SPLIT' ? 'SPLIT' : t.paymentMethod}
                             </span>
                           </td>
                           <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)', whiteSpace: 'nowrap' }}>
