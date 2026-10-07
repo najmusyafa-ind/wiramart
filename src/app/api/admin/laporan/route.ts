@@ -12,8 +12,8 @@
 
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { transactions, transactionItems, employees, shifts } from '@/lib/db/schema';
-import { eq, and, gte, lt, sql } from 'drizzle-orm';
+import { transactions, transactionItems, employees, shifts, transactionPayments } from '@/lib/db/schema';
+import { eq, and, gte, lt, inArray, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import {
   getFinancialReport,
@@ -99,6 +99,36 @@ export async function GET(req: NextRequest) {
       .orderBy(sql`${transactions.createdAt} DESC`)
       .limit(20);
 
+    // ── Pecahan pembayaran untuk 20 transaksi terbaru (Split Payment) ──
+    const txIds = recentTransactions.map((t) => t.id);
+    const recentPayments = txIds.length > 0
+      ? await db
+          .select({
+            transactionId: transactionPayments.transactionId,
+            paymentMethod: transactionPayments.paymentMethod,
+            amount:        transactionPayments.amount,
+          })
+          .from(transactionPayments)
+          .where(inArray(transactionPayments.transactionId, txIds))
+      : [];
+
+    const paymentsByTx = new Map<string, typeof recentPayments>();
+    for (const p of recentPayments) {
+      const list = paymentsByTx.get(p.transactionId) ?? [];
+      list.push(p);
+      paymentsByTx.set(p.transactionId, list);
+    }
+
+    const enhancedRecentTransactions = recentTransactions.map((t) => {
+      const pays = paymentsByTx.get(t.id) ?? [];
+      const isSplit = pays.length > 1;
+      return {
+        ...t,
+        paymentMethod: isSplit ? ('SPLIT' as const) : t.paymentMethod,
+        payments: pays,
+      };
+    });
+
     // ── Shift dalam periode (dengan modal awal) ────────────────
     const shiftList = await db
       .select({
@@ -156,7 +186,7 @@ export async function GET(req: NextRequest) {
         txCount:    d.txCount,
       })),
       topProducts,
-      recentTransactions,
+      recentTransactions: enhancedRecentTransactions,
       shifts: shiftList.map((sh) => ({
         shiftId:   sh.shiftId,
         clockIn:   sh.clockIn,
