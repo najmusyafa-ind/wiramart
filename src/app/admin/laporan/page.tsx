@@ -321,6 +321,7 @@ export default function LaporanPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [exportLoading, setExportLoading] = useState(false);
+  const [exportHarianLoading, setExportHarianLoading] = useState(false);
   const [voidTarget, setVoidTarget] = useState<RecentTransaction | null>(null);
 
   const fetchData = useCallback(async (p: PeriodKey, silent = false) => {
@@ -340,7 +341,31 @@ export default function LaporanPage() {
 
   useEffect(() => { fetchData(period); }, [period, fetchData]);
 
-  // ── Export Excel ────────────────────────────────────────────
+  // ── Export Excel 1-Sheet Skema Harian (Executive) ─────────────
+  async function handleDownloadSkemaHarian() {
+    if (!data) return;
+    setExportHarianLoading(true);
+    try {
+      const res = await fetch(`/api/admin/export/harian?period=${period}`);
+      if (!res.ok) {
+        alert('Gagal mengunduh skema harian.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `skema-harian-wiramart-${period}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Terjadi kesalahan koneksi internet.');
+    } finally {
+      setExportHarianLoading(false);
+    }
+  }
+
+  // ── Export Excel Multi-Sheet ────────────────────────────────
   async function handleExport() {
     if (!data) return;
     setExportLoading(true);
@@ -699,19 +724,38 @@ export default function LaporanPage() {
             <h1 className="page-title">Laporan Keuangan</h1>
             <p className="page-subtitle">{data?.label ?? '—'}</p>
           </div>
-          <button
-            id={`${uid}-export`}
-            onClick={handleExport}
-            className="btn btn-secondary"
-            disabled={!data || exportLoading}
-            style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
-            aria-label="Export laporan ke Excel"
-          >
-            {exportLoading
-              ? <><Loader2 size={14} className="spin-icon" aria-hidden="true" /> Exporting...</>
-              : <><Download size={14} aria-hidden="true" /> Export Excel</>
-            }
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+            <button
+              id={`${uid}-export-harian`}
+              onClick={handleDownloadSkemaHarian}
+              className="btn btn-primary"
+              disabled={!data || exportHarianLoading}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                background: 'hsl(142 71% 35%)', borderColor: 'hsl(142 71% 30%)',
+                fontWeight: 700,
+              }}
+              aria-label="Unduh 1-Sheet Skema Harian Excel"
+            >
+              {exportHarianLoading
+                ? <><Loader2 size={14} className="spin-icon" aria-hidden="true" /> Mengunduh...</>
+                : <><Download size={14} aria-hidden="true" /> 📊 1-Sheet Skema Harian (.xlsx)</>
+              }
+            </button>
+            <button
+              id={`${uid}-export`}
+              onClick={handleExport}
+              className="btn btn-secondary"
+              disabled={!data || exportLoading}
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+              aria-label="Export multi-sheet ke Excel"
+            >
+              {exportLoading
+                ? <><Loader2 size={14} className="spin-icon" aria-hidden="true" /> Exporting...</>
+                : <><Download size={14} aria-hidden="true" /> 📑 Multi-Sheet</>
+              }
+            </button>
+          </div>
         </div>
 
         {/* Period selector */}
