@@ -1757,6 +1757,7 @@ p, h1, h2, h3, h4, h5, h6 {
     border-color var(--duration-fast) var(--ease-spring),
     box-shadow var(--duration-fast) var(--ease-spring);
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 .pos-qty-input::-webkit-outer-spin-button,
 .pos-qty-input::-webkit-inner-spin-button {
