@@ -1040,9 +1040,38 @@ export default function PosPage() {
     );
   };
 
+  const handleDirectQtyChange = (id: string, val: string, stockQty: number, name: string) => {
+    if (val === '') {
+      // Biarkan 0 sementara saat kasir sedang mengetik/menghapus
+      applyCart((prev) => prev.map((i) => (i.id === id ? { ...i, qty: 0 } : i)));
+      return;
+    }
+    let num = parseInt(val, 10);
+    if (isNaN(num)) return;
+    // Guard E1: Scanner anti-overflow (maks. 999)
+    if (num > 999) {
+      showCartToast('Kuantitas melebihi batas wajar (maks. 999)');
+      num = Math.min(999, stockQty);
+    }
+    if (num > stockQty) {
+      showCartToast(`Stok "${name}" hanya tersisa ${stockQty}`);
+      num = stockQty;
+    }
+    if (num < 1) num = 1;
+    applyCart((prev) => prev.map((i) => (i.id === id ? { ...i, qty: num } : i)));
+  };
+
+  const handleDirectQtyBlur = (id: string, currentQty: number) => {
+    if (currentQty <= 0) {
+      // Kembalikan ke 1 jika ditinggal kosong / 0
+      applyCart((prev) => prev.map((i) => (i.id === id ? { ...i, qty: 1 } : i)));
+    }
+  };
+
   const clearCart = () => applyCart(() => []);
-  const total = cart.reduce((sum, i) => sum + parseFloat(i.sellingPrice) * i.qty, 0);
-  const totalItems = cart.reduce((sum, i) => sum + i.qty, 0);
+  const total = cart.reduce((sum, i) => sum + parseFloat(i.sellingPrice) * (i.qty || 0), 0);
+  const totalItems = cart.reduce((sum, i) => sum + (i.qty || 0), 0);
+  const hasInvalidQty = cart.some((i) => !i.qty || i.qty <= 0);
 
   // Submit transaksi
   async function handleConfirmPayment(cashReceived?: number) {
@@ -1678,7 +1707,7 @@ export default function PosPage() {
                       {rp(parseFloat(item.sellingPrice) * item.qty)}
                     </div>
                   </div>
-                  {/* Qty controls */}
+                  {/* Qty controls: Ketik langsung + tombol - / + */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', flexShrink: 0 }}>
                     <button
                       onClick={() => updateQty(item.id, -1)}
@@ -1687,9 +1716,24 @@ export default function PosPage() {
                     >
                       <Minus size={11} />
                     </button>
-                    <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', minWidth: 22, textAlign: 'center' }}>
-                      {item.qty}
-                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={item.stockQty}
+                      value={item.qty === 0 ? '' : item.qty}
+                      onChange={(e) => handleDirectQtyChange(item.id, e.target.value, item.stockQty, item.name)}
+                      onBlur={() => handleDirectQtyBlur(item.id, item.qty)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          (e.target as HTMLInputElement).blur();
+                          searchRef.current?.focus();
+                        }
+                      }}
+                      onFocus={(e) => e.target.select()}
+                      aria-label={`Kuantitas ${item.name}`}
+                      className="pos-qty-input"
+                    />
                     <button
                       onClick={() => updateQty(item.id, 1)}
                       disabled={item.qty >= item.stockQty}
@@ -1752,11 +1796,15 @@ export default function PosPage() {
             id={`${uid}-bayar`}
             onClick={() => setShowPayment(true)}
             className="btn btn-primary"
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || hasInvalidQty}
             style={{ width: '100%', minHeight: 52, fontSize: 'var(--text-base)', gap: 'var(--space-2)' }}
           >
             <CheckCircle size={20} />
-            {cart.length === 0 ? 'Pilih Produk Dulu' : `Bayar ${rp(total)}`}
+            {cart.length === 0
+              ? 'Pilih Produk Dulu'
+              : hasInvalidQty
+              ? 'Lengkapi Jumlah Item'
+              : `Bayar ${rp(total)}`}
           </button>
         </div>
       </aside>
