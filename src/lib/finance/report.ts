@@ -19,7 +19,7 @@
 
 import { and, eq, gte, lt, lte, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { transactions, transactionItems, operatingExpenses } from '@/lib/db/schema';
+import { transactions, transactionItems, operatingExpenses, transactionPayments } from '@/lib/db/schema';
 import type { ExpenseCategory } from '@/lib/db/schema';
 
 // ─────────────────────────────────────────────────────────────
@@ -254,6 +254,16 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     .from(transactions)
     .where(txBase(range));
 
+  // 1b) Pecahan Pembayaran: rincian Cash vs QRIS akurat (mendukung Split Payment)
+  const [paySummary] = await db
+    .select({
+      omzetCash: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${COMPLETED} AND ${transactionPayments.paymentMethod} = 'CASH'), 0)`,
+      omzetQris: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${COMPLETED} AND ${transactionPayments.paymentMethod} = 'QRIS'), 0)`,
+    })
+    .from(transactionPayments)
+    .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
+    .where(txBase(range));
+
   // 2) Item: HPP & laba kotor hanya dari item ber-HPP
   const [it] = await db
     .select({
@@ -292,6 +302,18 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
       omzetQris: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'QRIS'), 0)`,
     })
     .from(transactions)
+    .where(txBase(range))
+    .groupBy(WIB_DAY_TX);
+
+  // 4b) Pecahan harian metode pembayaran (Split payment aware)
+  const payDaily = await db
+    .select({
+      day:       WIB_DAY_TX,
+      omzetCash: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${COMPLETED} AND ${transactionPayments.paymentMethod} = 'CASH'), 0)`,
+      omzetQris: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${COMPLETED} AND ${transactionPayments.paymentMethod} = 'QRIS'), 0)`,
+    })
+    .from(transactionPayments)
+    .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
     .where(txBase(range))
     .groupBy(WIB_DAY_TX);
 
@@ -353,10 +375,14 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
   const alokasiGajiKaryawan   = money(Math.round(labaOperasionalBersih * 0.5));
   const labaBersih            = money(labaKotor - alokasiGajiKaryawan - biaya);
 
+  const hasPayments = (num(paySummary?.omzetCash) + num(paySummary?.omzetQris)) > 0;
+  const omzetCash = hasPayments ? money(num(paySummary?.omzetCash)) : money(num(tx?.omzetCash));
+  const omzetQris = hasPayments ? money(num(paySummary?.omzetQris)) : money(num(tx?.omzetQris));
+
   const summary: FinancialSummary = {
     omzet,
-    omzetCash:   money(num(tx?.omzetCash)),
-    omzetQris:   money(num(tx?.omzetQris)),
+    omzetCash,
+    omzetQris,
     txCount:     num(tx?.txCount),
     txCountCash: num(tx?.txCountCash),
     txCountQris: num(tx?.txCountQris),
@@ -394,6 +420,11 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     r.omzet = money(num(t.omzet));
     r.omzetCash = money(num(t.omzetCash));
     r.omzetQris = money(num(t.omzetQris));
+  }
+  for (const p of payDaily) {
+    const r = row(p.day);
+    r.omzetCash = money(num(p.omzetCash));
+    r.omzetQris = money(num(p.omzetQris));
   }
   for (const i of itemDaily) {
     const r = row(i.day);
