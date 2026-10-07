@@ -66,8 +66,12 @@ export async function GET(
 const patchSchema = z.discriminatedUnion('action', [
   // Bebaskan slot → employee_id = NULL (karyawan bisa daftar lagi)
   z.object({ action: z.literal('free') }),
-  // Pindahkan ke karyawan lain (by employeeId)
-  z.object({ action: z.literal('reassign'), newEmployeeId: z.string().uuid() }),
+  // Pindahkan ke karyawan lain (by employeeId, opsional forceMove jika sudah punya slot lama)
+  z.object({
+    action: z.literal('reassign'),
+    newEmployeeId: z.string().uuid(),
+    forceMove: z.boolean().optional(),
+  }),
   // Tukar slot dua karyawan (swap slot A ↔ slot B)
   z.object({ action: z.literal('swap'), targetSlotId: z.string().uuid() }),
 ]);
@@ -119,7 +123,7 @@ export async function PATCH(
 
       // ── ACTION: reassign ──────────────────────────────────────
       if (parsed.data.action === 'reassign') {
-        const { newEmployeeId } = parsed.data;
+        const { newEmployeeId, forceMove } = parsed.data;
 
         // Validasi: karyawan target ada
         const targetEmployee = await tx.query.employees.findFirst({
@@ -130,7 +134,7 @@ export async function PATCH(
           throw new AppError('Karyawan target tidak ditemukan.', 'EMPLOYEE_NOT_FOUND', 404);
         }
 
-        // Cek: karyawan target tidak sedang menempati slot LAIN
+        // Cek: apakah karyawan target sedang menempati slot LAIN
         const alreadyHasSlot = await tx.query.shiftSchedules.findFirst({
           where: and(
             eq(shiftSchedules.employeeId, newEmployeeId),
@@ -140,13 +144,21 @@ export async function PATCH(
         });
 
         if (alreadyHasSlot && alreadyHasSlot.id !== slotId) {
-          throw new AppError(
-            `${targetEmployee.fullName} sudah memiliki slot di ` +
-            `${alreadyHasSlot.dayOfWeek} ${alreadyHasSlot.slotStart}–${alreadyHasSlot.slotEnd}. ` +
-            `Gunakan action "swap" untuk tukar slot, atau bebaskan slot mereka dulu.`,
-            'EMPLOYEE_HAS_SLOT',
-            409,
-          );
+          if (forceMove) {
+            // Bebaskan slot lama terlebih dahulu secara otomatis
+            await tx
+              .update(shiftSchedules)
+              .set({ employeeId: null, updatedAt: new Date() })
+              .where(eq(shiftSchedules.id, alreadyHasSlot.id));
+          } else {
+            throw new AppError(
+              `${targetEmployee.fullName} sudah memiliki slot di ` +
+              `${alreadyHasSlot.dayOfWeek} ${alreadyHasSlot.slotStart}–${alreadyHasSlot.slotEnd}. ` +
+              `Centang opsi "Pindahkan dari jadwal lama" untuk memindahkannya ke sini.`,
+              'EMPLOYEE_HAS_SLOT',
+              409,
+            );
+          }
         }
 
         await tx
@@ -154,8 +166,14 @@ export async function PATCH(
           .set({ employeeId: newEmployeeId, updatedAt: new Date() })
           .where(eq(shiftSchedules.id, slotId));
 
+        if (alreadyHasSlot && alreadyHasSlot.id !== slotId && forceMove) {
+          return `Berhasil memindahkan ${targetEmployee.fullName} dari ` +
+                 `${alreadyHasSlot.dayOfWeek} (${alreadyHasSlot.slotStart}–${alreadyHasSlot.slotEnd}) ke ` +
+                 `${slot.dayOfWeek} (${slot.slotStart}–${slot.slotEnd})!`;
+        }
+
         return `Slot ${slot.dayOfWeek} ${slot.slotStart}–${slot.slotEnd} ` +
-               `berhasil dipindahkan ke ${targetEmployee.fullName} (NIM: ${targetEmployee.nim}).`;
+               `berhasil ditugaskan ke ${targetEmployee.fullName} (NIM: ${targetEmployee.nim}).`;
       }
 
       // ── ACTION: swap ──────────────────────────────────────────
