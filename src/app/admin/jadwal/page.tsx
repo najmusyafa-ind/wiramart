@@ -11,7 +11,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   RefreshCw, UserX, UserCheck, ArrowLeftRight,
-  CheckCircle, AlertCircle, Loader2, X, Search, Trash2,
+  CheckCircle, AlertCircle, Loader2, X, Search, Trash2, Plus,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────
@@ -72,6 +72,7 @@ function SlotModal({
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [loadingEmp, setLoadingEmp] = useState(false);
   const [selectedEmp, setSelectedEmp] = useState<EmployeeOption | null>(null);
+  const [forceMove, setForceMove] = useState(true);
   // Swap: cari slot target
   const [schedule, setSchedule] = useState<DayGroup[]>([]);
   const [targetSlotId, setTargetSlotId] = useState<string | null>(null);
@@ -110,12 +111,12 @@ function SlotModal({
     setLoading(true);
     setResult(null);
 
-    let body: Record<string, string>;
+    let body: Record<string, string | boolean>;
     if (modal.type === 'free') {
       body = { action: 'free' };
     } else if (modal.type === 'reassign') {
       if (!selectedEmp) return;
-      body = { action: 'reassign', newEmployeeId: selectedEmp.id };
+      body = { action: 'reassign', newEmployeeId: selectedEmp.id, forceMove };
     } else {
       if (!targetSlotId) return;
       body = { action: 'swap', targetSlotId };
@@ -155,7 +156,7 @@ function SlotModal({
 
   const titles: Record<NonNullable<ModalState>['type'], string> = {
     free:     '🔓 Bebaskan Slot',
-    reassign: '👤 Pindah ke Karyawan Lain',
+    reassign: modal.slot.isFilled ? '👤 Ganti / Pindah Karyawan' : '➕ Tugaskan Karyawan ke Slot Kosong',
     swap:     '🔄 Tukar / Pindah Slot',
   };
 
@@ -213,7 +214,6 @@ function SlotModal({
                 style={{ paddingLeft: 32 }}
               />
             </div>
-            {loadingEmp && <div style={{ textAlign: 'center', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}><Loader2 size={12} className="spin-icon" style={{ display: 'inline' }} /> Mencari...</div>}
             {employees.map(emp => (
               <div
                 key={emp.id}
@@ -230,6 +230,22 @@ function SlotModal({
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>NIM {emp.nim} · {emp.programStudi}</div>
               </div>
             ))}
+            {selectedEmp && (
+              <label style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)',
+                marginTop: 'var(--space-3)', padding: 'var(--space-2) var(--space-3)',
+                background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)',
+                cursor: 'pointer',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={forceMove}
+                  onChange={e => setForceMove(e.target.checked)}
+                />
+                <span>Pindahkan otomatis jika karyawan sudah memiliki jadwal shift di hari lain</span>
+              </label>
+            )}
           </div>
         )}
 
@@ -372,7 +388,7 @@ function SlotModal({
             {loading
               ? <><Loader2 size={14} className="spin-icon" /> Memproses...</>
               : modal.type === 'free' ? '🔓 Bebaskan Slot'
-              : modal.type === 'reassign' ? '✅ Pindahkan'
+              : modal.type === 'reassign' ? (modal.slot.isFilled ? '✅ Pindahkan' : '➕ Tugaskan ke Slot')
               : selectedTargetIsEmpty ? '➡️ Pindah ke Slot Kosong'
               : '🔄 Tukar Posisi'}
           </button>
@@ -422,8 +438,8 @@ function SlotCard({
         </div>
       </div>
 
-      {/* Admin actions — hanya jika slot terisi */}
-      {entry.isFilled && (
+      {/* Admin actions */}
+      {entry.isFilled ? (
         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
           <button
             title="Tukar slot dengan karyawan lain"
@@ -445,6 +461,22 @@ function SlotCard({
             style={{ background: 'none', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '3px 6px', cursor: 'pointer', color: 'var(--color-error)', display: 'flex', alignItems: 'center' }}
           >
             <UserX size={12} />
+          </button>
+        </div>
+      ) : (
+        <div style={{ flexShrink: 0 }}>
+          <button
+            title="Tugaskan karyawan ke slot kosong ini"
+            onClick={() => onAction({ type: 'reassign', slot: entry, day, time })}
+            className="btn btn-secondary"
+            style={{
+              padding: '3px 8px', fontSize: 'var(--text-xs)',
+              display: 'flex', alignItems: 'center', gap: 4,
+              borderColor: 'var(--color-primary)', color: 'var(--color-primary)',
+              fontWeight: 'var(--weight-semibold)',
+            }}
+          >
+            <Plus size={12} /> Isi Slot
           </button>
         </div>
       )}
