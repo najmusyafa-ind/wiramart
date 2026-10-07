@@ -7,6 +7,16 @@
 //   - clockOut di-set ke waktu sekarang (WIB)
 //   - status → CLOSED
 //   - Auto-close juga dipanggil oleh cron 15 menit pasca jam akhir shift
+//
+// v1.1 — Fix D2 (Fase 0.6):
+//   saldoAkhirLaci TIDAK lagi dikirim ke kasir. Kasir harus melakukan
+//   BLIND COUNT — tidak tahu angka yang diharapkan.
+// v1.2 — Tutup celah D2:
+//   Respons juga TIDAK memuat modalAwal / totalCash / totalQris / totalOmzet /
+//   totalHpp, karena kombinasi angka itu cukup untuk menurunkan saldo expected
+//   (modalAwal + totalCash, atau labaKotor + HPP − QRIS). Angka lengkap hanya
+//   untuk manajer/admin lewat laporan shift.
+//   UPDATE diberi guard status = 'ACTIVE' agar penutupan ganda bersamaan ditolak.
 // =============================================================
 
 import { z } from 'zod';
@@ -96,7 +106,6 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   const totalCash      = parseFloat(summary?.totalCash  ?? '0');
   const totalQris      = parseFloat(summary?.totalQris  ?? '0');
   const txCount        = Number(summary?.txCount ?? 0);
-  const modalAwal      = parseFloat(activeShift.modalAwal ?? '0');
   const totalHpp       = parseFloat(hppRow?.totalHpp ?? '0');
   const totalOmzet     = totalCash + totalQris;
   const labaKotorShift = Math.max(0, totalOmzet - totalHpp);
@@ -156,36 +165,40 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   const personCount = Math.max(1, attendeeNames.length);
   const perPersonShare = Math.round(alokasiGajiShift / personCount);
 
-  // Saldo expected di laci = modal awal + semua cash yang masuk
-  const saldoAkhir = modalAwal + totalCash;
+  // Catatan D2: saldo expected (modalAwal + totalCash) sengaja TIDAK dihitung
+  // di sini maupun dikirim ke kasir. Laporan manajer menghitungnya sendiri.
 
-  // 5. Tutup shift
-  await db
+  // 5. Tutup shift — guard status mencegah dua request bersamaan sama-sama "berhasil"
+  const closed = await db
     .update(shifts)
     .set({
       status:   'CLOSED',
       clockOut: nowWib,
       notes:    notes ?? null,
     })
-    .where(eq(shifts.id, activeShift.id));
+    .where(and(eq(shifts.id, activeShift.id), eq(shifts.status, 'ACTIVE')))
+    .returning({ id: shifts.id });
 
+  if (closed.length === 0) {
+    return apiError(
+      'Shift sudah ditutup oleh proses lain.',
+      'SHIFT_ALREADY_CLOSED',
+      409,
+    );
+  }
+
+  // PENTING (D2): respons TIDAK memuat angka apa pun yang bisa dipakai
+  // menurunkan kas laci. Kasir hanya melihat jumlah transaksi & bagi hasil.
   return apiOk({
     message: 'Shift berhasil ditutup.',
     shiftId:        activeShift.id,
     clockIn:        activeShift.clockIn,
     clockOut:       nowWib.toISOString(),
-    modalAwal,
-    totalCash,
-    totalQris,
-    totalOmzet,
-    totalHpp,
     labaKotorShift,
     alokasiGajiShift,
     personCount,
     attendeeNames,
     perPersonShare,
     txCount,
-    // Saldo expected di laci (hanya uang tunai — QRIS langsung ke rekening)
-    saldoAkhirLaci: saldoAkhir,
   });
 }

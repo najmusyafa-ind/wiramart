@@ -796,9 +796,7 @@ export default function PosPage() {
   const [tutupLoading, setTutupLoading] = useState(false);
   const [showTutupConfirm, setShowTutupConfirm] = useState(false);
   const [tutupResult, setTutupResult] = useState<{
-    totalCash: number; totalQris: number; txCount: number;
-    modalAwal: number; saldoAkhirLaci: number;
-    totalOmzet?: number; totalHpp?: number;
+    txCount: number;
     labaKotorShift?: number; alokasiGajiShift?: number;
     personCount?: number; perPersonShare?: number;
     attendeeNames?: string[];
@@ -1112,11 +1110,10 @@ export default function PosPage() {
       const json = await res.json() as {
         success: boolean;
         data?: {
-          totalCash: number; totalQris: number; txCount: number;
-          modalAwal: number; saldoAkhirLaci: number;
-          totalOmzet?: number; totalHpp?: number;
+          txCount: number;
           labaKotorShift?: number; alokasiGajiShift?: number;
           personCount?: number; perPersonShare?: number;
+          attendeeNames?: string[];
         };
         error?: string;
       };
@@ -1218,19 +1215,11 @@ export default function PosPage() {
                   Ringkasan sesi kasir hari ini
                 </p>
               </div>
-              {/* Tabel ringkasan */}
-              {([
-                { label: 'Modal Awal Laci', val: rp(tutupResult.modalAwal) },
-                { label: 'Total Cash Masuk', val: rp(tutupResult.totalCash), green: true },
-                { label: 'Total QRIS', val: rp(tutupResult.totalQris) },
-                { label: 'Total Omzet Shift', val: rp(tutupResult.totalOmzet ?? (tutupResult.totalCash + tutupResult.totalQris)) },
-                { label: 'Total Transaksi', val: `${tutupResult.txCount} txn` },
-              ]).map(row => (
-                <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-sm)', padding: 'var(--space-2) 0', borderBottom: '1px solid var(--color-border)' }}>
-                  <span style={{ color: 'var(--color-text-muted)' }}>{row.label}</span>
-                  <span style={{ fontWeight: 'var(--weight-semibold)', color: row.green ? 'var(--color-success)' : 'var(--color-text)' }}>{row.val}</span>
-                </div>
-              ))}
+              {/* Tabel ringkasan — D2: hanya angka yang tidak bisa dipakai menghitung kas laci */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-sm)', padding: 'var(--space-2) 0', borderBottom: '1px solid var(--color-border)' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>Total Transaksi</span>
+                <span style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>{tutupResult.txCount} txn</span>
+              </div>
 
               {/* Box Bagi Hasil 50% Shift Karyawan */}
               {tutupResult.alokasiGajiShift !== undefined && (
@@ -1254,13 +1243,21 @@ export default function PosPage() {
                 </div>
               )}
 
-              {/* Saldo akhir */}
-              <div style={{ padding: 'var(--space-3)', background: 'var(--color-success-light)', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>💰 Saldo Expected di Laci</div>
-                <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-success)' }}>
-                  {rp(tutupResult.saldoAkhirLaci)}
+              {/* Instruksi Blind Count — D2 Fix: angka expected TIDAK ditampilkan ke kasir */}
+              <div style={{
+                padding: 'var(--space-3)',
+                background: 'var(--color-warning-light, #fffbeb)',
+                border: '1.5px solid var(--color-warning, #f59e0b)',
+                borderRadius: 'var(--radius-md)',
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-warning, #92400e)', marginBottom: 4 }}>
+                  ⚠️ Hitung Uang di Laci
                 </div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 2 }}>(Modal Awal + Cash Masuk)</div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                  Hitung uang secara fisik, lalu laporkan jumlahnya ke Manajer.
+                  Jangan cocokkan dengan angka di sistem.
+                </div>
               </div>
               <button
                 onClick={() => { setTutupResult(null); handleLogout(); }}

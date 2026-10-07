@@ -9,14 +9,22 @@
 // 2. Fetch transaksi + items (READ di luar tx)
 // 3. Guard: status harus COMPLETED, umur < 24 jam
 // 4. ATOMIC TX:
-//    a. Update transactions.status → VOID (+ voidReason, voidedByAdminId, voidedAt)
-//    b. Kembalikan stok setiap produk (reverse transactionItems.qty)
+//    a. Update transactions.status → VOID dengan guard WHERE status='COMPLETED'
+//       (cek ganda untuk race condition — dua admin void bersamaan)
+//    b. Kembalikan stok setiap produk ATOMIK: stock_qty = stock_qty + qty
+//       (bukan nilai JS basi) — lock ordering by productId agar tanpa deadlock
 //    c. Catat di audit_logs
+//
+// v1.1 — Fix D16 (Fase 0.5):
+//  • Stok dikembalikan via UPDATE atomik `stock_qty = stock_qty + qty`.
+//    Nilai JS yang dibaca SEBELUM transaksi tidak lagi dipakai → tidak ada
+//    stok negatif/loncat saat dua kasir/admin void bersamaan.
+//  • Lock ordering deterministik by productId mencegah deadlock.
 // =============================================================
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   transactions,
@@ -117,7 +125,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
     }
 
     // ── Fetch transaction items untuk reverse stok ───────────
-    const items = await db
+    const itemsRaw = await db
       .select({
         productId: transactionItems.productId,
         qty:       transactionItems.qty,
@@ -125,7 +133,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
       .from(transactionItems)
       .where(eq(transactionItems.transactionId, transactionId));
 
-    if (items.length === 0) {
+    if (itemsRaw.length === 0) {
       return apiError(
         'Item transaksi tidak ditemukan. Tidak dapat memproses void.',
         'NO_ITEMS',
@@ -133,28 +141,25 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
       );
     }
 
-    // ── Fetch stok produk saat ini ───────────────────────────
-    const productIds = [...new Set(items.map((i) => i.productId))];
-
-    // Fetch stok saat ini untuk semua produk yang terlibat
-    const productMap = new Map<string, number>();
-    for (const pid of productIds) {
-      const [row] = await db
-        .select({ id: products.id, stockQty: products.stockQty })
-        .from(products)
-        .where(eq(products.id, pid))
-        .limit(1);
-      if (row) productMap.set(row.id, row.stockQty);
-    }
-
     // ─────────────────────────────────────────────────────────
-    // ATOMIC TRANSACTION — void + reverse stok + audit log
+    // ATOMIC TRANSACTION — void + reverse stok atomik + audit log
+    //
+    // D16 Fix: Stok dikembalikan via `stock_qty = stock_qty + qty`
+    // (atomik di server DB, bukan nilai JS yang dibaca sebelumnya).
+    // Lock ordering by productId mencegah deadlock saat dua void
+    // menyentuh produk yang sama dalam urutan berbeda.
     // ─────────────────────────────────────────────────────────
     const now = new Date();
 
+    // Sort items by productId untuk lock ordering deterministik
+    const itemsByLockOrder = [...itemsRaw].sort((a, b) =>
+      a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0,
+    );
+
     await db.transaction(async (tx) => {
-      // Step 1: Update status transaksi → VOID
-      await tx
+      // Step 1: Update status transaksi → VOID dengan guard WHERE status='COMPLETED'
+      // Guard ini penting: jika dua admin menekan void bersamaan, hanya satu yang sukses.
+      const updated = await tx
         .update(transactions)
         .set({
           status:           'VOID',
@@ -166,17 +171,23 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
         .where(
           and(
             eq(transactions.id, transactionId),
-            eq(transactions.status, 'COMPLETED'), // double-check untuk mencegah race condition
+            eq(transactions.status, 'COMPLETED'), // guard race condition
           ),
-        );
+        )
+        .returning({ id: transactions.id });
 
-      // Step 2: Kembalikan stok setiap produk
-      for (const item of items) {
-        const currentQty = productMap.get(item.productId) ?? 0;
+      // Jika baris tidak terupdate, transaksi sudah di-void duluan oleh request lain
+      if (updated.length === 0) {
+        throw new Error('ALREADY_VOIDED_RACE');
+      }
+
+      // Step 2: Kembalikan stok ATOMIK — stock_qty = stock_qty + qty
+      // Tidak ada nilai JS yang dibaca; Postgres langsung menjumlahkan di server.
+      for (const item of itemsByLockOrder) {
         await tx
           .update(products)
           .set({
-            stockQty:  currentQty + item.qty,
+            stockQty:  sql`${products.stockQty} + ${item.qty}`,
             updatedAt: now,
           })
           .where(eq(products.id, item.productId));
@@ -204,11 +215,19 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
       invoiceNumber: trx.invoiceNumber,
       status:        'VOID',
       voidedAt:      now.toISOString(),
-      message:       `Transaksi ${trx.invoiceNumber} berhasil di-void. Stok ${items.length} produk telah dikembalikan.`,
+      message:       `Transaksi ${trx.invoiceNumber} berhasil di-void. Stok ${itemsRaw.length} produk telah dikembalikan.`,
     });
   } catch (err) {
     if (err instanceof AppError) {
       return apiError(err.message, err.code, err.statusCode);
+    }
+    // Race condition: transaksi sudah di-void oleh request lain
+    if (err instanceof Error && err.message === 'ALREADY_VOIDED_RACE') {
+      return apiError(
+        'Transaksi ini sudah di-void oleh permintaan lain. Muat ulang halaman.',
+        'ALREADY_VOIDED',
+        409,
+      );
     }
     return apiError('Terjadi kesalahan server.', 'INTERNAL_ERROR', 500);
   }
