@@ -797,9 +797,6 @@ export default function PosPage() {
   const [showTutupConfirm, setShowTutupConfirm] = useState(false);
   const [tutupResult, setTutupResult] = useState<{
     txCount: number;
-    labaKotorShift?: number; alokasiGajiShift?: number;
-    personCount?: number; perPersonShare?: number;
-    attendeeNames?: string[];
   } | null>(null);
   const [lastTx, setLastTx] = useState<{
     invoiceNumber: string;
@@ -1111,9 +1108,6 @@ export default function PosPage() {
         success: boolean;
         data?: {
           txCount: number;
-          labaKotorShift?: number; alokasiGajiShift?: number;
-          personCount?: number; perPersonShare?: number;
-          attendeeNames?: string[];
         };
         error?: string;
       };
@@ -1221,27 +1215,21 @@ export default function PosPage() {
                 <span style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>{tutupResult.txCount} txn</span>
               </div>
 
-              {/* Box Bagi Hasil 50% Shift Karyawan */}
-              {tutupResult.alokasiGajiShift !== undefined && (
-                <div style={{ padding: 'var(--space-3)', background: 'var(--color-primary-light)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-primary)', fontWeight: 'var(--weight-semibold)' }}>
-                      👥 Hak Bagi Hasil Tim Shift (50%)
-                    </span>
-                    <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
-                      {rp(tutupResult.alokasiGajiShift)}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-                    Laba kotor shift: {rp(tutupResult.labaKotorShift ?? 0)}
-                  </div>
-                  {tutupResult.personCount && tutupResult.personCount > 0 && (
-                    <div style={{ fontSize: '0.72rem', color: 'var(--color-primary)', fontWeight: 'var(--weight-medium)', marginTop: 2 }}>
-                      Dibagi ke {tutupResult.personCount} personel {tutupResult.attendeeNames && tutupResult.attendeeNames.length > 0 ? `(${tutupResult.attendeeNames.join(', ')})` : ''} = <strong>{rp(tutupResult.perPersonShare ?? 0)}</strong> / orang
-                    </div>
-                  )}
+              {/* Status Operasional Shift (K2: Laba & Bagi Hasil hanya dikelola Manajer/Dosen) */}
+              <div style={{
+                padding: 'var(--space-3)',
+                background: 'var(--color-surface-muted, #f8fafc)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--color-border)',
+                fontSize: '0.78rem',
+                color: 'var(--color-text-secondary)',
+                lineHeight: 1.5,
+              }}>
+                <div style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)', marginBottom: 2 }}>
+                  📋 Status Operasional
                 </div>
-              )}
+                Sesi shift telah ditutup. Seluruh data transaksi tersimpan aman di server untuk rekapitulasi berkala Manajer.
+              </div>
 
               {/* Instruksi Blind Count — D2 Fix: angka expected TIDAK ditampilkan ke kasir */}
               <div style={{

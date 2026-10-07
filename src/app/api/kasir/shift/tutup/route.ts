@@ -20,10 +20,10 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, inArray, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { shifts, transactions, transactionItems, attendances, shiftSchedules, employees } from '@/lib/db/schema';
+import { shifts, transactions } from '@/lib/db/schema';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
 
@@ -75,100 +75,18 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  // 4. Hitung ringkasan shift (total cash & QRIS dalam shift ini)
+  // 4. Hitung jumlah transaksi yang terselesaikan dalam shift ini (hanya volume transaksi)
   const [summary] = await db
     .select({
-      totalCash: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (
-        WHERE ${transactions.paymentMethod} = 'CASH'
-        AND ${transactions.status} = 'COMPLETED'
-      ), 0)`,
-      totalQris: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (
-        WHERE ${transactions.paymentMethod} = 'QRIS'
-        AND ${transactions.status} = 'COMPLETED'
-      ), 0)`,
       txCount: sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'COMPLETED')`,
     })
     .from(transactions)
     .where(eq(transactions.shiftId, activeShift.id));
 
-  // 4b. Hitung HPP dan laba kotor shift ini
-  const [hppRow] = await db
-    .select({
-      totalHpp: sql<string>`COALESCE(SUM(${transactionItems.subtotalCost}), 0)`,
-    })
-    .from(transactionItems)
-    .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
-    .where(and(
-      eq(transactions.shiftId, activeShift.id),
-      eq(transactions.status, 'COMPLETED'),
-    ));
+  const txCount = Number(summary?.txCount ?? 0);
+  const nowWib  = new Date();
 
-  const totalCash      = parseFloat(summary?.totalCash  ?? '0');
-  const totalQris      = parseFloat(summary?.totalQris  ?? '0');
-  const txCount        = Number(summary?.txCount ?? 0);
-  const totalHpp       = parseFloat(hppRow?.totalHpp ?? '0');
-  const totalOmzet     = totalCash + totalQris;
-  const labaKotorShift = Math.max(0, totalOmzet - totalHpp);
-  // Sistem Paten Wiramart: 50% Laba Kotor untuk Hak Karyawan Shift
-  const alokasiGajiShift = Math.round(labaKotorShift * 0.5);
-
-  const nowWib = new Date();
-  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(nowWib);
-
-  // Ambil data slot jadwal shift aktif ini (jika ada)
-  let attendeeNames: string[] = [];
-
-  const [currentAtt] = await db
-    .select({
-      slotStart: shiftSchedules.slotStart,
-      slotEnd:   shiftSchedules.slotEnd,
-    })
-    .from(attendances)
-    .innerJoin(shiftSchedules, eq(attendances.scheduleId, shiftSchedules.id))
-    .where(eq(attendances.shiftId, activeShift.id))
-    .limit(1);
-
-  if (currentAtt) {
-    // Ambil personil yang hadir pada slot shift yang sama hari ini
-    const slotAttRows = await db
-      .select({
-        employeeName: employees.fullName,
-      })
-      .from(attendances)
-      .innerJoin(shiftSchedules, eq(attendances.scheduleId, shiftSchedules.id))
-      .innerJoin(employees, eq(attendances.employeeId, employees.id))
-      .where(and(
-        eq(attendances.attendanceDate, todayStr),
-        eq(shiftSchedules.slotStart, currentAtt.slotStart),
-        eq(shiftSchedules.slotEnd, currentAtt.slotEnd),
-        inArray(attendances.status, ['HADIR', 'TELAT', 'PENGGANTI']),
-      ));
-
-    attendeeNames = slotAttRows.map((r) => r.employeeName);
-  }
-
-  // Fallback jika shift tidak terikat slot spesifik
-  if (attendeeNames.length === 0) {
-    const fallbackAttRows = await db
-      .select({
-        employeeName: employees.fullName,
-      })
-      .from(attendances)
-      .innerJoin(employees, eq(attendances.employeeId, employees.id))
-      .where(and(
-        eq(attendances.attendanceDate, todayStr),
-        inArray(attendances.status, ['HADIR', 'TELAT', 'PENGGANTI']),
-      ));
-    attendeeNames = fallbackAttRows.map((r) => r.employeeName);
-  }
-
-  const personCount = Math.max(1, attendeeNames.length);
-  const perPersonShare = Math.round(alokasiGajiShift / personCount);
-
-  // Catatan D2: saldo expected (modalAwal + totalCash) sengaja TIDAK dihitung
-  // di sini maupun dikirim ke kasir. Laporan manajer menghitungnya sendiri.
-
-  // 5. Tutup shift — guard status mencegah dua request bersamaan sama-sama "berhasil"
+  // 5. Tutup shift — guard status ACTIVE mencegah dua request bersamaan sama-sama "berhasil"
   const closed = await db
     .update(shifts)
     .set({
@@ -187,18 +105,15 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  // PENTING (D2): respons TIDAK memuat angka apa pun yang bisa dipakai
-  // menurunkan kas laci. Kasir hanya melihat jumlah transaksi & bagi hasil.
+  // PENTING (K2 & K5 Zero-Trust):
+  // Respons TIDAK memuat angka laba, margin, bagi hasil, atau nominal kas laci.
+  // Seluruh kalkulasi finansial dan bagi hasil dikelola oleh Manajer/Dosen.
   return apiOk({
-    message: 'Shift berhasil ditutup.',
-    shiftId:        activeShift.id,
-    clockIn:        activeShift.clockIn,
-    clockOut:       nowWib.toISOString(),
-    labaKotorShift,
-    alokasiGajiShift,
-    personCount,
-    attendeeNames,
-    perPersonShare,
+    message:  'Shift berhasil ditutup.',
+    shiftId:  activeShift.id,
+    clockIn:  activeShift.clockIn,
+    clockOut: nowWib.toISOString(),
     txCount,
   });
 }
+
