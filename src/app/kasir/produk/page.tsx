@@ -569,6 +569,21 @@ export default function KasirProdukPage() {
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const b = params.get('barcode');
+      const n = params.get('nama');
+      const t = params.get('tambah');
+      if (b || n || t === '1') {
+        if (b) setPrefillBarcode(b);
+        if (n) setPrefillName(n);
+        setEditData(null);
+        setShowModal(true);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     const t = setTimeout(() => fetchProducts(search), 350);
     return () => clearTimeout(t);
   }, [search, fetchProducts]);
