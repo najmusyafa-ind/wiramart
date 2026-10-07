@@ -1,15 +1,25 @@
 // =============================================================
 // GET /api/cron/auto-close-shift
-// Dipanggil oleh Vercel Cron Job setiap menit (*/1 * * * *)
+// Dipanggil oleh Vercel Cron Job setiap menit (*/1 * * * *).
+// Jadwal produksi: "0 17 * * *" = pukul 00:00 WIB setiap hari.
+//
 // Auth: CRON_SECRET header (Vercel Cron standard)
 //
 // Business Rules:
-//   1. Tutup otomatis shift ACTIVE yang sudah > 15 menit
-//      melewati jam akhir slot jadwal kasir tsb.
+//   1. Tutup otomatis shift ACTIVE yang sudah melewati slotEnd jadwal
+//      kasir + 15 menit TOLERANSI — dihitung dari slotEnd hari kasir
+//      tersebut buka shift (bukan hari cron berjalan).
 //   2. Jika shift tidak punya slot jadwal (kasir tanpa jadwal hari ini),
 //      fallback: tutup shift yang > 10 jam (stale session).
 //   3. Semua auto-close dicatat dengan notes = 'AUTO_CLOSED_BY_CRON'
 //   4. Tidak blocking — error satu shift tidak menghentikan yang lain.
+//
+// ⚠️  FIX v2 — Bug yang diperbaiki:
+//      Versi lama membandingkan nowMinutes (0 saat cron 00:00 WIB)
+//      terhadap slotEndMinutes (~915 untuk 15:15 WIB). Selalu false.
+//      Kini menggunakan perbandingan epoch absolut:
+//        slotEndWib = date(clockIn WIB) + slotEnd "HH:MM" → ms
+//        shouldClose = nowEpoch >= slotEndWib + 15 menit buffer
 //
 // FinOps: query ACTIVE shifts difilter isNull(clockOut) + limit 50
 // =============================================================
@@ -19,7 +29,21 @@ import { db } from '@/lib/db/client';
 import { shifts, shiftSchedules, attendances } from '@/lib/db/schema';
 import { eq, and, isNull, desc } from 'drizzle-orm';
 
+// Tipe literal enum hari dari skema DB
+type DayOfWeek = 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU';
+
 export const runtime = 'nodejs';
+
+// ── Mapping nama hari Indonesia ke format database ─────────────────────────
+const HARI_MAP: Record<string, string> = {
+  Minggu: 'MINGGU',
+  Senin:  'SENIN',
+  Selasa: 'SELASA',
+  Rabu:   'RABU',
+  Kamis:  'KAMIS',
+  Jumat:  'JUMAT',
+  Sabtu:  'SABTU',
+};
 
 // Pastikan hanya Vercel Cron yang bisa memanggil endpoint ini
 function verifyCronSecret(req: NextRequest): boolean {
@@ -29,6 +53,40 @@ function verifyCronSecret(req: NextRequest): boolean {
   return authHeader === `Bearer ${secret}`;
 }
 
+/**
+ * Mengonversi string tanggal WIB (YYYY-MM-DD) + slotEnd "HH:MM[:SS]"
+ * menjadi epoch milliseconds yang merepresentasikan waktu WIB absolut.
+ *
+ * Contoh: tanggal="2026-10-07" + slotEnd="15:00"
+ *   → new Date("2026-10-07T15:00:00+07:00").getTime()
+ *   → ms epoch untuk 15:00 WIB tgl 7 Oktober 2026
+ */
+function slotEndToEpoch(tanggalWib: string, slotEnd: string): number {
+  const [hh, mm] = slotEnd.split(':');
+  // Buat timestamp WIB eksplisit dengan offset +07:00
+  const isoWib = `${tanggalWib}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00+07:00`;
+  return new Date(isoWib).getTime();
+}
+
+/**
+ * Mengambil nama hari dari timestamp UTC dalam zona WIB.
+ * Return: 'SENIN' | 'SELASA' | ... | 'MINGGU'
+ */
+function getDayOfWeekWib(date: Date): string {
+  const hariRaw = new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'long',
+  }).format(date);
+  return HARI_MAP[hariRaw] ?? hariRaw.toUpperCase();
+}
+
+/**
+ * Mengambil string tanggal WIB (YYYY-MM-DD) dari Date UTC.
+ */
+function getTanggalWib(date: Date): string {
+  return date.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   // Auth guard — hanya Vercel Cron yang boleh
   if (!verifyCronSecret(req)) {
@@ -36,27 +94,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const nowWib = new Date();
-  // Tentukan nama hari WIB secara deterministik
-  const hariIni = new Intl.DateTimeFormat('id-ID', {
-    timeZone: 'Asia/Jakarta',
-    weekday: 'long',
-  }).format(nowWib).toUpperCase() as
-    'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU';
+  const nowEpoch = nowWib.getTime();
 
-  // Jam sekarang dalam WIB (HH:MM)
-  const jamWib = nowWib.toLocaleTimeString('en-GB', {
-    timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
-  }); // "HH:MM"
-  const [jamH, jamM] = jamWib.split(':').map(Number);
-  const nowMinutes = (jamH ?? 0) * 60 + (jamM ?? 0);
+  // Toleransi menit setelah slotEnd sebelum shift ditutup paksa
+  const TOLERANSI_MS   = 15 * 60 * 1_000; // 15 menit
+  const TEN_HOURS_MS   = 10 * 60 * 60 * 1_000;
 
   let closedCount = 0;
   let skippedCount = 0;
   const errors: string[] = [];
 
   try {
+    // ── PASS 1: Tutup shift ACTIVE yang sudah overdue ─────────────────────
     // Ambil semua shift ACTIVE yang belum di-clockOut
-    // Limit 50 — max kasir Wiramart ~10 orang
     const activeShifts = await db
       .select({
         shiftId:    shifts.id,
@@ -85,11 +135,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Proses setiap shift aktif secara serial (menghindari race condition)
     for (const shift of activeShifts) {
       try {
-        // Cek apakah kasir ini punya jadwal hari ini
+        // Tentukan hari WIB saat kasir buka shift (bukan hari cron berjalan)
+        const clockInDate  = new Date(shift.clockIn);
+        const hariShift    = getDayOfWeekWib(clockInDate);
+        const tanggalShift = getTanggalWib(clockInDate);
+
+        // Cari jadwal kasir yang sesuai hari saat shift dibuka
         const jadwal = await db.query.shiftSchedules.findFirst({
           where: and(
             eq(shiftSchedules.employeeId, shift.employeeId),
-            eq(shiftSchedules.dayOfWeek, hariIni),
+            eq(shiftSchedules.dayOfWeek, hariShift as DayOfWeek),
             eq(shiftSchedules.isActive, true),
           ),
           columns: { slotEnd: true },
@@ -99,20 +154,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         let closeReason = '';
 
         if (jadwal) {
-          // Kasir punya jadwal — tutup 15 menit setelah slotEnd
-          // slotEnd format: "HH:MM" atau "HH:MM:SS"
-          const [slotH, slotM] = jadwal.slotEnd.split(':').map(Number);
-          const slotEndMinutes = (slotH ?? 0) * 60 + (slotM ?? 0);
-          const TOLERANSI = 15; // menit buffer setelah slotEnd
+          // ── KUNCI FIX: bandingkan epoch absolut, bukan nowMinutes ────────
+          // slotEndEpoch = kapan seharusnya shift berakhir (dalam ms epoch UTC)
+          const slotEndEpoch = slotEndToEpoch(tanggalShift, jadwal.slotEnd);
 
-          if (nowMinutes >= slotEndMinutes + TOLERANSI) {
+          if (nowEpoch >= slotEndEpoch + TOLERANSI_MS) {
             shouldClose = true;
-            closeReason = `AUTO_CLOSED_OVERDUE — ditutup otomatis oleh sistem karena melewati batas akhir slot (${jadwal.slotEnd} WIB + ${TOLERANSI}m). Fisik laci kas belum diverifikasi kasir.`;
+            closeReason = `AUTO_CLOSED_OVERDUE — ditutup otomatis oleh sistem. Batas akhir slot: ${jadwal.slotEnd} WIB (${tanggalShift}) + 15m toleransi. Fisik laci kas belum diverifikasi kasir.`;
           }
         } else {
-          // Tidak ada jadwal hari ini — fallback tutup shift > 10 jam
-          const shiftAgeMs = nowWib.getTime() - new Date(shift.clockIn).getTime();
-          const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
+          // Tidak ada jadwal untuk hari itu — fallback: tutup shift > 10 jam
+          const shiftAgeMs = nowEpoch - clockInDate.getTime();
           if (shiftAgeMs > TEN_HOURS_MS) {
             shouldClose = true;
             closeReason = 'AUTO_CLOSED_STALE — durasi shift aktif melebihi 10 jam tanpa jadwal aktif. Fisik laci kas belum diverifikasi kasir.';
@@ -151,79 +203,88 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     // ── PASS 2: Auto-mark TIDAK_HADIR ─────────────────────────────────────
-    // Karyawan yang punya jadwal hari ini, slotEnd sudah lewat + 30 menit,
-    // tapi tidak ada attendance record (tidak pernah login sama sekali hari ini)
+    // Karyawan yang punya jadwal kemarin (atau hari ini jika cron bukan tengah malam),
+    // slotEnd sudah lewat + 30 menit, tapi tidak ada attendance record.
     let absenCount = 0;
     try {
-      const tanggalHariIni = nowWib.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-      const BUFFER_ABSEN = 30; // menit setelah slotEnd sebelum dianggap absen
+      // Cron berjalan pukul 00:00 WIB → "hariIni" di WIB = hari baru.
+      // Jadwal yang perlu dicek absennya adalah KEMARIN (hari saat toko masih buka).
+      // Kita cek keduanya agar tidak missed jika cron berjalan di jam lain.
+      const waktuCek = [
+        // Kemarin WIB (kasus utama: cron 00:00)
+        new Date(nowEpoch - 24 * 60 * 60 * 1_000),
+        // Hari ini WIB (kasus cron berjalan siang/sore)
+        nowWib,
+      ];
 
-      // Ambil semua jadwal aktif hari ini yang slotEnd-nya sudah lewat + buffer
-      const jadwalHariIniAll = await db
-        .select({
-          scheduleId: shiftSchedules.id,
-          employeeId: shiftSchedules.employeeId,
-          slotStart:  shiftSchedules.slotStart,
-          slotEnd:    shiftSchedules.slotEnd,
-        })
-        .from(shiftSchedules)
-        .where(and(
-          eq(shiftSchedules.dayOfWeek, hariIni),
-          eq(shiftSchedules.isActive, true),
-        ))
-        .limit(100);
+      const BUFFER_ABSEN_MS = 30 * 60 * 1_000; // 30 menit
 
-      for (const jadwal of jadwalHariIniAll) {
-        try {
-          // Guard: employeeId bisa nullable dari join result — skip jika null
-          if (!jadwal.employeeId) continue;
-          const empId = jadwal.employeeId; // now typed as string (non-null)
+      for (const refDate of waktuCek) {
+        const hariRef    = getDayOfWeekWib(refDate);
+        const tanggalRef = getTanggalWib(refDate);
 
-          const [slotH, slotM] = jadwal.slotEnd.split(':').map(Number);
-          const slotEndMenit = (slotH ?? 0) * 60 + (slotM ?? 0);
+        // Ambil semua jadwal aktif hari referensi
+        const jadwalHariRef = await db
+          .select({
+            scheduleId: shiftSchedules.id,
+            employeeId: shiftSchedules.employeeId,
+            slotEnd:    shiftSchedules.slotEnd,
+          })
+          .from(shiftSchedules)
+          .where(and(
+            eq(shiftSchedules.dayOfWeek, hariRef as DayOfWeek),
+            eq(shiftSchedules.isActive, true),
+          ))
+          .limit(100);
 
-          // Hanya proses jika slotEnd + buffer sudah lewat
-          if (nowMinutes < slotEndMenit + BUFFER_ABSEN) continue;
+        for (const jadwal of jadwalHariRef) {
+          try {
+            if (!jadwal.employeeId) continue;
+            const empId = jadwal.employeeId;
 
-          // Cek apakah sudah ada attendance record hari ini untuk employee ini
-          const existingAttendance = await db.query.attendances.findFirst({
-            where: and(
-              eq(attendances.employeeId, empId),
-              eq(attendances.attendanceDate, tanggalHariIni),
-            ),
-            columns: { id: true },
-          });
+            // Hanya proses jika slotEnd + buffer sudah benar-benar lewat
+            const slotEndEpoch = slotEndToEpoch(tanggalRef, jadwal.slotEnd);
+            if (nowEpoch < slotEndEpoch + BUFFER_ABSEN_MS) continue;
 
-          if (existingAttendance) continue; // Sudah hadir/telat/ijin → skip
+            // Cek apakah sudah ada attendance record untuk tanggal referensi ini
+            const existingAttendance = await db.query.attendances.findFirst({
+              where: and(
+                eq(attendances.employeeId, empId),
+                eq(attendances.attendanceDate, tanggalRef),
+              ),
+              columns: { id: true },
+            });
 
-          // Cek apakah ada shift hari ini (ambil shift paling baru)
-          const existingShiftToday = await db.query.shifts.findFirst({
-            where: eq(shifts.employeeId, empId),
-            orderBy: [desc(shifts.clockIn)],
-            columns: { id: true, clockIn: true },
-          });
+            if (existingAttendance) continue; // Sudah hadir/telat/ijin → skip
 
-          // Jika ada shift hari ini tapi tanpa attendance → sudah dihandle, skip
-          if (existingShiftToday) {
-            const clockInDate = new Date(existingShiftToday.clockIn).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-            if (clockInDate === tanggalHariIni) continue;
+            // Cek apakah ada shift pada tanggal referensi
+            const existingShiftOnDate = await db.query.shifts.findFirst({
+              where: eq(shifts.employeeId, empId),
+              orderBy: [desc(shifts.clockIn)],
+              columns: { id: true, clockIn: true },
+            });
+
+            if (existingShiftOnDate) {
+              const shiftClockInDate = getTanggalWib(new Date(existingShiftOnDate.clockIn));
+              if (shiftClockInDate === tanggalRef) continue; // Ada shift hari itu → skip
+            }
+
+            // Tidak ada attendance & tidak ada shift → TIDAK_HADIR
+            await db
+              .insert(attendances)
+              .values({
+                employeeId:     empId,
+                scheduleId:     jadwal.scheduleId,
+                attendanceDate: tanggalRef,
+                status:         'TIDAK_HADIR',
+                lateMinutes:    0,
+              })
+              .onConflictDoNothing();
+
+            absenCount++;
+          } catch {
+            // Gagal satu jadwal tidak menghentikan proses
           }
-
-          // Tidak ada attendance & tidak ada shift hari ini → TIDAK_HADIR
-          await db
-            .insert(attendances)
-            .values({
-              employeeId:     empId,
-              scheduleId:     jadwal.scheduleId,
-              attendanceDate: tanggalHariIni,
-              status:         'TIDAK_HADIR',
-              lateMinutes:    0,
-            })
-            .onConflictDoNothing();
-
-          absenCount++;
-        } catch {
-          // Gagal satu jadwal tidak menghentikan proses
         }
       }
     } catch {

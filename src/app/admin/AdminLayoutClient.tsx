@@ -21,6 +21,7 @@ import {
   CalendarDays,
   ClipboardList,
   ArrowLeftRight,
+  QrCode,
 } from 'lucide-react';
 
 type NavItem = {
@@ -77,6 +78,12 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Laporan',
     href: '/admin/laporan',
     icon: <BarChart3 size={18} aria-hidden="true" />,
+    section: 'Menu Utama',
+  },
+  {
+    label: 'Rekonsiliasi QRIS',
+    href: '/admin/qris',
+    icon: <QrCode size={18} aria-hidden="true" />,
     section: 'Menu Utama',
   },
   {

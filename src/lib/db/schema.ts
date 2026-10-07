@@ -569,6 +569,52 @@ export type ShiftCashMovement = typeof shiftCashMovements.$inferSelect;
 export type NewShiftCashMovement = typeof shiftCashMovements.$inferInsert;
 
 // =============================================================
+// 15. QRIS_RECONCILIATIONS (Rekonsiliasi Harian QRIS vs Bank)
+// =============================================================
+// FILOSOFI:
+//   - Manajer/Dosen input nominal kredit bank Mandiri/Livin' per tanggal
+//   - Sistem otomatis hitung total QRIS kasir dari tabel transactions
+//   - Selisih = bank_credit - system_qris (dihitung di application layer)
+//   - Status: PENDING → admin belum input | MATCH → ok | SELISIH → investigasi
+// =============================================================
+
+export const RECON_STATUS = ['PENDING', 'MATCH', 'SELISIH'] as const;
+export type ReconStatus = (typeof RECON_STATUS)[number];
+
+export const qrisReconciliations = pgTable(
+  'qris_reconciliations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Tanggal bisnis rekonsiliasi (WIB, format YYYY-MM-DD)
+    reconDate: date('recon_date', { mode: 'string' }).notNull(),
+    // Nominal kredit rekening bank hari itu (input manual manajer)
+    bankCreditAmount: decimal('bank_credit_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    // Total QRIS sistem kasir hari itu (dihitung saat admin submit)
+    systemQrisAmount: decimal('system_qris_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    // Status rekonsiliasi: PENDING | MATCH | SELISIH
+    status: varchar('status', { length: 20 }).$type<ReconStatus>().notNull().default('PENDING'),
+    // Catatan investigasi dari manajer
+    notes: text('notes'),
+    createdByAdminId: uuid('created_by_admin_id')
+      .notNull()
+      .references(() => admins.id),
+    updatedByAdminId: uuid('updated_by_admin_id')
+      .references(() => admins.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // 1 rekonsiliasi per tanggal (upsert-safe)
+    uniqueIndex('idx_qris_recon_date_unique').on(table.reconDate),
+    // Query laporan bulanan
+    index('idx_qris_recon_date_status').on(table.reconDate, table.status),
+  ],
+);
+
+export type QrisReconciliation = typeof qrisReconciliations.$inferSelect;
+export type NewQrisReconciliation = typeof qrisReconciliations.$inferInsert;
+
+// =============================================================
 // RELATIONS (for Drizzle query builder)
 // =============================================================
 
