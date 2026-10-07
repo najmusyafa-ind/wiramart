@@ -812,6 +812,7 @@ export default function PosPage() {
   const [shiftDuration, setShiftDuration] = useState('');
   const [showPosScanner, setShowPosScanner] = useState(false);
   const [scanToast, setScanToast] = useState<string | null>(null);
+  const [unknownBarcodePrompt, setUnknownBarcodePrompt] = useState<string | null>(null);
   const posCamRef = useRef<HTMLVideoElement>(null);
   const posScanInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   // mounted: mencegah hydration mismatch untuk elemen client-only di header
@@ -957,8 +958,9 @@ export default function PosPage() {
       }
     } catch { /* jaringan error */ }
     // 2. Tidak ada di DB
-    setScanToast(`Barcode ${cleanCode} belum terdaftar. Cari manual lewat nama produk, atau hubungi admin.`);
-    setTimeout(() => setScanToast(null), 4500);
+    setScanToast(`Barcode ${cleanCode} belum terdaftar di sistem.`);
+    setUnknownBarcodePrompt(cleanCode);
+    setTimeout(() => setScanToast(null), 3000);
   }
 
   // ── Hardware USB Barcode Scanner Listener (HID Keyboard Mode) ─────────
@@ -1323,6 +1325,80 @@ export default function PosPage() {
         </div>
       )}
 
+      {/* ── Modal Cepat: Barcode Belum Terdaftar ────────── */}
+      {unknownBarcodePrompt && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 2100,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 'var(--space-4)',
+          }}
+          onClick={() => setUnknownBarcodePrompt(null)}
+        >
+          <div
+            style={{
+              background: 'var(--color-surface)',
+              borderRadius: 'var(--radius-xl)',
+              padding: 'var(--space-6)',
+              maxWidth: 400,
+              width: '100%',
+              boxShadow: 'var(--shadow-xl)',
+              textAlign: 'center',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{
+              width: 52, height: 52, borderRadius: 'var(--radius-full)',
+              background: 'var(--color-primary-light)', color: 'var(--color-primary)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto var(--space-3)',
+            }}>
+              <Package size={26} />
+            </div>
+            <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', marginBottom: 6 }}>
+              Barcode Belum Terdaftar
+            </h3>
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
+              Barcode <code style={{ fontWeight: 700, color: 'var(--color-text)' }}>{unknownBarcodePrompt}</code> belum ada di sistem katalog toko.
+            </p>
+            <div style={{
+              background: 'var(--color-surface-muted)',
+              borderRadius: 'var(--radius-md)',
+              padding: '10px 12px',
+              marginBottom: 'var(--space-5)',
+              fontSize: 12,
+              color: 'var(--color-text)',
+            }}>
+              Mau langsung input nama barang, HPP, harga jual, dan stoknya sekarang?
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <a
+                href={`/kasir/produk?barcode=${encodeURIComponent(unknownBarcodePrompt)}`}
+                className="btn btn-primary"
+                style={{
+                  width: '100%', padding: '12px', fontSize: 13, fontWeight: 700,
+                  textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+              >
+                <Plus size={16} /> + Daftarkan Produk Ini Sekarang
+              </a>
+              <button
+                type="button"
+                onClick={() => setUnknownBarcodePrompt(null)}
+                className="btn btn-secondary"
+                style={{ width: '100%', padding: '10px', fontSize: 12 }}
+              >
+                Batal / Nanti Saja
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Top bar ────────────────────────────────────── */}
       <header className="pos-topbar">
         {/* Brand */}
@@ -1401,6 +1477,24 @@ export default function PosPage() {
             <span className="pos-search-wrap">Scan</span>
           </button>
 
+          {/* Tombol Akses Produk / Stok — selalu tampil di mobile & desktop */}
+          <a
+            href="/kasir/produk"
+            id="btn-nav-produk-topbar"
+            title="Kelola Produk & Stok"
+            aria-label="Kelola produk dan stok"
+            style={{
+              background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)',
+              borderRadius: 'var(--radius-md)', padding: '6px 11px',
+              display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+              color: 'white', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
+              textDecoration: 'none', flexShrink: 0,
+            }}
+          >
+            <Package size={15} aria-hidden="true" />
+            <span>Produk</span>
+          </a>
+
           {/* Tombol Keranjang — selalu tampil di desktop & mobile */}
           <button
             id="btn-show-cart"
@@ -1437,31 +1531,9 @@ export default function PosPage() {
               )}
             </div>
 
-            {/* Tombol Kelola Produk + Tukar Shift */}
+            {/* Tombol Tukar Shift (Desktop) */}
             {mounted && (
               <>
-                <a
-                  href="/kasir/produk"
-                  id="btn-kelola-produk"
-                  title="Kelola Produk"
-                  aria-label="Kelola produk"
-                  style={{
-                    background: 'rgba(255,255,255,0.08)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    borderRadius: 'var(--radius-md)',
-                    color: 'var(--color-sidebar-muted)',
-                    cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                    padding: '6px 10px',
-                    fontSize: 'var(--text-xs)',
-                    fontWeight: 'var(--weight-medium)',
-                    transition: 'all var(--duration-fast)',
-                    textDecoration: 'none',
-                  }}
-                >
-                  <Package size={14} />
-                  <span>Produk</span>
-                </a>
                 <a
                   href="/kasir/tukar-shift"
                   id="btn-tukar-shift"
@@ -1613,9 +1685,18 @@ export default function PosPage() {
                 {search ? `Tidak ada produk untuk "${search}"` : 'Tidak ada produk tersedia'}
               </p>
               {search && (
-                <button onClick={() => setSearch('')} className="btn btn-ghost" style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>
-                  Reset pencarian
-                </button>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 'var(--space-3)', flexWrap: 'wrap' }}>
+                  <button onClick={() => setSearch('')} className="btn btn-secondary btn-sm" style={{ fontSize: 'var(--text-sm)' }}>
+                    Reset pencarian
+                  </button>
+                  <a
+                    href={`/kasir/produk?tambah=1&nama=${encodeURIComponent(search)}`}
+                    className="btn btn-primary btn-sm"
+                    style={{ fontSize: 'var(--text-sm)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <Plus size={14} /> + Tambah Produk "{search}"
+                  </a>
+                </div>
               )}
             </div>
           ) : (
