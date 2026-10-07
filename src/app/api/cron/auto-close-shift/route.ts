@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
 import { shifts, shiftSchedules, attendances } from '@/lib/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, desc } from 'drizzle-orm';
 
 export const runtime = 'nodejs';
 
@@ -36,13 +36,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   const nowWib = new Date();
-  // Nama hari Indonesia — gunakan locale WIB
-  const hariMap: Record<number, string> = {
-    0: 'MINGGU', 1: 'SENIN', 2: 'SELASA', 3: 'RABU',
-    4: 'KAMIS',  5: 'JUMAT', 6: 'SABTU',
-  };
-  const wibDateStr = nowWib.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' });
-  const hariIni = hariMap[new Date(wibDateStr).getDay()] as
+  // Tentukan nama hari WIB secara deterministik
+  const hariIni = new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'long',
+  }).format(nowWib).toUpperCase() as
     'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU';
 
   // Jam sekarang dalam WIB (HH:MM)
@@ -109,7 +107,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
           if (nowMinutes >= slotEndMinutes + TOLERANSI) {
             shouldClose = true;
-            closeReason = `AUTO_CLOSED_BY_CRON — jadwal selesai ${jadwal.slotEnd} WIB, toleransi ${TOLERANSI} menit`;
+            closeReason = `AUTO_CLOSED_OVERDUE — ditutup otomatis oleh sistem karena melewati batas akhir slot (${jadwal.slotEnd} WIB + ${TOLERANSI}m). Fisik laci kas belum diverifikasi kasir.`;
           }
         } else {
           // Tidak ada jadwal hari ini — fallback tutup shift > 10 jam
@@ -117,7 +115,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
           if (shiftAgeMs > TEN_HOURS_MS) {
             shouldClose = true;
-            closeReason = 'AUTO_CLOSED_BY_CRON — durasi shift melebihi 10 jam (tidak ada jadwal hari ini)';
+            closeReason = 'AUTO_CLOSED_STALE — durasi shift aktif melebihi 10 jam tanpa jadwal aktif. Fisik laci kas belum diverifikasi kasir.';
           }
         }
 
@@ -198,9 +196,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
           if (existingAttendance) continue; // Sudah hadir/telat/ijin → skip
 
-          // Cek apakah ada shift hari ini (login tapi attendance gagal di tengah jalan)
+          // Cek apakah ada shift hari ini (ambil shift paling baru)
           const existingShiftToday = await db.query.shifts.findFirst({
-            where: eq(shifts.employeeId, empId), // shifts tidak punya deletedAt
+            where: eq(shifts.employeeId, empId),
+            orderBy: [desc(shifts.clockIn)],
             columns: { id: true, clockIn: true },
           });
 
