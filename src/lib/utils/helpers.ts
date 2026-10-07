@@ -79,14 +79,37 @@ export function durationBetween(start: Date | string, end?: Date | string | null
 
 // --- Typed Error ---
 export class AppError extends Error {
+  public readonly code: string;
+  public readonly statusCode: number;
+  public readonly isOperational: boolean;
+
   constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode: number = 400,
-    public readonly isOperational: boolean = true,
+    arg1: string,
+    arg2: string,
+    statusCode: number = 400,
+    isOperational: boolean = true,
   ) {
+    // Deteksi fleksibel: mendukung (code, message) maupun (message, code)
+    const isCode = (s: string) => /^[A-Z0-9_]{3,}$/.test(s.trim());
+    let code: string;
+    let message: string;
+
+    if (isCode(arg1) && !isCode(arg2)) {
+      code = arg1;
+      message = arg2;
+    } else if (isCode(arg2) && !isCode(arg1)) {
+      code = arg2;
+      message = arg1;
+    } else {
+      code = arg1;
+      message = arg2;
+    }
+
     super(message);
     this.name = 'AppError';
+    this.code = code;
+    this.statusCode = statusCode;
+    this.isOperational = isOperational;
   }
 }
 

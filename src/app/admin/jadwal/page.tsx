@@ -142,6 +142,12 @@ function SlotModal({
     }
   }
 
+  const selectedTargetEntry = schedule
+    .flatMap(d => d.slots)
+    .flatMap(s => s.entries)
+    .find(e => e.id === targetSlotId);
+  const selectedTargetIsEmpty = Boolean(selectedTargetEntry && !selectedTargetEntry.isFilled);
+
   const canSubmit =
     modal.type === 'free' ||
     (modal.type === 'reassign' && !!selectedEmp) ||
@@ -150,7 +156,7 @@ function SlotModal({
   const titles: Record<NonNullable<ModalState>['type'], string> = {
     free:     '🔓 Bebaskan Slot',
     reassign: '👤 Pindah ke Karyawan Lain',
-    swap:     '🔄 Tukar Slot',
+    swap:     '🔄 Tukar / Pindah Slot',
   };
 
   return (
@@ -227,41 +233,118 @@ function SlotModal({
           </div>
         )}
 
-        {/* ── Swap: pilih slot target ── */}
+        {/* ── Swap: pilih slot target (termasuk slot kosong & dibagi per-shift) ── */}
         {modal.type === 'swap' && (
-          <div style={{ marginBottom: 'var(--space-4)', maxHeight: 300, overflowY: 'auto' }}>
+          <div style={{ marginBottom: 'var(--space-4)', maxHeight: 340, overflowY: 'auto' }}>
             <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
-              Pilih slot yang ingin ditukar:
+              Pilih slot target (tukar posisi atau pindah ke slot kosong):
             </p>
             {schedule.map(day => (
-              <div key={day.dayOfWeek}>
-                <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-1)', padding: '2px var(--space-2)', background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-sm)' }}>
-                  {day.dayOfWeek}
+              <div key={day.dayOfWeek} style={{ marginBottom: 'var(--space-3)' }}>
+                {/* Header Hari */}
+                <div style={{
+                  fontSize: '0.75rem', fontWeight: 'var(--weight-bold)',
+                  color: 'var(--color-text-secondary)',
+                  padding: '4px var(--space-2)',
+                  background: 'var(--color-surface-muted)',
+                  borderRadius: 'var(--radius-sm)',
+                  marginBottom: 'var(--space-2)',
+                }}>
+                  📅 {day.dayOfWeek}
                 </div>
-                {day.slots.map(slotGroup =>
-                  slotGroup.entries
-                    .filter(e => e.isFilled && e.id !== modal.slot.id)
-                    .map(entry => (
-                      <div
-                        key={entry.id}
-                        onClick={() => setTargetSlotId(entry.id)}
-                        style={{
-                          padding: 'var(--space-2) var(--space-3)',
-                          border: targetSlotId === entry.id ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
-                          borderRadius: 'var(--radius-md)', cursor: 'pointer',
-                          marginBottom: 'var(--space-1)',
-                          background: targetSlotId === entry.id ? 'var(--color-primary-light)' : 'transparent',
-                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)' }}>{entry.employeeName}</div>
-                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{day.dayOfWeek} · {slotGroup.slotStart}–{slotGroup.slotEnd}</div>
-                        </div>
-                        {targetSlotId === entry.id && <CheckCircle size={16} style={{ color: 'var(--color-primary)' }} />}
+
+                {day.slots.map(slotGroup => {
+                  const entries = slotGroup.entries.filter(e => e.orderInSlot !== 99 && e.id !== modal.slot.id);
+                  if (entries.length === 0) return null;
+
+                  const isPagi = slotGroup.slotStart < '11:00';
+                  const shiftLabel = isPagi
+                    ? `🌅 Shift Pagi (${slotGroup.slotStart}–${slotGroup.slotEnd})`
+                    : `☀️ Shift Siang (${slotGroup.slotStart}–${slotGroup.slotEnd})`;
+
+                  return (
+                    <div key={`${day.dayOfWeek}-${slotGroup.slotStart}`} style={{ marginBottom: 'var(--space-2)', paddingLeft: 'var(--space-2)' }}>
+                      {/* Sub-header Shift */}
+                      <div style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        fontSize: '0.72rem', fontWeight: 'var(--weight-semibold)',
+                        color: 'var(--color-primary)',
+                        padding: '2px 0',
+                        marginBottom: 'var(--space-1)',
+                      }}>
+                        <span>{shiftLabel}</span>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
+                          {slotGroup.filledCount}/{slotGroup.totalCount} terisi
+                        </span>
                       </div>
-                    ))
-                )}
+
+                      {/* List Slot */}
+                      {entries.map(entry => {
+                        const isSelected = targetSlotId === entry.id;
+                        const isEmpty = !entry.isFilled;
+
+                        return (
+                          <div
+                            key={entry.id}
+                            onClick={() => setTargetSlotId(entry.id)}
+                            style={{
+                              padding: 'var(--space-2) var(--space-3)',
+                              border: isSelected
+                                ? '2px solid var(--color-primary)'
+                                : isEmpty
+                                ? '1.5px dashed var(--color-success, #10b981)'
+                                : '1px solid var(--color-border)',
+                              borderRadius: 'var(--radius-md)',
+                              cursor: 'pointer',
+                              marginBottom: 'var(--space-1)',
+                              background: isSelected
+                                ? 'var(--color-primary-light)'
+                                : isEmpty
+                                ? 'var(--color-success-light, rgba(16, 185, 129, 0.08))'
+                                : 'transparent',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              {isEmpty ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{
+                                    display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                                    background: 'var(--color-success, #10b981)', flexShrink: 0,
+                                  }} />
+                                  <div>
+                                    <div style={{
+                                      fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
+                                      color: 'var(--color-success, #059669)',
+                                    }}>
+                                      Slot {entry.orderInSlot} — Kosong (Pindah ke sini)
+                                    </div>
+                                    <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
+                                      {day.dayOfWeek} · {slotGroup.slotStart}–{slotGroup.slotEnd}
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div>
+                                  <div style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
+                                    {entry.employeeName}
+                                  </div>
+                                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                                    {entry.employeeNim ? `NIM ${entry.employeeNim} · ` : ''}Slot {entry.orderInSlot} (Tukar posisi)
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            {isSelected && <CheckCircle size={16} style={{ color: 'var(--color-primary)', flexShrink: 0, marginLeft: 8 }} />}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -290,7 +373,8 @@ function SlotModal({
               ? <><Loader2 size={14} className="spin-icon" /> Memproses...</>
               : modal.type === 'free' ? '🔓 Bebaskan Slot'
               : modal.type === 'reassign' ? '✅ Pindahkan'
-              : '🔄 Tukar Slot'}
+              : selectedTargetIsEmpty ? '➡️ Pindah ke Slot Kosong'
+              : '🔄 Tukar Posisi'}
           </button>
         </div>
       </div>

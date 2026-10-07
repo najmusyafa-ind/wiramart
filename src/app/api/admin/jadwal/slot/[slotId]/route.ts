@@ -189,8 +189,15 @@ export async function PATCH(
           .set({ employeeId: tempEmployeeId, updatedAt: new Date() })
           .where(eq(shiftSchedules.id, targetSlotId));
 
+        if (!targetSlot.employeeId) {
+          return (
+            `Berhasil memindahkan ke slot kosong: ` +
+            `${targetSlot.dayOfWeek} ${targetSlot.slotStart}–${targetSlot.slotEnd} (Slot ${targetSlot.orderInSlot})`
+          );
+        }
+
         return (
-          `Swap berhasil: ` +
+          `Tukar posisi berhasil: ` +
           `${slot.dayOfWeek} ${slot.slotStart}–${slot.slotEnd} ↔ ` +
           `${targetSlot.dayOfWeek} ${targetSlot.slotStart}–${targetSlot.slotEnd}`
         );
