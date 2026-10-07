@@ -29,7 +29,13 @@ type Product = {
   photoUrl: string | null;
 };
 type CartItem = Product & { qty: number };
-type PaymentMethod = 'CASH' | 'QRIS';
+type PaymentMethod = 'CASH' | 'QRIS' | 'SPLIT';
+type SplitPaymentDetail = {
+  paymentMethod: 'CASH' | 'QRIS';
+  amount: number;
+  cashReceived?: number;
+  changeAmount?: number;
+};
 
 type SessionInfo = {
   employee: { id: string; fullName: string; jabatan: string; nim: string };
@@ -401,23 +407,81 @@ function BukaShiftOverlay({
 // ── Payment Modal ─────────────────────────────────────────────
 
 function PaymentModal({
-  total, method, qrisInfo, onClose, onConfirm, loading,
+  total, method: initialMethod, qrisInfo, onClose, onConfirm, loading,
 }: {
   total: number;
   method: PaymentMethod;
   qrisInfo: SessionInfo['qris'];
   onClose: () => void;
-  onConfirm: (cashReceived?: number) => void;
+  onConfirm: (cashReceived?: number, payments?: SplitPaymentDetail[]) => void;
   loading: boolean;
 }) {
   const uid = useId();
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(initialMethod);
+
+  // Tunai state
   const [cashInput, setCashInput] = useState('');
   const cashAmount = cashInput ? parseFloat(cashInput) : 0;
   const cashChange = cashInput ? cashAmount - total : null;
 
-  const quickAmounts = [total, 20000, 50000, 100000, 150000, 200000]
+  // Split (Campuran QRIS + Tunai) state
+  const [splitQrisInput, setSplitQrisInput] = useState('');
+  const [splitCashReceivedInput, setSplitCashReceivedInput] = useState('');
+  const splitQrisAmount = splitQrisInput ? parseFloat(splitQrisInput) : 0;
+  const splitCashNeeded = Math.max(0, total - splitQrisAmount);
+  const splitCashReceived = splitCashReceivedInput ? parseFloat(splitCashReceivedInput) : 0;
+  const splitCashChange = splitCashReceivedInput ? splitCashReceived - splitCashNeeded : null;
+
+  // Split validation flags
+  const isSplitQrisValid = splitQrisAmount > 0 && splitQrisAmount < total;
+  const isSplitCashValid = isSplitQrisValid && splitCashReceivedInput !== '' && splitCashReceived >= splitCashNeeded;
+  const isSplitReady = isSplitQrisValid && isSplitCashValid;
+
+  const quickAmountsCash = [total, 20000, 50000, 100000, 150000, 200000]
     .filter((a, i, arr) => arr.indexOf(a) === i && a >= total)
     .slice(0, 4);
+
+  const quickQrisSplit = [
+    Math.round(total / 2 / 1000) * 1000,
+    10000, 20000, 30000, 50000, 100000,
+  ].filter((a, i, arr) => arr.indexOf(a) === i && a > 0 && a < total).slice(0, 4);
+
+  const quickCashSplit = [
+    splitCashNeeded,
+    10000, 20000, 50000, 100000,
+  ].filter((a, i, arr) => arr.indexOf(a) === i && a >= splitCashNeeded).slice(0, 4);
+
+  function handleTriggerConfirm() {
+    if (selectedMethod === 'CASH') {
+      const payments: SplitPaymentDetail[] = [{
+        paymentMethod: 'CASH',
+        amount: total,
+        cashReceived: cashAmount,
+        changeAmount: Math.max(0, cashAmount - total),
+      }];
+      onConfirm(cashAmount, payments);
+    } else if (selectedMethod === 'QRIS') {
+      const payments: SplitPaymentDetail[] = [{
+        paymentMethod: 'QRIS',
+        amount: total,
+      }];
+      onConfirm(undefined, payments);
+    } else if (selectedMethod === 'SPLIT') {
+      const payments: SplitPaymentDetail[] = [
+        {
+          paymentMethod: 'QRIS',
+          amount: splitQrisAmount,
+        },
+        {
+          paymentMethod: 'CASH',
+          amount: splitCashNeeded,
+          cashReceived: splitCashReceived,
+          changeAmount: Math.max(0, splitCashReceived - splitCashNeeded),
+        },
+      ];
+      onConfirm(splitCashReceived, payments);
+    }
+  }
 
   return (
     <div
@@ -430,12 +494,12 @@ function PaymentModal({
         animation: 'fade-in 0.15s ease',
       }}
     >
-      <div className="card" style={{ width: '100%', maxWidth: 440, maxHeight: '92vh', overflowY: 'auto', margin: 0, boxShadow: 'var(--shadow-xl)' }}>
-        <div className="card-header">
+      <div className="card" style={{ width: '100%', maxWidth: 460, maxHeight: '92vh', overflowY: 'auto', margin: 0, boxShadow: 'var(--shadow-xl)' }}>
+        <div className="card-header" style={{ paddingBottom: 'var(--space-2)' }}>
           <h2 id={`${uid}-title`} className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            {method === 'CASH'
-              ? <><Banknote size={18} style={{ color: 'var(--color-accent)' }} /> Pembayaran Tunai</>
-              : <><QrCodeIcon size={18} /> Pembayaran QRIS</>}
+            {selectedMethod === 'CASH' && <><Banknote size={18} style={{ color: 'var(--color-accent)' }} /> Pembayaran Tunai</>}
+            {selectedMethod === 'QRIS' && <><QrCodeIcon size={18} /> Pembayaran QRIS</>}
+            {selectedMethod === 'SPLIT' && <><ArrowLeftRight size={18} style={{ color: 'var(--color-primary)' }} /> Pembayaran Campuran (Split)</>}
           </h2>
           <button
             onClick={onClose}
@@ -446,20 +510,42 @@ function PaymentModal({
           </button>
         </div>
 
-        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          {/* Total */}
+        {/* Tab switcher agar kasir bisa ganti metode langsung tanpa tutup modal */}
+        <div style={{ display: 'flex', gap: 6, padding: '0 var(--space-4)', marginTop: -4 }}>
+          {(['CASH', 'QRIS', 'SPLIT'] as PaymentMethod[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setSelectedMethod(m)}
+              className={`pos-method-btn${selectedMethod === m ? ' active' : ''}`}
+              style={{
+                flex: 1,
+                padding: '6px 8px',
+                fontSize: 'var(--text-xs)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
+              {m === 'CASH' && <><Banknote size={13} /> Tunai</>}
+              {m === 'QRIS' && <><QrCodeIcon size={13} /> QRIS</>}
+              {m === 'SPLIT' && <><ArrowLeftRight size={13} /> Split</>}
+            </button>
+          ))}
+        </div>
+
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', marginTop: 'var(--space-2)' }}>
+          {/* Total Tagihan */}
           <div style={{
-            textAlign: 'center', padding: 'var(--space-4)',
+            textAlign: 'center', padding: 'var(--space-3) var(--space-4)',
             background: 'var(--color-primary-light)', borderRadius: 'var(--radius-md)',
           }}>
-            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-1)' }}>Total Tagihan</div>
-            <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 2 }}>Total Tagihan Belanja</div>
+            <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
               {rp(total)}
             </div>
           </div>
 
-          {/* Cash section */}
-          {method === 'CASH' && (
+          {/* 1. Cash section */}
+          {selectedMethod === 'CASH' && (
             <>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label htmlFor={`${uid}-cash`} className="form-label">Uang Diterima (Rp)</label>
@@ -478,7 +564,7 @@ function PaymentModal({
               </div>
               {/* Quick amounts */}
               <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-                {quickAmounts.map((a) => (
+                {quickAmountsCash.map((a) => (
                   <button key={a} onClick={() => setCashInput(a.toString())} className="btn btn-secondary" style={{ flex: 1, minWidth: 80, padding: 'var(--space-2) var(--space-3)', fontSize: 'var(--text-sm)' }}>
                     {rp(a)}
                   </button>
@@ -503,8 +589,8 @@ function PaymentModal({
             </>
           )}
 
-          {/* QRIS section */}
-          {method === 'QRIS' && (
+          {/* 2. QRIS section */}
+          {selectedMethod === 'QRIS' && (
             <div style={{ textAlign: 'center' }}>
               {qrisInfo?.qrImageUrl ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)' }}>
@@ -517,7 +603,7 @@ function PaymentModal({
                     alignItems: 'center',
                     justifyContent: 'center',
                     width: '100%',
-                    maxWidth: 290,
+                    maxWidth: 270,
                     margin: '0 auto',
                     boxShadow: 'var(--shadow-sm)',
                   }}>
@@ -528,7 +614,7 @@ function PaymentModal({
                       style={{
                         width: '100%',
                         height: 'auto',
-                        maxHeight: 340,
+                        maxHeight: 300,
                         objectFit: 'contain',
                         display: 'block',
                         borderRadius: 'var(--radius-sm)',
@@ -541,8 +627,8 @@ function PaymentModal({
                       {qrisInfo.accountName && <div>{qrisInfo.accountName}</div>}
                     </div>
                   )}
-                  <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', maxWidth: 300 }}>
-                    Silakan arahkan kamera HP ke QR Code di atas, lalu klik <strong>Konfirmasi</strong> setelah pembayaran berhasil.
+                  <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', maxWidth: 300 }}>
+                    Silakan minta pembeli scan QR di atas nominal <strong>{rp(total)}</strong>, lalu klik <strong>Konfirmasi Diterima</strong>.
                   </p>
                 </div>
               ) : (
@@ -560,6 +646,140 @@ function PaymentModal({
             </div>
           )}
 
+          {/* 3. SPLIT section (QRIS + Tunai) */}
+          {selectedMethod === 'SPLIT' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {/* Langkah 1: Porsi QRIS */}
+              <div style={{
+                background: 'hsl(var(--color-primary-h, 220), 40%, 97%)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+                padding: 'var(--space-3)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 'var(--space-2)' }}>
+                  <QrCodeIcon size={16} />
+                  <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
+                    1. Porsi Dibayar QRIS
+                  </span>
+                </div>
+                <div className="form-group" style={{ marginBottom: 'var(--space-2)' }}>
+                  <input
+                    id={`${uid}-split-qris`}
+                    type="number"
+                    className="form-input"
+                    placeholder="Contoh: 20000"
+                    value={splitQrisInput}
+                    onChange={(e) => setSplitQrisInput(e.target.value)}
+                    min={1}
+                    max={total - 1}
+                    step={1000}
+                    autoFocus
+                    style={{ fontSize: 'var(--text-lg)', textAlign: 'center', fontWeight: 'var(--weight-bold)' }}
+                  />
+                </div>
+                {/* Quick pills QRIS */}
+                {quickQrisSplit.length > 0 && (
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 'var(--space-2)' }}>
+                    {quickQrisSplit.map((a) => (
+                      <button
+                        key={a}
+                        type="button"
+                        onClick={() => setSplitQrisInput(a.toString())}
+                        className="btn btn-secondary"
+                        style={{ flex: 1, minWidth: 60, padding: '3px 6px', fontSize: 'var(--text-xs)' }}
+                      >
+                        {rp(a)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {splitQrisAmount >= total && (
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-error)', marginTop: 2 }}>
+                    ⚠ Porsi QRIS tidak boleh menyamai atau melebihi total tagihan. Gunakan tab QRIS jika ingin bayar penuh non-tunai.
+                  </div>
+                )}
+              </div>
+
+              {/* Langkah 2: Sisa Tunai */}
+              <div style={{
+                background: 'hsl(var(--color-accent-h, 142), 40%, 97%)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+                padding: 'var(--space-3)',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Banknote size={16} style={{ color: 'var(--color-accent)' }} />
+                    <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
+                      2. Sisa Tagihan Tunai
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
+                    {rp(splitCashNeeded)}
+                  </span>
+                </div>
+                <div className="form-group" style={{ marginBottom: 'var(--space-2)' }}>
+                  <label htmlFor={`${uid}-split-cash`} className="form-label" style={{ fontSize: 'var(--text-xs)' }}>
+                    Uang Tunai Diterima (Rp)
+                  </label>
+                  <input
+                    id={`${uid}-split-cash`}
+                    type="number"
+                    className="form-input"
+                    placeholder={`Min. ${rp(splitCashNeeded)}`}
+                    value={splitCashReceivedInput}
+                    onChange={(e) => setSplitCashReceivedInput(e.target.value)}
+                    min={splitCashNeeded}
+                    step={1000}
+                    disabled={!isSplitQrisValid}
+                    style={{ fontSize: 'var(--text-lg)', textAlign: 'center', fontWeight: 'var(--weight-bold)' }}
+                  />
+                </div>
+                {/* Quick pills Cash */}
+                {isSplitQrisValid && quickCashSplit.length > 0 && (
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 'var(--space-2)' }}>
+                    {quickCashSplit.map((a) => (
+                      <button
+                        key={a}
+                        type="button"
+                        onClick={() => setSplitCashReceivedInput(a.toString())}
+                        className="btn btn-secondary"
+                        style={{ flex: 1, minWidth: 60, padding: '3px 6px', fontSize: 'var(--text-xs)' }}
+                      >
+                        {rp(a)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {/* Kembalian Tunai */}
+                {isSplitQrisValid && splitCashReceivedInput !== '' && splitCashChange !== null && (
+                  <div style={{
+                    padding: '6px 8px', borderRadius: 'var(--radius-sm)',
+                    background: splitCashChange >= 0 ? 'var(--color-success-light)' : 'var(--color-error-light)',
+                    textAlign: 'center', marginTop: 4,
+                  }}>
+                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Kembalian Tunai: </span>
+                    <strong style={{ fontSize: 'var(--text-base)', color: splitCashChange >= 0 ? 'var(--color-success)' : 'var(--color-error)' }}>
+                      {splitCashChange >= 0 ? rp(splitCashChange) : `Kurang ${rp(Math.abs(splitCashChange))}`}
+                    </strong>
+                  </div>
+                )}
+              </div>
+
+              {/* Ringkasan Akuntansi & Laci */}
+              <div style={{
+                fontSize: 11,
+                color: 'var(--color-text-secondary)',
+                background: 'var(--color-surface-muted)',
+                padding: '6px 10px',
+                borderRadius: 'var(--radius-sm)',
+                lineHeight: 1.4,
+              }}>
+                💡 <strong>Catatan Laci:</strong> Uang fisik masuk laci kasir bertambah <strong>{rp(splitCashNeeded)}</strong>. Nominal QRIS <strong>{rp(splitQrisAmount)}</strong> langsung masuk rekening bank toko.
+              </div>
+            </div>
+          )}
+
           {/* Actions */}
           <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
             <button onClick={onClose} className="btn btn-secondary" style={{ flex: 1 }} disabled={loading}>
@@ -567,18 +787,22 @@ function PaymentModal({
             </button>
             <button
               id={`${uid}-confirm`}
-              onClick={() => onConfirm(cashInput ? parseFloat(cashInput) : undefined)}
+              onClick={handleTriggerConfirm}
               className="btn btn-primary"
               style={{ flex: 2 }}
               disabled={
                 loading ||
-                (method === 'CASH' && (!cashInput || cashAmount < total))
-                // QRIS: selalu bisa konfirmasi (kasir konfirmasi manual setelah cek notif HP)
+                (selectedMethod === 'CASH' && (!cashInput || cashAmount < total)) ||
+                (selectedMethod === 'SPLIT' && !isSplitReady)
               }
             >
               {loading
                 ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Memproses...</>
-                : <><CheckCircle size={16} /> {method === 'CASH' ? 'Konfirmasi Bayar' : 'Konfirmasi Diterima'}</>}
+                : <><CheckCircle size={16} /> {
+                  selectedMethod === 'CASH' ? 'Konfirmasi Bayar'
+                  : selectedMethod === 'QRIS' ? 'Konfirmasi Diterima'
+                  : 'Konfirmasi Split'
+                }</>}
             </button>
           </div>
         </div>
@@ -591,7 +815,7 @@ function PaymentModal({
 function SuccessModal({
   invoiceNumber, total, change, method, kasirName,
   storeName, storeAddress, storePhone,
-  items, onClose,
+  items, payments, onClose,
 }: {
   invoiceNumber: string;
   total: number;
@@ -602,6 +826,7 @@ function SuccessModal({
   storeAddress: string;
   storePhone: string;
   items: { name: string; qty: number; price: number }[];
+  payments?: SplitPaymentDetail[];
   onClose: () => void;
 }) {
   const uid = useId();
@@ -609,6 +834,10 @@ function SuccessModal({
     day: '2-digit', month: 'long', year: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
   });
+
+  const isSplit = method === 'SPLIT' || (payments && payments.length > 1);
+  const qrisDetail = payments?.find((p) => p.paymentMethod === 'QRIS');
+  const cashDetail = payments?.find((p) => p.paymentMethod === 'CASH');
 
   function handlePrint() {
     const printContent = document.getElementById(`${uid}-struk`);
@@ -664,7 +893,11 @@ function SuccessModal({
               Transaksi Berhasil!
             </h2>
             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-              {method === 'CASH' ? '💵 Pembayaran Tunai' : '📱 Pembayaran QRIS'}
+              {isSplit
+                ? '🔀 Pembayaran Campuran (QRIS + Tunai)'
+                : method === 'CASH'
+                ? '💵 Pembayaran Tunai'
+                : '📱 Pembayaran QRIS'}
             </p>
           </div>
 
@@ -703,7 +936,7 @@ function SuccessModal({
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
               <span>Metode</span>
-              <span style={{ fontWeight: 'bold' }}>{method}</span>
+              <span style={{ fontWeight: 'bold' }}>{isSplit ? 'CAMPURAN (SPLIT)' : method}</span>
             </div>
 
             {/* Divider */}
@@ -729,10 +962,47 @@ function SuccessModal({
               <span>{rp(total)}</span>
             </div>
 
-            {change !== null && change >= 0 && method === 'CASH' && (
+            {/* Rincian Pembayaran */}
+            {isSplit ? (
+              <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px dotted #888' }}>
+                {qrisDetail && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                    <span>• QRIS</span>
+                    <span>{rp(qrisDetail.amount)}</span>
+                  </div>
+                )}
+                {cashDetail && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                    <span>• Tunai Tagihan</span>
+                    <span>{rp(cashDetail.amount)}</span>
+                  </div>
+                )}
+                {cashDetail?.cashReceived != null && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                    <span>  Tunai Diterima</span>
+                    <span>{rp(cashDetail.cashReceived)}</span>
+                  </div>
+                )}
+                {change !== null && change >= 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, fontWeight: 'bold', color: '#166534' }}>
+                    <span>Kembalian Tunai</span>
+                    <span>{rp(change)}</span>
+                  </div>
+                )}
+              </div>
+            ) : method === 'CASH' ? (
+              <>
+                {change !== null && change >= 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+                    <span>Kembalian</span>
+                    <span style={{ fontWeight: 'bold', color: '#166534' }}>{rp(change)}</span>
+                  </div>
+                )}
+              </>
+            ) : (
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
-                <span>Kembalian</span>
-                <span style={{ fontWeight: 'bold', color: '#166534' }}>{rp(change)}</span>
+                <span>Status</span>
+                <span style={{ fontWeight: 'bold', color: '#166534' }}>LUNAS (QRIS)</span>
               </div>
             )}
 
@@ -808,6 +1078,7 @@ export default function PosPage() {
     storeName: string;
     storeAddress: string;
     storePhone: string;
+    payments?: SplitPaymentDetail[];
   } | null>(null);
   const [shiftDuration, setShiftDuration] = useState('');
   const [showPosScanner, setShowPosScanner] = useState(false);
@@ -1076,7 +1347,7 @@ export default function PosPage() {
   const hasInvalidQty = cart.some((i) => !i.qty || i.qty <= 0);
 
   // Submit transaksi
-  async function handleConfirmPayment(cashReceived?: number) {
+  async function handleConfirmPayment(cashReceived?: number, payments?: SplitPaymentDetail[]) {
     setProcessingTx(true);
     try {
       const res = await fetch('/api/kasir/transaksi', {
@@ -1084,8 +1355,9 @@ export default function PosPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: cart.map((i) => ({ productId: i.id, qty: i.qty })),
-          paymentMethod,
+          paymentMethod: payments && payments.length > 1 ? undefined : (paymentMethod === 'SPLIT' ? 'CASH' : paymentMethod),
           cashReceived,
+          payments,
         }),
       });
       const json = await res.json();
@@ -1100,7 +1372,8 @@ export default function PosPage() {
         invoiceNumber: json.data.invoiceNumber,
         total: json.data.grossAmount,
         change: json.data.changeAmount,
-        method: paymentMethod,
+        method: payments && payments.length > 1 ? 'SPLIT' : paymentMethod,
+        payments: json.data.payments ?? payments,
         items: cart.map((i) => ({ name: i.name, qty: i.qty, price: parseFloat(i.sellingPrice) })),
         kasirName:    session?.employee?.fullName ?? 'Kasir',
         storeName:    session?.store?.name    ?? 'WIRAMART UNPERBA',
@@ -1856,18 +2129,20 @@ export default function PosPage() {
             role="group"
             aria-label="Metode pembayaran"
           >
-            {(['CASH', 'QRIS'] as PaymentMethod[]).map((m) => (
+            {(['CASH', 'QRIS', 'SPLIT'] as PaymentMethod[]).map((m) => (
               <button
                 key={m}
                 id={`${uid}-method-${m.toLowerCase()}`}
                 onClick={() => setPaymentMethod(m)}
                 aria-pressed={paymentMethod === m}
                 className={`pos-method-btn${paymentMethod === m ? ' active' : ''}`}
-                style={{ flex: 1 }}
+                style={{ flex: 1, padding: 'var(--space-2) var(--space-1)', fontSize: 'var(--text-xs)' }}
               >
                 {m === 'CASH'
                   ? <><Banknote size={14} /> Cash</>
-                  : <><QrCodeIcon size={14} /> QRIS</>}
+                  : m === 'QRIS'
+                  ? <><QrCodeIcon size={14} /> QRIS</>
+                  : <><ArrowLeftRight size={14} /> Split</>}
               </button>
             ))}
           </div>
@@ -1912,6 +2187,7 @@ export default function PosPage() {
           storeAddress={lastTx.storeAddress}
           storePhone={lastTx.storePhone}
           items={lastTx.items}
+          payments={lastTx.payments}
           onClose={() => setShowSuccess(false)}
         />
       )}
