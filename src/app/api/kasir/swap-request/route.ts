@@ -115,11 +115,14 @@ export async function POST(req: NextRequest): Promise<Response> {
   // 8. Consume rate limit slot (baru dikonsumsi setelah semua validasi lewat)
   swapRequestLimiter.check(rateKey, true);
 
-  // 9. Insert swap request
+  // 9. Insert swap request (Hubungkan rekan kerja pemilik jadwal tujuan - K4)
+  const peerEmployeeId = toSchedule.employeeId ?? null;
+
   const [newRequest] = await db
     .insert(shiftSwapRequests)
     .values({
       requesterId:    employeeId,
+      peerEmployeeId,
       fromScheduleId,
       toScheduleId,
       reason,
@@ -134,7 +137,9 @@ export async function POST(req: NextRequest): Promise<Response> {
   return apiOk(
     {
       id:      newRequest.id,
-      message: 'Pengajuan pindah shift berhasil dikirim. Tunggu persetujuan Admin.',
+      message: peerEmployeeId
+        ? 'Pengajuan tukar shift berhasil dikirim ke rekan kerja untuk persetujuan 2-arah.'
+        : 'Pengajuan pindah shift berhasil dikirim ke Admin.',
       from:    `${fromSchedule.dayOfWeek} ${fromSchedule.slotStart}–${fromSchedule.slotEnd}`,
       to:      `${toSchedule.dayOfWeek} ${toSchedule.slotStart}–${toSchedule.slotEnd}`,
     },
@@ -142,22 +147,43 @@ export async function POST(req: NextRequest): Promise<Response> {
   );
 }
 
-// GET — kasir lihat history swap request miliknya
+// GET — kasir lihat riwayat swap miliknya dan permintaan masuk dari rekan (K4)
 export async function GET(req: NextRequest): Promise<Response> {
   const session = await verifyJwt(req);
   if (!session || session.role !== 'employee') {
     return apiError('Akses ditolak.', 401);
   }
 
-  const requests = await db.query.shiftSwapRequests.findMany({
-    where: eq(shiftSwapRequests.requesterId, session.sub),
-    with: {
-      fromSchedule:  { columns: { dayOfWeek: true, slotStart: true, slotEnd: true } },
-      toSchedule:    { columns: { dayOfWeek: true, slotStart: true, slotEnd: true } },
-    },
-    orderBy: (t, { desc }) => [desc(t.createdAt)],
-    limit: 20,
-  });
+  const [myRequests, incomingRequests] = await Promise.all([
+    // Pengajuan yang diajukan oleh kasir ini
+    db.query.shiftSwapRequests.findMany({
+      where: eq(shiftSwapRequests.requesterId, session.sub),
+      with: {
+        peer:          { columns: { id: true, fullName: true, nim: true } },
+        fromSchedule:  { columns: { dayOfWeek: true, slotStart: true, slotEnd: true } },
+        toSchedule:    { columns: { dayOfWeek: true, slotStart: true, slotEnd: true } },
+      },
+      orderBy: (t, { desc }) => [desc(t.createdAt)],
+      limit: 20,
+    }),
+    // Permintaan masuk dari rekan kerja yang ingin bertukar dengan jadwal kasir ini
+    db.query.shiftSwapRequests.findMany({
+      where: and(
+        eq(shiftSwapRequests.peerEmployeeId, session.sub),
+        eq(shiftSwapRequests.status, 'PENDING'),
+      ),
+      with: {
+        requester:     { columns: { id: true, fullName: true, nim: true } },
+        fromSchedule:  { columns: { dayOfWeek: true, slotStart: true, slotEnd: true } },
+        toSchedule:    { columns: { dayOfWeek: true, slotStart: true, slotEnd: true } },
+      },
+      orderBy: (t, { desc }) => [desc(t.createdAt)],
+      limit: 20,
+    }),
+  ]);
 
-  return apiOk(requests);
+  return apiOk({
+    history: myRequests,
+    incoming: incomingRequests,
+  });
 }

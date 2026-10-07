@@ -19,8 +19,10 @@ type ShiftPersonnel = {
   defaultJabatan: string | null;
   attendance: {
     isAttended: boolean;
+    isClockedOut?: boolean;
     status?: string;
     clockInTime?: string | null;
+    clockOutTime?: string | null;
     lateMinutes?: number;
     notes?: string | null;
   };
@@ -43,7 +45,7 @@ type PresensiData = {
   shifts: ShiftGroup[];
 };
 
-type RoleOption = 'Kasir' | 'Customer Service' | 'Kepala Gudang' | 'Admin Kasir';
+type RoleOption = 'Ketua Admin' | 'Kasir' | 'Pelayan' | 'Gudang' | 'Customer Service' | 'Kepala Gudang' | 'Admin Kasir';
 
 export default function KasirLoginPage() {
   const router = useRouter();
@@ -113,6 +115,7 @@ export default function KasirLoginPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action:     'CLOCK_IN',
           employeeId: selectedPerson.employeeId,
           scheduleId: selectedPerson.scheduleId,
           roleTask:   selectedRole,
@@ -127,8 +130,8 @@ export default function KasirLoginPage() {
 
       setPresensiSuccessMsg(json.message ?? `Presensi berhasil! Selamat bertugas sebagai ${selectedRole}.`);
       
-      // Auto-fill login POS jika orang ini bertugas sebagai Kasir
-      if (selectedRole === 'Kasir') {
+      // Auto-fill login POS jika orang ini bertugas sebagai Kasir atau Ketua Admin
+      if (selectedRole === 'Kasir' || selectedRole === 'Ketua Admin') {
         setForm({
           fullName:     selectedPerson.fullName ?? '',
           nim:          selectedPerson.nim ?? '',
@@ -142,6 +145,36 @@ export default function KasirLoginPage() {
       setPresensiError('Gagal menghubungi server.');
     } finally {
       setSubmittingPresensi(false);
+    }
+  }
+
+  // Handle Presensi Pulang (Clock-Out)
+  async function handleClockOut(p: ShiftPersonnel) {
+    if (!p.employeeId) return;
+    const confirmOut = window.confirm(`Konfirmasi presensi pulang untuk ${p.fullName}?`);
+    if (!confirmOut) return;
+
+    setPresensiError(null);
+    setPresensiSuccessMsg(null);
+    try {
+      const res = await fetch('/api/kasir/presensi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action:     'CLOCK_OUT',
+          employeeId: p.employeeId,
+          scheduleId: p.scheduleId,
+        }),
+      });
+      const json = await res.json() as { success: boolean; message?: string; error?: string };
+      if (!res.ok || !json.success) {
+        setPresensiError(json.error ?? 'Gagal mencatat presensi pulang.');
+        return;
+      }
+      setPresensiSuccessMsg(json.message ?? `Presensi pulang berhasil dicatat untuk ${p.fullName}.`);
+      await loadPresensi();
+    } catch {
+      setPresensiError('Gagal menghubungi server.');
     }
   }
 
@@ -434,22 +467,56 @@ export default function KasirLoginPage() {
                             {/* Status / Action Button */}
                             {isAttended ? (
                               <div style={{ textAlign: 'right' }}>
-                                <span
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 4,
-                                    fontSize: 11,
-                                    fontWeight: 'bold',
-                                    color: p.attendance.status === 'TELAT' ? '#d97706' : '#15803d',
-                                    backgroundColor: p.attendance.status === 'TELAT' ? '#fef3c7' : '#dcfce7',
-                                    padding: '3px 8px',
-                                    borderRadius: 999,
-                                  }}
-                                >
-                                  <CheckCircle2 size={12} />
-                                  {p.attendance.status === 'TELAT' ? `Telat (${p.attendance.clockInTime})` : `Hadir (${p.attendance.clockInTime})`}
-                                </span>
+                                {p.attendance.isClockedOut ? (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 4,
+                                      fontSize: 11,
+                                      fontWeight: 'bold',
+                                      color: 'var(--color-primary)',
+                                      backgroundColor: 'var(--color-primary-light)',
+                                      padding: '3px 8px',
+                                      borderRadius: 999,
+                                    }}
+                                  >
+                                    🏁 Selesai ({p.attendance.clockInTime} – {p.attendance.clockOutTime})
+                                  </span>
+                                ) : (
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                    <span
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 4,
+                                        fontSize: 11,
+                                        fontWeight: 'bold',
+                                        color: p.attendance.status === 'TELAT' ? '#d97706' : '#15803d',
+                                        backgroundColor: p.attendance.status === 'TELAT' ? '#fef3c7' : '#dcfce7',
+                                        padding: '3px 8px',
+                                        borderRadius: 999,
+                                      }}
+                                    >
+                                      <CheckCircle2 size={12} />
+                                      {p.attendance.status === 'TELAT' ? `Telat (${p.attendance.clockInTime})` : `Hadir (${p.attendance.clockInTime})`}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleClockOut(p)}
+                                      className="btn btn-secondary"
+                                      style={{
+                                        padding: '2px 8px',
+                                        fontSize: 10,
+                                        fontWeight: 'var(--weight-bold)',
+                                        borderRadius: 'var(--radius-sm)',
+                                      }}
+                                      title="Presensi Pulang (Clock-Out)"
+                                    >
+                                      Pulang
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <button
@@ -539,10 +606,10 @@ export default function KasirLoginPage() {
                 </label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {[
-                    { role: 'Kasir', desc: 'Melayani transaksi & laci uang POS', icon: <ShoppingBag size={16} /> },
-                    { role: 'Customer Service', desc: 'Melayani pembeli & pramuniaga bagian depan', icon: <HeartHandshake size={16} /> },
-                    { role: 'Kepala Gudang', desc: 'Kelola stok, barang masuk & tata rak', icon: <Package size={16} /> },
-                    { role: 'Admin Kasir', desc: 'Pendamping, bantu antrean & rekap', icon: <ShieldCheck size={16} /> },
+                    { role: 'Ketua Admin', desc: 'Ketua Shift, koordinator tim & pemegang laci', icon: <ShieldCheck size={16} /> },
+                    { role: 'Kasir', desc: 'Melayani transaksi belanja & scanning POS', icon: <ShoppingBag size={16} /> },
+                    { role: 'Pelayan', desc: 'Customer service, bantu pembeli & display rak depan', icon: <HeartHandshake size={16} /> },
+                    { role: 'Gudang', desc: 'Logistik, cek fisik barang, tata rak & restock', icon: <Package size={16} /> },
                   ].map((item) => (
                     <button
                       key={item.role}

@@ -16,7 +16,9 @@ type SwapRequest = {
   adminNote: string | null;
   createdAt: string;
   reviewedAt: string | null;
+  peerApprovedAt?: string | null;
   requester: { fullName: string; nim: string; programStudi: string };
+  peer?: { fullName: string; nim: string } | null;
   fromSchedule: { dayOfWeek: string; slotStart: string; slotEnd: string; coordinatorName: string | null };
   toSchedule:   { dayOfWeek: string; slotStart: string; slotEnd: string; coordinatorName: string | null };
   reviewedByAdmin: { fullName: string } | null;
@@ -758,14 +760,28 @@ export default function SwapRequestPage() {
                   flexWrap: 'wrap',
                 }}
               >
-                {/* 1. Pemohon */}
+                {/* 1. Pemohon & Rekan */}
                 <div style={{ flex: '1 1 200px', minWidth: '180px' }}>
                   <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', fontSize: 'var(--text-sm)' }}>
                     {r.requester.fullName}
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
-                    {r.requester.nim} • {r.requester.programStudi}
+                    NIM: {r.requester.nim} • {r.requester.programStudi}
                   </div>
+                  {r.peer && (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-primary)', marginTop: 4, fontWeight: 500 }}>
+                      Tukar dg: <strong>{r.peer.fullName}</strong>
+                      {r.peerApprovedAt ? (
+                        <span style={{ color: 'var(--color-success)', marginLeft: 6, fontWeight: 600 }}>
+                          ✔ Rekan Setuju
+                        </span>
+                      ) : (
+                        <span style={{ color: 'hsl(38 92% 40%)', marginLeft: 6, fontWeight: 600 }}>
+                          ⏳ Menunggu Rekan
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* 2. Alur Swap */}

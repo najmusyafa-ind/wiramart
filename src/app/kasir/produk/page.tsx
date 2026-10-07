@@ -22,7 +22,7 @@ import { useState, useEffect, useCallback, useRef, useId } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Plus, Search, Edit2, Package, X, Loader2, ChevronLeft,
-  Camera, CameraOff, ScanLine, CheckCircle, AlertCircle,
+  Camera, CameraOff, ScanLine, CheckCircle, AlertCircle, Eye,
 } from 'lucide-react';
 
 type Category = { id: string; name: string };
@@ -338,43 +338,48 @@ function ProdukModal({
     setErr('');
     if (!form.name.trim()) { setErr('Nama produk wajib diisi.'); return; }
     if (!form.categoryId) { setErr('Pilih kategori.'); return; }
-    if (form.sellingPrice <= 0) { setErr('Harga jual harus lebih dari 0.'); return; }
     setSaving(true);
     try {
+      if (!isEdit) {
+        // K8: Kasir hanya mengusulkan produk (nama, kategori, barcode, satuan)
+        const res = await fetch('/api/kasir/produk/usulkan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: form.name.trim(),
+            categoryId: form.categoryId,
+            barcode: form.barcode?.trim() || null,
+            unit: form.unit || 'pcs',
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) { setErr(json.error ?? 'Gagal mengirim usulan produk.'); setSaving(false); return; }
+        onSaved('Usulan produk berhasil dikirim ke Gudang / Admin untuk penentuan HPP!');
+        return;
+      }
+
+      // Mode Edit (hanya jika diizinkan)
       const payload = {
         ...form,
         barcode: form.barcode?.trim() || null,
-        // Hanya relevan saat edit: server memakainya agar stok tak tertimpa angka basi
-        ...(isEdit ? { expectedStockQty: editData!.stockQty } : {}),
+        expectedStockQty: editData!.stockQty,
       };
 
-      let productId = editData?.id ?? '';
-      if (!isEdit) {
-        const res = await fetch('/api/admin/produk', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const json = await res.json();
-        if (!res.ok) { setErr(json.error ?? 'Gagal menyimpan produk.'); setSaving(false); return; }
-        productId = json.data.id;
-      } else {
-        const res = await fetch(`/api/admin/produk/${editData!.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const json = await res.json();
-        if (!res.ok) { setErr(json.error ?? 'Gagal mengupdate produk.'); setSaving(false); return; }
-      }
+      const res = await fetch(`/api/admin/produk/${editData!.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) { setErr(json.error ?? 'Gagal mengupdate produk.'); setSaving(false); return; }
 
-      if (foto && productId) {
+      if (foto && editData?.id) {
         const fd = new FormData();
         fd.append('foto', foto);
-        await fetch(`/api/admin/produk/${productId}/foto`, { method: 'POST', body: fd });
+        await fetch(`/api/admin/produk/${editData.id}/foto`, { method: 'POST', body: fd });
       }
 
-      onSaved(isEdit ? 'Produk berhasil diperbarui!' : 'Produk berhasil ditambahkan!');
+      onSaved('Produk berhasil diperbarui!');
     } catch {
       setErr('Terjadi kesalahan jaringan. Coba lagi.');
     } finally {
@@ -398,10 +403,10 @@ function ProdukModal({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
           <div>
             <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', margin: 0 }}>
-              {isEdit ? 'Ubah Stok & Harga Produk' : 'Tambah Produk Baru'}
+              {isEdit ? 'Detail Informasi Produk' : '💡 Usulkan Produk Baru'}
             </h2>
             <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: '4px 0 0 0' }}>
-              {isEdit ? 'Perbarui stok fisik barang, harga jual, atau modal kulakan (HPP)' : 'Lengkapi data barang baru agar langsung bisa dijual di kasir'}
+              {isEdit ? 'Informasi spesifikasi barang di sistem kasir' : 'Kirim usulan barang baru ke Gudang / Admin untuk penetapan HPP & harga jual'}
             </p>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }} aria-label="Tutup modal">
@@ -427,10 +432,29 @@ function ProdukModal({
           </div>
         )}
 
+        {/* Penjelasan Kebijakan K8 untuk Kasir */}
+        {!isEdit && (
+          <div style={{
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '1px solid rgba(59, 130, 246, 0.25)',
+            borderRadius: 10,
+            padding: '10px 14px',
+            fontSize: 12,
+            color: 'var(--color-text-secondary)',
+            lineHeight: 1.5,
+            marginBottom: 12,
+          }}>
+            <strong style={{ color: 'var(--color-primary)', display: 'block', marginBottom: 2 }}>
+              🛡️ Kebijakan Wiramart UNPERBA (K8 & K2):
+            </strong>
+            Kasir hanya mengusulkan nama, barcode, foto, dan kategori. HPP dan Harga Jual akan diverifikasi & ditetapkan langsung oleh Kepala Gudang / Admin sesuai margin global toko.
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
           {/* Foto */}
           <div>
-            <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Foto Produk</label>
+            <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Foto Produk (opsional)</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{
                 width: 80, height: 80, borderRadius: 10,
@@ -442,93 +466,95 @@ function ProdukModal({
                   ? <img src={preview} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   : <Package size={28} color="var(--color-text-muted)" />}
               </div>
-              <label style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                background: 'var(--color-primary-light)', color: 'var(--color-primary)',
-                padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
-                fontSize: 'var(--text-sm)', fontWeight: 600,
-              }}>
-                {preview ? 'Ganti Foto' : 'Pilih Foto'}
-                <input type="file" accept="image/*" onChange={handleFoto} style={{ display: 'none' }} />
-              </label>
+              {!isEdit && (
+                <label style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: 'var(--color-primary-light)', color: 'var(--color-primary)',
+                  padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
+                  fontSize: 'var(--text-sm)', fontWeight: 600,
+                }}>
+                  {preview ? 'Ganti Foto' : 'Pilih Foto'}
+                  <input type="file" accept="image/*" onChange={handleFoto} style={{ display: 'none' }} />
+                </label>
+              )}
             </div>
           </div>
 
           {/* Kategori */}
           <div>
             <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Kategori *</label>
-            <select value={f.categoryId} onChange={e => set('categoryId', e.target.value)} className="form-input" required>
-              <option value="">-- Pilih Kategori --</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            {isEdit ? (
+              <input className="form-input" value={categories.find(c => c.id === f.categoryId)?.name ?? '—'} disabled />
+            ) : (
+              <select value={f.categoryId} onChange={e => set('categoryId', e.target.value)} className="form-input" required>
+                <option value="">-- Pilih Kategori --</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
           </div>
 
           {/* Nama */}
           <div>
             <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Nama Produk *</label>
-            <input className="form-input" value={f.name} onChange={e => set('name', e.target.value)} placeholder="Contoh: Aqua Botol 600ml" required />
+            <input className="form-input" value={f.name} onChange={e => set('name', e.target.value)} placeholder="Contoh: Aqua Botol 600ml" required disabled={isEdit} />
           </div>
 
-          {/* Barcode (editable, bisa diisi manual juga) */}
+          {/* Barcode */}
           <div>
             <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Barcode (opsional)</label>
             <input className="form-input" value={f.barcode} onChange={e => set('barcode', e.target.value)}
-              placeholder="Scan atau ketik barcode..." />
+              placeholder="Scan atau ketik barcode..." disabled={isEdit} />
+          </div>
+
+          {/* Satuan */}
+          <div>
+            <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+              Satuan
+              <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>Bentuk kemasan / eceran</span>
+            </label>
+            {isEdit ? (
+              <input className="form-input" value={f.unit} disabled />
+            ) : (
+              <select className="form-input" value={f.unit} onChange={e => set('unit', e.target.value)}>
+                <option value="pcs">pcs</option>
+                <option value="botol">botol</option>
+                <option value="pak">pak</option>
+                <option value="dus">dus</option>
+                <option value="bungkus">bungkus</option>
+              </select>
+            )}
           </div>
 
           {/* Deskripsi */}
           <div>
-            <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Deskripsi (opsional)</label>
+            <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Catatan Tambahan untuk Gudang (opsional)</label>
             <textarea className="form-input" value={f.description} onChange={e => set('description', e.target.value)}
-              placeholder="Deskripsi singkat produk..." rows={2} style={{ resize: 'none' }} />
+              placeholder="Keterangan kulakan, supplier, atau lokasi rak..." rows={2} style={{ resize: 'none' }} disabled={isEdit} />
           </div>
 
-          {/* Harga */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
-                Harga Beli / HPP
-                <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>Modal kulakan</span>
-              </label>
-              <input className="form-input" type="number" min={0} value={f.costPrice} onChange={e => set('costPrice', Number(e.target.value))} placeholder="Contoh: 3000" />
+          {/* Jika modal sedang membuka detail produk yang sudah ada */}
+          {isEdit && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 4 }}>
+              <div>
+                <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Harga Jual Kasir</label>
+                <input className="form-input" value={`Rp ${Number(f.sellingPrice).toLocaleString('id-ID')}`} disabled />
+              </div>
+              <div>
+                <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Sisa Stok di Rak</label>
+                <input className="form-input" value={`${f.stockQty} ${f.unit}`} disabled />
+              </div>
             </div>
-            <div>
-              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
-                Harga Jual (Rp) *
-                <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>Harga ke pembeli</span>
-              </label>
-              <input className="form-input" type="number" min={1} value={f.sellingPrice} onChange={e => set('sellingPrice', Number(e.target.value))} placeholder="Contoh: 4000" required />
-            </div>
-          </div>
+          )}
 
-          {/* Stok & Satuan */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
-                {isEdit ? 'Ubah Sisa Stok' : 'Stok Awal'}
-                <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>Hitungan fisik di rak</span>
-              </label>
-              <input className="form-input" type="number" min={0} value={f.stockQty} onChange={e => set('stockQty', Number(e.target.value))} placeholder="0" />
-            </div>
-            <div>
-              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
-                Satuan
-                <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>Bentuk kemasan</span>
-              </label>
-              <select className="form-input" value={f.unit} onChange={e => set('unit', e.target.value)}>
-                <option value="pcs">pcs</option>
-                <option value="kg">kg</option>
-                <option value="liter">liter</option>
-                <option value="botol">botol</option>
-                <option value="pak">pak</option>
-                <option value="dus">dus</option>
-              </select>
-            </div>
-          </div>
-
-          <button type="submit" className="btn btn-primary" disabled={saving} style={{ marginTop: 8, padding: '12px 16px', fontSize: 14, fontWeight: 700 }}>
-            {saving ? <><Loader2 size={16} className="spin-icon" /> Menyimpan...</> : (isEdit ? '💾 Simpan Perubahan Stok & Harga' : '+ Simpan & Masukkan ke Katalog')}
-          </button>
+          {!isEdit ? (
+            <button type="submit" className="btn btn-primary" disabled={saving} style={{ marginTop: 8, padding: '12px 16px', fontSize: 14, fontWeight: 700 }}>
+              {saving ? <><Loader2 size={16} className="spin-icon" /> Mengirim Usulan...</> : '📨 Kirim Usulan Produk ke Gudang / Admin'}
+            </button>
+          ) : (
+            <button type="button" onClick={onClose} className="btn btn-secondary" style={{ marginTop: 8, padding: '12px 16px', fontSize: 14, fontWeight: 600 }}>
+              Tutup Detail
+            </button>
+          )}
         </form>
       </div>
     </div>
@@ -644,7 +670,7 @@ export default function KasirProdukPage() {
           onClick={() => { setEditData(null); setPrefillBarcode(undefined); setPrefillName(undefined); setShowModal(true); }}
           className="btn btn-primary btn-sm"
         >
-          <Plus size={15} /> Tambah
+          <Plus size={15} /> Usul Produk
         </button>
       </div>
 
@@ -678,9 +704,9 @@ export default function KasirProdukPage() {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Plus size={18} />
-            <span>+ Tambah Produk</span>
+            <span>💡 Usul Produk Baru</span>
           </div>
-          <span style={{ fontSize: 11, opacity: 0.9, fontWeight: 400 }}>Input barang baru</span>
+          <span style={{ fontSize: 11, opacity: 0.9, fontWeight: 400 }}>Ajukan ke Gudang/Admin</span>
         </button>
 
         <button
@@ -817,11 +843,11 @@ export default function KasirProdukPage() {
                   transition: 'all 0.15s ease',
                   whiteSpace: 'nowrap',
                 }}
-                title="Ubah stok fisik atau harga produk"
-                aria-label={`Ubah stok dan harga ${p.name}`}
+                title="Lihat detail spesifikasi produk"
+                aria-label={`Detail produk ${p.name}`}
               >
-                <Edit2 size={13} />
-                <span>Ubah Stok / Harga</span>
+                <Eye size={13} />
+                <span>Detail Produk</span>
               </button>
             </div>
           ))
@@ -850,10 +876,10 @@ export default function KasirProdukPage() {
           fontSize: 13,
           cursor: 'pointer',
         }}
-        aria-label="Tambah produk baru"
+        aria-label="Usulkan produk baru"
       >
         <Plus size={18} />
-        <span>+ Tambah Produk</span>
+        <span>💡 Usul Produk</span>
       </button>
 
       {/* Scanner Modal */}

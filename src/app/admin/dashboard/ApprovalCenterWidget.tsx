@@ -14,6 +14,8 @@ import {
   Download,
   Calendar,
   Users,
+  Lightbulb,
+  Package,
 } from 'lucide-react';
 import { formatRupiah } from '@/lib/utils/helpers';
 
@@ -27,6 +29,8 @@ export type AutoClosedShiftInfo = {
 
 export type ApprovalCenterProps = {
   pendingSwapsCount: number;
+  pendingProposalsCount?: number;
+  criticalBatchesCount?: number;
   autoClosedShiftsCount: number;
   autoClosedShifts: AutoClosedShiftInfo[];
   qrisNeedsAttention: boolean;
@@ -37,6 +41,8 @@ export type ApprovalCenterProps = {
 
 export default function ApprovalCenterWidget({
   pendingSwapsCount,
+  pendingProposalsCount = 0,
+  criticalBatchesCount = 0,
   autoClosedShiftsCount,
   autoClosedShifts,
   qrisNeedsAttention,
@@ -47,7 +53,9 @@ export default function ApprovalCenterWidget({
   const totalAlerts =
     pendingSwapsCount +
     autoClosedShiftsCount +
-    (qrisNeedsAttention ? 1 : 0);
+    (qrisNeedsAttention ? 1 : 0) +
+    pendingProposalsCount +
+    (criticalBatchesCount > 0 ? 1 : 0);
 
   return (
     <div className="card" style={{ marginTop: 'var(--space-6)', overflow: 'hidden' }}>
@@ -305,6 +313,130 @@ export default function ApprovalCenterWidget({
             }}
           >
             Rincian di Laporan Harian <ChevronRight size={14} />
+          </Link>
+        </div>
+
+        {/* 4. Usulan Produk Baru dari Kasir (K8) */}
+        <div
+          style={{
+            padding: 'var(--space-4)',
+            borderRadius: 'var(--radius-md)',
+            border: `1px solid ${
+              pendingProposalsCount > 0 ? 'hsl(217 91% 60% / 0.5)' : 'var(--color-border)'
+            }`,
+            backgroundColor:
+              pendingProposalsCount > 0 ? 'hsl(217 91% 60% / 0.05)' : 'var(--color-surface)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+              <span
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 600,
+                  fontSize: '0.85rem',
+                  color: pendingProposalsCount > 0 ? 'hsl(217 91% 50%)' : 'inherit',
+                }}
+              >
+                <Lightbulb size={16} />
+                Usulan Produk Kasir
+              </span>
+              <span
+                className={`badge ${
+                  pendingProposalsCount > 0 ? 'badge-primary' : 'badge-secondary'
+                }`}
+                style={{ fontSize: '0.72rem' }}
+              >
+                {pendingProposalsCount > 0 ? `${pendingProposalsCount} Menunggu` : 'Nihil'}
+              </span>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '0 0 var(--space-3)' }}>
+              {pendingProposalsCount > 0
+                ? 'Terdapat usulan produk baru dari kasir yang memerlukan review HPP & margin toko.'
+                : 'Belum ada usulan produk baru yang menunggu peninjauan.'}
+            </p>
+          </div>
+
+          <Link
+            href="/admin/produk"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              color: 'var(--color-primary)',
+              textDecoration: 'none',
+            }}
+          >
+            Review Usulan Produk <ChevronRight size={14} />
+          </Link>
+        </div>
+
+        {/* 5. Alert Kedaluwarsa Gudang FEFO (F3) */}
+        <div
+          style={{
+            padding: 'var(--space-4)',
+            borderRadius: 'var(--radius-md)',
+            border: `1px solid ${
+              criticalBatchesCount > 0 ? 'var(--color-error)' : 'var(--color-border)'
+            }`,
+            backgroundColor:
+              criticalBatchesCount > 0 ? 'hsl(0 84% 60% / 0.05)' : 'var(--color-surface)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+              <span
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 600,
+                  fontSize: '0.85rem',
+                  color: criticalBatchesCount > 0 ? 'var(--color-error)' : 'inherit',
+                }}
+              >
+                <Package size={16} />
+                Kedaluwarsa Stok (FEFO)
+              </span>
+              <span
+                className={`badge ${
+                  criticalBatchesCount > 0 ? 'badge-error' : 'badge-success'
+                }`}
+                style={{ fontSize: '0.72rem' }}
+              >
+                {criticalBatchesCount > 0 ? `${criticalBatchesCount} Kritis` : 'Aman'}
+              </span>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '0 0 var(--space-3)' }}>
+              {criticalBatchesCount > 0
+                ? 'Ada batch stok yang telah kedaluwarsa atau mendekati jatuh tempo (≤ 7 hari).'
+                : 'Seluruh batch stok produk masih dalam batas aman kedaluwarsa.'}
+            </p>
+          </div>
+
+          <Link
+            href="/admin/produk"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              color: 'var(--color-primary)',
+              textDecoration: 'none',
+            }}
+          >
+            Pantau Batch Kedaluwarsa <ChevronRight size={14} />
           </Link>
         </div>
       </div>

@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { employees, admins, shiftSchedules, shifts } from '@/lib/db/schema';
-import { eq, and, isNull, or, ilike } from 'drizzle-orm';
+import { eq, and, isNull, or, ilike, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 // ── GET: list semua karyawan ──────────────────────────────────
@@ -23,6 +23,8 @@ export async function GET(req: NextRequest) {
       programStudi: employees.programStudi,
       jabatan: employees.jabatan,
       isActive: employees.isActive,
+      isKetuaShift: employees.isKetuaShift,
+      hasPin: sql<boolean>`CASE WHEN ${employees.pinHash} IS NOT NULL THEN true ELSE false END`,
       createdAt: employees.createdAt,
       // Shift yang diassign ke karyawan ini (nullable jika belum ada slot)
       shiftDay:   shiftSchedules.dayOfWeek,
@@ -66,11 +68,15 @@ export async function GET(req: NextRequest) {
 }
 
 // ── POST: tambah karyawan baru ────────────────────────────────
+import bcrypt from 'bcryptjs';
+
 const CreateSchema = z.object({
   fullName: z.string().min(2).max(200),
   nim: z.string().min(5).max(20),
   programStudi: z.string().min(2).max(100),
   jabatan: z.string().max(100).default('Kasir'),
+  isKetuaShift: z.boolean().optional(),
+  pin: z.string().length(6, 'PIN harus 6 digit angka').optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -87,7 +93,7 @@ export async function POST(req: NextRequest) {
     return apiError(parsed.error.flatten().fieldErrors, 422);
   }
 
-  const { fullName, nim, programStudi, jabatan } = parsed.data;
+  const { fullName, nim, programStudi, jabatan, isKetuaShift, pin } = parsed.data;
 
   // Cek duplikat NIM + Prodi
   const existing = await db
@@ -106,6 +112,11 @@ export async function POST(req: NextRequest) {
     return apiError('NIM + Program Studi sudah terdaftar', 409);
   }
 
+  let pinHash: string | null = null;
+  if (isKetuaShift && pin) {
+    pinHash = await bcrypt.hash(pin, 10);
+  }
+
   const [created] = await db
     .insert(employees)
     .values({
@@ -113,6 +124,8 @@ export async function POST(req: NextRequest) {
       nim: nim.toUpperCase().trim(),
       programStudi: programStudi.trim(),
       jabatan: jabatan.trim(),
+      isKetuaShift: isKetuaShift ?? false,
+      pinHash,
       createdByAdminId: payload.sub as string,
     })
     .returning();

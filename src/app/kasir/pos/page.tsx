@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, useId, useRef } from 'react';
+import { useState, useEffect, useCallback, useId, useRef, useMemo } from 'react';
 import Image from 'next/image';
 import {
   ShoppingCart, Search, Plus, Minus, Trash2, Banknote,
   CheckCircle, X, Loader2, Package, LogOut, ArrowLeftRight,
   User, Clock, AlertTriangle, ScanLine, MoreVertical, ChevronRight,
-  Receipt, Calculator, Coins, Utensils,
+  Receipt, Calculator, Coins, Utensils, KeyRound, Zap,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import KalkulatorPecahan, { type DenominasiMap } from './KalkulatorPecahan';
@@ -66,6 +66,23 @@ function formatTimeShort(dateStr: string): string {
   return new Date(dateStr).toLocaleTimeString('id-ID', {
     hour: '2-digit', minute: '2-digit', hour12: false,
   });
+}
+
+function getProductEmoji(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes('cilok') || n.includes('sate')) return '🍢';
+  if (n.includes('sando') || n.includes('roti') || n.includes('burger')) return '🥪';
+  if (n.includes('nasi') || n.includes('kebuli') || n.includes('uduk') || n.includes('cokot') || n.includes('krawu') || n.includes('jinggo')) return '🍙';
+  if (n.includes('tahu') || n.includes('bakso')) return '🥟';
+  if (n.includes('pentol')) return '🧆';
+  if (n.includes('ades') || n.includes('air') || n.includes('mineral') || n.includes('aqua')) return '💧';
+  if (n.includes('teh') || n.includes('frestea') || n.includes('tea')) return '🍵';
+  if (n.includes('kopi')) return '☕';
+  if (n.includes('susu') || n.includes('yakult') || n.includes('nutri') || n.includes('power ade') || n.includes('fanta') || n.includes('coca') || n.includes('pulpy')) return '🥤';
+  if (n.includes('ayam') || n.includes('geprek')) return '🍗';
+  if (n.includes('klepon') || n.includes('kue') || n.includes('cake') || n.includes('bagelen')) return '🧁';
+  if (n.includes('basreng') || n.includes('macaroni') || n.includes('pangsit') || n.includes('kripik') || n.includes('klanting') || n.includes('kongstik') || n.includes('snack') || n.includes('rosta') || n.includes('duosus')) return '🍿';
+  return '🍱';
 }
 
 // ── QrCode SVG ────────────────────────────────────────────────
@@ -131,10 +148,11 @@ function BukaShiftOverlay({
 }) {
   // Default modal awal paten dari owner: Rp 100.000
   const [modalInput, setModalInput] = useState('100000');
-  const [breakdown, setBreakdown] = useState<DenominasiMap>({});
-  const [inputMode, setInputMode] = useState<'QUICK' | 'CALCULATOR'>('QUICK');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [pinInput, setPinInput]     = useState('');
+  const [breakdown, setBreakdown]   = useState<DenominasiMap>({});
+  const [inputMode, setInputMode]   = useState<'QUICK' | 'CALCULATOR'>('QUICK');
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState<string | null>(null);
   // Fase handover: jika ada kasir lain aktif, tampilkan konfirmasi dulu
   const [handoverConfirmed, setHandoverConfirmed] = useState(false);
 
@@ -166,6 +184,7 @@ function BukaShiftOverlay({
         body: JSON.stringify({
           modalAwal: nominal,
           breakdown: Object.keys(breakdown).length > 0 ? breakdown : undefined,
+          pin: pinInput || undefined,
         }),
       });
       const json = await res.json() as { success: boolean; error?: string };
@@ -443,6 +462,31 @@ function BukaShiftOverlay({
                   </div>
                 </div>
               )}
+
+              {/* Otorisasi PIN Ketua Shift jika pemegang laci */}
+              <div style={{
+                background: 'rgba(234, 179, 8, 0.08)',
+                border: '1px solid rgba(234, 179, 8, 0.25)',
+                borderRadius: 'var(--radius-md)',
+                padding: 'var(--space-3)',
+              }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#854d0e', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <KeyRound size={14} /> PIN Ketua Shift (Khusus Admin Kasir / Ketua Shift)
+                </label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  pattern="\d{6}"
+                  className="form-input"
+                  placeholder="Ketik 6 digit PIN (jika Ketua Shift)..."
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  style={{ letterSpacing: 4, fontWeight: 700, maxWidth: 220 }}
+                />
+                <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
+                  *Wajib diisi jika Anda ditugaskan sebagai Ketua Shift pemegang laci toko.
+                </div>
+              </div>
 
               {error && (
                 <div style={{ padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--color-error-light)', fontSize: '0.8rem', color: 'var(--color-error)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -1134,9 +1178,10 @@ export default function PosPage() {
   const [showKasGerak, setShowKasGerak] = useState(false);
   const [showSisaMakanan, setShowSisaMakanan] = useState(false);
   const [tutupActualCash, setTutupActualCash] = useState<string>('');
-  const [tutupBreakdown, setTutupBreakdown] = useState<DenominasiMap>({});
-  const [tutupNotes, setTutupNotes] = useState<string>('');
-  const [tutupMode, setTutupMode] = useState<'QUICK' | 'CALCULATOR'>('QUICK');
+  const [tutupBreakdown, setTutupBreakdown]   = useState<DenominasiMap>({});
+  const [tutupNotes, setTutupNotes]           = useState<string>('');
+  const [tutupPin, setTutupPin]               = useState<string>('');
+  const [tutupMode, setTutupMode]             = useState<'QUICK' | 'CALCULATOR'>('QUICK');
   const [tutupResult, setTutupResult] = useState<{
     txCount: number;
   } | null>(null);
@@ -1223,7 +1268,7 @@ export default function PosPage() {
 
   const displayedProducts = products.filter((p) => {
     if (activeCategory === 'QUICK_NON_BARCODE') {
-      const isNoBarcode = !p.barcode;
+      const isNoBarcode = !p.barcode || p.barcode.trim() === '';
       const catLower = (p.categoryName ?? '').toLowerCase();
       const nameLower = p.name.toLowerCase();
       const isFood =
@@ -1232,14 +1277,48 @@ export default function PosPage() {
         catLower.includes('snack') ||
         catLower.includes('basah') ||
         catLower.includes('konsinyasi') ||
+        catLower.includes('jajan') ||
+        catLower.includes('titip') ||
         nameLower.includes('cilok') ||
         nameLower.includes('siomai') ||
         nameLower.includes('gorengan') ||
-        nameLower.includes('ricebowl');
+        nameLower.includes('ricebowl') ||
+        nameLower.includes('nasi') ||
+        nameLower.includes('tahu') ||
+        nameLower.includes('pentol') ||
+        nameLower.includes('sando') ||
+        nameLower.includes('klepon') ||
+        nameLower.includes('burger') ||
+        nameLower.includes('macaroni') ||
+        nameLower.includes('ades');
       return isNoBarcode || isFood;
     }
     return true;
   });
+
+  // ── Tombol Cepat (Quick Tap) Makanan Basah / Titipan Non-Barcode & Terlaris ──
+  const quickTapItems = useMemo(() => {
+    return products
+      .filter((p) => {
+        const isNoBarcode = !p.barcode || p.barcode.trim() === '';
+        const nameLower = p.name.toLowerCase();
+        const isFastFood =
+          isNoBarcode ||
+          nameLower.includes('ades') ||
+          nameLower.includes('cilok') ||
+          nameLower.includes('sando') ||
+          nameLower.includes('tahu') ||
+          nameLower.includes('nasi') ||
+          nameLower.includes('pentol') ||
+          nameLower.includes('macaroni') ||
+          nameLower.includes('burger') ||
+          nameLower.includes('klepon') ||
+          nameLower.includes('geprek') ||
+          nameLower.includes('basreng');
+        return isFastFood && p.stockQty > 0;
+      })
+      .slice(0, 20);
+  }, [products]);
 
   // ── Barcode POS scanner (DB-first -> notif) ─────────────
   async function startPosScanner() {
@@ -1509,6 +1588,7 @@ export default function PosPage() {
           actualCash: nominalFisik !== undefined && !isNaN(nominalFisik) ? nominalFisik : undefined,
           breakdown: Object.keys(tutupBreakdown).length > 0 ? tutupBreakdown : undefined,
           notes: tutupNotes.trim() ? tutupNotes.trim() : undefined,
+          pin: tutupPin || undefined,
         }),
       });
       const json = await res.json() as {
@@ -1527,6 +1607,7 @@ export default function PosPage() {
       setTutupActualCash('');
       setTutupBreakdown({});
       setTutupNotes('');
+      setTutupPin('');
       // Update session: shift = null setelah tutup
       setSession((prev) => prev ? { ...prev, shift: null } : prev);
     } catch {
@@ -1674,6 +1755,31 @@ export default function PosPage() {
                   maxLength={300}
                   style={{ fontSize: '0.8rem', resize: 'none' }}
                 />
+              </div>
+
+              {/* Otorisasi PIN Ketua Shift saat Tutup Shift */}
+              <div style={{
+                background: 'rgba(234, 179, 8, 0.08)',
+                border: '1px solid rgba(234, 179, 8, 0.25)',
+                borderRadius: 'var(--radius-md)',
+                padding: 'var(--space-3)',
+              }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#854d0e', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <KeyRound size={14} /> PIN Otorisasi Ketua Shift (6 Digit)
+                </label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  pattern="\d{6}"
+                  className="form-input"
+                  placeholder="Ketik 6 digit PIN (jika Ketua Shift)..."
+                  value={tutupPin}
+                  onChange={(e) => setTutupPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  style={{ letterSpacing: 4, fontWeight: 700, maxWidth: 220 }}
+                />
+                <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
+                  *Wajib diisi untuk memverifikasi hitungan fisik laci kasir oleh Ketua Shift.
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 4 }}>
@@ -2222,6 +2328,111 @@ export default function PosPage() {
             </button>
           ))}
         </div>
+
+        {/* ── Rak Tombol Cepat Titipan & Makanan Non-Barcode (Quick Action Shelf) ── */}
+        {!search && quickTapItems.length > 0 && (
+          <div className="pos-quick-shelf">
+            <div className="pos-quick-shelf-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Zap size={16} style={{ color: 'hsl(32, 95%, 45%)' }} />
+                <span style={{
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  color: 'hsl(32, 95%, 28%)',
+                  letterSpacing: '0.02em',
+                  textTransform: 'uppercase',
+                }}>
+                  Tombol Cepat Titipan (Sekali Sentuh)
+                </span>
+                <span style={{
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  background: 'hsl(32, 95%, 88%)',
+                  color: 'hsl(32, 95%, 25%)',
+                  padding: '1px 7px',
+                  borderRadius: 'var(--radius-full)',
+                }}>
+                  {quickTapItems.length} item
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveCategory(activeCategory === 'QUICK_NON_BARCODE' ? '' : 'QUICK_NON_BARCODE')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: 'hsl(32, 95%, 35%)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                {activeCategory === 'QUICK_NON_BARCODE' ? 'Semua Produk ✕' : 'Filter Titipan Saja →'}
+              </button>
+            </div>
+
+            <div className="pos-quick-scroll">
+              {quickTapItems.map((item) => {
+                const emoji = getProductEmoji(item.name);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    id={`quick-tap-${item.id}`}
+                    onClick={() => {
+                      if (addToCart(item)) {
+                        playScanBeep();
+                        setScanToast(`+1 ${item.name}`);
+                        setTimeout(() => setScanToast(null), 1800);
+                      }
+                    }}
+                    className="pos-quick-card"
+                    title={`Klik untuk langsung tambah 1 ${item.name}`}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                      <span style={{ fontSize: 20 }}>{emoji}</span>
+                      <span style={{
+                        fontSize: '0.65rem',
+                        fontWeight: 700,
+                        color: item.stockQty <= 3 ? 'hsl(0, 80%, 45%)' : 'hsl(142, 70%, 35%)',
+                        background: item.stockQty <= 3 ? 'hsl(0, 90%, 95%)' : 'hsl(142, 70%, 95%)',
+                        padding: '1px 5px',
+                        borderRadius: 4,
+                      }}>
+                        sisa {item.stockQty}
+                      </span>
+                    </div>
+                    <div style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      color: 'var(--color-text)',
+                      lineHeight: 1.25,
+                      maxHeight: 28,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                    }}>
+                      {item.name}
+                    </div>
+                    <div style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      color: 'hsl(32, 95%, 40%)',
+                      marginTop: 'auto',
+                    }}>
+                      {rp(parseFloat(item.sellingPrice))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Products grid */}
         <div className="pos-products-grid" role="list" aria-label="Daftar produk">

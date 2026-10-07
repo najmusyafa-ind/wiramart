@@ -1,31 +1,27 @@
 // =============================================================
 // PATCH /api/kasir/shift/tutup — Tutup shift aktif secara manual
 // Auth: Employee JWT required
-// Body: { notes?: string } (opsional catatan handover)
-// Business Rules:
-//   - Hanya shift ACTIVE yang bisa ditutup
-//   - clockOut di-set ke waktu sekarang (WIB)
-//   - status → CLOSED
-//   - Auto-close juga dipanggil oleh cron 15 menit pasca jam akhir shift
+// Body: { actualCash?: number, breakdown?: Record<string, number>, notes?: string, pinKetuaShift?: string }
 //
-// v1.1 — Fix D2 (Fase 0.6):
-//   saldoAkhirLaci TIDAK lagi dikirim ke kasir. Kasir harus melakukan
-//   BLIND COUNT — tidak tahu angka yang diharapkan.
-// v1.2 — Tutup celah D2:
-//   Respons juga TIDAK memuat modalAwal / totalCash / totalQris / totalOmzet /
-//   totalHpp, karena kombinasi angka itu cukup untuk menurunkan saldo expected
-//   (modalAwal + totalCash, atau labaKotor + HPP − QRIS). Angka lengkap hanya
-//   untuk manajer/admin lewat laporan shift.
-//   UPDATE diberi guard status = 'ACTIVE' agar penutupan ganda bersamaan ditolak.
+// Business Rules:
+//   1. Hanya shift ACTIVE yang bisa ditutup.
+//   2. clockOut di-set ke waktu sekarang (WIB).
+//   3. status → CLOSED.
+//   4. Blind Count: saldoAkhirLaci / expected TIDAK dikirim ke kasir.
+//   5. K3 Fraud Detection: Jika ada penjualan tunai (omzetCash > 0),
+//      tetapi laci fisik masih persis sama dengan modalAwal,
+//      beri flag 'FRAUD_CASH_SUSPICIOUS' untuk audit Manajer.
+//   6. K17 PIN Ketua Shift: Otorisasi tutup shift oleh Ketua Shift (jika ditugaskan).
 // =============================================================
 
 import { z } from 'zod';
 import { eq, and, sql } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { shifts, transactions } from '@/lib/db/schema';
+import { shifts, transactions, transactionPayments, employees } from '@/lib/db/schema';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
+import bcrypt from 'bcryptjs';
 
 export const runtime = 'nodejs';
 
@@ -33,6 +29,7 @@ const tutupShiftSchema = z.object({
   actualCash: z.number().min(0, 'Saldo fisik kas tidak boleh negatif').max(50_000_000, 'Nilai terlalu besar').optional(),
   breakdown: z.record(z.string(), z.number()).optional(),
   notes: z.string().max(500).optional(),
+  pinKetuaShift: z.string().length(6, 'PIN harus 6 digit angka').optional(),
 });
 
 export async function PATCH(req: NextRequest): Promise<Response> {
@@ -61,12 +58,54 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  const { notes, actualCash, breakdown } = parsed.data;
+  const { notes, actualCash, breakdown, pinKetuaShift } = parsed.data;
 
-  // 3. Cari shift aktif milik karyawan ini
+  // 3. Verifikasi PIN Ketua Shift jika karyawan adalah Ketua Shift
+  const currentEmployee = await db.query.employees.findFirst({
+    where: eq(employees.id, employeeId),
+    columns: { id: true, isKetuaShift: true, pinHash: true, pinFailedAttempts: true, pinLockedUntil: true },
+  });
+
+  if (currentEmployee?.isKetuaShift && currentEmployee.pinHash) {
+    if (currentEmployee.pinLockedUntil && new Date(currentEmployee.pinLockedUntil) > new Date()) {
+      return apiError('Akses Ketua Shift terkunci sementara.', 'PIN_LOCKED', 403);
+    }
+
+    if (!pinKetuaShift) {
+      return apiError('Ketua Shift wajib memasukkan PIN 6 digit untuk otorisasi tutup laci kas.', 'PIN_REQUIRED', 403);
+    }
+
+    const isPinValid = await bcrypt.compare(pinKetuaShift, currentEmployee.pinHash);
+    if (!isPinValid) {
+      const attempts = (currentEmployee.pinFailedAttempts ?? 0) + 1;
+      const willLock = attempts >= 5;
+      await db
+        .update(employees)
+        .set({
+          pinFailedAttempts: attempts,
+          pinLockedUntil: willLock ? new Date(Date.now() + 15 * 60 * 1000) : null,
+        })
+        .where(eq(employees.id, employeeId));
+
+      return apiError(
+        willLock ? 'PIN salah 5x. Akses terkunci 15 menit.' : `PIN salah. Percobaan ${attempts}/5.`,
+        'INVALID_PIN',
+        401,
+      );
+    }
+
+    if ((currentEmployee.pinFailedAttempts ?? 0) > 0) {
+      await db
+        .update(employees)
+        .set({ pinFailedAttempts: 0, pinLockedUntil: null })
+        .where(eq(employees.id, employeeId));
+    }
+  }
+
+  // 4. Cari shift aktif milik karyawan ini
   const activeShift = await db.query.shifts.findFirst({
     where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
-    columns: { id: true, clockIn: true, modalAwal: true },
+    columns: { id: true, clockIn: true, modalAwal: true, auditFlags: true },
   });
 
   if (!activeShift) {
@@ -77,18 +116,48 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  // 4. Hitung jumlah transaksi yang terselesaikan dalam shift ini (hanya volume transaksi)
+  // 5. Hitung jumlah transaksi dan total omzet tunai dalam shift ini
   const [summary] = await db
     .select({
       txCount: sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'COMPLETED')`,
+      omzetCash: sql<string>`COALESCE(
+        SUM(${transactions.grossAmount})
+        FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.paymentMethod} = 'CASH'),
+        0
+      )`,
     })
     .from(transactions)
     .where(eq(transactions.shiftId, activeShift.id));
 
+  // 5b. Ambil juga dari transaction_payments (split payment aware)
+  const [paySummary] = await db
+    .select({
+      payCash: sql<string>`COALESCE(
+        SUM(${transactionPayments.amount})
+        FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactionPayments.paymentMethod} = 'CASH'),
+        0
+      )`,
+    })
+    .from(transactionPayments)
+    .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
+    .where(eq(transactions.shiftId, activeShift.id));
+
+  const totalOmzetCash = Math.max(Number(summary?.omzetCash ?? 0), Number(paySummary?.payCash ?? 0));
   const txCount = Number(summary?.txCount ?? 0);
   const nowWib  = new Date();
 
-  // 5. Tutup shift — guard status ACTIVE mencegah dua request bersamaan sama-sama "berhasil"
+  // 6. Kontrol Fraud K3: Penjualan tunai > 0 tetapi laci masih persis modal awal
+  let newAuditFlags = activeShift.auditFlags || 'NORMAL';
+  if (
+    totalOmzetCash > 0 &&
+    actualCash !== undefined &&
+    activeShift.modalAwal !== null &&
+    Math.abs(actualCash - Number(activeShift.modalAwal)) < 1
+  ) {
+    newAuditFlags = 'FRAUD_CASH_SUSPICIOUS';
+  }
+
+  // 7. Tutup shift — guard status ACTIVE
   const closed = await db
     .update(shifts)
     .set({
@@ -97,6 +166,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
       actualCash:         actualCash !== undefined ? actualCash.toString() : null,
       cashBreakdownClose: breakdown ?? null,
       notes:              notes ?? null,
+      auditFlags:         newAuditFlags,
     })
     .where(and(eq(shifts.id, activeShift.id), eq(shifts.status, 'ACTIVE')))
     .returning({ id: shifts.id });
@@ -109,9 +179,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  // PENTING (K2 & K5 Zero-Trust):
-  // Respons TIDAK memuat angka laba, margin, bagi hasil, atau nominal kas laci.
-  // Seluruh kalkulasi finansial dan bagi hasil dikelola oleh Manajer/Dosen.
+  // Zero-Trust: Respons TIDAK memuat expected cash atau laba ke kasir
   return apiOk({
     message:  'Shift berhasil ditutup.',
     shiftId:  activeShift.id,
@@ -120,4 +188,3 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     txCount,
   });
 }
-

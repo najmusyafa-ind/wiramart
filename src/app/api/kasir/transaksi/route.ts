@@ -27,8 +27,8 @@ import { createHash, randomInt } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { products, transactions, transactionItems, transactionPayments, shifts } from '@/lib/db/schema';
-import { eq, and, isNull, inArray, gte, sql } from 'drizzle-orm';
+import { products, transactions, transactionItems, transactionPayments, shifts, stockBatches } from '@/lib/db/schema';
+import { eq, and, isNull, inArray, gte, gt, lt, asc, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export const runtime = 'nodejs';
@@ -410,8 +410,65 @@ export async function POST(req: NextRequest) {
         })),
       );
 
-      // Step 3: Decrement stok atomik + guard
+      // Step 3: Decrement stok atomik + guard & FEFO Batch Consumption
+      const todayIsoDate = new Date().toISOString().slice(0, 10);
+
       for (const item of itemsByLockOrder) {
+        // 3a. Guard Kedaluwarsa (Bagian 4.6 & D-5): Cek apakah ada batch aktif yang sudah lewat tanggal untuk produk harian/pendek
+        const expiredBatches = await tx
+          .select({ batchCode: stockBatches.batchCode })
+          .from(stockBatches)
+          .where(
+            and(
+              eq(stockBatches.productId, item.productId),
+              gt(stockBatches.currentQty, 0),
+              lt(stockBatches.expiryDate, todayIsoDate),
+              inArray(stockBatches.expiryClass, ['HARIAN', 'PENDEK']),
+            ),
+          )
+          .limit(1);
+
+        if (expiredBatches.length > 0) {
+          const [freshProd] = await tx
+            .select({ name: products.name })
+            .from(products)
+            .where(eq(products.id, item.productId))
+            .limit(1);
+          throw new Error(`EXPIRED_PRODUCT:${freshProd?.name || item.productId}`);
+        }
+
+        // 3b. Konsumsi stok per batch FEFO (First Expired First Out)
+        const activeBatches = await tx
+          .select({
+            id: stockBatches.id,
+            currentQty: stockBatches.currentQty,
+          })
+          .from(stockBatches)
+          .where(
+            and(
+              eq(stockBatches.productId, item.productId),
+              gt(stockBatches.currentQty, 0),
+            ),
+          )
+          .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt));
+
+        if (activeBatches.length > 0) {
+          let needed = item.qty;
+          for (const b of activeBatches) {
+            if (needed <= 0) break;
+            const deduct = Math.min(b.currentQty, needed);
+            await tx
+              .update(stockBatches)
+              .set({
+                currentQty: sql`${stockBatches.currentQty} - ${deduct}`,
+                updatedAt: new Date(),
+              })
+              .where(eq(stockBatches.id, b.id));
+            needed -= deduct;
+          }
+        }
+
+        // 3c. Decrement total stok produk secara atomik dengan guard
         const updated = await tx
           .update(products)
           .set({
@@ -494,6 +551,14 @@ export async function POST(req: NextRequest) {
     // Handle race condition: stok berubah di antara pre-check dan tx
     const message = (err as { message?: unknown }).message;
     if (typeof message === 'string') {
+      if (message.startsWith('EXPIRED_PRODUCT')) {
+        const parts = message.split(':');
+        const prodName = parts[1] ?? 'produk';
+        return apiError(
+          `Produk "${prodName}" memiliki stok yang sudah kedaluwarsa dan diblokir untuk dijual. Segera serahkan ke Kepala Gudang untuk write-off.`,
+          400,
+        );
+      }
       if (message.startsWith('PRODUCT_NOT_FOUND')) {
         return apiError('Produk tidak ditemukan atau sudah dihapus.', 400);
       }

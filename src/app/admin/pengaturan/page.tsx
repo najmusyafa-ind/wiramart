@@ -20,6 +20,7 @@ import {
   ShieldAlert,
   FileText,
   CheckCircle2,
+  Percent,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ export default function PengaturanPage() {
   // ── Pengaturan Operasional state ────────────────────────────
   const [attendanceTolerance, setAttendanceTolerance] = useState(15);
   const [lowStockThreshold, setLowStockThreshold]     = useState(5);
+  const [globalMarginPercentage, setGlobalMarginPercentage] = useState(20);
   const [operasionalStatus, setOperasionalStatus]     = useState<FeedbackStatus>('idle');
 
   // ── Database Backup & Restore state ─────────────────────────
@@ -129,10 +131,13 @@ export default function PengaturanPage() {
     // Fetch Pengaturan Operasional
     fetch('/api/admin/pengaturan/operasional')
       .then((r) => r.json())
-      .then((json: { success?: boolean; data?: { attendanceTolerance?: number; lowStockThreshold?: number } }) => {
+      .then((json: { success?: boolean; data?: { attendanceTolerance?: number; lowStockThreshold?: number; globalMarginPercentage?: number } }) => {
         if (json.success && json.data) {
           setAttendanceTolerance(json.data.attendanceTolerance ?? 15);
           setLowStockThreshold(json.data.lowStockThreshold ?? 5);
+          if (json.data.globalMarginPercentage !== undefined) {
+            setGlobalMarginPercentage(json.data.globalMarginPercentage);
+          }
         }
       })
       .catch(() => {});
@@ -186,7 +191,11 @@ export default function PengaturanPage() {
       const res = await fetch('/api/admin/pengaturan/operasional', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attendanceTolerance, lowStockThreshold }),
+        body: JSON.stringify({
+          attendanceTolerance,
+          lowStockThreshold,
+          globalMarginPercentage,
+        }),
       });
       setOperasionalStatus(res.ok ? 'success' : 'error');
     } catch {
@@ -572,6 +581,44 @@ export default function PengaturanPage() {
                   border: '1px solid hsl(0 70% 55% / 0.3)',
                 }}>
                   ⚠ Stok ≤{lowStockThreshold} → Peringatan
+                </div>
+              </div>
+            </div>
+
+            {/* Margin Keuntungan Global (K2) */}
+            <div style={{
+              background: 'rgba(16, 185, 129, 0.05)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              borderRadius: 'var(--radius-lg)',
+              padding: 'var(--space-4)',
+            }}>
+              <label htmlFor={`${uid}-global-margin`} className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}>
+                <Percent size={16} style={{ color: '#059669' }} /> Margin Keuntungan Global Toko (%)
+              </label>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', margin: '4px 0 var(--space-3)', lineHeight: 1.5 }}>
+                <strong>Kebijakan Terkunci (K2):</strong> Harga Jual = <code>HPP &times; (1 + Margin%)</code>, dibulatkan ke atas ke ratusan terdekat. Nilai margin ini otomatis diterapkan pada seluruh usulan produk kasir dan kulakan baru. Kasir tidak memiliki akses melihat maupun mengubah persentase ini.
+              </p>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    id={`${uid}-global-margin`}
+                    type="number"
+                    min={0}
+                    max={500}
+                    step={0.5}
+                    className="form-input"
+                    style={{ maxWidth: 120, fontWeight: 700, fontSize: 'var(--text-base)' }}
+                    value={globalMarginPercentage}
+                    onChange={(e) => setGlobalMarginPercentage(Math.max(0, Math.min(500, Number(e.target.value))))}
+                    aria-label="Margin global percentage"
+                  />
+                  <span style={{ fontSize: 'var(--text-base)', fontWeight: 700, color: 'var(--color-text-primary)' }}>%</span>
+                </div>
+                <div style={{
+                  padding: '5px 12px', borderRadius: 'var(--radius-md)', fontSize: '0.75rem', fontWeight: 600,
+                  background: 'rgba(16, 185, 129, 0.12)', color: '#047857',
+                }}>
+                  Simulasi: HPP Rp 10.000 &rarr; Jual Rekomendasi Rp {Math.ceil((10000 * (1 + globalMarginPercentage / 100)) / 100) * 100}
                 </div>
               </div>
             </div>

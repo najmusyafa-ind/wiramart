@@ -1524,6 +1524,60 @@ p, h1, h2, h3, h4, h5, h6 {
   font-weight: var(--weight-semibold);
 }
 
+/* Quick Tap Shelf for Non-Barcode Cafeteria / Speed Goods */
+.pos-quick-shelf {
+  padding: 10px var(--space-4);
+  background: linear-gradient(135deg, hsl(32, 95%, 97%) 0%, hsl(38, 90%, 94%) 100%);
+  border-bottom: 1.5px solid hsl(32, 85%, 82%);
+  box-shadow: 0 1px 3px rgba(217, 119, 6, 0.06);
+  flex-shrink: 0;
+}
+
+.pos-quick-shelf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.pos-quick-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pos-quick-card {
+  flex: 0 0 auto;
+  width: 126px;
+  padding: 8px 10px;
+  background: white;
+  border: 1.5px solid hsl(32, 80%, 82%);
+  border-radius: var(--radius-md);
+  box-shadow: 0 2px 4px rgba(217, 119, 6, 0.08);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 4px;
+  transition: transform 0.12s var(--ease-spring), border-color 0.12s ease, box-shadow 0.12s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pos-quick-card:hover {
+  border-color: hsl(32, 95%, 45%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(217, 119, 6, 0.15);
+}
+
+.pos-quick-card:active {
+  transform: scale(0.96);
+}
+
 /* Products grid */
 .pos-products-grid {
   flex: 1;

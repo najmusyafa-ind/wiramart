@@ -8,6 +8,8 @@ import {
   shiftSwapRequests,
   shiftCashMovements,
   qrisReconciliations,
+  productProposals,
+  stockBatches,
 } from '@/lib/db/schema';
 import { eq, and, gte, lte, sql, count, isNull, desc } from 'drizzle-orm';
 import { formatRupiah, formatDateTime } from '@/lib/utils/helpers';
@@ -113,6 +115,20 @@ async function getDashboardData() {
     qrisStatusText = `${qrisReconResult.pendingCount} Belum Rekonsiliasi`;
   }
 
+  // 6b. Pending Usulan Produk dari Kasir (K8)
+  const [pendingProposalsResult] = await db
+    .select({ count: count(productProposals.id) })
+    .from(productProposals)
+    .where(eq(productProposals.status, 'PENDING'));
+
+  // 6c. Batch Stok Mendekati Kedaluwarsa (<= 7 hari atau expired) FEFO (F3)
+  const in7Days = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const [criticalBatchesResult] = await db
+    .select({
+      count: sql<number>`COALESCE(COUNT(*) FILTER (WHERE ${stockBatches.expiryDate} IS NOT NULL AND ${stockBatches.expiryDate} <= ${in7Days} AND ${stockBatches.currentQty} > 0), 0)::int`,
+    })
+    .from(stockBatches);
+
   // 7. Recent Transactions (last 10 today)
   const recentTransactions = await db.query.transactions.findMany({
     where: and(
@@ -130,6 +146,8 @@ async function getDashboardData() {
     activeShifts: activeShiftsResult?.count ?? 0,
     totalEmployees: totalEmployeesResult?.count ?? 0,
     pendingSwapsCount: pendingSwapsResult?.count ?? 0,
+    pendingProposalsCount: pendingProposalsResult?.count ?? 0,
+    criticalBatchesCount: criticalBatchesResult?.count ?? 0,
     autoClosedShiftsCount: autoClosedShifts.length,
     autoClosedShifts,
     pettyCashOut: Number(pettyCashResult?.cashOut ?? 0),
@@ -291,6 +309,8 @@ export default async function AdminDashboardPage() {
       {/* PUSAT KENDALI & APPROVAL CENTER (Dosen Pembina & Manajer Toko) */}
       <ApprovalCenterWidget
         pendingSwapsCount={data.pendingSwapsCount}
+        pendingProposalsCount={data.pendingProposalsCount}
+        criticalBatchesCount={data.criticalBatchesCount}
         autoClosedShiftsCount={data.autoClosedShiftsCount}
         autoClosedShifts={data.autoClosedShifts}
         qrisNeedsAttention={data.qrisNeedsAttention}

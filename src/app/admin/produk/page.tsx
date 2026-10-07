@@ -33,6 +33,8 @@ import {
   ScanLine, Camera, CameraOff, CheckCircle, AlertCircle,
   ClipboardList, ImageIcon, RefreshCw, AlertTriangle,
 } from 'lucide-react';
+import UsulanProdukTab from './UsulanProdukTab';
+import BatchStokTab from './BatchStokTab';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -618,6 +620,27 @@ function ProdukModal({
     }
   }, [prefillName, isEdit]);
 
+  // K2: Muat margin global toko
+  const [globalMargin, setGlobalMargin] = useState<number>(20);
+  useEffect(() => {
+    fetch('/api/admin/pengaturan/operasional')
+      .then((r) => r.json())
+      .then((j: { success?: boolean; data?: { globalMarginPercentage?: number } }) => {
+        if (j.success && typeof j.data?.globalMarginPercentage === 'number') {
+          setGlobalMargin(j.data.globalMarginPercentage);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  function applyGlobalMargin() {
+    const cost = parseFloat(form.costPrice);
+    if (!isNaN(cost) && cost > 0) {
+      const calculated = Math.ceil((cost * (1 + globalMargin / 100)) / 100) * 100;
+      setForm((f) => ({ ...f, sellingPrice: calculated.toString() }));
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -723,7 +746,27 @@ function ProdukModal({
                   onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))} required disabled={loading} />
               </div>
               <div className="form-group">
-                <label htmlFor={`${uid}-sell`} className="form-label">Harga Jual (Rp) *</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-1)' }}>
+                  <label htmlFor={`${uid}-sell`} className="form-label" style={{ margin: 0 }}>Harga Jual (Rp) *</label>
+                  {parseFloat(form.costPrice) > 0 && (
+                    <button
+                      type="button"
+                      onClick={applyGlobalMargin}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--color-primary)',
+                        fontSize: '0.72rem',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        padding: 0,
+                      }}
+                      title={`Hitung otomatis: HPP + Margin ${globalMargin}%`}
+                    >
+                      ⚡ Margin Global ({globalMargin}%)
+                    </button>
+                  )}
+                </div>
                 <input id={`${uid}-sell`} type="number" min="0" step="100" className="form-input"
                   placeholder="5000" value={form.sellingPrice}
                   onChange={(e) => setForm((f) => ({ ...f, sellingPrice: e.target.value }))} required disabled={loading} />
@@ -816,6 +859,37 @@ export default function ProdukPage() {
 
   // ── Low Stock Threshold (dari pengaturan operasional) ──
   const [lowStockThreshold, setLowStockThreshold] = useState(5);
+
+  // ── Tab state: Katalog vs Usulan Kasir (K8) vs Batch Stok (F3) ─────────────
+  const [activeTab, setActiveTab] = useState<'katalog' | 'usulan' | 'batch'>('katalog');
+  const [pendingProposalCount, setPendingProposalCount] = useState<number>(0);
+  const [criticalBatchCount, setCriticalBatchCount] = useState<number>(0);
+
+  const fetchPendingProposalsCount = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/produk/usulan?status=PENDING');
+      const j = await res.json();
+      if (j.success && Array.isArray(j.data?.proposals)) {
+        setPendingProposalCount(j.data.proposals.length);
+      }
+    } catch {}
+  }, []);
+
+  const fetchCriticalBatchCount = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/gudang/batch');
+      const j = await res.json();
+      if (j.success && j.data?.summary) {
+        setCriticalBatchCount((j.data.summary.expiredCount || 0) + (j.data.summary.expiring7Count || 0));
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchPendingProposalsCount();
+    fetchCriticalBatchCount();
+  }, [fetchPendingProposalsCount, fetchCriticalBatchCount]);
+
   useEffect(() => {
     fetch('/api/admin/pengaturan/operasional')
       .then(r => r.json())
@@ -1015,7 +1089,81 @@ export default function ProdukPage() {
           </div>
         </div>
 
-        {/* Filter bar */}
+        {/* Navigation Tabs */}
+        <div style={{
+          display: 'flex',
+          gap: 8,
+          marginBottom: 'var(--space-4)',
+          borderBottom: '1px solid var(--color-border)',
+          paddingBottom: 10,
+        }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('katalog')}
+            className={`btn btn-sm ${activeTab === 'katalog' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <Package size={15} /> Katalog Produk ({products.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('usulan')}
+            className={`btn btn-sm ${activeTab === 'usulan' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            💡 Usulan dari Kasir
+            {pendingProposalCount > 0 && (
+              <span style={{
+                background: 'var(--color-error)',
+                color: '#fff',
+                fontSize: 10,
+                fontWeight: 800,
+                padding: '1px 6px',
+                borderRadius: 9999,
+              }}>
+                {pendingProposalCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('batch')}
+            className={`btn btn-sm ${activeTab === 'batch' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            📦 Batch &amp; Kedaluwarsa (FEFO)
+            {criticalBatchCount > 0 && (
+              <span style={{
+                background: 'var(--color-error)',
+                color: '#fff',
+                fontSize: 10,
+                fontWeight: 800,
+                padding: '1px 6px',
+                borderRadius: 9999,
+              }}>
+                {criticalBatchCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === 'usulan' ? (
+          <UsulanProdukTab
+            onApproved={() => {
+              fetchProducts(search, filterCat);
+              fetchPendingProposalsCount();
+            }}
+          />
+        ) : activeTab === 'batch' ? (
+          <BatchStokTab
+            onBatchUpdated={() => {
+              fetchProducts(search, filterCat);
+              fetchCriticalBatchCount();
+            }}
+          />
+        ) : (
+          <>
+            {/* Filter bar */}
         <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
           <div className="card-body" style={{ padding: 'var(--space-3) var(--space-4)', display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'center' }}>
             <div className="form-input-icon" style={{ flex: 1, minWidth: 200 }}>
@@ -1191,6 +1339,8 @@ export default function ProdukPage() {
             </div>
           )}
         </div>
+        </>
+        )}
       </div>
     </>
   );

@@ -9,7 +9,7 @@
 import { NextRequest } from 'next/server';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { products, stockAdjustments } from '@/lib/db/schema';
+import { products, stockAdjustments, stockBatches } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 import { z } from 'zod';
@@ -82,6 +82,18 @@ export async function POST(req: NextRequest): Promise<Response> {
         qtyAfter:          afterQty,
         qtyDiff:           qty,                // delta positif = restock
         reason:            notes ?? `Restock via barcode scan: ${barcode}`,
+      });
+
+      // 4. Catat batch di stockBatches (FEFO inventory)
+      const batchCode = `RESTOCK-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+      await tx.insert(stockBatches).values({
+        productId: product.id,
+        batchCode,
+        costPrice: product.costPrice,
+        initialQty: qty,
+        currentQty: qty,
+        expiryClass: 'PANJANG',
+        notes: notes ?? `Restock via barcode scan: ${barcode}`,
       });
 
       return { product, beforeQty, afterQty, deltaQty: qty };

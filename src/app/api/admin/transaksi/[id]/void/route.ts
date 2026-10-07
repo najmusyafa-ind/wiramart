@@ -31,6 +31,7 @@ import {
   transactionItems,
   products,
   auditLogs,
+  dailyClosings,
 } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
@@ -121,6 +122,23 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
         `Transaksi sudah berumur ${hours} jam. Void hanya diizinkan dalam 24 jam pertama.`,
         'VOID_WINDOW_EXPIRED',
         422,
+      );
+    }
+
+    // ── Guard Tutup Buku (Fase 3 & Bagian 13 I2): Cek apakah tanggal transaksi sudah terkunci ──
+    const trxDateStr = new Date(trx.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+    const lockedDay = await db.query.dailyClosings.findFirst({
+      where: and(
+        eq(dailyClosings.closingDate, trxDateStr),
+        eq(dailyClosings.status, 'LOCKED'),
+      ),
+    });
+
+    if (lockedDay) {
+      return apiError(
+        `Transaksi pada tanggal ${trxDateStr} sudah Tutup Buku (Locked). Tidak dapat di-void secara normal. Hubungi Manager Toko.`,
+        'DATE_LOCKED',
+        403,
       );
     }
 

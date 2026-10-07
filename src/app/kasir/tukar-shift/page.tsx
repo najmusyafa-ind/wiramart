@@ -26,6 +26,17 @@ type SwapRequest = {
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   reason: string;
   createdAt: string;
+  peer?: { id: string; fullName: string; nim: string } | null;
+  fromSchedule: { dayOfWeek: string; slotStart: string; slotEnd: string };
+  toSchedule: { dayOfWeek: string; slotStart: string; slotEnd: string };
+};
+
+type IncomingSwapRequest = {
+  id: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reason: string;
+  createdAt: string;
+  requester?: { id: string; fullName: string; nim: string } | null;
   fromSchedule: { dayOfWeek: string; slotStart: string; slotEnd: string };
   toSchedule: { dayOfWeek: string; slotStart: string; slotEnd: string };
 };
@@ -51,6 +62,7 @@ export default function TukarShiftPage() {
   const [jadwalSaya, setJadwalSaya] = useState<JadwalSaya[]>([]);
   const [slotTersedia, setSlotTersedia] = useState<SlotTersedia[]>([]);
   const [history, setHistory] = useState<SwapRequest[]>([]);
+  const [incoming, setIncoming] = useState<IncomingSwapRequest[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Form state
@@ -58,6 +70,7 @@ export default function TukarShiftPage() {
   const [toId, setToId] = useState('');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
 
   const fetchAll = useCallback(async () => {
@@ -68,7 +81,7 @@ export default function TukarShiftPage() {
         fetch('/api/kasir/swap-request'),
       ]);
       const jadwalJson = await jadwalRes.json() as { data?: { jadwalSaya: JadwalSaya[]; slotTersedia: SlotTersedia[] } };
-      const historyJson = await historyRes.json() as { data?: SwapRequest[] };
+      const historyJson = await historyRes.json() as { data?: SwapRequest[] | { history?: SwapRequest[]; incoming?: IncomingSwapRequest[] } };
 
       if (jadwalJson.data) {
         const sorted = [...jadwalJson.data.jadwalSaya].sort(
@@ -78,13 +91,42 @@ export default function TukarShiftPage() {
         setSlotTersedia(jadwalJson.data.slotTersedia);
         if (sorted.length > 0) setFromId(sorted[0]!.id);
       }
-      if (historyJson.data) setHistory(historyJson.data);
+      if (historyJson.data) {
+        if (Array.isArray(historyJson.data)) {
+          setHistory(historyJson.data);
+        } else if (typeof historyJson.data === 'object') {
+          setHistory(historyJson.data.history ?? []);
+          setIncoming(historyJson.data.incoming ?? []);
+        }
+      }
     } catch {
-      // Gagal load — kasir mungkin belum login, redirect akan terjadi otomatis
+      // Gagal load
     } finally {
       setLoading(false);
     }
   }, []);
+
+  async function handlePeerAction(id: string, action: 'APPROVE' | 'REJECT') {
+    setActionLoadingId(id);
+    try {
+      const res = await fetch(`/api/kasir/swap-request/${id}/peer-approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const json = await res.json() as { success?: boolean; data?: { message?: string }; error?: string };
+      if (res.ok && json.success) {
+        setToast({ msg: json.data?.message ?? 'Aksi berhasil disimpan.', ok: true });
+        fetchAll();
+      } else {
+        setToast({ msg: json.error ?? 'Gagal memproses aksi.', ok: false });
+      }
+    } catch {
+      setToast({ msg: 'Kesalahan jaringan.', ok: false });
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
@@ -176,6 +218,105 @@ export default function TukarShiftPage() {
           </div>
         ) : (
           <>
+            {/* ── Inbox Permintaan Tukar Masuk dari Rekan (K4) ── */}
+            {incoming.length > 0 && (
+              <section className="card" style={{
+                background: 'rgba(59, 130, 246, 0.04)',
+                border: '1.5px solid rgba(59, 130, 246, 0.35)',
+                boxShadow: 'var(--shadow-md)',
+              }}>
+                <div className="card-body" style={{ padding: '16px 20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <ArrowLeftRight size={18} style={{ color: 'var(--color-primary)' }} />
+                      <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 700, margin: 0, color: 'var(--color-primary)' }}>
+                        Permintaan Tukar Masuk ({incoming.length})
+                      </h2>
+                    </div>
+                    <span style={{ fontSize: 11, background: 'var(--color-primary)', color: '#fff', padding: '2px 8px', borderRadius: 9999, fontWeight: 700 }}>
+                      K4 2-Arah
+                    </span>
+                  </div>
+
+                  <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: '0 0 12px 0', lineHeight: 1.4 }}>
+                    Rekan kerja berikut mengajak Anda bertukar jadwal shift. Jika Anda setuju, jadwal kedua belah pihak akan otomatis bertukar!
+                  </p>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {incoming.map((req) => (
+                      <div
+                        key={req.id}
+                        style={{
+                          background: 'var(--color-surface)',
+                          border: '1px solid var(--color-border)',
+                          borderRadius: 12,
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <span style={{ fontWeight: 700, fontSize: 13 }}>
+                            {req.requester?.fullName ?? 'Rekan Kerja'} ({req.requester?.nim ?? '—'})
+                          </span>
+                          <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                            {new Date(req.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
+                          </span>
+                        </div>
+
+                        <div style={{
+                          background: 'var(--color-surface-muted)',
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          fontSize: 12,
+                          marginBottom: 8,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 4,
+                        }}>
+                          <div>
+                            👉 <strong>Jadwal Anda:</strong> {formatShiftLabel(req.toSchedule.dayOfWeek, req.toSchedule.slotStart, req.toSchedule.slotEnd)}
+                          </div>
+                          <div>
+                            🔄 <strong>Ditukar dengan:</strong> {formatShiftLabel(req.fromSchedule.dayOfWeek, req.fromSchedule.slotStart, req.fromSchedule.slotEnd)}
+                          </div>
+                          {req.reason && (
+                            <div style={{ fontStyle: 'italic', color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                              &ldquo;{req.reason}&rdquo;
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            onClick={() => handlePeerAction(req.id, 'REJECT')}
+                            disabled={actionLoadingId === req.id}
+                            className="btn btn-secondary btn-sm"
+                            style={{ color: 'var(--color-error)' }}
+                          >
+                            Tolak
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePeerAction(req.id, 'APPROVE')}
+                            disabled={actionLoadingId === req.id}
+                            className="btn btn-primary btn-sm"
+                            style={{ fontWeight: 700 }}
+                          >
+                            {actionLoadingId === req.id ? (
+                              <Loader2 size={13} className="spin-icon" />
+                            ) : (
+                              <CheckCircle size={13} />
+                            )}
+                            Setujui Tukar Jadwal
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            )}
+
             {/* Jadwal kamu */}
             <section className="card">
               <div className="card-body" style={{ padding: '16px 20px' }}>

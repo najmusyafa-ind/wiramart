@@ -1,5 +1,5 @@
 // =============================================================
-// PATCH /api/admin/karyawan/[id] — Update karyawan (toggle aktif / edit jabatan)
+// PATCH /api/admin/karyawan/[id] — Update karyawan (toggle aktif / edit jabatan / set Ketua Shift & PIN)
 // DELETE /api/admin/karyawan/[id] — Soft delete karyawan
 // =============================================================
 
@@ -9,6 +9,7 @@ import { db } from '@/lib/db/client';
 import { employees, shifts, shiftSchedules } from '@/lib/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import bcrypt from 'bcryptjs';
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -16,6 +17,8 @@ const PatchSchema = z.object({
   fullName: z.string().min(2).max(200).optional(),
   jabatan: z.string().max(100).optional(),
   isActive: z.boolean().optional(),
+  isKetuaShift: z.boolean().optional(),
+  pin: z.string().length(6, 'PIN harus 6 digit angka').optional(),
 });
 
 // ── PATCH: update karyawan ────────────────────────────────────
@@ -40,14 +43,44 @@ export async function PATCH(req: NextRequest, ctx: Context) {
 
   if (!existing) return apiError('Karyawan tidak ditemukan', 404);
 
+  const updateData: Record<string, unknown> = {
+    updatedAt: new Date(),
+  };
+
+  if (parsed.data.fullName !== undefined) updateData.fullName = parsed.data.fullName;
+  if (parsed.data.jabatan !== undefined) updateData.jabatan = parsed.data.jabatan;
+  if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
+  if (parsed.data.isKetuaShift !== undefined) {
+    updateData.isKetuaShift = parsed.data.isKetuaShift;
+    if (parsed.data.isKetuaShift === false) {
+      updateData.pinHash = null;
+      updateData.pinFailedAttempts = 0;
+      updateData.pinLockedUntil = null;
+    }
+  }
+
+  // Jika admin menyetel/mereset PIN 6 digit
+  if (parsed.data.pin) {
+    const hashedPin = await bcrypt.hash(parsed.data.pin, 10);
+    updateData.pinHash = hashedPin;
+    updateData.isKetuaShift = true; // Otomatis aktifkan flag ketua shift
+    updateData.pinFailedAttempts = 0;
+    updateData.pinLockedUntil = null;
+  }
+
   const [updated] = await db
     .update(employees)
-    .set({
-      ...parsed.data,
-      updatedAt: new Date(),
-    })
+    .set(updateData)
     .where(eq(employees.id, id))
-    .returning();
+    .returning({
+      id: employees.id,
+      fullName: employees.fullName,
+      nim: employees.nim,
+      programStudi: employees.programStudi,
+      jabatan: employees.jabatan,
+      isKetuaShift: employees.isKetuaShift,
+      isActive: employees.isActive,
+    });
 
   return apiOk(updated);
 }

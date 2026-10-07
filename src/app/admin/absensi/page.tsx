@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback, useId } from 'react';
 import {
   ClipboardList, Search, CheckCircle2, XCircle, Clock, AlertTriangle,
   UserCheck, UserX, CalendarDays, ChevronLeft, ChevronRight, Loader2, X,
-  Download,
+  Download, Award,
 } from 'lucide-react';
+import BagiHasilTab from './BagiHasilTab';
 
 // ─── Types ────────────────────────────────────────────────────
 type AttendanceStatus = 'HADIR' | 'TELAT' | 'IJIN' | 'TIDAK_HADIR' | 'PENGGANTI';
@@ -231,6 +232,7 @@ function ManualInputModal({
 // ─── Main Page ────────────────────────────────────────────────
 export default function AbsensiPage() {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+  const [activeTab, setActiveTab] = useState<'absensi' | 'bagi_hasil'>('absensi');
   const [selectedDate, setSelectedDate] = useState(today);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -495,24 +497,91 @@ export default function AbsensiPage() {
       {/* Header */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">Rekap Absensi Karyawan</h1>
-          <p className="page-subtitle">Pantau kehadiran, keterlambatan, dan status shift kasir harian</p>
+          <h1 className="page-title">
+            {activeTab === 'absensi' ? 'Rekap Absensi Karyawan' : 'Alokasi Bagi Hasil 50% Karyawan'}
+          </h1>
+          <p className="page-subtitle">
+            {activeTab === 'absensi'
+              ? 'Pantau kehadiran, keterlambatan, dan status shift kasir harian'
+              : 'Perhitungan transparan pembagian laba harian untuk tim shift toko (Paten Wiramart)'}
+          </p>
         </div>
+        {activeTab === 'absensi' && (
+          <button
+            onClick={() => setShowModal(true)}
+            className="btn btn-primary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}
+          >
+            <UserX size={16} aria-hidden="true" /> Input Manual
+          </button>
+        )}
+      </div>
+
+      {/* Tab Switcher */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 'var(--space-2)',
+          marginBottom: 'var(--space-5)',
+          borderBottom: '2px solid var(--color-border)',
+          paddingBottom: 'var(--space-2)',
+        }}
+      >
         <button
-          onClick={() => setShowModal(true)}
-          className="btn btn-primary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}
+          type="button"
+          onClick={() => setActiveTab('absensi')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '8px 16px',
+            border: 'none',
+            borderRadius: 'var(--radius-md)',
+            cursor: 'pointer',
+            fontWeight: 700,
+            fontSize: 'var(--text-sm)',
+            backgroundColor: activeTab === 'absensi' ? 'var(--color-primary)' : 'transparent',
+            color: activeTab === 'absensi' ? 'white' : 'var(--color-text-secondary)',
+            transition: 'all 0.15s ease',
+          }}
         >
-          <UserX size={16} aria-hidden="true" /> Input Manual
+          <ClipboardList size={16} />
+          <span>📋 Presensi Shift (4 Orang)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('bagi_hasil')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '8px 16px',
+            border: 'none',
+            borderRadius: 'var(--radius-md)',
+            cursor: 'pointer',
+            fontWeight: 700,
+            fontSize: 'var(--text-sm)',
+            backgroundColor: activeTab === 'bagi_hasil' ? 'hsl(142 71% 35%)' : 'transparent',
+            color: activeTab === 'bagi_hasil' ? 'white' : 'var(--color-text-secondary)',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <Award size={16} />
+          <span>💰 Alokasi Bagi Hasil (50% Paten)</span>
         </button>
       </div>
 
-      {/* Date Navigator + Action Toolbar */}
-      <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
-        <div
-          className="card-body"
-          style={{
-            padding: 'var(--space-3) var(--space-4)',
+      {activeTab === 'bagi_hasil' ? (
+        <BagiHasilTab />
+      ) : (
+        <>
+          {/* Date Navigator + Action Toolbar */}
+          <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
+            <div
+              className="card-body"
+              style={{
+                padding: 'var(--space-3) var(--space-4)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -815,13 +884,15 @@ export default function AbsensiPage() {
         </div>
       )}
 
-      {/* Modal */}
-      {showModal && (
-        <ManualInputModal
-          date={selectedDate}
-          onClose={() => setShowModal(false)}
-          onSuccess={fetchData}
-        />
+          {/* Modal */}
+          {showModal && (
+            <ManualInputModal
+              date={selectedDate}
+              onClose={() => setShowModal(false)}
+              onSuccess={fetchData}
+            />
+          )}
+        </>
       )}
     </div>
   );

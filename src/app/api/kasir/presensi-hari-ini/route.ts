@@ -64,6 +64,7 @@ export async function GET(): Promise<Response> {
         scheduleId:     attendances.scheduleId,
         status:         attendances.status,
         clockInActual:  attendances.clockInActual,
+        clockOutActual: attendances.clockOutActual,
         lateMinutes:    attendances.lateMinutes,
         notes:          attendances.notes,
       })
@@ -92,8 +93,10 @@ export async function GET(): Promise<Response> {
         defaultJabatan: string | null;
         attendance: {
           isAttended: boolean;
+          isClockedOut: boolean;
           status?: string;
           clockInTime?: string | null;
+          clockOutTime?: string | null;
           lateMinutes?: number;
           notes?: string | null;
         };
@@ -131,6 +134,11 @@ export async function GET(): Promise<Response> {
               timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
             })
           : null;
+        const clockOutStr = att?.clockOutActual
+          ? new Date(att.clockOutActual).toLocaleTimeString('en-GB', {
+              timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
+            })
+          : null;
 
         grouped.get(key)!.personnel.push({
           scheduleId:      s.scheduleId,
@@ -141,11 +149,13 @@ export async function GET(): Promise<Response> {
           programStudi:    s.employeeProdi,
           defaultJabatan:  s.employeeJabatan,
           attendance: {
-            isAttended:  Boolean(att),
-            status:      att?.status,
-            clockInTime: clockInStr,
-            lateMinutes: att?.lateMinutes,
-            notes:       att?.notes,
+            isAttended:   Boolean(att),
+            isClockedOut: Boolean(att?.clockOutActual),
+            status:       att?.status,
+            clockInTime:  clockInStr,
+            clockOutTime: clockOutStr,
+            lateMinutes:  att?.lateMinutes,
+            notes:        att?.notes,
           },
         });
       }

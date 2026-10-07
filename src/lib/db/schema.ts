@@ -105,6 +105,11 @@ export const employees = pgTable(
       .references(() => admins.id),
     // TRUE jika mahasiswa daftar mandiri (bukan diinput developer)
     isSelfRegistered: boolean('is_self_registered').notNull().default(false),
+    // Peran Ketua Shift / Admin Kasir (Pemegang PIN Laci)
+    isKetuaShift: boolean('is_ketua_shift').notNull().default(false),
+    pinHash: text('pin_hash'),
+    pinFailedAttempts: integer('pin_failed_attempts').notNull().default(0),
+    pinLockedUntil: timestamp('pin_locked_until', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -144,6 +149,10 @@ export const shifts = pgTable(
     cashBreakdownClose: jsonb('cash_breakdown_close'),
     // Catatan serah terima laci ke shift berikutnya
     handoverNote: text('handover_note'),
+    // Selisih serah terima: modalAwal saat buka vs actualCash shift sebelumnya
+    serahTerimaDiff: decimal('serah_terima_diff', { precision: 15, scale: 2 }),
+    // Flag audit sistem: SERAH_TERIMA_SELISIH, FRAUD_CASH_SUSPICIOUS, NORMAL
+    auditFlags: varchar('audit_flags', { length: 100 }),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -397,6 +406,7 @@ export const qrisSettings = pgTable('qris_settings', {
   // ── Pengaturan Operasional ───────────────────────────────────
   attendanceTolerance: integer('attendance_tolerance').notNull().default(15), // menit toleransi clock-in
   lowStockThreshold:   integer('low_stock_threshold').notNull().default(5),   // batas stok rendah
+  globalMarginPercentage: decimal('global_margin_percentage', { precision: 5, scale: 2 }).notNull().default('20.00'), // default 20%
   // ────────────────────────────────────────────────────────────
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -615,6 +625,80 @@ export type QrisReconciliation = typeof qrisReconciliations.$inferSelect;
 export type NewQrisReconciliation = typeof qrisReconciliations.$inferInsert;
 
 // =============================================================
+// 16. PRODUCT_PROPOSALS (Usulan Produk Baru oleh Kasir / Karyawan)
+// =============================================================
+// K8 & K2: Kasir hanya mengusulkan (nama, barcode, foto, kategori).
+// HPP dan harga jual diisi oleh Gudang / Admin / Manajer.
+// =============================================================
+
+export const PROPOSAL_STATUS = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export type ProposalStatus = (typeof PROPOSAL_STATUS)[number];
+
+export const productProposals = pgTable(
+  'product_proposals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: varchar('name', { length: 200 }).notNull(),
+    categoryId: uuid('category_id')
+      .notNull()
+      .references(() => categories.id),
+    barcode: varchar('barcode', { length: 50 }),
+    unit: varchar('unit', { length: 20 }).notNull().default('pcs'),
+    photoUrl: text('photo_url'),
+    proposedByEmployeeId: uuid('proposed_by_employee_id')
+      .notNull()
+      .references(() => employees.id),
+    status: varchar('status', { length: 20 }).$type<ProposalStatus>().notNull().default('PENDING'),
+    adminNote: text('admin_note'),
+    approvedProductId: uuid('approved_product_id').references(() => products.id),
+    reviewedByAdminId: uuid('reviewed_by_admin_id').references(() => admins.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_product_proposals_status').on(table.status, table.createdAt.desc()),
+    index('idx_product_proposals_employee').on(table.proposedByEmployeeId),
+  ],
+);
+
+export type ProductProposal = typeof productProposals.$inferSelect;
+export type NewProductProposal = typeof productProposals.$inferInsert;
+
+// =============================================================
+// 17. STOCK_BATCHES (Batch Stok & Expired Date FEFO)
+// =============================================================
+
+export const EXPIRY_CLASSES = ['HARIAN', 'PENDEK', 'PANJANG'] as const;
+export type ExpiryClass = (typeof EXPIRY_CLASSES)[number];
+
+export const stockBatches = pgTable(
+  'stock_batches',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    batchCode: varchar('batch_code', { length: 50 }).notNull(),
+    costPrice: decimal('cost_price', { precision: 15, scale: 2 }).notNull().default('0'),
+    initialQty: integer('initial_qty').notNull().default(0),
+    currentQty: integer('current_qty').notNull().default(0),
+    expiryDate: date('expiry_date', { mode: 'string' }),
+    expiryClass: varchar('expiry_class', { length: 20 }).$type<ExpiryClass>().notNull().default('PANJANG'),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_stock_batches_fefo').on(table.productId, table.expiryDate, table.currentQty),
+    index('idx_stock_batches_expiry_alert').on(table.expiryDate, table.currentQty),
+  ],
+);
+
+export type StockBatch = typeof stockBatches.$inferSelect;
+export type NewStockBatch = typeof stockBatches.$inferInsert;
+
+// =============================================================
 // RELATIONS (for Drizzle query builder)
 // =============================================================
 
@@ -676,6 +760,14 @@ export const productsRelations = relations(products, ({ one, many }) => ({
   }),
   transactionItems: many(transactionItems),
   stockAdjustments: many(stockAdjustments),
+  stockBatches: many(stockBatches),
+}));
+
+export const stockBatchesRelations = relations(stockBatches, ({ one }) => ({
+  product: one(products, {
+    fields: [stockBatches.productId],
+    references: [products.id],
+  }),
 }));
 
 export const transactionsRelations = relations(transactions, ({ one, many }) => ({
@@ -734,6 +826,10 @@ export const shiftSwapRequests = pgTable(
       .references(() => shiftSchedules.id),
     // Alasan wajib diisi — memudahkan dosen evaluasi
     reason: text('reason').notNull(),
+    // Rekan yang diajak tukar (2-arah)
+    peerEmployeeId: uuid('peer_employee_id').references(() => employees.id),
+    peerApprovedAt: timestamp('peer_approved_at', { withTimezone: true }),
+    peerRejectedAt: timestamp('peer_rejected_at', { withTimezone: true }),
     status: swapStatusEnum('status').notNull().default('PENDING'),
     // Dosen yang review (nullable sampai ada keputusan)
     reviewedByAdminId: uuid('reviewed_by_admin_id').references(() => admins.id),
@@ -756,9 +852,17 @@ export type NewShiftSwapRequest = typeof shiftSwapRequests.$inferInsert;
 
 export const shiftSwapRequestsRelations = relations(shiftSwapRequests, ({ one }) => ({
   requester:     one(employees,      { fields: [shiftSwapRequests.requesterId],       references: [employees.id] }),
+  peer:          one(employees,      { fields: [shiftSwapRequests.peerEmployeeId],    references: [employees.id] }),
   fromSchedule:  one(shiftSchedules, { fields: [shiftSwapRequests.fromScheduleId],    references: [shiftSchedules.id] }),
   toSchedule:    one(shiftSchedules, { fields: [shiftSwapRequests.toScheduleId],      references: [shiftSchedules.id] }),
   reviewedByAdmin: one(admins,       { fields: [shiftSwapRequests.reviewedByAdminId], references: [admins.id] }),
+}));
+
+export const productProposalsRelations = relations(productProposals, ({ one }) => ({
+  category:         one(categories, { fields: [productProposals.categoryId],           references: [categories.id] }),
+  proposedByEmployee: one(employees, { fields: [productProposals.proposedByEmployeeId], references: [employees.id] }),
+  reviewedByAdmin:   one(admins,    { fields: [productProposals.reviewedByAdminId],   references: [admins.id] }),
+  approvedProduct:   one(products,  { fields: [productProposals.approvedProductId],   references: [products.id] }),
 }));
 
 // =============================================================
@@ -829,3 +933,37 @@ export const attendancesRelations = relations(attendances, ({ one }) => ({
   recordedByAdmin: one(admins,           { fields: [attendances.recordedByAdminId],  references: [admins.id] }),
   fromSwapRequest: one(shiftSwapRequests,{ fields: [attendances.fromSwapRequestId],  references: [shiftSwapRequests.id] }),
 }));
+
+// =============================================================
+// 19. DAILY_CLOSINGS (Tutup Buku Finansial Harian - Locking Period)
+// =============================================================
+
+export const dailyClosings = pgTable(
+  'daily_closings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    closingDate: date('closing_date').notNull().unique(),
+    totalOmzet: decimal('total_omzet', { precision: 15, scale: 2 }).notNull().default('0'),
+    omzetCash: decimal('omzet_cash', { precision: 15, scale: 2 }).notNull().default('0'),
+    omzetQris: decimal('omzet_qris', { precision: 15, scale: 2 }).notNull().default('0'),
+    totalHpp: decimal('total_hpp', { precision: 15, scale: 2 }).notNull().default('0'),
+    grossProfit: decimal('gross_profit', { precision: 15, scale: 2 }).notNull().default('0'),
+    operatingExpenses: decimal('operating_expenses', { precision: 15, scale: 2 }).notNull().default('0'),
+    qrisFee: decimal('qris_fee', { precision: 15, scale: 2 }).notNull().default('0'),
+    cashDiscrepancy: decimal('cash_discrepancy', { precision: 15, scale: 2 }).notNull().default('0'),
+    netProfit: decimal('net_profit', { precision: 15, scale: 2 }).notNull().default('0'),
+    status: varchar('status', { length: 20 }).notNull().default('LOCKED'), // 'OPEN' | 'LOCKED' | 'AUDITED'
+    notes: text('notes'),
+    closedByAdminId: uuid('closed_by_admin_id').references(() => admins.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_daily_closings_date').on(table.closingDate.desc()),
+    index('idx_daily_closings_status').on(table.status),
+  ],
+);
+
+export type DailyClosing = typeof dailyClosings.$inferSelect;
+export type NewDailyClosing = typeof dailyClosings.$inferInsert;
+

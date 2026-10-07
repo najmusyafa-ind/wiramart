@@ -1,7 +1,7 @@
 // =============================================================
 // POST /api/kasir/presensi
-// Endpoint untuk mencatat kehadiran (Presensi Masuk) karyawan di Kiosk
-// Mendukung pencatatan peran shift (Kasir, Kepala Gudang, Admin Kasir)
+// Endpoint untuk mencatat kehadiran (Presensi Masuk & Presensi Pulang)
+// Mendukung 4 Peran Toko Resmi: Ketua Admin, Kasir, Pelayan, Gudang
 // =============================================================
 
 import { z } from 'zod';
@@ -13,9 +13,13 @@ import { apiOk, apiError } from '@/lib/utils/helpers';
 export const runtime = 'nodejs';
 
 const presensiSchema = z.object({
+  action:     z.enum(['CLOCK_IN', 'CLOCK_OUT']).default('CLOCK_IN'),
   employeeId: z.string().uuid('ID Karyawan tidak valid'),
   scheduleId: z.string().uuid('ID Jadwal tidak valid'),
-  roleTask:   z.enum(['Kasir', 'Customer Service', 'Kepala Gudang', 'Admin Kasir']),
+  roleTask:   z.enum([
+    'Ketua Admin', 'Kasir', 'Pelayan', 'Gudang',
+    'Customer Service', 'Kepala Gudang', 'Admin Kasir',
+  ]).optional(),
   notes:      z.string().max(255).optional(),
 });
 
@@ -32,7 +36,8 @@ export async function POST(request: Request): Promise<Response> {
     return apiError('Data presensi tidak lengkap', 'VALIDATION_ERROR', 422, parsed.error.format());
   }
 
-  const { employeeId, scheduleId, roleTask, notes } = parsed.data;
+  const { action, employeeId, scheduleId, notes } = parsed.data;
+  const roleTask = parsed.data.roleTask ?? 'Kasir';
 
   try {
     // 1. Verifikasi Karyawan
@@ -61,7 +66,70 @@ export async function POST(request: Request): Promise<Response> {
       timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
     }); // 'HH:MM'
 
-    // 3. Cek apakah sudah pernah presensi di jadwal dan tanggal ini
+    // =========================================================
+    // AKSI 1: CLOCK_OUT (Presensi Pulang)
+    // =========================================================
+    if (action === 'CLOCK_OUT') {
+      const existing = await db.query.attendances.findFirst({
+        where: and(
+          eq(attendances.employeeId, employeeId),
+          eq(attendances.scheduleId, scheduleId),
+          eq(attendances.attendanceDate, tanggalHari),
+        ),
+      });
+
+      if (!existing) {
+        return apiError(
+          'Belum ada catatan presensi masuk hari ini. Lakukan Presensi Masuk terlebih dahulu.',
+          'NOT_ATTENDED_YET',
+          404,
+        );
+      }
+
+      if (existing.clockOutActual) {
+        const jamOut = new Date(existing.clockOutActual).toLocaleTimeString('en-GB', {
+          timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
+        });
+        return apiError(
+          `Anda sudah melakukan presensi pulang sebelumnya pada pukul ${jamOut} WIB.`,
+          'ALREADY_CLOCKED_OUT',
+          409,
+        );
+      }
+
+      // Hitung durasi kerja aktif (menit)
+      const clockInTime = existing.clockInActual ? new Date(existing.clockInActual).getTime() : nowWib.getTime();
+      const durasiMenit = Math.max(0, Math.round((nowWib.getTime() - clockInTime) / 60000));
+      const durasiJam = Math.floor(durasiMenit / 60);
+      const sisaMenit = durasiMenit % 60;
+      const durasiTeks = durasiJam > 0 ? `${durasiJam} jam ${sisaMenit} menit` : `${sisaMenit} menit`;
+
+      const appendNotes = notes ? `${existing.notes ?? ''} | Pulang: ${notes.trim()}`.trim() : existing.notes;
+
+      await db
+        .update(attendances)
+        .set({
+          clockOutActual: nowWib,
+          notes:          appendNotes,
+          updatedAt:      nowWib,
+        })
+        .where(eq(attendances.id, existing.id));
+
+      return apiOk({
+        id: existing.id,
+        fullName: employee.fullName,
+        nim: employee.nim,
+        jamPresensi: jamMenitSekarang,
+        durasiMenit,
+        durasiTeks,
+        message: `Presensi pulang berhasil! Terima kasih atas dedikasinya (${durasiTeks}).`,
+      });
+    }
+
+    // =========================================================
+    // AKSI 2: CLOCK_IN (Presensi Masuk)
+    // =========================================================
+    // Cek apakah sudah pernah presensi di jadwal dan tanggal ini
     const existing = await db.query.attendances.findFirst({
       where: and(
         eq(attendances.employeeId, employeeId),
@@ -78,7 +146,7 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    // 4. Hitung keterlambatan berdasarkan toleransi
+    // Hitung keterlambatan berdasarkan toleransi
     const settingsRow = await db.query.qrisSettings.findFirst({
       where: eq(qrisSettings.id, '00000000-0000-0000-0000-000000000002'),
       columns: { attendanceTolerance: true },
@@ -98,7 +166,7 @@ export async function POST(request: Request): Promise<Response> {
 
     const fullNotes = `Peran: ${roleTask}${notes ? ` | ${notes.trim()}` : ''}`;
 
-    // 5. Simpan record absensi
+    // Simpan record absensi masuk
     const [saved] = await db
       .insert(attendances)
       .values({
@@ -112,7 +180,7 @@ export async function POST(request: Request): Promise<Response> {
       })
       .returning({ id: attendances.id });
 
-    // 6. Update jabatan aktual di profil karyawan jika berubah
+    // Update jabatan aktual di profil karyawan jika berubah
     if (employee.jabatan !== roleTask) {
       await db
         .update(employees)

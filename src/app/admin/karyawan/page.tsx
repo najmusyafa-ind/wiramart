@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useId, useCallback } from 'react';
-import { Plus, Search, UserCheck, UserX, Trash2, Edit2, X, Loader2, Users, AlertTriangle, LogOut, CheckCircle } from 'lucide-react';
+import { Plus, Search, UserCheck, UserX, Trash2, Edit2, X, Loader2, Users, AlertTriangle, LogOut, CheckCircle, Crown, KeyRound } from 'lucide-react';
 
 type Employee = {
   id: string;
@@ -10,6 +10,8 @@ type Employee = {
   programStudi: string;
   jabatan: string;
   isActive: boolean;
+  isKetuaShift: boolean;
+  hasPin: boolean;
   createdAt: string;
   // Dari left join shiftSchedules
   shiftDay:    string | null;
@@ -52,6 +54,8 @@ function KaryawanModal({
     programStudi: editData?.programStudi ?? '',
     jabatan: editData?.jabatan ?? 'Kasir',
   });
+  const [isKetuaShift, setIsKetuaShift] = useState<boolean>(editData?.isKetuaShift ?? false);
+  const [pin, setPin] = useState<string>('');
 
   // Slot picker — hanya untuk modal Tambah
   const [slots, setSlots]           = useState<SlotOption[]>([]);
@@ -114,6 +118,15 @@ function KaryawanModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isKetuaShift && !editData?.hasPin && pin.length !== 6) {
+      setError('PIN 6 digit angka wajib diset untuk Ketua Shift.');
+      return;
+    }
+    if (pin && pin.length !== 6) {
+      setError('PIN harus tepat 6 digit angka.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
@@ -122,7 +135,11 @@ function KaryawanModal({
         {
           method: isEdit ? 'PATCH' : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form),
+          body: JSON.stringify({
+            ...form,
+            isKetuaShift,
+            ...(pin.length === 6 ? { pin } : {}),
+          }),
         },
       );
       const json = await res.json();
@@ -341,6 +358,51 @@ function KaryawanModal({
                 )}
               </div>
             )}
+
+            {/* Otorisasi Ketua Shift / Admin Kasir (K17) */}
+            <div style={{
+              background: isKetuaShift ? 'rgba(234, 179, 8, 0.08)' : 'var(--color-surface-muted)',
+              border: `1px solid ${isKetuaShift ? 'rgba(234, 179, 8, 0.35)' : 'var(--color-border)'}`,
+              borderRadius: 'var(--radius-lg)',
+              padding: 'var(--space-3) var(--space-4)',
+              transition: 'all 0.15s ease',
+            }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={isKetuaShift}
+                  onChange={(e) => setIsKetuaShift(e.target.checked)}
+                  style={{ width: 16, height: 16, accentColor: '#ca8a04' }}
+                />
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: isKetuaShift ? '#854d0e' : 'inherit' }}>
+                  <Crown size={16} color={isKetuaShift ? '#ca8a04' : 'var(--color-text-muted)'} />
+                  Tugaskan sebagai Ketua Shift (Admin Kasir)
+                </span>
+              </label>
+
+              {isKetuaShift && (
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed rgba(234, 179, 8, 0.3)' }}>
+                  <label htmlFor={`${uid}-pin`} className="form-label" style={{ fontSize: 12, fontWeight: 700, color: '#854d0e', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <KeyRound size={14} /> PIN Otorisasi 6 Digit {editData?.hasPin ? '(Kosongkan jika PIN tidak diganti)' : '*'}
+                  </label>
+                  <input
+                    id={`${uid}-pin`}
+                    type="password"
+                    maxLength={6}
+                    pattern="\d{6}"
+                    className="form-input"
+                    placeholder="Contoh: 123456 (6 digit angka)"
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    style={{ maxWidth: 200, letterSpacing: 4, fontWeight: 700 }}
+                  />
+                  <p style={{ fontSize: 11, color: 'var(--color-text-muted)', margin: '4px 0 0 0', lineHeight: 1.4 }}>
+                    💡 <strong>Fungsi PIN (K17):</strong> Mengotorisasi pembukaan laci kasir, serah terima saldo fisik, dan persetujuan petty cash (kas keluar).
+                  </p>
+                </div>
+              )}
+            </div>
+
             <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', paddingTop: 'var(--space-2)' }}>
               <button type="button" onClick={onClose} className="btn btn-secondary" disabled={loading}>
                 Batal
@@ -576,7 +638,29 @@ export default function KaryawanPage() {
               <tbody>
                 {employees.map((emp) => (
                   <tr key={emp.id}>
-                    <td className="allow-wrap" style={{ fontWeight: 'var(--weight-medium)' }}>{emp.fullName}</td>
+                    <td className="allow-wrap" style={{ fontWeight: 'var(--weight-medium)' }}>
+                      <div>{emp.fullName}</div>
+                      {emp.isKetuaShift && (
+                        <div style={{
+                          marginTop: 4,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          background: 'rgba(234, 179, 8, 0.15)',
+                          color: '#854d0e',
+                          border: '1px solid rgba(234, 179, 8, 0.35)',
+                          borderRadius: 6,
+                          padding: '2px 7px',
+                          fontSize: 11,
+                          fontWeight: 700,
+                        }}>
+                          <Crown size={12} color="#ca8a04" /> Ketua Shift
+                          <span style={{ fontSize: 10, color: emp.hasPin ? '#15803d' : '#dc2626', fontWeight: 600, marginLeft: 2 }}>
+                            · {emp.hasPin ? 'PIN Aktif' : 'PIN Kosong!'}
+                          </span>
+                        </div>
+                      )}
+                    </td>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{emp.nim}</td>
                     <td className="allow-wrap">{emp.programStudi}</td>
                     <td>{emp.jabatan}</td>

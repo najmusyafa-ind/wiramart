@@ -47,6 +47,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       : eq(shiftSwapRequests.status, statusFilter as 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'),
     with: {
       requester:     { columns: { id: true, fullName: true, nim: true, programStudi: true, jabatan: true } },
+      peer:          { columns: { id: true, fullName: true, nim: true } },
       fromSchedule:  { columns: { id: true, dayOfWeek: true, slotStart: true, slotEnd: true, coordinatorName: true } },
       toSchedule:    { columns: { id: true, dayOfWeek: true, slotStart: true, slotEnd: true, coordinatorName: true } },
       reviewedByAdmin: { columns: { id: true, fullName: true } },

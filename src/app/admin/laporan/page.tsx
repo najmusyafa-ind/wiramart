@@ -20,9 +20,11 @@ import {
   Wallet,
   Users,
   ArrowLeftRight,
+  Lock,
 } from 'lucide-react';
 import RekapHarian from './RekapHarian';
 import BiayaOperasionalPanel from './BiayaOperasionalPanel';
+import TutupBukuModal from './TutupBukuModal';
 import {
   EXPENSE_CATEGORY_LABEL,
   formatRupiah,
@@ -67,9 +69,12 @@ type ShiftRecord = {
   actualCash?: number | null;
   discrepancy?: number | null;
   statusLaci?: 'RUNNING' | 'BALANCED' | 'SHORTAGE' | 'OVERAGE';
+  discrepancyTier?: 'HIJAU' | 'KUNING' | 'MERAH' | 'OVERAGE';
   notes?: string | null;
   kasirName: string;
   kasirNim: string;
+  serahTerimaDiff?: number | null;
+  auditFlags?: string[] | null;
 };
 
 type LaporanData = {
@@ -323,6 +328,7 @@ export default function LaporanPage() {
   const [exportLoading, setExportLoading] = useState(false);
   const [exportHarianLoading, setExportHarianLoading] = useState(false);
   const [voidTarget, setVoidTarget] = useState<RecentTransaction | null>(null);
+  const [showTutupBuku, setShowTutupBuku] = useState(false);
 
   const fetchData = useCallback(async (p: PeriodKey, silent = false) => {
     if (!silent) setLoading(true);
@@ -717,6 +723,16 @@ export default function LaporanPage() {
         />
       )}
 
+      {/* Tutup Buku Modal */}
+      <TutupBukuModal
+        isOpen={showTutupBuku}
+        onClose={() => setShowTutupBuku(false)}
+        onSuccess={() => {
+          setShowTutupBuku(false);
+          fetchData(period);
+        }}
+      />
+
       <div>
         {/* Header */}
         <div className="page-header">
@@ -725,6 +741,19 @@ export default function LaporanPage() {
             <p className="page-subtitle">{data?.label ?? '—'}</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+            <button
+              id={`${uid}-tutup-buku`}
+              onClick={() => setShowTutupBuku(true)}
+              className="btn btn-primary"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                background: 'hsl(217 91% 60%)', borderColor: 'hsl(217 91% 50%)',
+                fontWeight: 700,
+              }}
+              aria-label="Tutup Buku Finansial Harian (Locking Period)"
+            >
+              <Lock size={14} aria-hidden="true" /> 🔒 Tutup Buku Hari Ini
+            </button>
             <button
               id={`${uid}-export-harian`}
               onClick={handleDownloadSkemaHarian}
@@ -1392,7 +1421,12 @@ export default function LaporanPage() {
                               </div>
                             </td>
                             <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
-                              {sh.modalAwal !== null ? formatRp(sh.modalAwal) : '—'}
+                              <div>{sh.modalAwal !== null ? formatRp(sh.modalAwal) : '—'}</div>
+                              {sh.serahTerimaDiff !== null && sh.serahTerimaDiff !== undefined && Math.abs(sh.serahTerimaDiff) > 0 && (
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-error)', fontWeight: 600, marginTop: 2 }}>
+                                  ⚠️ Beda serah terima: {sh.serahTerimaDiff > 0 ? `+${formatRp(sh.serahTerimaDiff)}` : formatRp(sh.serahTerimaDiff)}
+                                </div>
+                              )}
                             </td>
                             <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: 'var(--color-success)', fontWeight: 600 }}>
                               +{formatRp(sh.cashSales ?? 0)}
@@ -1436,23 +1470,32 @@ export default function LaporanPage() {
                                 }}>
                                   ⏳ AKTIF
                                 </span>
-                              ) : isBalanced ? (
+                              ) : sh.discrepancyTier === 'HIJAU' || isBalanced ? (
                                 <span style={{
                                   display: 'inline-flex', alignItems: 'center', gap: 4,
                                   padding: '2px 8px', borderRadius: 'var(--radius-full)',
                                   backgroundColor: 'var(--color-success-light)', color: 'var(--color-success)',
                                   fontWeight: 600,
                                 }}>
-                                  <CheckCircle size={11} /> PAS
+                                  <CheckCircle size={11} /> PAS (≤ 2k)
                                 </span>
-                              ) : isShortage ? (
+                              ) : sh.discrepancyTier === 'KUNING' ? (
+                                <span style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                  backgroundColor: 'hsl(38 92% 95%)', color: 'hsl(38 92% 35%)',
+                                  fontWeight: 600, border: '1px solid hsl(38 92% 80%)',
+                                }}>
+                                  <AlertTriangle size={11} /> TEKOR SEDANG (≤ 20k)
+                                </span>
+                              ) : sh.discrepancyTier === 'MERAH' || isShortage ? (
                                 <span style={{
                                   display: 'inline-flex', alignItems: 'center', gap: 4,
                                   padding: '2px 8px', borderRadius: 'var(--radius-full)',
                                   backgroundColor: 'var(--color-error-light)', color: 'var(--color-error)',
-                                  fontWeight: 600,
+                                  fontWeight: 600, border: '1px solid var(--color-error)',
                                 }}>
-                                  <AlertTriangle size={11} /> TEKOR / KURANG
+                                  <AlertTriangle size={11} /> TEKOR BERAT (&gt; 20k)
                                 </span>
                               ) : (
                                 <span style={{
@@ -1463,6 +1506,29 @@ export default function LaporanPage() {
                                 }}>
                                   ⬆️ LEBIH
                                 </span>
+                              )}
+
+                              {sh.auditFlags?.includes('FRAUD_CASH_SUSPICIOUS') && (
+                                <div style={{ marginTop: 4 }}>
+                                  <span
+                                    className="badge badge-error"
+                                    style={{ fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                                    title="Ada penjualan tunai tetapi kasir menutup shift dengan fisik uang persis modal awal"
+                                  >
+                                    🚨 FRAUD LACI PERSIS MODAL
+                                  </span>
+                                </div>
+                              )}
+                              {sh.auditFlags?.includes('SERAH_TERIMA_DIFF') && (
+                                <div style={{ marginTop: 4 }}>
+                                  <span
+                                    className="badge badge-warning"
+                                    style={{ fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                                    title="Modal awal buka shift berbeda dari fisik tutup shift sebelumnya"
+                                  >
+                                    ⚠️ SELISIH SERAH TERIMA
+                                  </span>
+                                </div>
                               )}
                             </td>
                           </tr>

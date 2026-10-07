@@ -141,6 +141,8 @@ export async function GET(req: NextRequest) {
         notes:              shifts.notes,
         cashBreakdownOpen:  shifts.cashBreakdownOpen,
         cashBreakdownClose: shifts.cashBreakdownClose,
+        serahTerimaDiff:    shifts.serahTerimaDiff,
+        auditFlags:         shifts.auditFlags,
         kasirName:          employees.fullName,
         kasirNim:           employees.nim,
       })
@@ -270,15 +272,24 @@ export async function GET(req: NextRequest) {
         const discrepancy = actualCash !== null ? actualCash - expectedCash : null;
 
         let statusLaci: 'RUNNING' | 'BALANCED' | 'SHORTAGE' | 'OVERAGE' = 'RUNNING';
+        let discrepancyTier: 'HIJAU' | 'KUNING' | 'MERAH' | 'OVERAGE' = 'HIJAU';
+
         if (sh.status === 'CLOSED') {
           if (discrepancy === null) {
             statusLaci = 'BALANCED';
-          } else if (Math.abs(discrepancy) < 1) {
+            discrepancyTier = 'HIJAU';
+          } else if (Math.abs(discrepancy) <= 2000) {
+            // Toleransi K7: <= Rp 2.000 dianggap HIJAU (PAS / Wajar)
             statusLaci = 'BALANCED';
+            discrepancyTier = 'HIJAU';
           } else if (discrepancy < 0) {
             statusLaci = 'SHORTAGE';
+            // Kuning: tekor antara Rp 2.001 s/d Rp 20.000
+            // Merah: tekor > Rp 20.000
+            discrepancyTier = discrepancy < -20000 ? 'MERAH' : 'KUNING';
           } else {
             statusLaci = 'OVERAGE';
+            discrepancyTier = 'OVERAGE';
           }
         }
 
@@ -295,9 +306,12 @@ export async function GET(req: NextRequest) {
           actualCash,
           discrepancy,
           statusLaci,
+          discrepancyTier,
           notes:              sh.notes,
           cashBreakdownOpen:  sh.cashBreakdownOpen,
           cashBreakdownClose: sh.cashBreakdownClose,
+          serahTerimaDiff:    sh.serahTerimaDiff ? parseFloat(sh.serahTerimaDiff) : null,
+          auditFlags:         sh.auditFlags ?? [],
           kasirName:          sh.kasirName,
           kasirNim:           sh.kasirNim,
         };
