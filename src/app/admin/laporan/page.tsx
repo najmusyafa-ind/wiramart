@@ -862,7 +862,7 @@ export default function LaporanPage() {
                   Profitabilitas &amp; Beban Toko
                 </h2>
                 <span style={{ fontSize: 'var(--text-xs)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-alt)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)', fontWeight: 'var(--weight-medium)' }}>
-                  Rumus: Laba Kotor − Jatah Karyawan (50%) − Biaya Operasional = Laba Bersih Toko
+                  Rumus: (Laba Kotor − Biaya Operasional) = Laba Bersih Operasional → 50% Mahasiswa : 50% Wiramart
                 </span>
               </div>
 
@@ -900,13 +900,13 @@ export default function LaporanPage() {
                     <Users size={20} aria-hidden="true" />
                   </div>
                   <div className="stat-card__label" style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-primary)' }}>
-                    Bagi Hasil Karyawan (50%)
+                    Bagi Hasil Mahasiswa (50%)
                   </div>
                   <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
                     {formatRupiah(data.summary.alokasiGajiKaryawan ?? Math.round(data.summary.grossProfit * 0.5))}
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                    Paten 50% laba kotor dialokasikan ke karyawan shift
+                    50% dari sisa laba bersih operasional
                   </div>
                 </article>
 
@@ -921,7 +921,7 @@ export default function LaporanPage() {
                     {formatRupiah(data.summary.biayaOperasional)}
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                    Listrik, plastik, perlengkapan (catat di panel bawah)
+                    Paten bulanan 50rb (ATK 20rb + Bensin 30rb) + pengeluaran lain
                   </div>
                 </article>
 
@@ -932,13 +932,13 @@ export default function LaporanPage() {
                     <Wallet size={20} aria-hidden="true" />
                   </div>
                   <div className="stat-card__label" style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
-                    Laba Bersih Toko (Riil){!data.summary.labaLengkap && ' *'}
+                    Laba Bersih Wiramart (50%){!data.summary.labaLengkap && ' *'}
                   </div>
                   <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }}>
                     {formatRupiah(data.summary.labaBersih)}
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                    50% Laba Kotor ({formatRupiah(data.summary.grossProfit - (data.summary.alokasiGajiKaryawan ?? Math.round(data.summary.grossProfit * 0.5)))}) − Biaya ({formatRupiah(data.summary.biayaOperasional)})
+                    Hak bersih toko setelah biaya &amp; bagi hasil
                   </div>
                 </article>
               </div>
@@ -946,7 +946,7 @@ export default function LaporanPage() {
               <div style={{ marginTop: 'var(--space-3)', padding: 'var(--space-3) var(--space-4)', background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', fontSize: 'var(--text-xs)', color: 'var(--color-text)', display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)' }}>
                 <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>🤝</span>
                 <div style={{ lineHeight: 1.6 }}>
-                  <strong>Sistem Bagi Hasil 50:50 Wiramart:</strong> Dari perolehan laba kotor toko, <strong>paten 50%</strong> dialokasikan untuk operasional gaji karyawan shift yang bertugas (dibagi rata per orang sesuai absensi personel shift), dan <strong>50% sisanya</strong> menjadi laba bersih hak milik toko setelah dikurangi biaya operasional non-gaji.
+                  <strong>Sistem Bagi Hasil 50:50 Wiramart:</strong> Laba kotor penjualan dikurangi biaya operasional toko terlebih dahulu untuk mendapatkan <strong>Laba Bersih Operasional</strong>. Hasil bersih tersebut kemudian dibagi <strong>50%</strong> untuk hak mahasiswa (akumulasi per shift dan dibagi rata antar 4 role shift), dan <strong>50%</strong> menjadi laba bersih hak milik toko Wiramart. Pada periode bulanan, biaya paten Rp 50.000 (ATK Rp 20.000 + Bensin Rp 30.000) otomatis diikutsertakan.
                 </div>
               </div>
             </div>
