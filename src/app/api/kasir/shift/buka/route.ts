@@ -20,6 +20,8 @@ const bukaShiftSchema = z.object({
   // Modal awal minimal 0 (mesin baru, belum ada uang di laci)
   // Maksimal 10 juta agar tidak ada typo ekstrem
   modalAwal: z.number().min(0, 'Modal awal tidak boleh negatif').max(10_000_000, 'Nilai terlalu besar'),
+  // Breakdown pecahan lembar dan koin (opsional dari kalkulator fisik)
+  breakdown: z.record(z.string(), z.number()).optional(),
 });
 
 export async function PATCH(req: NextRequest): Promise<Response> {
@@ -48,7 +50,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  const { modalAwal } = parsed.data;
+  const { modalAwal, breakdown } = parsed.data;
 
   // 3. Cari shift aktif milik karyawan ini
   const activeShift = await db.query.shifts.findFirst({
@@ -74,11 +76,12 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  // 5. Update modal awal
+  // 5. Update modal awal & breakdown pecahan fisik
   await db
     .update(shifts)
     .set({
       modalAwal: modalAwal.toString(),
+      cashBreakdownOpen: breakdown ?? null,
     })
     .where(eq(shifts.id, activeShift.id));
 

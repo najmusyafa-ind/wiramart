@@ -60,6 +60,14 @@ type ShiftRecord = {
   clockOut: string | null;
   status: string;
   modalAwal: number | null;
+  cashSales?: number;
+  cashOut?: number;
+  cashIn?: number;
+  expectedCash?: number;
+  actualCash?: number | null;
+  discrepancy?: number | null;
+  statusLaci?: 'RUNNING' | 'BALANCED' | 'SHORTAGE' | 'OVERAGE';
+  notes?: string | null;
   kasirName: string;
   kasirNim: string;
 };
@@ -1261,6 +1269,161 @@ export default function LaporanPage() {
                           </td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
+            {/* ── CARD AUDIT LACI & REKAP SHIFT KASIR ────────────────── */}
+            <div className="card" style={{ marginTop: 'var(--space-6)', overflow: 'hidden' }}>
+              <div
+                className="card-header"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: 'var(--space-4) var(--space-5)',
+                  borderBottom: '1px solid var(--color-border)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <Wallet size={18} style={{ color: 'var(--color-primary)' }} aria-hidden="true" />
+                  <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-semibold)', margin: 0 }}>
+                    Audit Laci &amp; Riwayat Shift Kasir
+                  </h2>
+                </div>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  {data.shifts?.length ?? 0} shift dalam periode ini
+                </span>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                {!data.shifts || data.shifts.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
+                    Tidak ada sesi shift tercatat dalam periode ini.
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-xs)' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface-elevated)', textAlign: 'left' }}>
+                        <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Kasir</th>
+                        <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Waktu Sesi</th>
+                        <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Modal Awal</th>
+                        <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Penjualan Tunai</th>
+                        <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Petty Cash (-)</th>
+                        <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Kas Masuk (+)</th>
+                        <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Expected Kas</th>
+                        <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Fisik Laci (Blind Count)</th>
+                        <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Selisih</th>
+                        <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Status Audit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.shifts.map((sh) => {
+                        const isClosed = sh.status === 'CLOSED';
+                        const isShortage = sh.statusLaci === 'SHORTAGE';
+                        const isOverage  = sh.statusLaci === 'OVERAGE';
+                        const isBalanced = sh.statusLaci === 'BALANCED';
+
+                        return (
+                          <tr key={sh.shiftId} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                              <div style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
+                                {sh.kasirName}
+                              </div>
+                              <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
+                                NIM {sh.kasirNim}
+                              </div>
+                              {sh.notes && (
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)', marginTop: 2, fontStyle: 'italic' }}>
+                                  Catatan: &ldquo;{sh.notes}&rdquo;
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
+                              <div>{formatDateTime(sh.clockIn)}</div>
+                              <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
+                                {sh.clockOut ? `s/d ${formatDateTime(sh.clockOut)}` : '🟢 Sedang Berjalan'}
+                              </div>
+                            </td>
+                            <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
+                              {sh.modalAwal !== null ? formatRp(sh.modalAwal) : '—'}
+                            </td>
+                            <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: 'var(--color-success)', fontWeight: 600 }}>
+                              +{formatRp(sh.cashSales ?? 0)}
+                            </td>
+                            <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: (sh.cashOut ?? 0) > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
+                              {(sh.cashOut ?? 0) > 0 ? `-${formatRp(sh.cashOut ?? 0)}` : 'Rp 0'}
+                            </td>
+                            <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: (sh.cashIn ?? 0) > 0 ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
+                              {(sh.cashIn ?? 0) > 0 ? `+${formatRp(sh.cashIn ?? 0)}` : 'Rp 0'}
+                            </td>
+                            <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', fontWeight: 700 }}>
+                              {sh.expectedCash !== undefined ? formatRp(sh.expectedCash) : '—'}
+                            </td>
+                            <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', fontWeight: 700 }}>
+                              {sh.actualCash !== null && sh.actualCash !== undefined
+                                ? formatRp(sh.actualCash)
+                                : isClosed ? 'Tidak diisi' : 'Belum tutup'}
+                            </td>
+                            <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', fontWeight: 800 }}>
+                              {sh.discrepancy !== null && sh.discrepancy !== undefined ? (
+                                <span style={{
+                                  color: isShortage
+                                    ? 'var(--color-error)'
+                                    : isOverage
+                                    ? 'var(--color-info)'
+                                    : 'var(--color-success)',
+                                }}>
+                                  {sh.discrepancy > 0 ? `+${formatRp(sh.discrepancy)}` : formatRp(sh.discrepancy)}
+                                </span>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                            <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                              {!isClosed ? (
+                                <span style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                  backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)',
+                                  fontWeight: 600,
+                                }}>
+                                  ⏳ AKTIF
+                                </span>
+                              ) : isBalanced ? (
+                                <span style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                  backgroundColor: 'var(--color-success-light)', color: 'var(--color-success)',
+                                  fontWeight: 600,
+                                }}>
+                                  <CheckCircle size={11} /> PAS
+                                </span>
+                              ) : isShortage ? (
+                                <span style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                  backgroundColor: 'var(--color-error-light)', color: 'var(--color-error)',
+                                  fontWeight: 600,
+                                }}>
+                                  <AlertTriangle size={11} /> TEKOR / KURANG
+                                </span>
+                              ) : (
+                                <span style={{
+                                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                                  padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                  backgroundColor: 'var(--color-info-light)', color: 'var(--color-info)',
+                                  fontWeight: 600,
+                                }}>
+                                  ⬆️ LEBIH
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}

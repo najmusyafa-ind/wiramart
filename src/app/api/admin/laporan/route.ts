@@ -12,7 +12,7 @@
 
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { transactions, transactionItems, employees, shifts, transactionPayments } from '@/lib/db/schema';
+import { transactions, transactionItems, employees, shifts, transactionPayments, shiftCashMovements } from '@/lib/db/schema';
 import { eq, and, gte, lt, inArray, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import {
@@ -129,22 +129,95 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // ── Shift dalam periode (dengan modal awal) ────────────────
+    // ── Shift dalam periode (dengan modal awal & rekap laci) ────────────────
     const shiftList = await db
       .select({
-        shiftId:   shifts.id,
-        clockIn:   shifts.clockIn,
-        clockOut:  shifts.clockOut,
-        status:    shifts.status,
-        modalAwal: shifts.modalAwal,
-        kasirName: employees.fullName,
-        kasirNim:  employees.nim,
+        shiftId:            shifts.id,
+        clockIn:            shifts.clockIn,
+        clockOut:           shifts.clockOut,
+        status:             shifts.status,
+        modalAwal:          shifts.modalAwal,
+        actualCash:         shifts.actualCash,
+        notes:              shifts.notes,
+        cashBreakdownOpen:  shifts.cashBreakdownOpen,
+        cashBreakdownClose: shifts.cashBreakdownClose,
+        kasirName:          employees.fullName,
+        kasirNim:           employees.nim,
       })
       .from(shifts)
       .innerJoin(employees, eq(shifts.employeeId, employees.id))
       .where(and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)))
       .orderBy(sql`${shifts.clockIn} DESC`)
       .limit(100);
+
+    const shiftIds = shiftList.map((s) => s.shiftId);
+
+    // Ambil data petty cash & penjualan tunai jika ada shift
+    const shiftCashOutMap = new Map<string, number>();
+    const shiftCashInMap  = new Map<string, number>();
+    const shiftSalesMap   = new Map<string, number>();
+
+    if (shiftIds.length > 0) {
+      // 1) Petty cash movements
+      const movements = await db
+        .select({
+          shiftId: shiftCashMovements.shiftId,
+          movementType: shiftCashMovements.movementType,
+          total: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}), 0)`,
+        })
+        .from(shiftCashMovements)
+        .where(inArray(shiftCashMovements.shiftId, shiftIds))
+        .groupBy(shiftCashMovements.shiftId, shiftCashMovements.movementType);
+
+      for (const m of movements) {
+        const val = parseFloat(m.total || '0');
+        if (m.movementType === 'CASH_OUT') {
+          shiftCashOutMap.set(m.shiftId, val);
+        } else if (m.movementType === 'CASH_IN') {
+          shiftCashInMap.set(m.shiftId, val);
+        }
+      }
+
+      // 2) Penjualan tunai dari pecahan split payment
+      const splitCashSales = await db
+        .select({
+          shiftId: transactions.shiftId,
+          total: sql<string>`COALESCE(SUM(${transactionPayments.amount}), 0)`,
+        })
+        .from(transactionPayments)
+        .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
+        .where(and(
+          inArray(transactions.shiftId, shiftIds),
+          eq(transactions.status, 'COMPLETED'),
+          eq(transactionPayments.paymentMethod, 'CASH'),
+          eq(transactions.isTest, false),
+        ))
+        .groupBy(transactions.shiftId);
+
+      for (const s of splitCashSales) {
+        shiftSalesMap.set(s.shiftId, (shiftSalesMap.get(s.shiftId) ?? 0) + parseFloat(s.total || '0'));
+      }
+
+      // 3) Transaksi langsung tunai lama yang belum tercatat di transaction_payments
+      const directCashSales = await db
+        .select({
+          shiftId: transactions.shiftId,
+          total: sql<string>`COALESCE(SUM(${transactions.grossAmount}), 0)`,
+        })
+        .from(transactions)
+        .where(and(
+          inArray(transactions.shiftId, shiftIds),
+          eq(transactions.status, 'COMPLETED'),
+          eq(transactions.paymentMethod, 'CASH'),
+          eq(transactions.isTest, false),
+          sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+        ))
+        .groupBy(transactions.shiftId);
+
+      for (const d of directCashSales) {
+        shiftSalesMap.set(d.shiftId, (shiftSalesMap.get(d.shiftId) ?? 0) + parseFloat(d.total || '0'));
+      }
+    }
 
     return apiOk({
       period: period ?? 'custom',
@@ -187,15 +260,48 @@ export async function GET(req: NextRequest) {
       })),
       topProducts,
       recentTransactions: enhancedRecentTransactions,
-      shifts: shiftList.map((sh) => ({
-        shiftId:   sh.shiftId,
-        clockIn:   sh.clockIn,
-        clockOut:  sh.clockOut,
-        status:    sh.status,
-        modalAwal: sh.modalAwal ? parseFloat(sh.modalAwal) : null,
-        kasirName: sh.kasirName,
-        kasirNim:  sh.kasirNim,
-      })),
+      shifts: shiftList.map((sh) => {
+        const modalAwal = sh.modalAwal ? parseFloat(sh.modalAwal) : 0;
+        const actualCash = sh.actualCash ? parseFloat(sh.actualCash) : null;
+        const cashSales = shiftSalesMap.get(sh.shiftId) ?? 0;
+        const cashOut = shiftCashOutMap.get(sh.shiftId) ?? 0;
+        const cashIn = shiftCashInMap.get(sh.shiftId) ?? 0;
+        const expectedCash = modalAwal + cashSales - cashOut + cashIn;
+        const discrepancy = actualCash !== null ? actualCash - expectedCash : null;
+
+        let statusLaci: 'RUNNING' | 'BALANCED' | 'SHORTAGE' | 'OVERAGE' = 'RUNNING';
+        if (sh.status === 'CLOSED') {
+          if (discrepancy === null) {
+            statusLaci = 'BALANCED';
+          } else if (Math.abs(discrepancy) < 1) {
+            statusLaci = 'BALANCED';
+          } else if (discrepancy < 0) {
+            statusLaci = 'SHORTAGE';
+          } else {
+            statusLaci = 'OVERAGE';
+          }
+        }
+
+        return {
+          shiftId:            sh.shiftId,
+          clockIn:            sh.clockIn,
+          clockOut:           sh.clockOut,
+          status:             sh.status,
+          modalAwal:          sh.modalAwal ? parseFloat(sh.modalAwal) : null,
+          cashSales,
+          cashOut,
+          cashIn,
+          expectedCash,
+          actualCash,
+          discrepancy,
+          statusLaci,
+          notes:              sh.notes,
+          cashBreakdownOpen:  sh.cashBreakdownOpen,
+          cashBreakdownClose: sh.cashBreakdownClose,
+          kasirName:          sh.kasirName,
+          kasirNim:           sh.kasirNim,
+        };
+      }),
     });
   } catch {
     return apiError('Gagal mengambil data laporan', 500);

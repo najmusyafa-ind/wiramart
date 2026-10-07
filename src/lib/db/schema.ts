@@ -14,6 +14,7 @@ import {
   integer,
   decimal,
   date,
+  jsonb,
   pgEnum,
   uniqueIndex,
   unique,
@@ -135,6 +136,12 @@ export const shifts = pgTable(
     status: shiftStatusEnum('status').notNull().default('ACTIVE'),
     // Modal awal — jumlah uang di laci saat kasir buka shift (wajib diisi)
     modalAwal: decimal('modal_awal', { precision: 15, scale: 2 }),
+    // Saldo kas fisik hasil blind count kasir saat tutup shift (nullable hingga shift ditutup)
+    actualCash: decimal('actual_cash', { precision: 15, scale: 2 }),
+    // Rincian lembar & koin saat buka shift { "100k": 1, "50k": 2, ... }
+    cashBreakdownOpen: jsonb('cash_breakdown_open'),
+    // Rincian lembar & koin saat tutup shift
+    cashBreakdownClose: jsonb('cash_breakdown_close'),
     // Catatan serah terima laci ke shift berikutnya
     handoverNote: text('handover_note'),
     notes: text('notes'),
@@ -531,6 +538,37 @@ export type OperatingExpense = typeof operatingExpenses.$inferSelect;
 export type NewOperatingExpense = typeof operatingExpenses.$inferInsert;
 
 // =============================================================
+// 14. SHIFT_CASH_MOVEMENTS (Petty Cash: Kas Keluar & Masuk Laci per Shift)
+// =============================================================
+
+export const shiftCashMovements = pgTable(
+  'shift_cash_movements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    shiftId: uuid('shift_id')
+      .notNull()
+      .references(() => shifts.id, { onDelete: 'cascade' }),
+    employeeId: uuid('employee_id')
+      .notNull()
+      .references(() => employees.id),
+    // 'CASH_OUT' | 'CASH_IN'
+    movementType: varchar('movement_type', { length: 20 }).notNull(),
+    // 'KONSUMSI_GALON' | 'BENSIN' | 'ATK_KRESEK' | 'PARKIR_KEBERSIHAN' | 'TAMBAH_MODAL' | 'OPERASIONAL' | 'LAINNYA'
+    category: varchar('category', { length: 50 }).notNull(),
+    amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+    notes: text('notes').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_shift_cash_movements_shift').on(table.shiftId),
+    index('idx_shift_cash_movements_type_created').on(table.movementType, table.createdAt),
+  ],
+);
+
+export type ShiftCashMovement = typeof shiftCashMovements.$inferSelect;
+export type NewShiftCashMovement = typeof shiftCashMovements.$inferInsert;
+
+// =============================================================
 // RELATIONS (for Drizzle query builder)
 // =============================================================
 
@@ -559,6 +597,18 @@ export const shiftsRelations = relations(shifts, ({ one, many }) => ({
     references: [employees.id],
   }),
   transactions: many(transactions),
+  cashMovements: many(shiftCashMovements),
+}));
+
+export const shiftCashMovementsRelations = relations(shiftCashMovements, ({ one }) => ({
+  shift: one(shifts, {
+    fields: [shiftCashMovements.shiftId],
+    references: [shifts.id],
+  }),
+  employee: one(employees, {
+    fields: [shiftCashMovements.employeeId],
+    references: [employees.id],
+  }),
 }));
 
 export const categoriesRelations = relations(categories, ({ one, many }) => ({

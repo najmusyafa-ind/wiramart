@@ -30,6 +30,8 @@ import { apiOk, apiError } from '@/lib/utils/helpers';
 export const runtime = 'nodejs';
 
 const tutupShiftSchema = z.object({
+  actualCash: z.number().min(0, 'Saldo fisik kas tidak boleh negatif').max(50_000_000, 'Nilai terlalu besar').optional(),
+  breakdown: z.record(z.string(), z.number()).optional(),
   notes: z.string().max(500).optional(),
 });
 
@@ -59,7 +61,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  const { notes } = parsed.data;
+  const { notes, actualCash, breakdown } = parsed.data;
 
   // 3. Cari shift aktif milik karyawan ini
   const activeShift = await db.query.shifts.findFirst({
@@ -90,9 +92,11 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   const closed = await db
     .update(shifts)
     .set({
-      status:   'CLOSED',
-      clockOut: nowWib,
-      notes:    notes ?? null,
+      status:             'CLOSED',
+      clockOut:           nowWib,
+      actualCash:         actualCash !== undefined ? actualCash.toString() : null,
+      cashBreakdownClose: breakdown ?? null,
+      notes:              notes ?? null,
     })
     .where(and(eq(shifts.id, activeShift.id), eq(shifts.status, 'ACTIVE')))
     .returning({ id: shifts.id });

@@ -6,8 +6,11 @@ import {
   ShoppingCart, Search, Plus, Minus, Trash2, Banknote,
   CheckCircle, X, Loader2, Package, LogOut, ArrowLeftRight,
   User, Clock, AlertTriangle, ScanLine, MoreVertical, ChevronRight,
+  Receipt, Calculator, Coins,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import KalkulatorPecahan, { type DenominasiMap } from './KalkulatorPecahan';
+import KasGerakModal from './KasGerakModal';
 
 // BarcodeDetector Type — Shape Detection API (belum di TS stdlib)
 declare class BarcodeDetector {
@@ -126,6 +129,8 @@ function BukaShiftOverlay({
 }) {
   // Default modal awal paten dari owner: Rp 100.000
   const [modalInput, setModalInput] = useState('100000');
+  const [breakdown, setBreakdown] = useState<DenominasiMap>({});
+  const [inputMode, setInputMode] = useState<'QUICK' | 'CALCULATOR'>('QUICK');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Fase handover: jika ada kasir lain aktif, tampilkan konfirmasi dulu
@@ -139,6 +144,11 @@ function BukaShiftOverlay({
   const quickAmounts = [0, 50000, 100000, 200000, 500000];
   const modalNominal = modalInput ? parseFloat(modalInput.replace(/\D/g, '')) : NaN;
 
+  const handleCalculatorChange = useCallback((total: number, counts: DenominasiMap) => {
+    setBreakdown(counts);
+    setModalInput(total.toString());
+  }, []);
+
   async function handleBuka() {
     const nominal = parseFloat(modalInput.replace(/\D/g, ''));
     if (isNaN(nominal) || nominal < 0) {
@@ -151,7 +161,10 @@ function BukaShiftOverlay({
       const res = await fetch('/api/kasir/shift/buka', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modalAwal: nominal }),
+        body: JSON.stringify({
+          modalAwal: nominal,
+          breakdown: Object.keys(breakdown).length > 0 ? breakdown : undefined,
+        }),
       });
       const json = await res.json() as { success: boolean; error?: string };
       if (!res.ok) {
@@ -324,46 +337,97 @@ function BukaShiftOverlay({
                 <strong>ℹ️ Modal Paten Owner:</strong> Default modal uang kembalian di laci kasir adalah <strong>Rp 100.000</strong>. Sesuaikan nominal jika menerima serah terima saldo berbeda.
               </div>
 
-              {/* Input nominal */}
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label htmlFor="modal-awal-input" className="form-label">Modal Awal (Rp) *</label>
-                <input
-                  id="modal-awal-input"
-                  type="number"
-                  inputMode="numeric"
-                  className="form-input"
-                  placeholder="0"
-                  value={modalInput}
-                  onChange={(e) => setModalInput(e.target.value)}
-                  min={0}
-                  step={1000}
+              {/* Mode Switcher */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, background: 'var(--color-surface-elevated)', padding: 4, borderRadius: 'var(--radius-md)' }}>
+                <button
+                  type="button"
+                  onClick={() => setInputMode('QUICK')}
                   style={{
-                    fontSize: 'clamp(1.25rem, 6vw, var(--text-2xl))',
-                    textAlign: 'center',
-                    fontWeight: 'var(--weight-bold)',
-                    minHeight: 52,
+                    background: inputMode === 'QUICK' ? 'var(--color-surface)' : 'transparent',
+                    boxShadow: inputMode === 'QUICK' ? 'var(--shadow-xs)' : 'none',
+                    color: inputMode === 'QUICK' ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                    fontWeight: 700,
+                    border: 'none',
+                    padding: '8px 6px',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                   }}
-                />
+                >
+                  <Banknote size={14} />
+                  Input Cepat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInputMode('CALCULATOR')}
+                  style={{
+                    background: inputMode === 'CALCULATOR' ? 'var(--color-surface)' : 'transparent',
+                    boxShadow: inputMode === 'CALCULATOR' ? 'var(--shadow-xs)' : 'none',
+                    color: inputMode === 'CALCULATOR' ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                    fontWeight: 700,
+                    border: 'none',
+                    padding: '8px 6px',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  }}
+                >
+                  <Calculator size={14} />
+                  Hitung Fisik (Pecahan)
+                </button>
               </div>
 
-              {/* Quick amount buttons */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)' }}>
-                {quickAmounts.map((a) => (
-                  <button
-                    key={a}
-                    onClick={() => setModalInput(a.toString())}
-                    className="btn btn-secondary"
-                    style={{
-                      minHeight: 44,
-                      padding: 'var(--space-2) var(--space-1)',
-                      fontSize: '0.72rem',
-                      fontWeight: 'var(--weight-semibold)',
-                    }}
-                  >
-                    {a === 0 ? 'Kosong (Rp 0)' : rp(a)}
-                  </button>
-                ))}
-              </div>
+              {inputMode === 'QUICK' ? (
+                <>
+                  {/* Input nominal cepat */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label htmlFor="modal-awal-input" className="form-label">Modal Awal (Rp) *</label>
+                    <input
+                      id="modal-awal-input"
+                      type="number"
+                      inputMode="numeric"
+                      className="form-input"
+                      placeholder="0"
+                      value={modalInput}
+                      onChange={(e) => setModalInput(e.target.value)}
+                      min={0}
+                      step={1000}
+                      style={{
+                        fontSize: 'clamp(1.25rem, 6vw, var(--text-2xl))',
+                        textAlign: 'center',
+                        fontWeight: 'var(--weight-bold)',
+                        minHeight: 52,
+                      }}
+                    />
+                  </div>
+
+                  {/* Quick amount buttons */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)' }}>
+                    {quickAmounts.map((a) => (
+                      <button
+                        key={a}
+                        type="button"
+                        onClick={() => setModalInput(a.toString())}
+                        className="btn btn-secondary"
+                        style={{
+                          minHeight: 44,
+                          padding: 'var(--space-2) var(--space-1)',
+                          fontSize: '0.72rem',
+                          fontWeight: 'var(--weight-semibold)',
+                        }}
+                      >
+                        {a === 0 ? 'Kosong (Rp 0)' : rp(a)}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div style={{ maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
+                  <KalkulatorPecahan initialBreakdown={breakdown} onChange={handleCalculatorChange} />
+                </div>
+              )}
 
               {/* Preview */}
               {!isNaN(modalNominal) && (
@@ -371,7 +435,7 @@ function BukaShiftOverlay({
                   textAlign: 'center', padding: 'var(--space-3)',
                   background: 'var(--color-success-light)', borderRadius: 'var(--radius-md)',
                 }}>
-                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>Modal tercatat</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>Modal tercatat di laci</div>
                   <div style={{ fontSize: 'clamp(1.25rem, 5vw, var(--text-2xl))', fontWeight: 'var(--weight-bold)', color: 'var(--color-success)' }}>
                     {rp(modalNominal)}
                   </div>
@@ -1065,6 +1129,11 @@ export default function PosPage() {
   const [showKasirMenu, setShowKasirMenu] = useState(false); // Option A mobile drawer menu toggle
   const [tutupLoading, setTutupLoading] = useState(false);
   const [showTutupConfirm, setShowTutupConfirm] = useState(false);
+  const [showKasGerak, setShowKasGerak] = useState(false);
+  const [tutupActualCash, setTutupActualCash] = useState<string>('');
+  const [tutupBreakdown, setTutupBreakdown] = useState<DenominasiMap>({});
+  const [tutupNotes, setTutupNotes] = useState<string>('');
+  const [tutupMode, setTutupMode] = useState<'QUICK' | 'CALCULATOR'>('QUICK');
   const [tutupResult, setTutupResult] = useState<{
     txCount: number;
   } | null>(null);
@@ -1407,7 +1476,16 @@ export default function PosPage() {
   async function handleTutupShift() {
     setTutupLoading(true);
     try {
-      const res = await fetch('/api/kasir/shift/tutup', { method: 'PATCH' });
+      const nominalFisik = tutupActualCash ? parseFloat(tutupActualCash.replace(/\D/g, '')) : undefined;
+      const res = await fetch('/api/kasir/shift/tutup', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          actualCash: nominalFisik !== undefined && !isNaN(nominalFisik) ? nominalFisik : undefined,
+          breakdown: Object.keys(tutupBreakdown).length > 0 ? tutupBreakdown : undefined,
+          notes: tutupNotes.trim() ? tutupNotes.trim() : undefined,
+        }),
+      });
       const json = await res.json() as {
         success: boolean;
         data?: {
@@ -1421,6 +1499,9 @@ export default function PosPage() {
       }
       setTutupResult(json.data ?? null);
       setShowTutupConfirm(false);
+      setTutupActualCash('');
+      setTutupBreakdown({});
+      setTutupNotes('');
       // Update session: shift = null setelah tutup
       setSession((prev) => prev ? { ...prev, shift: null } : prev);
     } catch {
@@ -1454,7 +1535,7 @@ export default function PosPage() {
         />
       )}
 
-      {/* ── Tutup Shift Konfirmasi Modal ─────────────────────────── */}
+      {/* ── Tutup Shift Konfirmasi Modal (Blind Count Uang Fisik Laci) ─────────────────────────── */}
       {showTutupConfirm && (
         <div
           role="dialog" aria-modal="true" aria-labelledby="tutup-shift-title"
@@ -1462,29 +1543,134 @@ export default function PosPage() {
             position: 'fixed', inset: 0, zIndex: 1800,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: 'var(--space-4)', background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+            overflowY: 'auto',
           }}
         >
-          <div className="card" style={{ width: '100%', maxWidth: 380, margin: 'auto', boxShadow: 'var(--shadow-xl)' }}>
-            <div className="card-body" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-              <h2 id="tutup-shift-title" style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-bold)', textAlign: 'center', margin: 0 }}>
-                ⚠️ Tutup Kasir?
-              </h2>
-              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', textAlign: 'center', margin: 0 }}>
-                Shift akan ditutup sekarang. Yakin ingin menutup sesi ini?
-              </p>
-              <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-                <button onClick={() => setShowTutupConfirm(false)} className="btn btn-secondary" style={{ flex: 1 }} disabled={tutupLoading}>
+          <div className="card" style={{ width: '100%', maxWidth: 440, margin: 'auto', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-xl)' }}>
+            <div className="card-body" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', overflowY: 'auto' }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 32, marginBottom: 4 }}>🔐</div>
+                <h2 id="tutup-shift-title" style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', margin: '0 0 4px' }}>
+                  Tutup Shift &amp; Rekap Laci
+                </h2>
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
+                  Hitung uang tunai di laci (Blind Count). Data akan dicocokkan otomatis oleh sistem Manajer.
+                </p>
+              </div>
+
+              {/* Mode Switcher */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, background: 'var(--color-surface-elevated)', padding: 4, borderRadius: 'var(--radius-md)' }}>
+                <button
+                  type="button"
+                  onClick={() => setTutupMode('QUICK')}
+                  style={{
+                    background: tutupMode === 'QUICK' ? 'var(--color-surface)' : 'transparent',
+                    boxShadow: tutupMode === 'QUICK' ? 'var(--shadow-xs)' : 'none',
+                    color: tutupMode === 'QUICK' ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                    fontWeight: 700,
+                    border: 'none',
+                    padding: '8px 6px',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  }}
+                >
+                  <Banknote size={14} />
+                  Input Saldo Langsung
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTutupMode('CALCULATOR')}
+                  style={{
+                    background: tutupMode === 'CALCULATOR' ? 'var(--color-surface)' : 'transparent',
+                    boxShadow: tutupMode === 'CALCULATOR' ? 'var(--shadow-xs)' : 'none',
+                    color: tutupMode === 'CALCULATOR' ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                    fontWeight: 700,
+                    border: 'none',
+                    padding: '8px 6px',
+                    borderRadius: 'var(--radius-sm)',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  }}
+                >
+                  <Calculator size={14} />
+                  Hitung Lembar &amp; Koin
+                </button>
+              </div>
+
+              {tutupMode === 'QUICK' ? (
+                <div>
+                  <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>
+                    Total Uang Fisik di Laci (Rp) *
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="form-input"
+                    placeholder="Contoh: 350.000"
+                    value={tutupActualCash}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/\D/g, '');
+                      setTutupActualCash(v ? parseInt(v, 10).toLocaleString('id-ID') : '');
+                    }}
+                    style={{
+                      fontSize: '1.2rem',
+                      textAlign: 'center',
+                      fontWeight: 800,
+                      minHeight: 48,
+                    }}
+                  />
+                </div>
+              ) : (
+                <div style={{ maxHeight: 260, overflowY: 'auto', paddingRight: 4 }}>
+                  <KalkulatorPecahan
+                    initialBreakdown={tutupBreakdown}
+                    onChange={(tot, counts) => {
+                      setTutupBreakdown(counts);
+                      setTutupActualCash(tot > 0 ? tot.toLocaleString('id-ID') : '');
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Catatan Handover */}
+              <div>
+                <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>
+                  Catatan Handover / Keterangan (Opsional):
+                </label>
+                <textarea
+                  className="form-input"
+                  rows={2}
+                  placeholder="Catatan serah terima kunci, uang titipan, dll."
+                  value={tutupNotes}
+                  onChange={(e) => setTutupNotes(e.target.value)}
+                  maxLength={300}
+                  style={{ fontSize: '0.8rem', resize: 'none' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowTutupConfirm(false)}
+                  className="btn btn-secondary"
+                  style={{ flex: 1 }}
+                  disabled={tutupLoading}
+                >
                   Batal
                 </button>
                 <button
+                  type="button"
                   onClick={handleTutupShift}
                   className="btn btn-primary"
                   disabled={tutupLoading}
-                  style={{ flex: 2, background: 'hsl(0 70% 50%)', minHeight: 44 }}
+                  style={{ flex: 2, background: 'hsl(0 70% 50%)', minHeight: 46, fontWeight: 700 }}
                 >
                   {tutupLoading
-                    ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Menutup...</>
-                    : <><X size={14} /> Ya, Tutup Kasir</>}
+                    ? <><Loader2 size={16} className="spin" /> Menutup Shift...</>
+                    : <><X size={16} /> Tutup Shift &amp; Simpan</>}
                 </button>
               </div>
             </div>
@@ -1830,6 +2016,32 @@ export default function PosPage() {
                   <span>Tukar Shift</span>
                 </a>
               </>
+            )}
+
+            {/* Tombol Kas Gerak (Petty Cash) — hanya jika ada shift aktif */}
+            {session?.shift && (
+              <button
+                id="btn-kas-gerak"
+                onClick={() => setShowKasGerak(true)}
+                title="Pencatatan Kas Keluar / Masuk Laci (Galon, Bensin, ATK)"
+                aria-label="Kas Keluar Masuk Laci"
+                style={{
+                  background: 'rgba(234, 179, 8, 0.15)',
+                  border: '1px solid rgba(234, 179, 8, 0.35)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'hsl(45 95% 75%)',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                  padding: '6px 10px',
+                  fontSize: 'var(--text-xs)',
+                  fontWeight: 'var(--weight-semibold)',
+                  transition: 'all var(--duration-fast)',
+                  minHeight: 36,
+                }}
+              >
+                <Receipt size={14} />
+                <span>Kas Gerak</span>
+              </button>
             )}
 
             {/* Tombol Tutup Kasir — hanya jika ada shift aktif */}
@@ -2270,6 +2482,27 @@ export default function PosPage() {
                 <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
               </a>
 
+              {session?.shift && (
+                <button
+                  type="button"
+                  className="pos-drawer-link"
+                  onClick={() => {
+                    setShowKasirMenu(false);
+                    setShowKasGerak(true);
+                  }}
+                  style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                >
+                  <div className="pos-drawer-icon-box" style={{ background: 'hsl(45 95% 90%)', color: 'hsl(45 90% 35%)' }}>
+                    <Receipt size={20} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="pos-drawer-link-title">Kas Keluar / Masuk Laci</div>
+                    <div className="pos-drawer-link-sub">Petty Cash: Galon, Bensin, ATK, Receh</div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+                </button>
+              )}
+
               <div className="pos-drawer-divider" />
 
               {session?.shift && (
@@ -2321,6 +2554,12 @@ export default function PosPage() {
           </div>
         </div>
       )}
+
+      {/* ── Modal Kas Keluar & Masuk Laci (Petty Cash) ─────────── */}
+      <KasGerakModal
+        isOpen={showKasGerak}
+        onClose={() => setShowKasGerak(false)}
+      />
     </div>
   );
 }
