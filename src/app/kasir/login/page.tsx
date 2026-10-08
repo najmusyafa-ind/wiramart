@@ -523,7 +523,19 @@ export default function KasirLoginPage() {
                                 type="button"
                                 onClick={() => {
                                   setSelectedPerson(p);
-                                  setSelectedRole('Kasir');
+                                  // Auto-detect role yang cocok berdasarkan jabatan atau nomor urut slot
+                                  let initialRole: RoleOption = 'Kasir';
+                                  const jab = (p.defaultJabatan ?? '').toLowerCase();
+                                  if (p.orderInSlot === 1 || jab.includes('admin')) {
+                                    initialRole = 'Admin Shift';
+                                  } else if (p.orderInSlot === 3 || jab.includes('gudang')) {
+                                    initialRole = 'Kepala Gudang';
+                                  } else if (p.orderInSlot === 4 || jab.includes('pelayan') || jab.includes('service')) {
+                                    initialRole = 'Customer Service';
+                                  } else if (p.orderInSlot === 2 || jab.includes('kasir')) {
+                                    initialRole = 'Kasir';
+                                  }
+                                  setSelectedRole(initialRole);
                                   setPresensiError(null);
                                 }}
                                 className="btn btn-primary"
