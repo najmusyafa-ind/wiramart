@@ -45,7 +45,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // State Modal Setup PIN (Untuk Azzahro atau Admin Shift baru)
+  // State Modal Setup PIN (Untuk Admin Shift yang belum membuat PIN)
   const [setupPinData, setSetupPinData] = useState<SetupPinData | null>(null);
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -90,7 +90,7 @@ export default function LoginPage() {
           message?: string;
         };
 
-        // KASUS KHUSUS: Belum memiliki PIN (cth: Azzahro Setyowati S)
+        // KASUS KHUSUS: Belum memiliki PIN (Akun Baru / Belum Inisialisasi)
         if (json.code === 'NEED_SETUP_PIN' && json.data) {
           setSetupPinData({
             nim: json.data.nim ?? trimmedNim,
@@ -392,7 +392,7 @@ export default function LoginPage() {
                     id={`${uid}-admin-shift-nim`}
                     type="text"
                     className="form-input"
-                    placeholder="Contoh: 02301028 (Azzahro) atau 02601018 (Risqia)"
+                    placeholder="Contoh: 02301001"
                     value={adminShiftNim}
                     onChange={(e) => setAdminShiftNim(e.target.value)}
                     autoComplete="off"
@@ -503,7 +503,7 @@ export default function LoginPage() {
                     id={`${uid}-manager-nidn`}
                     type="text"
                     className="form-input"
-                    placeholder="Contoh: 1234567890 (dedewaryanto)"
+                    placeholder="Contoh: 0612345678"
                     value={managerNidn}
                     onChange={(e) => setManagerNidn(e.target.value)}
                     autoComplete="off"
@@ -669,7 +669,7 @@ export default function LoginPage() {
         </p>
       </main>
 
-      {/* ── MODAL SETUP PIN (JIKA AZZAHRO / ADMIN BELUM BIKIN PIN) ── */}
+      {/* ── MODAL SETUP PIN (JIKA ADMIN SHIFT BELUM BIKIN PIN) ── */}
       {setupPinData && (
         <div
           style={{

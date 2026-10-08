@@ -120,7 +120,7 @@ export async function POST(request: Request): Promise<Response> {
   // ── LOGIKA OTENTIKASI & DETEKSI PIN ───────────────────────────────────
 
   // Kasus A: Karyawan Admin Shift terdaftar di employees tapi BELUM ADA di admins / BELUM MEMBUAT PIN
-  // (Kondisi Azzahro Setyowati S: nim 02301028, pinHash null)
+  // (Kondisi Akun Terdaftar: pinHash null)
   if ((!admin && employee && isEligibleEmployeeAdmin && !employee.pinHash) ||
       (admin && admin.role === 'ADMIN_SHIFT' && !admin.passwordHash && !employee?.pinHash)) {
     const targetName = employee?.fullName ?? admin?.fullName ?? 'Admin Shift';

@@ -774,7 +774,7 @@ export default function KasirLoginPage() {
                     id={nameId}
                     type="text"
                     className="form-input"
-                    placeholder="Contoh: Dwi Lia Rahmania"
+                    placeholder="Nama lengkap sesuai jadwal"
                     value={form.fullName}
                     onChange={handleFormChange('fullName')}
                     autoComplete="name"
@@ -806,7 +806,7 @@ export default function KasirLoginPage() {
                     id={nimId}
                     type="text"
                     className="form-input"
-                    placeholder="Contoh: 02401083"
+                    placeholder="Contoh: 02301001"
                     value={form.nim}
                     onChange={handleFormChange('nim')}
                     autoComplete="off"
