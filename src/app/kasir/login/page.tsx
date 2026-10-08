@@ -427,11 +427,33 @@ export default function KasirLoginPage() {
                             AKTIF
                           </span>
                         )}
+                        {s.personnel.length < 4 && (
+                          <span style={{ backgroundColor: 'var(--color-surface-alt, #f1f5f9)', color: 'var(--color-text-muted)', fontSize: 10, padding: '2px 6px', borderRadius: 10, border: '1px solid var(--color-border)' }}>
+                            {s.personnel.length} Personel (Fleksibel)
+                          </span>
+                        )}
                       </div>
                       <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                         {s.personnel.filter(p => p.attendance.isAttended).length} / {s.personnel.length} Hadir
                       </span>
                     </div>
+
+                    {s.personnel.length < 4 && (
+                      <div style={{
+                        padding: '6px 10px',
+                        backgroundColor: 'rgba(59, 130, 246, 0.06)',
+                        border: '1px solid rgba(59, 130, 246, 0.2)',
+                        borderRadius: 'var(--radius-md)',
+                        fontSize: 11,
+                        color: 'var(--color-primary)',
+                        marginBottom: 10,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}>
+                        <span>ℹ️ Shift fleksibel ({s.personnel.length} personel terdaftar). Anggota yang hadir dapat merangkap peran dan langsung bertugas di POS kasir.</span>
+                      </div>
+                    )}
 
                     {/* Personnel List */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -562,7 +584,7 @@ export default function KasirLoginPage() {
               <button
                 type="button"
                 onClick={() => setActiveTab('pos')}
-                className="btn btn-secondary btn-full"
+                className="btn btn-primary btn-full"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -572,9 +594,12 @@ export default function KasirLoginPage() {
                   padding: '10px 14px',
                 }}
               >
-                <span>Sudah absen semua? Buka Kasir POS</span>
+                <span>Sudah Presensi? Lanjut Buka Kasir POS Sekarang</span>
                 <ChevronRight size={16} />
               </button>
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--color-text-muted)' }}>
+                Buka kasir dapat dilakukan oleh petugas yang hadir tanpa harus menunggu 4 anggota lengkap.
+              </p>
             </div>
           </div>
         )}
@@ -861,7 +886,7 @@ export default function KasirLoginPage() {
               transition: 'color var(--duration-fast)',
             }}
           >
-            ← Login sebagai Admin Dosen
+            ← Login Pengelola (Admin Kasir &amp; Manager Dosen)
           </a>
         </div>
       </main>
