@@ -25,16 +25,17 @@ export default async function AdminLayout({
     redirect('/login');
   }
 
-  // Fetch admin full name
+  // Fetch admin full name & role
   const admin = await db.query.admins.findFirst({
     where: eq(admins.id, session.sub),
-    columns: { fullName: true },
+    columns: { fullName: true, role: true },
   });
 
   const adminName = admin?.fullName ?? 'Admin';
+  const adminRole = (admin?.role as 'MANAGER' | 'ADMIN_SHIFT') ?? session.adminRole ?? 'ADMIN_SHIFT';
 
   return (
-    <AdminLayoutClient adminName={adminName}>
+    <AdminLayoutClient adminName={adminName} adminRole={adminRole}>
       {children}
     </AdminLayoutClient>
   );

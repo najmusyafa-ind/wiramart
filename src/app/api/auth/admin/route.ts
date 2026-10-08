@@ -53,7 +53,7 @@ export async function POST(request: Request): Promise<Response> {
     ),
     columns: {
       id: true, nidn: true, passwordHash: true,
-      fullName: true, isActive: true, isActivated: true,
+      fullName: true, role: true, isActive: true, isActivated: true,
     },
   });
 
@@ -79,12 +79,23 @@ export async function POST(request: Request): Promise<Response> {
   // Login sukses — reset counter
   adminAuthLimiter.reset(rateKey);
 
-  const accessToken = await signAccessToken({ sub: admin.id, role: 'admin', username: admin.nidn });
+  const adminRole = (admin.role as 'MANAGER' | 'ADMIN_SHIFT') ?? 'ADMIN_SHIFT';
+  const accessToken = await signAccessToken({
+    sub: admin.id,
+    role: 'admin',
+    adminRole,
+    username: admin.nidn,
+  });
   const refreshToken = await signRefreshToken(admin.id, 'admin');
 
   const response = NextResponse.json({
     success: true,
-    data: { role: 'admin', name: admin.fullName, redirect: '/admin/dashboard' },
+    data: {
+      role: 'admin',
+      adminRole,
+      name: admin.fullName,
+      redirect: '/admin/dashboard',
+    },
   });
 
   const isProduction = process.env.NODE_ENV === 'production';

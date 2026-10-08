@@ -42,9 +42,12 @@ function getJwtSecret(): Uint8Array {
 }
 
 // --- Token Payload Types ---
+export type AdminRole = 'MANAGER' | 'ADMIN_SHIFT';
+
 export type AdminTokenPayload = {
   sub: string;    // admin id
   role: 'admin';
+  adminRole?: AdminRole;
   username: string;
 };
 
@@ -189,7 +192,15 @@ export async function requireAuth(): Promise<TokenPayload> {
 export async function requireAdmin(): Promise<AdminTokenPayload> {
   const session = await getAdminSession();
   if (!session) {
-    throw new AppError('FORBIDDEN', 'Akses ditolak. Hanya Admin yang dapat melakukan ini.', 403);
+    throw new AppError('FORBIDDEN', 'Akses ditolak. Hanya Admin/Manager yang dapat melakukan ini.', 403);
+  }
+  return session;
+}
+
+export async function requireManager(): Promise<AdminTokenPayload> {
+  const session = await requireAdmin();
+  if (session.adminRole !== 'MANAGER') {
+    throw new AppError('FORBIDDEN', 'Akses ditolak. Fitur ini khusus untuk Manager (Dosen).', 403);
   }
   return session;
 }

@@ -66,6 +66,8 @@ export const admins = pgTable(
     // NULL = belum aktivasi akun (belum set password)
     passwordHash: text('password_hash'),
     fullName: varchar('full_name', { length: 200 }).notNull(),
+    // Role: MANAGER (Dosen/Owner/Developer Testing) | ADMIN_SHIFT (Mahasiswa Koordinator Shift)
+    role: varchar('role', { length: 50 }).notNull().default('ADMIN_SHIFT'),
     // TRUE setelah dosen aktivasi akun (set password sendiri)
     isActivated: boolean('is_activated').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),

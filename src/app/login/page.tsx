@@ -180,11 +180,11 @@ export default function LoginPage() {
         {/* ── Heading ─────────────────────────────────────── */}
         <div style={{ marginBottom: 'var(--space-5)', textAlign: 'center' }}>
           <h1 className="auth-title" style={{ marginBottom: 'var(--space-1)' }}>
-            {role === 'admin' ? 'Masuk sebagai Admin' : 'Masuk sebagai Karyawan'}
+            {role === 'admin' ? 'Masuk sebagai Pengelola' : 'Masuk sebagai Karyawan'}
           </h1>
           <p className="auth-subtitle">
             {role === 'admin'
-              ? 'Kelola produk, laporan, dan pengaturan sistem.'
+              ? 'Khusus Manager (Dosen) dan Admin Shift (Mahasiswa).'
               : 'Sesi kerja Anda akan tercatat otomatis saat login dan logout.'}
           </p>
         </div>
@@ -228,14 +228,14 @@ export default function LoginPage() {
               {/* Username */}
               <div className="form-group">
                 <label className="form-label" htmlFor={`${uid}-nidn`}>
-                  NIDN / NIDK <span className="required" aria-hidden="true">*</span>
+                  NIDN / ID Pengelola <span className="required" aria-hidden="true">*</span>
                 </label>
                 <input
                   id={`${uid}-nidn`}
                   name="admin_nidn_login"
                   type="text"
                   className="form-input"
-                  placeholder="Nomor Induk Dosen"
+                  placeholder="NIDN Dosen atau ID Admin Shift"
                   value={nidn}
                   onChange={(e) => setNidn(e.target.value)}
                   autoComplete="off"

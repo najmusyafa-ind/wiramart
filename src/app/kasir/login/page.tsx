@@ -45,7 +45,7 @@ type PresensiData = {
   shifts: ShiftGroup[];
 };
 
-type RoleOption = 'Ketua Admin' | 'Kasir' | 'Pelayan' | 'Gudang' | 'Customer Service' | 'Kepala Gudang' | 'Admin Kasir';
+type RoleOption = 'Admin Shift' | 'Kepala Gudang' | 'Kasir' | 'Customer Service' | 'Ketua Admin' | 'Pelayan' | 'Gudang' | 'Admin Kasir';
 
 export default function KasirLoginPage() {
   const router = useRouter();
@@ -130,8 +130,8 @@ export default function KasirLoginPage() {
 
       setPresensiSuccessMsg(json.message ?? `Presensi berhasil! Selamat bertugas sebagai ${selectedRole}.`);
       
-      // Auto-fill login POS jika orang ini bertugas sebagai Kasir atau Ketua Admin
-      if (selectedRole === 'Kasir' || selectedRole === 'Ketua Admin') {
+      // Auto-fill login POS jika orang ini bertugas sebagai Kasir atau Admin Shift
+      if (selectedRole === 'Kasir' || selectedRole === 'Admin Shift' || selectedRole === 'Ketua Admin') {
         setForm({
           fullName:     selectedPerson.fullName ?? '',
           nim:          selectedPerson.nim ?? '',
@@ -606,10 +606,10 @@ export default function KasirLoginPage() {
                 </label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {[
-                    { role: 'Ketua Admin', desc: 'Ketua Shift, koordinator tim & pemegang laci', icon: <ShieldCheck size={16} /> },
-                    { role: 'Kasir', desc: 'Melayani transaksi belanja & scanning POS', icon: <ShoppingBag size={16} /> },
-                    { role: 'Pelayan', desc: 'Customer service, bantu pembeli & display rak depan', icon: <HeartHandshake size={16} /> },
-                    { role: 'Gudang', desc: 'Logistik, cek fisik barang, tata rak & restock', icon: <Package size={16} /> },
+                    { role: 'Admin Shift', desc: 'Koordinator shift, monitoring tim & otorisasi operasional', icon: <ShieldCheck size={16} /> },
+                    { role: 'Kepala Gudang', desc: 'Logistik, terima barang supplier, cek batch & expired', icon: <Package size={16} /> },
+                    { role: 'Kasir', desc: 'Melayani transaksi belanja, laci uang & scanning POS', icon: <ShoppingBag size={16} /> },
+                    { role: 'Customer Service', desc: 'Layanan pelanggan, cek harga rak, display etalase', icon: <HeartHandshake size={16} /> },
                   ].map((item) => (
                     <button
                       key={item.role}

@@ -29,6 +29,7 @@ type NavItem = {
   href: string;
   icon: React.ReactNode;
   section?: string;
+  managerOnly?: boolean;
 };
 
 const NAV_ITEMS: NavItem[] = [
@@ -91,6 +92,7 @@ const NAV_ITEMS: NavItem[] = [
     href: '/admin/pengaturan',
     icon: <Settings size={18} aria-hidden="true" />,
     section: 'Sistem',
+    managerOnly: true,
   },
   {
     label: 'Export Data',
@@ -102,11 +104,12 @@ const NAV_ITEMS: NavItem[] = [
 
 type AdminSidebarProps = {
   adminName: string;
+  adminRole?: 'MANAGER' | 'ADMIN_SHIFT';
   isMobileOpen: boolean;
   onClose: () => void;
 };
 
-function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
+function AdminSidebar({ adminName, adminRole = 'ADMIN_SHIFT', isMobileOpen, onClose }: AdminSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -128,13 +131,15 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
     }
   }
 
-  // Group nav items by section
-  const sections = NAV_ITEMS.reduce<Record<string, NavItem[]>>((acc, item) => {
-    const section = item.section ?? 'Lainnya';
-    if (!acc[section]) acc[section] = [];
-    acc[section].push(item);
-    return acc;
-  }, {});
+  // Group nav items by section (hanya tampilkan managerOnly jika user adalah MANAGER)
+  const sections = NAV_ITEMS
+    .filter((item) => !item.managerOnly || adminRole === 'MANAGER')
+    .reduce<Record<string, NavItem[]>>((acc, item) => {
+      const section = item.section ?? 'Lainnya';
+      if (!acc[section]) acc[section] = [];
+      acc[section].push(item);
+      return acc;
+    }, {});
 
   return (
     <nav
@@ -278,8 +283,17 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
             >
               {adminName}
             </div>
-            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-sidebar-muted)' }}>
-              Administrator
+            <div
+              style={{
+                fontSize: 'var(--text-xs)',
+                color: adminRole === 'MANAGER' ? '#f59e0b' : 'var(--color-sidebar-muted)',
+                fontWeight: adminRole === 'MANAGER' ? 700 : 500,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              {adminRole === 'MANAGER' ? '👑 Manager (Dosen)' : '🛡️ Admin Shift'}
             </div>
           </div>
         </div>
@@ -308,12 +322,14 @@ function AdminSidebar({ adminName, isMobileOpen, onClose }: AdminSidebarProps) {
 type AdminLayoutClientProps = {
   children: React.ReactNode;
   adminName: string;
+  adminRole?: 'MANAGER' | 'ADMIN_SHIFT';
   pageTitle?: string;
 };
 
 export default function AdminLayoutClient({
   children,
   adminName,
+  adminRole = 'ADMIN_SHIFT',
   pageTitle,
 }: AdminLayoutClientProps) {
   const router = useRouter();
@@ -422,6 +438,7 @@ export default function AdminLayoutClient({
       {/* Single sidebar — .mobile-open class makes it visible on mobile */}
       <AdminSidebar
         adminName={adminName}
+        adminRole={adminRole}
         isMobileOpen={isMobileOpen}
         onClose={() => setIsMobileOpen(false)}
       />
@@ -467,27 +484,44 @@ export default function AdminLayoutClient({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-            <a
-              href="/admin/pengaturan"
-              title="Pengaturan Sistem"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
-                color: 'var(--color-text-muted)',
-                textDecoration: 'none',
-              }}
-            >
-              <Wrench size={16} aria-hidden="true" />
-            </a>
-            <div
-              style={{
-                fontSize: 'var(--text-sm)',
-                color: 'var(--color-text-secondary)',
-                fontWeight: 'var(--weight-medium)',
-              }}
-            >
-              {adminName}
+            {adminRole === 'MANAGER' && (
+              <a
+                href="/admin/pengaturan"
+                title="Pengaturan Sistem (Manager Khusus)"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-1)',
+                  color: 'var(--color-text-muted)',
+                  textDecoration: 'none',
+                }}
+              >
+                <Wrench size={16} aria-hidden="true" />
+              </a>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  backgroundColor: adminRole === 'MANAGER' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(37, 99, 235, 0.12)',
+                  color: adminRole === 'MANAGER' ? '#d97706' : '#2563eb',
+                  border: adminRole === 'MANAGER' ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid rgba(37, 99, 235, 0.25)',
+                }}
+              >
+                {adminRole === 'MANAGER' ? '👑 MANAGER' : '🛡️ ADMIN SHIFT'}
+              </span>
+              <div
+                style={{
+                  fontSize: 'var(--text-sm)',
+                  color: 'var(--color-text-secondary)',
+                  fontWeight: 'var(--weight-medium)',
+                }}
+              >
+                {adminName}
+              </div>
             </div>
           </div>
         </header>
