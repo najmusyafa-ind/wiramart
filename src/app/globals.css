@@ -1448,12 +1448,16 @@ p, h1, h2, h3, h4, h5, h6 {
   grid-column: 1 / -1;
   background-color: var(--color-sidebar-bg);
   padding: 0 var(--space-4);
-  height: 54px;
+  min-height: 54px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: var(--space-2);
   border-bottom: 1px solid var(--color-sidebar-border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  flex-shrink: 0;
 }
 
 /* Products area */
@@ -2018,10 +2022,14 @@ p, h1, h2, h3, h4, h5, h6 {
     padding-bottom: calc(var(--space-4) + 64px + env(safe-area-inset-bottom, 0px));
   }
 
-  /* POS mobile: single column */
+  /* POS mobile: single column flex layout to guarantee sticky topbar */
   .layout-pos {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    position: relative;
   }
 
   /* Cart panel: slides up from bottom on mobile */
@@ -2031,7 +2039,7 @@ p, h1, h2, h3, h4, h5, h6 {
     left: 0;
     right: 0;
     height: 70dvh;
-    z-index: 20;
+    z-index: 200;
     border-left: none;
     border-top: 1px solid var(--color-border);
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
@@ -2061,6 +2069,7 @@ p, h1, h2, h3, h4, h5, h6 {
   /* Show mobile search below topbar */
   .pos-mobile-search {
     display: block;
+    flex-shrink: 0;
   }
 
   /* POS products grid — smaller cards */
@@ -2077,7 +2086,7 @@ p, h1, h2, h3, h4, h5, h6 {
   .grid-stats { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* POS Desktop Actions & Mobile Menu (Option A) */
+/* POS Desktop Actions & Mobile Menu */
 .pos-desktop-actions {
   display: flex;
   align-items: center;
@@ -2088,18 +2097,92 @@ p, h1, h2, h3, h4, h5, h6 {
   display: none;
 }
 
-@media (max-width: 640px) {
-  /* Hide all desktop action pills on mobile to prevent squished dots */
+/* Mobile Quick Action Ribbon (Pita Fitur Kasir) */
+.pos-mobile-actions-ribbon {
+  display: none;
+}
+
+@media (max-width: 1023px) {
   .pos-desktop-actions {
     display: none !important;
   }
+
+  .pos-mobile-actions-ribbon {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--color-surface);
+    border-bottom: 1.5px solid var(--color-border);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    flex-shrink: 0;
+  }
+  .pos-mobile-actions-ribbon::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.pos-ribbon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.12s ease;
+  min-height: 32px;
+}
+.pos-ribbon-btn:active {
+  transform: scale(0.96);
+}
+
+.pos-ribbon-btn-primary {
+  background: hsl(142 65% 92%);
+  color: hsl(142 75% 20%);
+  border-color: hsl(142 60% 75%);
+}
+.pos-ribbon-btn-info {
+  background: hsl(200 85% 92%);
+  color: hsl(200 85% 22%);
+  border-color: hsl(200 70% 75%);
+}
+.pos-ribbon-btn-warning {
+  background: hsl(45 95% 90%);
+  color: hsl(45 95% 20%);
+  border-color: hsl(45 90% 70%);
+}
+.pos-ribbon-btn-orange {
+  background: hsl(24 95% 92%);
+  color: hsl(24 95% 25%);
+  border-color: hsl(24 85% 75%);
+}
+.pos-ribbon-btn-danger {
+  background: hsl(0 85% 92%);
+  color: hsl(0 75% 35%);
+  border-color: hsl(0 70% 78%);
+}
+.pos-ribbon-btn-logout {
+  background: hsl(220 15% 92%);
+  color: hsl(220 20% 30%);
+  border-color: hsl(220 15% 80%);
+}
+
+@media (max-width: 640px) {
   /* Show clean mobile kebab menu button */
   .pos-mobile-menu-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 36px;
     border-radius: var(--radius-md);
     background: rgba(255, 255, 255, 0.12);
     border: 1px solid rgba(255, 255, 255, 0.2);

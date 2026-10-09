@@ -15,7 +15,7 @@ export default async function KasirLayout({ children }: { children: React.ReactN
   }
 
   return (
-    <div style={{ height: '100vh', overflow: 'hidden' }}>
+    <div style={{ height: '100dvh', maxHeight: '100dvh', overflow: 'hidden', position: 'relative' }}>
       {children}
     </div>
   );

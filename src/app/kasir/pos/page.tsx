@@ -2057,13 +2057,13 @@ export default function PosPage() {
             title="Scan Barcode"
             style={{
               background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 'var(--radius-md)', padding: '6px 12px', cursor: 'pointer',
+              borderRadius: 'var(--radius-md)', padding: '6px 11px', cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
               color: 'white', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
               flexShrink: 0,
             }}
           >
-            <ScanLine size={16} aria-hidden="true" />
+            <ScanLine size={15} aria-hidden="true" />
             <span className="pos-search-wrap">Scan</span>
           </button>
 
@@ -2071,18 +2071,18 @@ export default function PosPage() {
           <a
             href="/kasir/produk"
             id="btn-nav-produk-topbar"
-            title="Kelola Produk & Stok"
-            aria-label="Kelola produk dan stok"
+            title="Kelola & Tambah Produk / Stok"
+            aria-label="Tambah dan kelola produk"
             style={{
-              background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)',
+              background: 'rgba(34, 197, 94, 0.22)', border: '1px solid rgba(34, 197, 94, 0.45)',
               borderRadius: 'var(--radius-md)', padding: '6px 11px',
               display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-              color: 'white', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
+              color: 'hsl(142 80% 85%)', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
               textDecoration: 'none', flexShrink: 0,
             }}
           >
-            <Package size={15} aria-hidden="true" />
-            <span>Produk</span>
+            <Plus size={14} aria-hidden="true" />
+            <span>+ Produk</span>
           </a>
 
           {/* Tombol Keranjang — selalu tampil di desktop & mobile */}
@@ -2098,7 +2098,7 @@ export default function PosPage() {
             )}
           </button>
 
-          {/* DESKTOP ACTIONS ONLY (disembunyikan di mobile <= 640px) */}
+          {/* DESKTOP ACTIONS ONLY (di desktop >= 1024px tampil lengkap) */}
           <div className="pos-desktop-actions">
             {/* Kasir info */}
             <div className="pos-kasir-info">
@@ -2108,7 +2108,7 @@ export default function PosPage() {
               }}>
                 <User size={14} style={{ flexShrink: 0, opacity: 0.7 }} />
                 <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {kasirName}
+                  {kasirName || 'Kasir'}
                 </span>
               </div>
               {session?.shift && (
@@ -2123,135 +2123,148 @@ export default function PosPage() {
 
             {/* Tombol Tukar Shift (Desktop) */}
             {mounted && (
-              <>
-                <a
-                  href="/kasir/tukar-shift"
-                  id="btn-tukar-shift"
-                  title="Ajukan Tukar Shift"
-                  aria-label="Ajukan tukar shift"
-                  style={{
-                    background: 'rgba(255,255,255,0.08)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    borderRadius: 'var(--radius-md)',
-                    color: 'var(--color-sidebar-muted)',
-                    cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                    padding: '6px 10px',
-                    fontSize: 'var(--text-xs)',
-                    fontWeight: 'var(--weight-medium)',
-                    transition: 'all var(--duration-fast)',
-                    textDecoration: 'none',
-                  }}
-                >
-                  <ArrowLeftRight size={14} />
-                  <span>Tukar Shift</span>
-                </a>
-              </>
-            )}
-
-            {/* Tombol Kas Gerak (Petty Cash) — hanya jika ada shift aktif */}
-            {session?.shift && (
-              <button
-                id="btn-kas-gerak"
-                onClick={() => setShowKasGerak(true)}
-                title="Pencatatan Kas Keluar / Masuk Laci (Galon, Bensin, ATK)"
-                aria-label="Kas Keluar Masuk Laci"
+              <a
+                href="/kasir/tukar-shift"
+                id="btn-tukar-shift"
+                title="Ajukan Tukar Shift"
+                aria-label="Ajukan tukar shift"
                 style={{
-                  background: 'rgba(234, 179, 8, 0.15)',
-                  border: '1px solid rgba(234, 179, 8, 0.35)',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
                   borderRadius: 'var(--radius-md)',
-                  color: 'hsl(45 95% 75%)',
+                  color: 'var(--color-sidebar-muted)',
                   cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
                   padding: '6px 10px',
                   fontSize: 'var(--text-xs)',
-                  fontWeight: 'var(--weight-semibold)',
+                  fontWeight: 'var(--weight-medium)',
                   transition: 'all var(--duration-fast)',
-                  minHeight: 36,
+                  textDecoration: 'none',
                 }}
               >
-                <Receipt size={14} />
-                <span>Kas Gerak</span>
-              </button>
+                <ArrowLeftRight size={14} />
+                <span>Tukar Shift</span>
+              </a>
             )}
 
-            {/* Tombol Opname Sisa Makanan Jam 15:00 — hanya jika ada shift aktif */}
-            {session?.shift && (
-              <button
-                id="btn-opname-makanan"
-                onClick={() => setShowSisaMakanan(true)}
-                title="Opname Sisa Makanan Harian & Non-Barcode Jam 15:00"
-                aria-label="Opname Makanan Jam 15:00"
-                style={{
-                  background: 'rgba(249, 115, 22, 0.15)',
-                  border: '1px solid rgba(249, 115, 22, 0.35)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'hsl(24 95% 75%)',
-                  cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                  padding: '6px 10px',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 'var(--weight-semibold)',
-                  transition: 'all var(--duration-fast)',
-                  minHeight: 36,
-                }}
-              >
-                <Utensils size={14} />
-                <span>Opname 15:00</span>
-              </button>
-            )}
-
-            {/* Tombol Tutup Kasir — hanya jika ada shift aktif */}
-            {session?.shift && (
-              <button
-                id="btn-tutup-kasir"
-                onClick={() => setShowTutupConfirm(true)}
-                title="Tutup Kasir"
-                aria-label="Tutup shift kasir"
-                style={{
-                  background: 'rgba(220, 38, 38, 0.15)',
-                  border: '1px solid rgba(220, 38, 38, 0.35)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'hsl(0 80% 75%)',
-                  cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                  padding: '6px 10px',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 'var(--weight-semibold)',
-                  transition: 'all var(--duration-fast)',
-                  minHeight: 36,
-                }}
-              >
-                <X size={14} />
-                <span>Tutup Kasir</span>
-              </button>
-            )}
-
-            {/* Tombol Keluar */}
+            {/* Tombol Kas Gerak (Petty Cash) — selalu tampil di desktop */}
             <button
-              onClick={handleLogout}
+              id="btn-kas-gerak"
+              onClick={() => {
+                if (!session?.shift) {
+                  alert('Silakan buka shift terlebih dahulu untuk mencatat kas laci.');
+                  return;
+                }
+                setShowKasGerak(true);
+              }}
+              title="Pencatatan Kas Keluar / Masuk Laci (Galon, Bensin, ATK)"
+              aria-label="Kas Keluar Masuk Laci"
               style={{
-                background: 'rgba(255,255,255,0.08)',
-                border: '1px solid rgba(255,255,255,0.12)',
+                background: 'rgba(234, 179, 8, 0.15)',
+                border: '1px solid rgba(234, 179, 8, 0.35)',
                 borderRadius: 'var(--radius-md)',
-                color: 'var(--color-sidebar-muted)',
+                color: 'hsl(45 95% 75%)',
                 cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
+                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
                 padding: '6px 10px',
                 fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-medium)',
+                fontWeight: 'var(--weight-semibold)',
                 transition: 'all var(--duration-fast)',
+                minHeight: 36,
               }}
-              aria-label="Keluar dari sesi"
             >
-              <LogOut size={14} />
-              <span>Keluar</span>
+              <Receipt size={14} />
+              <span>Kas Gerak</span>
+            </button>
+
+            {/* Tombol Opname Sisa Makanan Jam 15:00 — selalu tampil di desktop */}
+            <button
+              id="btn-opname-makanan"
+              onClick={() => {
+                if (!session?.shift) {
+                  alert('Silakan buka shift terlebih dahulu untuk opname sisa makanan.');
+                  return;
+                }
+                setShowSisaMakanan(true);
+              }}
+              title="Opname Sisa Makanan Harian & Non-Barcode Jam 15:00"
+              aria-label="Opname Makanan Jam 15:00"
+              style={{
+                background: 'rgba(249, 115, 22, 0.15)',
+                border: '1px solid rgba(249, 115, 22, 0.35)',
+                borderRadius: 'var(--radius-md)',
+                color: 'hsl(24 95% 75%)',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                padding: '6px 10px',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 'var(--weight-semibold)',
+                transition: 'all var(--duration-fast)',
+                minHeight: 36,
+              }}
+            >
+              <Utensils size={14} />
+              <span>Opname 15:00</span>
+            </button>
+
+            {/* Tombol Tutup Kasir — selalu tampil di desktop */}
+            <button
+              id="btn-tutup-kasir"
+              onClick={() => {
+                if (!session?.shift) {
+                  alert('Tidak ada shift aktif yang perlu ditutup.');
+                  return;
+                }
+                setShowTutupConfirm(true);
+              }}
+              title="Tutup Kasir"
+              aria-label="Tutup shift kasir"
+              style={{
+                background: 'rgba(220, 38, 38, 0.15)',
+                border: '1px solid rgba(220, 38, 38, 0.35)',
+                borderRadius: 'var(--radius-md)',
+                color: 'hsl(0 80% 75%)',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                padding: '6px 10px',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 'var(--weight-semibold)',
+                transition: 'all var(--duration-fast)',
+                minHeight: 36,
+              }}
+            >
+              <X size={14} />
+              <span>Tutup Kasir</span>
             </button>
           </div>
 
-          {/* MOBILE ONLY MENU TRIGGER (Kebab ⋮ button — tampil hanya di mobile <= 640px) */}
+          {/* Tombol Keluar — tampil di desktop & mobile topbar */}
+          <button
+            id="btn-logout-pos"
+            onClick={handleLogout}
+            title="Keluar dari sesi kasir"
+            aria-label="Keluar dari sesi"
+            style={{
+              background: 'rgba(239, 68, 68, 0.18)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              borderRadius: 'var(--radius-md)',
+              color: 'hsl(0 85% 85%)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              padding: '6px 10px',
+              fontSize: 'var(--text-xs)',
+              fontWeight: 'var(--weight-semibold)',
+              transition: 'all var(--duration-fast)',
+              flexShrink: 0,
+            }}
+          >
+            <LogOut size={14} />
+            <span>Keluar</span>
+          </button>
+
+          {/* MOBILE ONLY MENU TRIGGER (Kebab ⋮ button — opsi menu tambahan) */}
           <button
             id="btn-mobile-kasir-menu"
             onClick={() => setShowKasirMenu(true)}
@@ -2259,7 +2272,7 @@ export default function PosPage() {
             aria-label="Menu Kasir & Akun"
             title="Menu Kasir"
           >
-            <MoreVertical size={20} />
+            <MoreVertical size={18} />
           </button>
         </div>
       </header>
@@ -2285,6 +2298,72 @@ export default function PosPage() {
               background: 'var(--color-surface)',
             }}
           />
+        </div>
+
+        {/* Mobile Quick Action Ribbon — Semua fitur kasir langsung 1 sentuhan di mobile */}
+        <div className="pos-mobile-actions-ribbon">
+          <a href="/kasir/produk" className="pos-ribbon-btn pos-ribbon-btn-primary" title="Tambah Produk Baru">
+            <Plus size={13} strokeWidth={2.5} />
+            <span>+ Tambah Produk</span>
+          </a>
+          <a href="/kasir/tukar-shift" className="pos-ribbon-btn pos-ribbon-btn-info" title="Ajukan Tukar Shift">
+            <ArrowLeftRight size={13} />
+            <span>Tukar Shift</span>
+          </a>
+          <button
+            type="button"
+            onClick={() => {
+              if (!session?.shift) {
+                alert('Silakan buka shift terlebih dahulu untuk mencatat kas laci.');
+                return;
+              }
+              setShowKasGerak(true);
+            }}
+            className="pos-ribbon-btn pos-ribbon-btn-warning"
+            title="Pencatatan Kas Keluar / Masuk Laci"
+          >
+            <Receipt size={13} />
+            <span>Kas Gerak</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!session?.shift) {
+                alert('Silakan buka shift terlebih dahulu untuk opname sisa makanan.');
+                return;
+              }
+              setShowSisaMakanan(true);
+            }}
+            className="pos-ribbon-btn pos-ribbon-btn-orange"
+            title="Opname Sisa Makanan Jam 15:00"
+          >
+            <Utensils size={13} />
+            <span>Opname 15:00</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!session?.shift) {
+                alert('Tidak ada shift aktif yang perlu ditutup.');
+                return;
+              }
+              setShowTutupConfirm(true);
+            }}
+            className="pos-ribbon-btn pos-ribbon-btn-danger"
+            title="Tutup Shift Kasir"
+          >
+            <X size={13} />
+            <span>Tutup Kasir</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="pos-ribbon-btn pos-ribbon-btn-logout"
+            title="Keluar dari akun kasir"
+          >
+            <LogOut size={13} />
+            <span>Keluar</span>
+          </button>
         </div>
 
         {/* Category tabs */}
