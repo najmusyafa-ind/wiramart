@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { employees, admins, shiftSchedules, shifts } from '@/lib/db/schema';
 import { eq, and, isNull, or, ilike, sql } from 'drizzle-orm';
-import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { verifyJwt, apiOk, apiError, requireManager } from '@/lib/utils/auth';
+import { AppError } from '@/lib/utils/helpers';
 
 // ── GET: list semua karyawan ──────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest) {
   return apiOk(rows);
 }
 
-// ── POST: tambah karyawan baru ────────────────────────────────
+// ── POST: tambah karyawan baru (Manager Dosen Only — Cacat 6 Opsi A) ───────────────
 import bcrypt from 'bcryptjs';
 
 const CreateSchema = z.object({
@@ -80,13 +81,11 @@ const CreateSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'admin') {
-    return apiError('Unauthorized', 401);
-  }
+  try {
+    const manager = await requireManager();
 
-  let body: unknown;
-  try { body = await req.json(); } catch { return apiError('Invalid JSON', 400); }
+    let body: unknown;
+    try { body = await req.json(); } catch { return apiError('Invalid JSON', 400); }
 
   const parsed = CreateSchema.safeParse(body);
   if (!parsed.success) {
@@ -126,9 +125,15 @@ export async function POST(req: NextRequest) {
       jabatan: jabatan.trim(),
       isKetuaShift: isKetuaShift ?? false,
       pinHash,
-      createdByAdminId: payload.sub as string,
+      createdByAdminId: manager.sub,
     })
     .returning();
 
-  return apiOk(created, 201);
+    return apiOk(created, 201);
+  } catch (err) {
+    if (err instanceof AppError) {
+      return apiError(err.message, err.statusCode);
+    }
+    return apiError('Gagal menambahkan karyawan', 500);
+  }
 }

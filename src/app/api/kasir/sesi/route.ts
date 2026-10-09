@@ -7,7 +7,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import { employees, shifts, qrisSettings } from '@/lib/db/schema';
-import { eq, and, ne, isNull } from 'drizzle-orm';
+import { eq, and, ne, isNull, desc } from 'drizzle-orm';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
 
@@ -21,42 +21,62 @@ export async function GET(req: NextRequest) {
 
   const employeeId = payload.sub as string;
 
-  // Ambil data karyawan + shift aktif sendiri + QRIS settings
-  // + cek apakah ada kasir lain yang masih punya shift ACTIVE (deteksi handover)
-  const [employee, activeShift, qris, otherShiftRows] = await Promise.all([
+  // Cacat 1 Opsi A: Single Cash Drawer per Shift Roster
+  // Ambil data karyawan + shift aktif toko saat ini (<12 jam) + QRIS settings
+  const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+  const EIGHT_HOURS  = 8 * 60 * 60 * 1000;
+
+  const [employee, storeActiveShift, qris] = await Promise.all([
     db.query.employees.findFirst({
       where: eq(employees.id, employeeId),
       columns: { id: true, fullName: true, jabatan: true, nim: true, programStudi: true },
     }),
     db.query.shifts.findFirst({
-      where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
-      columns: { id: true, clockIn: true, modalAwal: true },
+      where: and(eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut)),
+      orderBy: [desc(shifts.clockIn)],
+      columns: { id: true, clockIn: true, modalAwal: true, employeeId: true },
     }),
-    // Ambil QRIS tanpa filter isActive — kasir tetap bisa konfirmasi QRIS manual
-    // WAJIB filter singleton ID: tabel bisa berisi baris lama/kosong (legacy)
     db.query.qrisSettings.findFirst({
       where: eq(qrisSettings.id, '00000000-0000-0000-0000-000000000002'),
       columns: { qrImageUrl: true, bankName: true, accountName: true, isActive: true, storeName: true, storeAddress: true, storePhone: true },
     }),
-    // Cek shift ACTIVE dari karyawan LAIN (untuk deteksi handover)
-    db
-      .select({
-        kasirName: employees.fullName,
-        kasirNim:  employees.nim,
-        clockIn:   shifts.clockIn,
-        shiftId:   shifts.id,
-      })
-      .from(shifts)
-      .innerJoin(employees, eq(shifts.employeeId, employees.id))
-      .where(
-        and(
-          eq(shifts.status, 'ACTIVE'),
-          ne(shifts.employeeId, employeeId), // BUKAN milik kasir ini
-          isNull(shifts.clockOut),
-        ),
-      )
-      .limit(5), // max 5 — di Wiramart tidak mungkin >1, tapi aman
   ]);
+
+  let currentShift: { id: string; clockIn: Date; modalAwal: string | null } | null = null;
+  const otherActiveShifts: Array<{ kasirName: string; kasirNim: string; clockIn: Date; shiftId: string }> = [];
+
+  if (storeActiveShift) {
+    const shiftAge = Date.now() - new Date(storeActiveShift.clockIn).getTime();
+    if (shiftAge > TWELVE_HOURS) {
+      // Auto-close shift lama yang sudah basi (>12 jam)
+      await db
+        .update(shifts)
+        .set({ clockOut: new Date(), status: 'CLOSED' })
+        .where(eq(shifts.id, storeActiveShift.id));
+    } else if (storeActiveShift.employeeId === employeeId || shiftAge <= EIGHT_HOURS) {
+      // Shift aktif toko milik sendiri ATAU dibuka oleh rekan dalam 1 shift kerja (<8 jam)
+      // Seluruh kasir dalam shift yang sama menggunakan sesi laci kas yang sama
+      currentShift = {
+        id: storeActiveShift.id,
+        clockIn: storeActiveShift.clockIn,
+        modalAwal: storeActiveShift.modalAwal,
+      };
+    } else {
+      // Shift aktif dari kasir shift sebelumnya yang lupa ditutup (>8 jam dan beda kasir)
+      const prevKasir = await db.query.employees.findFirst({
+        where: eq(employees.id, storeActiveShift.employeeId),
+        columns: { fullName: true, nim: true },
+      });
+      if (prevKasir) {
+        otherActiveShifts.push({
+          kasirName: prevKasir.fullName,
+          kasirNim:  prevKasir.nim,
+          clockIn:   storeActiveShift.clockIn,
+          shiftId:   storeActiveShift.id,
+        });
+      }
+    }
+  }
 
   if (!employee) {
     return apiError('Karyawan tidak ditemukan', 'NOT_FOUND', 404);
@@ -70,11 +90,11 @@ export async function GET(req: NextRequest) {
       nim: employee.nim,
       programStudi: employee.programStudi,
     },
-    shift: activeShift
-      ? { id: activeShift.id, clockIn: activeShift.clockIn, modalAwal: activeShift.modalAwal }
+    shift: currentShift
+      ? { id: currentShift.id, clockIn: currentShift.clockIn, modalAwal: currentShift.modalAwal }
       : null,
-    // Shift aktif dari kasir lain (handover signal)
-    otherActiveShifts: otherShiftRows.map(s => ({
+    // Shift aktif dari kasir lain (handover signal jika shift lama belum ditutup)
+    otherActiveShifts: otherActiveShifts.map(s => ({
       kasirName: s.kasirName,
       kasirNim:  s.kasirNim,
       clockIn:   s.clockIn,

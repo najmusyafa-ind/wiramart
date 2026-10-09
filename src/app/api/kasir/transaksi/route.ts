@@ -28,7 +28,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { products, transactions, transactionItems, transactionPayments, shifts, stockBatches } from '@/lib/db/schema';
-import { eq, and, isNull, inArray, gte, gt, lt, asc, sql } from 'drizzle-orm';
+import { eq, and, isNull, inArray, gte, gt, lt, asc, desc, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export const runtime = 'nodejs';
@@ -210,20 +210,48 @@ export async function POST(req: NextRequest) {
     if (replay) return replay;
   }
 
-  // ── Cek shift aktif karyawan (di luar tx — READ ONLY check) ─
-  const [activeShift] = await db
+  // ── Cek shift aktif laci kas (Single Cash Drawer per Shift — Cacat 1 Opsi A) ─
+  let activeShiftId: string | null = null;
+
+  // 1. Cek shift aktif milik kasir ini sendiri
+  const [ownShift] = await db
     .select({ id: shifts.id })
     .from(shifts)
     .where(
       and(
         eq(shifts.employeeId, employeeId),
         eq(shifts.status, 'ACTIVE'),
+        isNull(shifts.clockOut),
       ),
     )
     .limit(1);
 
-  if (!activeShift) {
-    return apiError('Tidak ada shift aktif. Silakan login ulang.', 403);
+  if (ownShift) {
+    activeShiftId = ownShift.id;
+  } else {
+    // 2. Cek shift aktif toko yang dibuka oleh rekan shift (<12 jam)
+    const [teamShift] = await db
+      .select({ id: shifts.id, clockIn: shifts.clockIn })
+      .from(shifts)
+      .where(
+        and(
+          eq(shifts.status, 'ACTIVE'),
+          isNull(shifts.clockOut),
+        ),
+      )
+      .orderBy(desc(shifts.clockIn))
+      .limit(1);
+
+    if (teamShift) {
+      const shiftAge = Date.now() - new Date(teamShift.clockIn).getTime();
+      if (shiftAge <= 12 * 60 * 60 * 1000) {
+        activeShiftId = teamShift.id;
+      }
+    }
+  }
+
+  if (!activeShiftId) {
+    return apiError('Tidak ada shift kasir yang aktif. Buka shift terlebih dahulu.', 403);
   }
 
   // ── Fetch semua produk yang dibutuhkan (di luar tx — READ) ──
@@ -374,7 +402,7 @@ export async function POST(req: NextRequest) {
         .insert(transactions)
         .values({
           invoiceNumber,
-          shiftId:        activeShift.id,
+          shiftId:        activeShiftId,
           employeeId,
           paymentMethod:  primaryPaymentMethod,
           status:         'COMPLETED',
@@ -439,28 +467,9 @@ export async function POST(req: NextRequest) {
             return b.expiryDate >= todayIsoDate;
           });
 
-          const totalValidQty = validBatches.reduce((acc, b) => acc + b.currentQty, 0);
-
-          // Jika stok dari batch yang valid tidak mencukupi permintaan kasir
-          if (totalValidQty < item.qty) {
-            const hasExpired = allActiveBatches.some(
-              (b) => b.expiryDate && b.expiryDate < todayIsoDate && (b.expiryClass === 'HARIAN' || b.expiryClass === 'PENDEK'),
-            );
-
-            const [freshProd] = await tx
-              .select({ name: products.name })
-              .from(products)
-              .where(eq(products.id, item.productId))
-              .limit(1);
-
-            if (hasExpired) {
-              throw new Error(`EXPIRED_PRODUCT:${freshProd?.name || item.productId}`);
-            } else {
-              throw new Error(`INSUFFICIENT_STOCK:${freshProd?.name || item.productId}:${totalValidQty}`);
-            }
-          }
-
-          // 3b. Konsumsi stok hanya dari batch-batch yang VALID (FEFO)
+          // 3b. Konsumsi stok hanya dari batch-batch yang VALID (FEFO) — Cacat 5 Opsi B
+          // Jika kuantitas batch lebih sedikit dari total stok produk, kurangi batch yang ada
+          // dan sisa kekurangan dikonsumsi langsung dari products.stockQty (Step 3c) tanpa memblokir transaksi
           let needed = item.qty;
           for (const b of validBatches) {
             if (needed <= 0) break;

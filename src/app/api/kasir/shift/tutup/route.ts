@@ -15,7 +15,7 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, desc, isNull, sql } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import { shifts, transactions, transactionPayments } from '@/lib/db/schema';
@@ -60,11 +60,19 @@ export async function PATCH(req: NextRequest): Promise<Response> {
 
   const { notes, actualCash, breakdown } = parsed.data;
 
-  // 3. Cari shift aktif milik karyawan ini
-  const activeShift = await db.query.shifts.findFirst({
+  // 3. Cari shift aktif (milik kasir ini ATAU shift aktif toko saat ini — Cacat 1 Opsi A)
+  let activeShift = await db.query.shifts.findFirst({
     where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
     columns: { id: true, clockIn: true, modalAwal: true, auditFlags: true },
   });
+
+  if (!activeShift) {
+    activeShift = await db.query.shifts.findFirst({
+      where: and(eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut)),
+      orderBy: [desc(shifts.clockIn)],
+      columns: { id: true, clockIn: true, modalAwal: true, auditFlags: true },
+    });
+  }
 
   if (!activeShift) {
     return apiError(
@@ -74,25 +82,20 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  // 5. Hitung jumlah transaksi dan total omzet tunai dalam shift ini
+  // 5. Hitung jumlah transaksi completed
   const [summary] = await db
     .select({
       txCount: sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'COMPLETED')`,
-      omzetCash: sql<string>`COALESCE(
-        SUM(${transactions.grossAmount})
-        FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.paymentMethod} = 'CASH'),
-        0
-      )`,
     })
     .from(transactions)
     .where(eq(transactions.shiftId, activeShift.id));
 
-  // 5b. Ambil juga dari transaction_payments (split payment aware)
+  // 5b. Hitung omzet TUNAI murni dari transaction_payments (Split Payment aware — Cacat 3 Opsi A)
   const [paySummary] = await db
     .select({
       payCash: sql<string>`COALESCE(
         SUM(${transactionPayments.amount})
-        FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactionPayments.paymentMethod} = 'CASH'),
+        FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactionPayments.paymentMethod} = 'CASH' AND ${transactions.isTest} = false),
         0
       )`,
     })
@@ -100,7 +103,26 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
     .where(eq(transactions.shiftId, activeShift.id));
 
-  const totalOmzetCash = Math.max(Number(summary?.omzetCash ?? 0), Number(paySummary?.payCash ?? 0));
+  // 5c. Transaksi tunai langsung legacy (jika ada baris transaksi tanpa transaction_payments)
+  const [directSummary] = await db
+    .select({
+      directCash: sql<string>`COALESCE(
+        SUM(${transactions.grossAmount})
+        FILTER (
+          WHERE ${transactions.status} = 'COMPLETED'
+          AND ${transactions.paymentMethod} = 'CASH'
+          AND ${transactions.isTest} = false
+          AND NOT EXISTS (
+            SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id}
+          )
+        ),
+        0
+      )`,
+    })
+    .from(transactions)
+    .where(eq(transactions.shiftId, activeShift.id));
+
+  const totalOmzetCash = Number(paySummary?.payCash ?? 0) + Number(directSummary?.directCash ?? 0);
   const txCount = Number(summary?.txCount ?? 0);
   const nowWib  = new Date();
 

@@ -76,7 +76,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // 4. Periksa shift aktif karyawan (dukung resume sesi aktif <12 jam)
-  let shiftToUseId: string;
+  // Cacat 2 Opsi A: Login HANYA otentikasi akun, TIDAK otomatis membuat shift baru tanpa modal awal.
+  // Shift baru HANYA dibuat secara resmi saat Buka Shift (input modal awal) di POS.
+  let shiftToUseId: string | undefined = undefined;
 
   const existingShift = await db.query.shifts.findFirst({
     where: and(eq(shifts.employeeId, employee.id), eq(shifts.status, 'ACTIVE')),
@@ -92,38 +94,11 @@ export async function POST(request: Request): Promise<Response> {
         .update(shifts)
         .set({ clockOut: new Date(), status: 'CLOSED' })
         .where(eq(shifts.id, existingShift.id));
-
-      // Buat shift baru
-      const [newShift] = await db
-        .insert(shifts)
-        .values({
-          employeeId: employee.id,
-          status: 'ACTIVE',
-        })
-        .returning({ id: shifts.id });
-
-      if (!newShift) {
-        return apiError('Gagal membuat sesi kerja. Coba lagi.', 'SHIFT_CREATE_FAILED', 500);
-      }
-      shiftToUseId = newShift.id;
+      shiftToUseId = undefined;
     } else {
-      // Resume sesi shift yang sedang aktif (misal kasir me-refresh tab atau buka browser baru)
+      // Resume sesi shift yang sedang aktif
       shiftToUseId = existingShift.id;
     }
-  } else {
-    // 5. Buat shift baru (clock-in)
-    const [newShift] = await db
-      .insert(shifts)
-      .values({
-        employeeId: employee.id,
-        status: 'ACTIVE',
-      })
-      .returning({ id: shifts.id });
-
-    if (!newShift) {
-      return apiError('Gagal membuat sesi kerja. Coba lagi.', 'SHIFT_CREATE_FAILED', 500);
-    }
-    shiftToUseId = newShift.id;
   }
 
   // 5b. Catat absensi (HADIR / TELAT) — sinkron (await) dengan error guard terisolasi

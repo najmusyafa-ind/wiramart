@@ -22,68 +22,73 @@ const PatchSchema = z.object({
   pin: z.string().length(6, 'PIN harus 6 digit angka').optional(),
 });
 
-// ── PATCH: update karyawan ────────────────────────────────────
+// ── PATCH: update karyawan (Manager Dosen Only — Cacat 6 Opsi A) ─────────────────
 export async function PATCH(req: NextRequest, ctx: Context) {
-  const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
+  try {
+    const manager = await requireManager();
+    const { id } = await ctx.params;
 
-  const { id } = await ctx.params;
+    let body: unknown;
+    try { body = await req.json(); } catch { return apiError('Invalid JSON', 400); }
 
-  let body: unknown;
-  try { body = await req.json(); } catch { return apiError('Invalid JSON', 400); }
+    const parsed = PatchSchema.safeParse(body);
+    if (!parsed.success) return apiError(parsed.error.flatten().fieldErrors, 422);
 
-  const parsed = PatchSchema.safeParse(body);
-  if (!parsed.success) return apiError(parsed.error.flatten().fieldErrors, 422);
+    // Pastikan karyawan exist & belum dihapus
+    const [existing] = await db
+      .select({ id: employees.id })
+      .from(employees)
+      .where(and(eq(employees.id, id), isNull(employees.deletedAt)))
+      .limit(1);
 
-  // Pastikan karyawan exist & belum dihapus
-  const [existing] = await db
-    .select({ id: employees.id })
-    .from(employees)
-    .where(and(eq(employees.id, id), isNull(employees.deletedAt)))
-    .limit(1);
+    if (!existing) return apiError('Karyawan tidak ditemukan', 404);
 
-  if (!existing) return apiError('Karyawan tidak ditemukan', 404);
+    const updateData: Record<string, unknown> = {
+      updatedAt: new Date(),
+    };
 
-  const updateData: Record<string, unknown> = {
-    updatedAt: new Date(),
-  };
+    if (parsed.data.fullName !== undefined) updateData.fullName = parsed.data.fullName;
+    if (parsed.data.jabatan !== undefined) updateData.jabatan = parsed.data.jabatan;
+    if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
+    if (parsed.data.isKetuaShift !== undefined) {
+      updateData.isKetuaShift = parsed.data.isKetuaShift;
+      if (parsed.data.isKetuaShift === false) {
+        updateData.pinHash = null;
+        updateData.pinFailedAttempts = 0;
+        updateData.pinLockedUntil = null;
+      }
+    }
 
-  if (parsed.data.fullName !== undefined) updateData.fullName = parsed.data.fullName;
-  if (parsed.data.jabatan !== undefined) updateData.jabatan = parsed.data.jabatan;
-  if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
-  if (parsed.data.isKetuaShift !== undefined) {
-    updateData.isKetuaShift = parsed.data.isKetuaShift;
-    if (parsed.data.isKetuaShift === false) {
-      updateData.pinHash = null;
+    // Jika manager menyetel/mereset PIN 6 digit
+    if (parsed.data.pin) {
+      const hashedPin = await bcrypt.hash(parsed.data.pin, 10);
+      updateData.pinHash = hashedPin;
+      updateData.isKetuaShift = true; // Otomatis aktifkan flag ketua shift
       updateData.pinFailedAttempts = 0;
       updateData.pinLockedUntil = null;
     }
+
+    const [updated] = await db
+      .update(employees)
+      .set(updateData)
+      .where(eq(employees.id, id))
+      .returning({
+        id: employees.id,
+        fullName: employees.fullName,
+        nim: employees.nim,
+        programStudi: employees.programStudi,
+        jabatan: employees.jabatan,
+        isKetuaShift: employees.isKetuaShift,
+        isActive: employees.isActive,
+      });
+
+    return apiOk(updated);
+  } catch (err) {
+    if (err instanceof AppError) {
+      return apiError(err.message, err.statusCode);
+    }
+    return apiError('Gagal memperbarui data karyawan', 500);
   }
-
-  // Jika admin menyetel/mereset PIN 6 digit
-  if (parsed.data.pin) {
-    const hashedPin = await bcrypt.hash(parsed.data.pin, 10);
-    updateData.pinHash = hashedPin;
-    updateData.isKetuaShift = true; // Otomatis aktifkan flag ketua shift
-    updateData.pinFailedAttempts = 0;
-    updateData.pinLockedUntil = null;
-  }
-
-  const [updated] = await db
-    .update(employees)
-    .set(updateData)
-    .where(eq(employees.id, id))
-    .returning({
-      id: employees.id,
-      fullName: employees.fullName,
-      nim: employees.nim,
-      programStudi: employees.programStudi,
-      jabatan: employees.jabatan,
-      isKetuaShift: employees.isKetuaShift,
-      isActive: employees.isActive,
-    });
-
-  return apiOk(updated);
 }
 
 // ── DELETE: soft delete karyawan & eliminasi akun admin terkait ──────────

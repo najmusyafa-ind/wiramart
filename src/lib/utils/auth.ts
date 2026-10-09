@@ -54,7 +54,7 @@ export type AdminTokenPayload = {
 export type EmployeeTokenPayload = {
   sub: string;    // employee id
   role: 'employee';
-  shiftId: string;
+  shiftId?: string;
   name: string;
 };
 

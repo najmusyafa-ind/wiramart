@@ -2528,7 +2528,12 @@ export default function PosPage() {
                 className="pos-drawer-btn-logout"
                 onClick={() => {
                   setShowKasirMenu(false);
-                  handleLogout();
+                  if (session?.shift) {
+                    alert('Sesi shift laci masih aktif. Silakan lakukan Tutup Sesi Kasir & Rekap Laci terlebih dahulu.');
+                    setShowTutupConfirm(true);
+                  } else {
+                    handleLogout();
+                  }
                 }}
               >
                 <div className="pos-drawer-icon-box">

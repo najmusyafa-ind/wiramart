@@ -6,8 +6,8 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { products } from '@/lib/db/schema';
-import { eq, and, isNull, ne, type SQL } from 'drizzle-orm';
+import { products, stockBatches } from '@/lib/db/schema';
+import { eq, and, isNull, ne, gt, type SQL } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 type Context = { params: Promise<{ id: string }> };
@@ -113,6 +113,32 @@ export async function PATCH(req: NextRequest, ctx: Context) {
       'Muat ulang halaman, lalu ulangi perubahan stok.',
       409,
     );
+  }
+
+  // Sinkronisasi batch inventaris (Cacat 5 Opsi A)
+  if (parsed.data.stockQty !== undefined) {
+    const currentBatches = await db
+      .select({ id: stockBatches.id, currentQty: stockBatches.currentQty })
+      .from(stockBatches)
+      .where(and(eq(stockBatches.productId, id), gt(stockBatches.currentQty, 0)));
+
+    const totalBatchQty = currentBatches.reduce((acc, b) => acc + b.currentQty, 0);
+    const newStock = updated.stockQty;
+
+    if (newStock > totalBatchQty) {
+      // Ada penambahan stok manual yang belum memiliki batch -> buat batch default
+      const delta = newStock - totalBatchQty;
+      const batchCode = `ADJ-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+      await db.insert(stockBatches).values({
+        productId: id,
+        batchCode,
+        costPrice: updated.costPrice,
+        initialQty: delta,
+        currentQty: delta,
+        expiryClass: 'PANJANG',
+        notes: 'Penyesuaian stok manual katalog produk',
+      });
+    }
   }
 
   return apiOk(updated);

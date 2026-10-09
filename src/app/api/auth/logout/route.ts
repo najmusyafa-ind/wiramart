@@ -34,17 +34,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   if (requestedRole === 'employee') {
-    // Logout kasir + clock-out shift
-    const session = await getKasirSession();
-    if (session?.shiftId) {
-      await db
-        .update(shifts)
-        .set({ clockOut: new Date(), status: 'CLOSED' })
-        .where(eq(shifts.id, session.shiftId))
-        .catch(() => {
-          // Non-fatal — clear cookies tetap jalan
-        });
-    }
+    // Logout kasir (Hapus cookie tanpa menutup shift secara diam-diam — Cacat 4 Opsi A)
+    // Penutupan shift resmi WAJIB melalui /api/kasir/shift/tutup dengan Blind Count actualCash
     await clearAuthCookies('employee');
     return apiOk({ message: 'Logout kasir berhasil', redirect: '/kasir/login' });
   }
@@ -52,13 +43,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   // Auto-detect: cek session mana yang aktif
   const kasirSession = await getKasirSession();
   if (kasirSession) {
-    if (kasirSession.shiftId) {
-      await db
-        .update(shifts)
-        .set({ clockOut: new Date(), status: 'CLOSED' })
-        .where(eq(shifts.id, kasirSession.shiftId))
-        .catch(() => {});
-    }
     await clearAuthCookies('employee');
     return apiOk({ message: 'Logout kasir berhasil', redirect: '/kasir/login' });
   }
