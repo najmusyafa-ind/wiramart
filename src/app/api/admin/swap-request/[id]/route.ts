@@ -22,6 +22,33 @@ const reviewSchema = z.object({
   adminNote: z.string().max(500).trim().optional(),
 });
 
+const DAY_MAP: Record<string, number> = {
+  MINGGU: 0,
+  SENIN: 1,
+  SELASA: 2,
+  RABU: 3,
+  KAMIS: 4,
+  JUMAT: 5,
+  SABTU: 6,
+};
+
+function getNextDateForDay(dayOfWeek: string, baseDate: Date): string {
+  const dateStrWib = baseDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // 'YYYY-MM-DD'
+  const [y, m, d] = dateStrWib.split('-').map(Number);
+  const dt = new Date(Date.UTC(y ?? 2026, (m ?? 1) - 1, d ?? 1));
+
+  const targetDay = DAY_MAP[dayOfWeek] ?? 1;
+  const currentDay = dt.getUTCDay();
+
+  let diff = targetDay - currentDay;
+  if (diff < 0) {
+    diff += 7;
+  }
+
+  dt.setUTCDate(dt.getUTCDate() + diff);
+  return dt.toISOString().slice(0, 10);
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -64,7 +91,6 @@ export async function PATCH(
   }
 
   const now = new Date();
-  const todayDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
 
   if (action === 'REJECT') {
     // ── REJECT: Hanya update status ──────────────────────────
@@ -88,7 +114,7 @@ export async function PATCH(
   // Langkah:
   //   A. Update status swap request → APPROVED
   //   B. Swap employeeId di kedua shiftSchedules
-  //   C. Upsert attendance PENGGANTI untuk requester di slot toSchedule
+  //   C. Upsert attendance PENGGANTI untuk requester & rekan di slot terkait per tanggal spesifik
   //   D. Insert audit log
   await db.transaction(async (tx) => {
     // A. Update swap request
@@ -124,14 +150,17 @@ export async function PATCH(
       })
       .where(eq(shiftSchedules.id, swapReq.toScheduleId));
 
-    // C. Upsert attendance PENGGANTI untuk requester di slot baru (hari ini)
-    // ON CONFLICT DO UPDATE karena mungkin sudah ada record attendance
+    // Kalkulasi tanggal target aktual untuk masing-masing slot
+    const targetToDate = getNextDateForDay(swapReq.toSchedule.dayOfWeek, now);
+    const targetFromDate = getNextDateForDay(swapReq.fromSchedule.dayOfWeek, now);
+
+    // C1. Upsert attendance PENGGANTI untuk requester di slot baru
     await tx
       .insert(attendances)
       .values({
         employeeId:          swapReq.requesterId,
         scheduleId:          swapReq.toScheduleId,
-        attendanceDate:      todayDate,
+        attendanceDate:      targetToDate,
         status:              'PENGGANTI',
         notes:               `Swap dari ${swapReq.fromSchedule.dayOfWeek} ${swapReq.fromSchedule.slotStart} — disetujui Admin`,
         recordedByAdminId:   session.sub,
@@ -147,13 +176,43 @@ export async function PATCH(
         },
       });
 
+    // C2. Jika ada rekan (peer) yang ditukar ke slot asal, catat juga attendance PENGGANTI untuk rekan
+    if (toScheduleCurrentEmployeeId) {
+      await tx
+        .insert(attendances)
+        .values({
+          employeeId:          toScheduleCurrentEmployeeId,
+          scheduleId:          swapReq.fromScheduleId,
+          attendanceDate:      targetFromDate,
+          status:              'PENGGANTI',
+          notes:               `Swap ke ${swapReq.fromSchedule.dayOfWeek} ${swapReq.fromSchedule.slotStart} — disetujui Admin`,
+          recordedByAdminId:   session.sub,
+          fromSwapRequestId:   swapId,
+        })
+        .onConflictDoUpdate({
+          target: [attendances.employeeId, attendances.scheduleId, attendances.attendanceDate],
+          set: {
+            status:            'PENGGANTI',
+            notes:             `Swap disetujui Admin ${now.toISOString()}`,
+            fromSwapRequestId: swapId,
+            updatedAt:         now,
+          },
+        });
+    }
+
     // D. Audit log
     await tx.insert(auditLogs).values({
       tableName:  'shift_swap_requests',
       recordId:   swapId,
       action:     'UPDATE',
       oldValues:  JSON.stringify({ status: 'PENDING' }),
-      newValues:  JSON.stringify({ status: 'APPROVED', fromSchedule: swapReq.fromScheduleId, toSchedule: swapReq.toScheduleId }),
+      newValues:  JSON.stringify({
+        status: 'APPROVED',
+        fromSchedule: swapReq.fromScheduleId,
+        toSchedule: swapReq.toScheduleId,
+        targetToDate,
+        targetFromDate,
+      }),
       actorType:  'ADMIN',
       actorId:    session.sub,
     });

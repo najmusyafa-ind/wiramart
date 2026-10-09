@@ -11,7 +11,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { shiftSwapRequests, shiftSchedules, auditLogs } from '@/lib/db/schema';
+import { shiftSwapRequests, shiftSchedules, attendances, auditLogs } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export const runtime = 'nodejs';
@@ -22,6 +22,33 @@ const ActionSchema = z.object({
   action: z.enum(['APPROVE', 'REJECT']),
   note: z.string().max(300).optional(),
 });
+
+const DAY_MAP: Record<string, number> = {
+  MINGGU: 0,
+  SENIN: 1,
+  SELASA: 2,
+  RABU: 3,
+  KAMIS: 4,
+  JUMAT: 5,
+  SABTU: 6,
+};
+
+function getNextDateForDay(dayOfWeek: string, baseDate: Date): string {
+  const dateStrWib = baseDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // 'YYYY-MM-DD'
+  const [y, m, d] = dateStrWib.split('-').map(Number);
+  const dt = new Date(Date.UTC(y ?? 2026, (m ?? 1) - 1, d ?? 1));
+
+  const targetDay = DAY_MAP[dayOfWeek] ?? 1;
+  const currentDay = dt.getUTCDay();
+
+  let diff = targetDay - currentDay;
+  if (diff < 0) {
+    diff += 7;
+  }
+
+  dt.setUTCDate(dt.getUTCDate() + diff);
+  return dt.toISOString().slice(0, 10);
+}
 
 export async function POST(req: NextRequest, ctx: Context): Promise<Response> {
   const session = await verifyJwt(req);
@@ -80,9 +107,9 @@ export async function POST(req: NextRequest, ctx: Context): Promise<Response> {
   }
 
   // action === 'APPROVE'
-  // K4: Cukup 2 karyawan setuju -> jadwal bertukar di DB
+  // K4: Cukup 2 karyawan setuju -> jadwal bertukar di DB & absensi PENGGANTI tercatat
   await db.transaction(async (tx) => {
-    // Tukar employee_id di kedua jadwal
+    // 1. Tukar employee_id di kedua jadwal template
     await tx
       .update(shiftSchedules)
       .set({
@@ -99,7 +126,53 @@ export async function POST(req: NextRequest, ctx: Context): Promise<Response> {
       })
       .where(eq(shiftSchedules.id, swap.toScheduleId));
 
-    // Update status swap request menjadi APPROVED
+    // 2. Hitung tanggal slot tujuan dan slot asal spesifik
+    const targetToDate = getNextDateForDay(swap.toSchedule.dayOfWeek, now);
+    const targetFromDate = getNextDateForDay(swap.fromSchedule.dayOfWeek, now);
+
+    // 3. Catat status kehadiran PENGGANTI untuk pemohon di slot tujuan
+    await tx
+      .insert(attendances)
+      .values({
+        employeeId: swap.requesterId,
+        scheduleId: swap.toScheduleId,
+        attendanceDate: targetToDate,
+        status: 'PENGGANTI',
+        notes: `Swap disetujui rekan kerja: Pengganti slot ${swap.toSchedule.dayOfWeek} ${swap.toSchedule.slotStart}–${swap.toSchedule.slotEnd}`,
+        fromSwapRequestId: id,
+      })
+      .onConflictDoUpdate({
+        target: [attendances.employeeId, attendances.scheduleId, attendances.attendanceDate],
+        set: {
+          status: 'PENGGANTI',
+          notes: `Swap disetujui rekan kerja: Pengganti slot ${swap.toSchedule.dayOfWeek} ${swap.toSchedule.slotStart}–${swap.toSchedule.slotEnd}`,
+          fromSwapRequestId: id,
+          updatedAt: now,
+        },
+      });
+
+    // 4. Catat status kehadiran PENGGANTI untuk rekan di slot asal
+    await tx
+      .insert(attendances)
+      .values({
+        employeeId: peerEmployeeId,
+        scheduleId: swap.fromScheduleId,
+        attendanceDate: targetFromDate,
+        status: 'PENGGANTI',
+        notes: `Swap disetujui rekan kerja: Pengganti slot ${swap.fromSchedule.dayOfWeek} ${swap.fromSchedule.slotStart}–${swap.fromSchedule.slotEnd}`,
+        fromSwapRequestId: id,
+      })
+      .onConflictDoUpdate({
+        target: [attendances.employeeId, attendances.scheduleId, attendances.attendanceDate],
+        set: {
+          status: 'PENGGANTI',
+          notes: `Swap disetujui rekan kerja: Pengganti slot ${swap.fromSchedule.dayOfWeek} ${swap.fromSchedule.slotStart}–${swap.fromSchedule.slotEnd}`,
+          fromSwapRequestId: id,
+          updatedAt: now,
+        },
+      });
+
+    // 5. Update status swap request menjadi APPROVED
     await tx
       .update(shiftSwapRequests)
       .set({
@@ -111,7 +184,7 @@ export async function POST(req: NextRequest, ctx: Context): Promise<Response> {
       })
       .where(eq(shiftSwapRequests.id, id));
 
-    // Audit log
+    // 6. Audit log
     await tx.insert(auditLogs).values({
       action: 'UPDATE',
       tableName: 'shift_swap_requests',
@@ -119,11 +192,17 @@ export async function POST(req: NextRequest, ctx: Context): Promise<Response> {
       actorType: 'EMPLOYEE',
       actorId: session.sub,
       oldValues: JSON.stringify({ status: swap.status }),
-      newValues: JSON.stringify({ status: 'APPROVED', peerApprovedAt: now, note }),
+      newValues: JSON.stringify({
+        status: 'APPROVED',
+        peerApprovedAt: now,
+        note,
+        targetToDate,
+        targetFromDate,
+      }),
     });
   });
 
   return apiOk({
-    message: 'Tukar shift berhasil disetujui! Jadwal otomatis diperbarui.',
+    message: 'Tukar shift berhasil disetujui! Jadwal dan catatan kehadiran pengganti telah diperbarui.',
   });
 }

@@ -8,7 +8,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { qrisSettings } from '@/lib/db/schema';
-import { requireAdmin } from '@/lib/utils/auth';
+import { requireAdmin, requireManager } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 import { getSupabaseAdmin } from '@/lib/supabase/server';
 
@@ -70,7 +70,7 @@ const qrisTextSchema = z.object({
 // ─────────────────────────────────────────────────────────────
 export async function POST(request: Request): Promise<Response> {
   try {
-    const session = await requireAdmin();
+    const session = await requireManager();
 
     // Parse multipart FormData
     let formData: FormData;

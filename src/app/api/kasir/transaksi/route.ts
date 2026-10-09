@@ -414,34 +414,13 @@ export async function POST(req: NextRequest) {
       const todayIsoDate = new Date().toISOString().slice(0, 10);
 
       for (const item of itemsByLockOrder) {
-        // 3a. Guard Kedaluwarsa (Bagian 4.6 & D-5): Cek apakah ada batch aktif yang sudah lewat tanggal untuk produk harian/pendek
-        const expiredBatches = await tx
-          .select({ batchCode: stockBatches.batchCode })
-          .from(stockBatches)
-          .where(
-            and(
-              eq(stockBatches.productId, item.productId),
-              gt(stockBatches.currentQty, 0),
-              lt(stockBatches.expiryDate, todayIsoDate),
-              inArray(stockBatches.expiryClass, ['HARIAN', 'PENDEK']),
-            ),
-          )
-          .limit(1);
-
-        if (expiredBatches.length > 0) {
-          const [freshProd] = await tx
-            .select({ name: products.name })
-            .from(products)
-            .where(eq(products.id, item.productId))
-            .limit(1);
-          throw new Error(`EXPIRED_PRODUCT:${freshProd?.name || item.productId}`);
-        }
-
-        // 3b. Konsumsi stok per batch FEFO (First Expired First Out)
-        const activeBatches = await tx
+        // 3a. Ambil seluruh batch aktif produk ini (diurutkan FEFO)
+        const allActiveBatches = await tx
           .select({
-            id: stockBatches.id,
-            currentQty: stockBatches.currentQty,
+            id:          stockBatches.id,
+            currentQty:  stockBatches.currentQty,
+            expiryDate:  stockBatches.expiryDate,
+            expiryClass: stockBatches.expiryClass,
           })
           .from(stockBatches)
           .where(
@@ -452,16 +431,45 @@ export async function POST(req: NextRequest) {
           )
           .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt));
 
-        if (activeBatches.length > 0) {
+        if (allActiveBatches.length > 0) {
+          // Filter batch yang aman untuk dijual (belum lewat tanggal kedaluwarsa)
+          const validBatches = allActiveBatches.filter((b) => {
+            if (!b.expiryDate) return true;
+            if (b.expiryClass === 'PANJANG') return true;
+            return b.expiryDate >= todayIsoDate;
+          });
+
+          const totalValidQty = validBatches.reduce((acc, b) => acc + b.currentQty, 0);
+
+          // Jika stok dari batch yang valid tidak mencukupi permintaan kasir
+          if (totalValidQty < item.qty) {
+            const hasExpired = allActiveBatches.some(
+              (b) => b.expiryDate && b.expiryDate < todayIsoDate && (b.expiryClass === 'HARIAN' || b.expiryClass === 'PENDEK'),
+            );
+
+            const [freshProd] = await tx
+              .select({ name: products.name })
+              .from(products)
+              .where(eq(products.id, item.productId))
+              .limit(1);
+
+            if (hasExpired) {
+              throw new Error(`EXPIRED_PRODUCT:${freshProd?.name || item.productId}`);
+            } else {
+              throw new Error(`INSUFFICIENT_STOCK:${freshProd?.name || item.productId}:${totalValidQty}`);
+            }
+          }
+
+          // 3b. Konsumsi stok hanya dari batch-batch yang VALID (FEFO)
           let needed = item.qty;
-          for (const b of activeBatches) {
+          for (const b of validBatches) {
             if (needed <= 0) break;
             const deduct = Math.min(b.currentQty, needed);
             await tx
               .update(stockBatches)
               .set({
                 currentQty: sql`${stockBatches.currentQty} - ${deduct}`,
-                updatedAt: new Date(),
+                updatedAt:  new Date(),
               })
               .where(eq(stockBatches.id, b.id));
             needed -= deduct;

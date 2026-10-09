@@ -9,7 +9,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { and, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { operatingExpenses, admins, auditLogs, EXPENSE_CATEGORIES } from '@/lib/db/schema';
+import { operatingExpenses, admins, auditLogs, EXPENSE_CATEGORIES, dailyClosings } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import {
   addDays,
@@ -121,6 +121,16 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await db.transaction(async (tx) => {
+      // 1. Financial Integrity Guard: Cek Locking Period Tutup Buku Harian
+      const existingClosing = await tx.query.dailyClosings.findFirst({
+        where: eq(dailyClosings.closingDate, input.expenseDate),
+        columns: { status: true },
+      });
+
+      if (existingClosing && (existingClosing.status === 'LOCKED' || existingClosing.status === 'AUDITED')) {
+        throw new Error(`PERIOD_LOCKED: Tanggal ${input.expenseDate} telah dikunci oleh Tutup Buku Harian (${existingClosing.status}). Biaya baru tidak dapat dicatat.`);
+      }
+
       // Perlindungan klik ganda: entri identik oleh admin yang sama dalam 60 detik = entri yang sama
       const [dup] = await tx
         .select({ id: operatingExpenses.id })
@@ -158,7 +168,10 @@ export async function POST(req: NextRequest) {
     });
 
     return apiOk(result, result.duplicate ? 200 : 201);
-  } catch {
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.startsWith('PERIOD_LOCKED:')) {
+      return apiError(err.message.replace('PERIOD_LOCKED: ', ''), 403);
+    }
     return apiError('Gagal menyimpan biaya. Silakan coba lagi.', 500);
   }
 }

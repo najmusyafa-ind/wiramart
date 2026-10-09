@@ -9,9 +9,9 @@
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { eq, and, gt, asc, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { products, stockAdjustments } from '@/lib/db/schema';
+import { products, stockAdjustments, stockBatches } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 
@@ -58,14 +58,20 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     const { productId, qtyAfter, reason } = parsed.data;
 
-    // ── ATOMIC: kunci baris → baca stok → update → log ─────
+    // ── ATOMIC: kunci baris → baca stok → update → sinkronisasi batch → log ─────
     // SELECT ... FOR UPDATE memastikan penjualan/restock konkuren menunggu,
     // sehingga qtyBefore & qtyDiff pada log audit selalu akurat.
     const now = new Date();
 
     const result = await db.transaction(async (tx) => {
       const [product] = await tx
-        .select({ id: products.id, name: products.name, stockQty: products.stockQty, deletedAt: products.deletedAt })
+        .select({
+          id: products.id,
+          name: products.name,
+          costPrice: products.costPrice,
+          stockQty: products.stockQty,
+          deletedAt: products.deletedAt,
+        })
         .from(products)
         .where(eq(products.id, productId))
         .limit(1)
@@ -93,7 +99,52 @@ export async function POST(req: NextRequest): Promise<Response> {
         .set({ stockQty: qtyAfter, updatedAt: now })
         .where(eq(products.id, productId));
 
-      // Step 2: Insert stock adjustment log
+      // Step 2: Sinkronisasi stockBatches (Invarian: stock_qty = sum(stockBatches.currentQty))
+      if (qtyDiff > 0) {
+        // Opname menemukan kelebihan fisik: buat batch penyesuaian baru
+        const batchCode = `OPNAME-${now.toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+        await tx.insert(stockBatches).values({
+          productId,
+          batchCode,
+          costPrice: product.costPrice,
+          initialQty: qtyDiff,
+          currentQty: qtyDiff,
+          expiryClass: 'PANJANG',
+          notes: `Penyesuaian stok opname (+${qtyDiff}): ${reason}`,
+        });
+      } else if (qtyDiff < 0) {
+        // Opname menemukan kekurangan fisik (kehilangan / kerusakan / susut):
+        // Kurangi batch-batch aktif secara berurutan menurut FEFO
+        let neededDeduct = Math.abs(qtyDiff);
+        const activeBatches = await tx
+          .select({
+            id: stockBatches.id,
+            currentQty: stockBatches.currentQty,
+          })
+          .from(stockBatches)
+          .where(
+            and(
+              eq(stockBatches.productId, productId),
+              gt(stockBatches.currentQty, 0),
+            ),
+          )
+          .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt));
+
+        for (const b of activeBatches) {
+          if (neededDeduct <= 0) break;
+          const deduct = Math.min(b.currentQty, neededDeduct);
+          await tx
+            .update(stockBatches)
+            .set({
+              currentQty: sql`${stockBatches.currentQty} - ${deduct}`,
+              updatedAt: now,
+            })
+            .where(eq(stockBatches.id, b.id));
+          neededDeduct -= deduct;
+        }
+      }
+
+      // Step 3: Insert stock adjustment log
       await tx.insert(stockAdjustments).values({
         productId,
         qtyBefore,

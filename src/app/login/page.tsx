@@ -193,8 +193,8 @@ export default function LoginPage() {
 
     setSetupPinError(null);
 
-    if (!/^\d{6}$/.test(newPin)) {
-      setSetupPinError('PIN wajib tepat 6 digit angka.');
+    if (!/^\d{6,8}$/.test(newPin)) {
+      setSetupPinError('PIN wajib 6 hingga 8 digit angka.');
       return;
     }
 
@@ -316,7 +316,7 @@ export default function LoginPage() {
             {role === 'kasir' && 'Masuk sebagai Karyawan Kasir'}
           </h1>
           <p className="auth-subtitle" style={{ fontSize: 'var(--text-xs)' }}>
-            {role === 'admin_shift' && 'Khusus Mahasiswa Koordinator Shift (Gunakan NIM & PIN 6-Digit).'}
+            {role === 'admin_shift' && 'Khusus Mahasiswa Koordinator Shift (Gunakan NIM & PIN / Password).'}
             {role === 'manager' && 'Khusus Dosen Pembina & Owner UKM (Gunakan NIDN & Password).'}
             {role === 'kasir' && 'Petugas pelaksana kasir membuka sesi POS toko.'}
           </p>
@@ -408,7 +408,7 @@ export default function LoginPage() {
               <div className="form-group">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <label className="form-label" htmlFor={`${uid}-admin-shift-pin`} style={{ margin: 0 }}>
-                    PIN 6-Digit <span className="required" aria-hidden="true">*</span>
+                    PIN / Password <span className="required" aria-hidden="true">*</span>
                   </label>
                   <button
                     type="button"
@@ -454,19 +454,16 @@ export default function LoginPage() {
                   <input
                     id={`${uid}-admin-shift-pin`}
                     type={showAdminShiftPin ? 'text' : 'password'}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
                     className="form-input"
-                    placeholder="Masukkan 6-digit PIN"
+                    placeholder="Masukkan PIN / Password"
                     value={adminShiftPin}
-                    onChange={(e) => setAdminShiftPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    onChange={(e) => setAdminShiftPin(e.target.value.slice(0, 50))}
                     autoComplete="new-password"
                     disabled={isLoading}
                     style={{
                       paddingLeft: 'calc(var(--space-3) + 15px + var(--space-2))',
                       paddingRight: 'var(--space-10)',
-                      letterSpacing: showAdminShiftPin ? '2px' : '4px',
+                      letterSpacing: showAdminShiftPin ? 'normal' : '2px',
                       fontFamily: 'var(--font-mono)',
                     }}
                   />
@@ -712,7 +709,7 @@ export default function LoginPage() {
                 <KeyRound size={24} />
               </div>
               <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-bold)', margin: 0 }}>
-                Buat PIN 6-Digit Baru
+                Buat PIN Baru (6–8 Digit)
               </h2>
               <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 4 }}>
                 Halo <strong>{setupPinData.fullName}</strong>! Akun Anda ({setupPinData.jabatan}) belum memiliki PIN pengelola.
@@ -743,17 +740,17 @@ export default function LoginPage() {
             <form onSubmit={handleSetupPinSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label" style={{ fontSize: 11 }}>
-                  PIN Baru (6 Digit Angka) <span className="required">*</span>
+                  PIN Baru (6–8 Digit Angka) <span className="required">*</span>
                 </label>
                 <input
                   type="password"
                   inputMode="numeric"
                   pattern="[0-9]*"
-                  maxLength={6}
+                  maxLength={8}
                   className="form-input"
-                  placeholder="Contoh: 123456"
+                  placeholder="6–8 digit angka (contoh: 123456 atau NIM)"
                   value={newPin}
-                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
                   required
                   disabled={setupPinLoading}
                   style={{ textAlign: 'center', letterSpacing: '4px', fontFamily: 'var(--font-mono)', fontSize: 16 }}
@@ -768,11 +765,11 @@ export default function LoginPage() {
                   type="password"
                   inputMode="numeric"
                   pattern="[0-9]*"
-                  maxLength={6}
+                  maxLength={8}
                   className="form-input"
-                  placeholder="Ketik ulang 6 digit"
+                  placeholder="Ketik ulang 6–8 digit"
                   value={confirmPin}
-                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
                   required
                   disabled={setupPinLoading}
                   style={{ textAlign: 'center', letterSpacing: '4px', fontFamily: 'var(--font-mono)', fontSize: 16 }}

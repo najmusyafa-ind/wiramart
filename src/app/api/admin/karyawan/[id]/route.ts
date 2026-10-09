@@ -6,9 +6,10 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { employees, shifts, shiftSchedules } from '@/lib/db/schema';
+import { employees, shifts, shiftSchedules, admins, auditLogs } from '@/lib/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
-import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { verifyJwt, requireManager, apiOk, apiError } from '@/lib/utils/auth';
+import { AppError } from '@/lib/utils/helpers';
 import bcrypt from 'bcryptjs';
 
 type Context = { params: Promise<{ id: string }> };
@@ -85,38 +86,75 @@ export async function PATCH(req: NextRequest, ctx: Context) {
   return apiOk(updated);
 }
 
-// ── DELETE: soft delete karyawan ─────────────────────────────
+// ── DELETE: soft delete karyawan & eliminasi akun admin terkait ──────────
 export async function DELETE(req: NextRequest, ctx: Context) {
-  const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
+  try {
+    const admin = await requireManager();
+    const { id } = await ctx.params;
 
-  const { id } = await ctx.params;
+    const [existing] = await db
+      .select({ id: employees.id, nim: employees.nim, fullName: employees.fullName })
+      .from(employees)
+      .where(and(eq(employees.id, id), isNull(employees.deletedAt)))
+      .limit(1);
 
-  const [existing] = await db
-    .select({ id: employees.id })
-    .from(employees)
-    .where(and(eq(employees.id, id), isNull(employees.deletedAt)))
-    .limit(1);
+    if (!existing) return apiError('Karyawan tidak ditemukan', 404);
 
-  if (!existing) return apiError('Karyawan tidak ditemukan', 404);
+    const now = new Date();
 
-  // 1. Soft-delete employee
-  await db
-    .update(employees)
-    .set({ deletedAt: new Date(), isActive: false, updatedAt: new Date() })
-    .where(eq(employees.id, id));
+    await db.transaction(async (tx) => {
+      // 1. Soft-delete employee
+      await tx
+        .update(employees)
+        .set({ deletedAt: now, isActive: false, updatedAt: now })
+        .where(eq(employees.id, id));
 
-  // 2. Force-close semua sesi shift yang masih aktif
-  await db
-    .update(shifts)
-    .set({ clockOut: new Date(), status: 'CLOSED' })
-    .where(and(eq(shifts.employeeId, id), eq(shifts.status, 'ACTIVE')));
+      // 2. Force-close semua sesi shift yang masih aktif
+      await tx
+        .update(shifts)
+        .set({ clockOut: now, status: 'CLOSED' })
+        .where(and(eq(shifts.employeeId, id), eq(shifts.status, 'ACTIVE')));
 
-  // 3. Lepaskan slot jadwal mingguan agar kembali kosong untuk pendaftar lain
-  await db
-    .update(shiftSchedules)
-    .set({ employeeId: null })
-    .where(eq(shiftSchedules.employeeId, id));
+      // 3. Lepaskan slot jadwal mingguan agar kembali kosong untuk pendaftar lain
+      await tx
+        .update(shiftSchedules)
+        .set({ employeeId: null })
+        .where(eq(shiftSchedules.employeeId, id));
 
-  return apiOk({ message: 'Karyawan berhasil dihapus dan slot jadwal telah dikosongkan' });
+      // 4. CISO Guard: Soft-delete akun admin terkait (Zombie Admin Account Elimination)
+      // Nonaktifkan akun di tabel admins yang terhubung dengan NIM karyawan ini
+      await tx
+        .update(admins)
+        .set({
+          isActive: false,
+          deletedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(admins.nidn, existing.nim),
+            eq(admins.role, 'ADMIN_SHIFT'),
+            isNull(admins.deletedAt),
+          ),
+        );
+
+      // 5. Catat audit logs
+      await tx.insert(auditLogs).values({
+        tableName: 'employees',
+        recordId: id,
+        action: 'SOFT_DELETE',
+        oldValues: JSON.stringify({ fullName: existing.fullName, nim: existing.nim }),
+        newValues: JSON.stringify({ isActive: false, deletedAt: now.toISOString() }),
+        actorType: 'ADMIN',
+        actorId: admin.sub,
+      });
+    });
+
+    return apiOk({ message: 'Karyawan dan hak akses admin berhasil dinonaktifkan, serta slot jadwal telah dikosongkan' });
+  } catch (err: unknown) {
+    if (err instanceof AppError) {
+      return apiError(err.message, err.statusCode);
+    }
+    return apiError('Gagal menghapus karyawan. Silakan coba lagi.', 500);
+  }
 }

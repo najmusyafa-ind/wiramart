@@ -88,20 +88,6 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // Static assets — cache agresif HANYA di production.
-      // Di development: no-store agar perubahan kode langsung terlihat tanpa hard-refresh.
-      // Di production aman karena filename mengandung content hash unik per deploy.
-      ...(process.env.NODE_ENV === 'production'
-        ? [{
-            source: '/_next/static/(.*)',
-            headers: [
-              {
-                key: 'Cache-Control',
-                value: 'public, max-age=31536000, immutable',
-              },
-            ],
-          }]
-        : []),
     ];
   },
 };

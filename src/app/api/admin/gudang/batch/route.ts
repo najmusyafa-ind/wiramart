@@ -143,6 +143,7 @@ const CreateBatchSchema = z.object({
   expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD').nullable().optional(),
   expiryClass: z.enum(['HARIAN', 'PENDEK', 'PANJANG']).default('PANJANG'),
   supplierName: z.string().trim().max(100).optional(),
+  invoiceNumber: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(500).optional(),
 });
 
@@ -171,6 +172,7 @@ export async function POST(req: NextRequest) {
     expiryDate,
     expiryClass,
     supplierName,
+    invoiceNumber,
     notes,
   } = parsed.data;
 
@@ -185,6 +187,14 @@ export async function POST(req: NextRequest) {
   const batchCode =
     parsed.data.batchCode ||
     `BATCH-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  const combinedNotes = [
+    supplierName ? `Pemasok: ${supplierName}` : '',
+    invoiceNumber ? `No. Nota: ${invoiceNumber}` : '',
+    notes || '',
+  ]
+    .filter(Boolean)
+    .join(' | ') || null;
 
   try {
     const result = await db.transaction(async (tx) => {
@@ -210,7 +220,7 @@ export async function POST(req: NextRequest) {
           currentQty: initialQty,
           expiryDate: expiryDate || null,
           expiryClass,
-          notes: supplierName ? `Pemasok: ${supplierName}. ${notes || ''}`.trim() : notes || null,
+          notes: combinedNotes,
         })
         .returning();
 
@@ -232,7 +242,7 @@ export async function POST(req: NextRequest) {
         qtyBefore: product.stockQty,
         qtyAfter: updatedProduct.stockQty,
         qtyDiff: initialQty,
-        reason: `Penerimaan batch ${batchCode} (${initialQty} unit)${supplierName ? ` dari ${supplierName}` : ''}`,
+        reason: `Penerimaan batch ${batchCode} (${initialQty} unit)${supplierName ? ` dari ${supplierName}` : ''}${invoiceNumber ? ` (Nota: ${invoiceNumber})` : ''}`,
       });
 
       return { newBatch, totalStock: updatedProduct.stockQty };
@@ -248,5 +258,147 @@ export async function POST(req: NextRequest) {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Gagal menyimpan penerimaan batch baru';
     return apiError(message, 500);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// PATCH: Write-off / Pemusnahan / Retur Batch Kedaluwarsa/Rusak
+// ─────────────────────────────────────────────────────────────
+const WriteOffBatchSchema = z.object({
+  batchId: z.string().uuid('Batch ID tidak valid'),
+  qty: z.number().int().positive('Jumlah write-off harus lebih dari 0'),
+  action: z.enum(['EXPIRED', 'RUSAK', 'HILANG', 'RETUR_PEMASOK', 'DISPOSISI_HARIAN']),
+  reason: z.string().trim().min(5, 'Alasan minimal 5 karakter').max(300),
+});
+
+export async function PATCH(req: NextRequest) {
+  const session = await verifyJwt(req);
+  if (!session || session.role !== 'admin') {
+    return apiError('Akses ditolak. Memerlukan hak akses Admin/Manajer.', 403);
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return apiError('Format JSON tidak valid.', 400);
+  }
+
+  const parsed = WriteOffBatchSchema.safeParse(body);
+  if (!parsed.success) {
+    return apiError(parsed.error.issues[0]?.message || 'Data input tidak valid.', 422);
+  }
+
+  const { batchId, qty, action, reason } = parsed.data;
+
+  try {
+    const result = await db.transaction(async (tx) => {
+      // 1. Kunci dan ambil batch target
+      const [batch] = await tx
+        .select()
+        .from(stockBatches)
+        .where(eq(stockBatches.id, batchId))
+        .limit(1)
+        .for('update');
+
+      if (!batch) {
+        throw new Error('BATCH_NOT_FOUND: Batch stok tidak ditemukan.');
+      }
+
+      if (batch.currentQty < qty) {
+        throw new Error(
+          `INSUFFICIENT_BATCH_QTY: Sisa stok pada batch ini hanya ${batch.currentQty} unit (diminta write-off ${qty} unit).`,
+        );
+      }
+
+      // 2. Kunci dan ambil produk terkait
+      const [product] = await tx
+        .select()
+        .from(products)
+        .where(and(eq(products.id, batch.productId), isNull(products.deletedAt)))
+        .limit(1)
+        .for('update');
+
+      if (!product) {
+        throw new Error('PROD_NOT_FOUND: Produk tidak ditemukan atau telah dihapus.');
+      }
+
+      if (product.stockQty < qty) {
+        throw new Error(
+          `INSUFFICIENT_PROD_STOCK: Total stok produk di rak hanya ${product.stockQty} unit (diminta write-off ${qty} unit).`,
+        );
+      }
+
+      const now = new Date();
+
+      // 3. Potong stok batch
+      const [updatedBatch] = await tx
+        .update(stockBatches)
+        .set({
+          currentQty: sql`${stockBatches.currentQty} - ${qty}`,
+          updatedAt: now,
+        })
+        .where(eq(stockBatches.id, batchId))
+        .returning();
+
+      // 4. Potong total stok produk secara atomik
+      const [updatedProduct] = await tx
+        .update(products)
+        .set({
+          stockQty: sql`${products.stockQty} - ${qty}`,
+          updatedAt: now,
+        })
+        .where(eq(products.id, batch.productId))
+        .returning({ stockQty: products.stockQty });
+
+      // 5. Catat ke stockAdjustments untuk audit trail & laporan susut barang
+      const actionLabel =
+        action === 'EXPIRED'
+          ? 'Kedaluwarsa'
+          : action === 'RUSAK'
+          ? 'Barang Rusak'
+          : action === 'HILANG'
+          ? 'Barang Hilang'
+          : action === 'RETUR_PEMASOK'
+          ? 'Retur Pemasok'
+          : 'Disposisi Harian';
+
+      const costPriceNum = parseFloat(batch.costPrice) || 0;
+      const totalLostCost = costPriceNum * qty;
+
+      await tx.insert(stockAdjustments).values({
+        productId: batch.productId,
+        adjustedByAdminId: session.sub,
+        qtyBefore: product.stockQty,
+        qtyAfter: updatedProduct.stockQty,
+        qtyDiff: -qty,
+        reason: `[WRITE-OFF:${action}] ${actionLabel} - ${reason} (Batch: ${batch.batchCode}, HPP: Rp ${costPriceNum.toLocaleString('id-ID')}, Nilai Susut: Rp ${totalLostCost.toLocaleString('id-ID')})`,
+      });
+
+      return {
+        batch: updatedBatch,
+        totalStock: updatedProduct.stockQty,
+        qtyWrittenOff: qty,
+        action,
+        totalLostCost,
+      };
+    });
+
+    return apiOk(
+      {
+        message: `Write-off ${result.qtyWrittenOff} unit berhasil diproses.`,
+        data: result,
+      },
+      200,
+    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Gagal memproses write-off batch';
+    const statusCode =
+      message.startsWith('BATCH_NOT_FOUND') || message.startsWith('PROD_NOT_FOUND')
+        ? 404
+        : message.startsWith('INSUFFICIENT')
+        ? 422
+        : 500;
+    return apiError(message, statusCode);
   }
 }

@@ -79,33 +79,76 @@ export default function RestockPage() {
     }
   }
 
+  const quaggaActiveRef = useRef(false);
+
   // ── Scanner kamera ───────────────────────────────────────
   async function startScan() {
     setState({ status: 'scanning' });
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
       if (!camRef.current) return;
       camRef.current.srcObject = stream;
       await camRef.current.play();
 
-      const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'upc_a', 'upc_e'] });
-      scanRef.current = setInterval(async () => {
-        if (!camRef.current || camRef.current.readyState < 2) return;
-        const codes = await detector.detect(camRef.current).catch(() => []);
-        if (codes.length > 0 && codes[0]) {
-          stopScan();
-          await lookupBarcode(codes[0].rawValue);
-        }
-      }, 400);
+      if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+        const detector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'code_128', 'upc_a', 'upc_e'] });
+        scanRef.current = setInterval(async () => {
+          if (!camRef.current || camRef.current.readyState < 2) return;
+          const codes = await detector.detect(camRef.current).catch(() => []);
+          if (codes.length > 0 && codes[0]) {
+            stopScan();
+            await lookupBarcode(codes[0].rawValue);
+          }
+        }, 400);
+      } else {
+        const Quagga = (await import('@ericblade/quagga2')).default;
+        quaggaActiveRef.current = true;
+        Quagga.init(
+          {
+            inputStream: {
+              type: 'LiveStream',
+              target: camRef.current.parentElement as HTMLElement,
+              constraints: { facingMode: 'environment' },
+            },
+            decoder: { readers: ['ean_reader', 'ean_8_reader', 'code_128_reader', 'upc_reader'] },
+          },
+          (err) => {
+            if (err) {
+              quaggaActiveRef.current = false;
+              setState({ status: 'error', message: 'Scanner kamera tidak didukung di browser ini. Gunakan input manual.' });
+              return;
+            }
+            Quagga.start();
+            Quagga.onDetected(async (res) => {
+              const code = res.codeResult?.code;
+              if (code) {
+                stopScan();
+                await lookupBarcode(code);
+              }
+            });
+          },
+        );
+      }
     } catch {
-      setState({ status: 'error', message: 'Kamera tidak dapat diakses. Gunakan input manual.' });
+      setState({ status: 'error', message: 'Akses kamera ditolak atau tidak tersedia. Gunakan input manual.' });
     }
   }
 
   function stopScan() {
-    if (scanRef.current) clearInterval(scanRef.current);
+    if (scanRef.current) {
+      clearInterval(scanRef.current);
+      scanRef.current = null;
+    }
+    if (quaggaActiveRef.current) {
+      import('@ericblade/quagga2')
+        .then((m) => m.default.stop())
+        .catch(() => {});
+      quaggaActiveRef.current = false;
+    }
     if (camRef.current?.srcObject) {
-      (camRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
+      (camRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
       camRef.current.srcObject = null;
     }
     if ((state as { status: string }).status === 'scanning') {

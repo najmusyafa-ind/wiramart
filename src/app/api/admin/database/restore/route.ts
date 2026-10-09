@@ -6,18 +6,18 @@
 // =============================================================
 
 import { eq } from 'drizzle-orm';
-import { requireAdmin } from '@/lib/utils/auth';
+import { requireManager } from '@/lib/utils/auth';
 import { db } from '@/lib/db/client';
 import { admins } from '@/lib/db/schema';
 import { databaseBackupService } from '@/lib/db/backup/DatabaseBackupService';
 import { backupPayloadSchema, type BackupPayload } from '@/lib/db/backup/backup.types';
-import { apiOk, apiError } from '@/lib/utils/helpers';
+import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const session = await requireAdmin();
+    const session = await requireManager();
 
     let rawBody: unknown;
     try {
@@ -54,6 +54,9 @@ export async function POST(request: Request): Promise<Response> {
 
     return apiOk(restoreSummary, undefined, 200);
   } catch (err: unknown) {
+    if (err instanceof AppError) {
+      return apiError(err.message, err.code, err.statusCode);
+    }
     const message = err instanceof Error ? err.message : 'Terjadi kegagalan saat proses restore database';
     return apiError(message, 'RESTORE_FAILED', 500);
   }

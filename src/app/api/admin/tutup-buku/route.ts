@@ -2,33 +2,61 @@
 // /api/admin/tutup-buku — Ritual Tutup Buku Harian Dosen (Manager)
 // Locking Period Finansial Wiramart UNPERBA (Fase 3 & Bagian 13 I1/I2)
 //
-// GET:  Status & Preview Tutup Buku untuk tanggal tertentu (?date=YYYY-MM-DD)
+// GET:  Status & Preview Tutup Buku:
+//       - Rincian per shift (Shift 1 Pagi vs Shift 2 Siang)
+//       - Rekap konsolidasi harian toko jam 15:00
 // POST: Eksekusi Tutup Buku & Kunci Finansial Harian (Status: LOCKED)
+// Auth: Manager (Dosen) Only — requireManager()
 // =============================================================
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq, and, gte, lt, sql } from 'drizzle-orm';
+import { eq, and, gte, lt, sql, asc } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   dailyClosings,
   shifts,
+  employees,
   auditLogs,
   transactionPayments,
   transactions,
+  shiftCashMovements,
 } from '@/lib/db/schema';
-import { requireAdmin } from '@/lib/utils/auth';
-import { apiOk, apiError } from '@/lib/utils/helpers';
+import { requireManager } from '@/lib/utils/auth';
+import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 import { getFinancialReport, resolveReportRange } from '@/lib/finance/report';
 
 export const runtime = 'nodejs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+export type ShiftDetailReport = {
+  shiftId: string;
+  shiftName: string; // 'Shift 1 (Pagi)' | 'Shift 2 (Siang)'
+  employeeId: string;
+  employeeName: string;
+  employeeNim: string;
+  status: 'ACTIVE' | 'CLOSED';
+  clockIn: string;
+  clockOut: string | null;
+  modalAwal: number;
+  cashSales: number;
+  qrisSales: number;
+  totalOmzet: number;
+  txCount: number;
+  cashIn: number;
+  cashOut: number;
+  expectedCash: number;
+  actualCash: number | null;
+  selisih: number | null;
+  auditFlags: string | null;
+  notes: string | null;
+};
+
 // ── GET: Preview / Status Tutup Buku ──────────────────────────
 export async function GET(req: NextRequest): Promise<Response> {
   try {
-    await requireAdmin();
+    await requireManager();
 
     const { searchParams } = new URL(req.url);
     const dateParam = searchParams.get('date');
@@ -46,46 +74,111 @@ export async function GET(req: NextRequest): Promise<Response> {
     const report = await getFinancialReport(range);
     const s = report.summary;
 
-    // 3. Ambil shifts pada tanggal ini untuk menghitung total selisih fisik laci
+    // 3. Ambil shifts pada tanggal ini beserta identitas karyawan
     const dayShifts = await db
       .select({
         id: shifts.id,
         status: shifts.status,
+        clockIn: shifts.clockIn,
+        clockOut: shifts.clockOut,
         modalAwal: shifts.modalAwal,
         actualCash: shifts.actualCash,
+        auditFlags: shifts.auditFlags,
+        notes: shifts.notes,
+        employeeId: shifts.employeeId,
+        employeeName: employees.fullName,
+        employeeNim: employees.nim,
       })
       .from(shifts)
-      .where(and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)));
+      .innerJoin(employees, eq(shifts.employeeId, employees.id))
+      .where(and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)))
+      .orderBy(asc(shifts.clockIn));
 
     const activeShiftsCount = dayShifts.filter((sh) => sh.status === 'ACTIVE').length;
 
-    // Hitung total selisih kas dari shift yang sudah CLOSED
-    // (Actual Cash - Expected Cash)
+    // 4. Hitung rincian per-shift dan total selisih kas fisik
+    const shiftDetailsList: ShiftDetailReport[] = [];
     let totalCashDiscrepancy = 0;
-    for (const sh of dayShifts) {
-      if (sh.status === 'CLOSED' && sh.actualCash !== null && sh.modalAwal !== null) {
-        // Ambil penjualan tunai untuk shift ini
-        const [sales] = await db
-          .select({
-            total: sql<string>`COALESCE(SUM(${transactionPayments.amount}), 0)`,
-          })
-          .from(transactionPayments)
-          .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
-          .where(
-            and(
-              eq(transactions.shiftId, sh.id),
-              eq(transactions.status, 'COMPLETED'),
-              eq(transactionPayments.paymentMethod, 'CASH'),
-              eq(transactions.isTest, false),
-            ),
-          );
 
-        const modal = Number(sh.modalAwal);
-        const actual = Number(sh.actualCash);
-        const cashSales = Number(sales?.total ?? 0);
-        const expected = modal + cashSales;
-        totalCashDiscrepancy += actual - expected;
+    for (const sh of dayShifts) {
+      // Penjualan per shift (Cash vs QRIS)
+      const [payRow] = await db
+        .select({
+          cash: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${transactionPayments.paymentMethod} = 'CASH'), 0)`,
+          qris: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${transactionPayments.paymentMethod} = 'QRIS'), 0)`,
+          txCount: sql<number>`COUNT(DISTINCT ${transactions.id})`,
+        })
+        .from(transactionPayments)
+        .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
+        .where(
+          and(
+            eq(transactions.shiftId, sh.id),
+            eq(transactions.status, 'COMPLETED'),
+            eq(transactions.isTest, false),
+          ),
+        );
+
+      // Gerakan Kas / Petty Cash (CASH_IN vs CASH_OUT)
+      const [movements] = await db
+        .select({
+          cashIn: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_IN'), 0)`,
+          cashOut: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_OUT'), 0)`,
+        })
+        .from(shiftCashMovements)
+        .where(eq(shiftCashMovements.shiftId, sh.id));
+
+      const modal = Number(sh.modalAwal ?? 100_000);
+      const cashSales = Number(payRow?.cash ?? 0);
+      const qrisSales = Number(payRow?.qris ?? 0);
+      const txCount = Number(payRow?.txCount ?? 0);
+      const cashIn = Number(movements?.cashIn ?? 0);
+      const cashOut = Number(movements?.cashOut ?? 0);
+
+      // Expected Cash di laci = Modal + Cash Sales + Kas Masuk - Kas Keluar
+      const expectedCash = modal + cashSales + cashIn - cashOut;
+      const actualCash = sh.actualCash !== null ? Number(sh.actualCash) : null;
+      const selisih = actualCash !== null ? actualCash - expectedCash : null;
+
+      if (sh.status === 'CLOSED' && selisih !== null) {
+        totalCashDiscrepancy += selisih;
       }
+
+      // Deteksi penamaan Shift berdasarkan jam clockIn (WIB)
+      // Pagi: < 11:30 WIB | Siang: >= 11:30 WIB
+      const clockInDate = new Date(sh.clockIn);
+      const hourWib = parseInt(
+        new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jakarta', hour: 'numeric', hour12: false }).format(clockInDate),
+        10,
+      );
+      const minuteWib = parseInt(
+        new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jakarta', minute: 'numeric' }).format(clockInDate),
+        10,
+      );
+      const isPagi = hourWib < 11 || (hourWib === 11 && minuteWib < 30);
+      const shiftName = isPagi ? 'Shift 1 (Pagi)' : 'Shift 2 (Siang)';
+
+      shiftDetailsList.push({
+        shiftId: sh.id,
+        shiftName,
+        employeeId: sh.employeeId,
+        employeeName: sh.employeeName,
+        employeeNim: sh.employeeNim,
+        status: sh.status,
+        clockIn: sh.clockIn.toISOString(),
+        clockOut: sh.clockOut ? sh.clockOut.toISOString() : null,
+        modalAwal: modal,
+        cashSales,
+        qrisSales,
+        totalOmzet: cashSales + qrisSales,
+        txCount,
+        cashIn,
+        cashOut,
+        expectedCash,
+        actualCash,
+        selisih,
+        auditFlags: sh.auditFlags,
+        notes: sh.notes,
+      });
     }
 
     // Evaluasi tingkat keparahan selisih kas (Bagian 18 K7)
@@ -100,6 +193,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       targetDate,
       isLocked: existingClosing?.status === 'LOCKED' || existingClosing?.status === 'AUDITED',
       closing: existingClosing ?? null,
+      shifts: shiftDetailsList,
       preview: {
         omzet: s.omzet,
         omzetCash: s.omzetCash,
@@ -114,7 +208,10 @@ export async function GET(req: NextRequest): Promise<Response> {
         txCount: s.txCount,
       },
     });
-  } catch (err) {
+  } catch (err: unknown) {
+    if (err instanceof AppError) {
+      return apiError(err.message, err.code, err.statusCode);
+    }
     console.error('[tutup-buku GET]', err);
     return apiError('Gagal memuat status tutup buku', 'SERVER_ERROR', 500);
   }
@@ -128,7 +225,7 @@ const tutupBukuSchema = z.object({
 
 export async function POST(req: NextRequest): Promise<Response> {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireManager();
 
     let body: unknown;
     try {
@@ -169,7 +266,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     const report = await getFinancialReport(range);
     const s = report.summary;
 
-    // 3. Hitung selisih kas fisik
+    // 3. Hitung selisih kas fisik akumulasi (memperhitungkan petty cash)
     const dayShifts = await db
       .select({
         id: shifts.id,
@@ -181,7 +278,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     let totalCashDiscrepancy = 0;
     for (const sh of dayShifts) {
-      if (sh.actualCash !== null && sh.modalAwal !== null) {
+      if (sh.actualCash !== null) {
         const [sales] = await db
           .select({
             total: sql<string>`COALESCE(SUM(${transactionPayments.amount}), 0)`,
@@ -197,10 +294,22 @@ export async function POST(req: NextRequest): Promise<Response> {
             ),
           );
 
-        const modal = Number(sh.modalAwal);
+        const [movements] = await db
+          .select({
+            cashIn: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_IN'), 0)`,
+            cashOut: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_OUT'), 0)`,
+          })
+          .from(shiftCashMovements)
+          .where(eq(shiftCashMovements.shiftId, sh.id));
+
+        const modal = Number(sh.modalAwal ?? 100_000);
         const actual = Number(sh.actualCash);
         const cashSales = Number(sales?.total ?? 0);
-        totalCashDiscrepancy += actual - (modal + cashSales);
+        const cashIn = Number(movements?.cashIn ?? 0);
+        const cashOut = Number(movements?.cashOut ?? 0);
+        const expected = modal + cashSales + cashIn - cashOut;
+
+        totalCashDiscrepancy += actual - expected;
       }
     }
 
@@ -263,7 +372,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       message: `Tutup Buku Harian tanggal ${closingDate} berhasil dikunci.`,
       closing: result,
     });
-  } catch (err) {
+  } catch (err: unknown) {
+    if (err instanceof AppError) {
+      return apiError(err.message, err.code, err.statusCode);
+    }
     console.error('[tutup-buku POST]', err);
     return apiError('Gagal melakukan tutup buku harian', 'SERVER_ERROR', 500);
   }

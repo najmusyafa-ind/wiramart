@@ -18,7 +18,7 @@ export const runtime = 'nodejs';
 
 const setupPinSchema = z.object({
   nim: z.string().min(1, 'NIM wajib diisi').max(20).trim(),
-  pin: z.string().regex(/^\d{6}$/, 'PIN harus berupa 6 digit angka (0-9)'),
+  pin: z.string().regex(/^\d{6,8}$/, 'PIN harus berupa 6 hingga 8 digit angka (0-9)'),
 });
 
 export async function POST(request: Request): Promise<Response> {

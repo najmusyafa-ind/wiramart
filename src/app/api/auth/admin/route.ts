@@ -162,7 +162,7 @@ export async function POST(request: Request): Promise<Response> {
       adminAuthLimiter.check(rateKey, true);
       const isShiftAdmin = admin.role === 'ADMIN_SHIFT';
       return apiError(
-        isShiftAdmin ? 'PIN 6-digit Admin Kasir salah.' : 'NIDN atau password Manager salah.',
+        isShiftAdmin ? 'PIN atau Password Admin Kasir salah.' : 'NIDN atau password Manager salah.',
         'INVALID_CREDENTIALS',
         401,
       );

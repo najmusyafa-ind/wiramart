@@ -28,6 +28,28 @@ function fmtRupiah(num: number): string {
   return 'Rp ' + Math.round(num).toLocaleString('id-ID');
 }
 
+// Netralisasi sel teks agar kebal terhadap Formula Injection (Celah I3)
+function sanitizeExcelText(val: string | null | undefined): string {
+  if (!val) return '';
+  const str = String(val).trim();
+  if (/^[=+@\-]/.test(str)) {
+    return `'${str}`;
+  }
+  return str;
+}
+
+// Label shift toko berdasarkan jam buka (08:00 - 11:30 vs 11:30 - 15:00 WIB)
+function getShiftLabel(clockIn: Date): string {
+  const timeStr = new Date(clockIn).toLocaleTimeString('en-GB', {
+    timeZone: 'Asia/Jakarta',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const [h, m] = timeStr.split(':').map(Number);
+  const totalM = (h ?? 0) * 60 + (m ?? 0);
+  return totalM < 690 ? 'Shift 1 (Pagi)' : 'Shift 2 (Siang)';
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     await requireAdmin();
@@ -132,37 +154,38 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const ws = wb.addWorksheet('Skema Harian Wiramart');
     ws.views = [{ showGridLines: true }];
 
-    // Kolom lebar
+    // Kolom lebar (A sampai L)
     ws.columns = [
       { width: 4 },  // A (padding)
-      { width: 24 }, // B
-      { width: 20 }, // C
-      { width: 16 }, // D
-      { width: 16 }, // E
-      { width: 16 }, // F
-      { width: 16 }, // G
-      { width: 18 }, // H
-      { width: 18 }, // I
-      { width: 18 }, // J
-      { width: 16 }, // K
+      { width: 18 }, // B Sesi Shift
+      { width: 24 }, // C Kasir (Nama / NIM)
+      { width: 18 }, // D Waktu Shift
+      { width: 16 }, // E Modal Awal
+      { width: 16 }, // F Omzet Tunai
+      { width: 16 }, // G Kas Keluar (-)
+      { width: 16 }, // H Kas Masuk (+)
+      { width: 18 }, // I Expected Kas
+      { width: 16 }, // J Fisik Laci
+      { width: 16 }, // K Selisih
+      { width: 14 }, // L Status Audit
     ];
 
     // Title Block
-    ws.mergeCells('B2:K2');
+    ws.mergeCells('B2:L2');
     const titleCell = ws.getCell('B2');
     titleCell.value = 'WIRAMART UNPERBA — LAPORAN KEUANGAN & BAGI HASIL';
     titleCell.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FF1E3A8A' } };
     titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
     ws.getRow(2).height = 28;
 
-    ws.mergeCells('B3:K3');
+    ws.mergeCells('B3:L3');
     const subTitle = ws.getCell('B3');
     subTitle.value = `Universitas Perwira Purbalingga • Periode: ${range.label} • Dicetak: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`;
     subTitle.font = { name: 'Arial', size: 10, color: { argb: 'FF64748B' } };
     ws.getRow(3).height = 18;
 
     // ── SECTION 1: RINGKASAN FINANSIAL & BAGI HASIL ───────────
-    ws.mergeCells('B5:K5');
+    ws.mergeCells('B5:L5');
     const sec1 = ws.getCell('B5');
     sec1.value = '1. RINGKASAN FINANSIAL & SKEMA BAGI HASIL 50% - 50%';
     sec1.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
@@ -201,13 +224,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         color: String(label).includes('LABA BERSIH') ? { argb: 'FF15803D' } : undefined,
       };
 
-      ws.mergeCells(`H${curRow}:K${curRow}`);
+      ws.mergeCells(`H${curRow}:L${curRow}`);
       const noteCell = ws.getCell(`H${curRow}`);
       noteCell.value = note;
       noteCell.font = { size: 9, color: { argb: 'FF64748B' }, italic: true };
 
       if (String(label).includes('LABA BERSIH') || String(label).includes('HAK')) {
-        for (let c = 2; c <= 11; c++) {
+        for (let c = 2; c <= 12; c++) {
           ws.getRow(curRow).getCell(c).fill = {
             type: 'pattern',
             pattern: 'solid',
@@ -221,7 +244,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     // ── SECTION 2: REKAPITULASI HARIAN ─────────────────────────
     curRow += 2;
-    ws.mergeCells(`B${curRow}:K${curRow}`);
+    ws.mergeCells(`B${curRow}:L${curRow}`);
     const sec2 = ws.getCell(`B${curRow}`);
     sec2.value = '2. REKAPITULASI HARIAN (DAILY BREAKDOWN)';
     sec2.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
@@ -264,35 +287,55 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       curRow++;
     }
 
-    // ── SECTION 3: AUDIT LACI & REKAP SHIFT KASIR ──────────────
+    // ── SECTION 3: AUDIT LACI & REKAP KAS SHIFT KASIR ──────────
     curRow += 2;
-    ws.mergeCells(`B${curRow}:K${curRow}`);
+    ws.mergeCells(`B${curRow}:L${curRow}`);
     const sec3 = ws.getCell(`B${curRow}`);
-    sec3.value = '3. AUDIT LACI & REKAP KAS SHIFT KASIR';
+    sec3.value = '3. AUDIT LACI & REKAP KAS SHIFT (SHIFT 1 PAGI & SHIFT 2 SIANG — MODAL RP 100.000)';
     sec3.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
     sec3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7C3AED' } };
     ws.getRow(curRow).height = 24;
 
     curRow++;
-    const headers3 = ['Kasir (Nama / NIM)', 'Waktu Shift', 'Modal Awal', 'Omzet Tunai', 'Kas Keluar (-)', 'Kas Masuk (+)', 'Expected Kas', 'Fisik Laci', 'Selisih', 'Status Audit'];
+    const headers3 = [
+      'Sesi Shift',
+      'Kasir (Nama / NIM)',
+      'Waktu Shift',
+      'Modal Awal',
+      'Omzet Tunai',
+      'Kas Keluar (-)',
+      'Kas Masuk (+)',
+      'Expected Kas',
+      'Fisik Laci',
+      'Selisih',
+      'Status Audit',
+    ];
     headers3.forEach((h, idx) => {
       const cell = ws.getRow(curRow).getCell(idx + 2);
       cell.value = h;
       cell.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF5B21B6' } };
-      cell.alignment = { horizontal: idx >= 2 && idx <= 8 ? 'right' : 'left', vertical: 'middle' };
+      cell.alignment = { horizontal: idx >= 3 && idx <= 9 ? 'right' : 'left', vertical: 'middle' };
     });
     ws.getRow(curRow).height = 20;
 
     curRow++;
     if (shiftList.length === 0) {
-      ws.mergeCells(`B${curRow}:K${curRow}`);
+      ws.mergeCells(`B${curRow}:L${curRow}`);
       ws.getCell(`B${curRow}`).value = 'Tidak ada shift tercatat pada rentang tanggal ini.';
       ws.getCell(`B${curRow}`).font = { italic: true, color: { argb: 'FF64748B' } };
       curRow++;
     } else {
+      let totModalAwal = 0;
+      let totCashSales = 0;
+      let totCashOut = 0;
+      let totCashIn = 0;
+      let totExpected = 0;
+      let totActual = 0;
+      let hasClosedShift = false;
+
       for (const sh of shiftList) {
-        const modalAwal = sh.modalAwal ? parseFloat(sh.modalAwal) : 0;
+        const modalAwal = sh.modalAwal ? parseFloat(sh.modalAwal) : 100_000;
         const actualCash = sh.actualCash ? parseFloat(sh.actualCash) : null;
         const cashSales = shiftSalesMap.get(sh.shiftId) ?? 0;
         const cashOut = shiftCashOutMap.get(sh.shiftId) ?? 0;
@@ -300,16 +343,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         const expectedCash = modalAwal + cashSales - cashOut + cashIn;
         const discrepancy = actualCash !== null ? actualCash - expectedCash : null;
 
+        totModalAwal += modalAwal;
+        totCashSales += cashSales;
+        totCashOut += cashOut;
+        totCashIn += cashIn;
+        totExpected += expectedCash;
+        if (actualCash !== null) {
+          totActual += actualCash;
+          hasClosedShift = true;
+        }
+
+        const shiftBadge = getShiftLabel(sh.clockIn);
+        const kasirLabel = sanitizeExcelText(`${sh.kasirName} (${sh.kasirNim})`);
+        const clockInStr = new Date(sh.clockIn).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
+        const clockOutStr = sh.clockOut ? new Date(sh.clockOut).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : 'Aktif';
+
         const row = ws.getRow(curRow);
-        row.getCell(2).value = `${sh.kasirName} (${sh.kasirNim})`;
-        row.getCell(3).value = `${new Date(sh.clockIn).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} s/d ${sh.clockOut ? new Date(sh.clockOut).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : 'Aktif'}`;
-        row.getCell(4).value = modalAwal;
-        row.getCell(5).value = cashSales;
-        row.getCell(6).value = cashOut;
-        row.getCell(7).value = cashIn;
-        row.getCell(8).value = expectedCash;
-        row.getCell(9).value = actualCash !== null ? actualCash : 'Belum tutup';
-        row.getCell(10).value = discrepancy !== null ? discrepancy : '-';
+        row.getCell(2).value = shiftBadge;
+        row.getCell(3).value = kasirLabel;
+        row.getCell(4).value = `${clockInStr} s/d ${clockOutStr}`;
+        row.getCell(5).value = modalAwal;
+        row.getCell(6).value = cashSales;
+        row.getCell(7).value = cashOut;
+        row.getCell(8).value = cashIn;
+        row.getCell(9).value = expectedCash;
+        row.getCell(10).value = actualCash !== null ? actualCash : 'Belum tutup';
+        row.getCell(11).value = discrepancy !== null ? discrepancy : '-';
 
         let auditText = 'AKTIF';
         if (sh.status === 'CLOSED') {
@@ -317,42 +376,79 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           else if (discrepancy < 0) auditText = 'TEKOR';
           else auditText = 'LEBIH';
         }
-        row.getCell(11).value = auditText;
+        row.getCell(12).value = auditText;
 
-        for (let c = 4; c <= 8; c++) {
+        for (let c = 5; c <= 9; c++) {
           row.getCell(c).numFmt = '"Rp "#,##0';
           row.getCell(c).alignment = { horizontal: 'right' };
         }
-        if (typeof row.getCell(9).value === 'number') {
-          row.getCell(9).numFmt = '"Rp "#,##0';
-          row.getCell(9).alignment = { horizontal: 'right' };
-        }
         if (typeof row.getCell(10).value === 'number') {
-          row.getCell(10).numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0';
+          row.getCell(10).numFmt = '"Rp "#,##0';
           row.getCell(10).alignment = { horizontal: 'right' };
         }
-        row.getCell(11).alignment = { horizontal: 'center' };
+        if (typeof row.getCell(11).value === 'number') {
+          row.getCell(11).numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0';
+          row.getCell(11).alignment = { horizontal: 'right' };
+        }
+        row.getCell(2).alignment = { horizontal: 'center' };
+        row.getCell(12).alignment = { horizontal: 'center' };
 
         curRow++;
       }
+
+      // Baris Total Konsolidasi Toko Jam 15:00 WIB
+      const totDiscrepancy = hasClosedShift ? totActual - totExpected : null;
+      const totRow = ws.getRow(curRow);
+      totRow.getCell(2).value = 'TOTAL KONSOLIDASI (15:00 WIB)';
+      totRow.getCell(3).value = 'Semua Sesi Shift';
+      totRow.getCell(4).value = '08:00 - 15:00 WIB';
+      totRow.getCell(5).value = totModalAwal;
+      totRow.getCell(6).value = totCashSales;
+      totRow.getCell(7).value = totCashOut;
+      totRow.getCell(8).value = totCashIn;
+      totRow.getCell(9).value = totExpected;
+      totRow.getCell(10).value = hasClosedShift ? totActual : 'Belum tutup';
+      totRow.getCell(11).value = totDiscrepancy !== null ? totDiscrepancy : '-';
+      totRow.getCell(12).value = hasClosedShift ? (Math.abs(totDiscrepancy ?? 0) < 1 ? 'PAS' : (totDiscrepancy ?? 0) < 0 ? 'TEKOR' : 'LEBIH') : 'SEBAGIAN';
+
+      for (let c = 2; c <= 12; c++) {
+        const cell = totRow.getCell(c);
+        cell.font = { bold: true, size: 9 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3E8FF' } }; // Soft purple
+      }
+      for (let c = 5; c <= 9; c++) {
+        totRow.getCell(c).numFmt = '"Rp "#,##0';
+        totRow.getCell(c).alignment = { horizontal: 'right' };
+      }
+      if (typeof totRow.getCell(10).value === 'number') {
+        totRow.getCell(10).numFmt = '"Rp "#,##0';
+        totRow.getCell(10).alignment = { horizontal: 'right' };
+      }
+      if (typeof totRow.getCell(11).value === 'number') {
+        totRow.getCell(11).numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0';
+        totRow.getCell(11).alignment = { horizontal: 'right' };
+      }
+      totRow.getCell(2).alignment = { horizontal: 'center' };
+      totRow.getCell(12).alignment = { horizontal: 'center' };
+      curRow++;
     }
 
     // ── SECTION 4: INTEGRITAS & TANDA TANGAN ──────────────────
     curRow += 2;
-    ws.mergeCells(`B${curRow}:K${curRow}`);
+    ws.mergeCells(`B${curRow}:L${curRow}`);
     const sec4 = ws.getCell(`B${curRow}`);
     sec4.value = '✓ INVARIAN KEUANGAN: Omzet Cash + QRIS Seimbang. Seluruh formula terverifikasi atomik.';
     sec4.font = { italic: true, size: 9, color: { argb: 'FF15803D' } };
 
     curRow += 3;
     ws.getCell(`C${curRow}`).value = 'Dibuat oleh:';
-    ws.getCell(`H${curRow}`).value = 'Disetujui oleh:';
+    ws.getCell(`I${curRow}`).value = 'Disetujui oleh:';
 
     curRow += 4;
     ws.getCell(`C${curRow}`).value = '___________________';
     ws.getCell(`C${curRow + 1}`).value = 'Pengelola Toko';
-    ws.getCell(`H${curRow}`).value = '___________________';
-    ws.getCell(`H${curRow + 1}`).value = 'Dosen Pembina / Manajer';
+    ws.getCell(`I${curRow}`).value = '___________________';
+    ws.getCell(`I${curRow + 1}`).value = 'Dosen Pembina / Manajer';
 
     // Stream Excel Buffer
     const buffer = await wb.xlsx.writeBuffer();
@@ -367,7 +463,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         'Cache-Control': 'no-store',
       },
     });
-  } catch {
-    return NextResponse.json({ success: false, error: 'Gagal ekspor laporan skema harian' }, { status: 500 });
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : 'Gagal ekspor laporan skema harian';
+    return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
   }
 }

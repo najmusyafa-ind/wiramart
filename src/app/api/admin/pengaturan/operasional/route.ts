@@ -9,7 +9,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { qrisSettings } from '@/lib/db/schema';
-import { requireAdmin } from '@/lib/utils/auth';
+import { requireAdmin, requireManager } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
@@ -44,7 +44,7 @@ export async function GET(): Promise<Response> {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PATCH — Update pengaturan operasional
+// PATCH — Update pengaturan operasional (Khusus Manager / Dosen)
 // ─────────────────────────────────────────────────────────────
 const operasionalSchema = z.object({
   attendanceTolerance:    z.number().int().min(0).max(120).optional(),
@@ -54,7 +54,7 @@ const operasionalSchema = z.object({
 
 export async function PATCH(req: Request): Promise<Response> {
   try {
-    await requireAdmin();
+    await requireManager();
 
     const body = await req.json() as unknown;
     const parsed = operasionalSchema.safeParse(body);

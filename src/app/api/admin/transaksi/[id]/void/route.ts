@@ -24,12 +24,13 @@
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, desc, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   transactions,
   transactionItems,
   products,
+  stockBatches,
   auditLogs,
   dailyClosings,
 } from '@/lib/db/schema';
@@ -130,13 +131,13 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
     const lockedDay = await db.query.dailyClosings.findFirst({
       where: and(
         eq(dailyClosings.closingDate, trxDateStr),
-        eq(dailyClosings.status, 'LOCKED'),
+        inArray(dailyClosings.status, ['LOCKED', 'AUDITED']),
       ),
     });
 
     if (lockedDay) {
       return apiError(
-        `Transaksi pada tanggal ${trxDateStr} sudah Tutup Buku (Locked). Tidak dapat di-void secara normal. Hubungi Manager Toko.`,
+        `Transaksi pada tanggal ${trxDateStr} sudah Tutup Buku (${lockedDay.status}). Tidak dapat di-void secara normal. Hubungi Manager Toko.`,
         'DATE_LOCKED',
         403,
       );
@@ -164,6 +165,8 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
     //
     // D16 Fix: Stok dikembalikan via `stock_qty = stock_qty + qty`
     // (atomik di server DB, bukan nilai JS yang dibaca sebelumnya).
+    // Sinkronisasi Batch (FEFO Reversal): stockBatches.currentQty
+    // juga dipulihkan agar saldo batch gudang tidak desinkron.
     // Lock ordering by productId mencegah deadlock saat dua void
     // menyentuh produk yang sama dalam urutan berbeda.
     // ─────────────────────────────────────────────────────────
@@ -199,9 +202,9 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
         throw new Error('ALREADY_VOIDED_RACE');
       }
 
-      // Step 2: Kembalikan stok ATOMIK — stock_qty = stock_qty + qty
-      // Tidak ada nilai JS yang dibaca; Postgres langsung menjumlahkan di server.
+      // Step 2: Kembalikan stok ATOMIK — products.stockQty & sinkronkan stockBatches (Reverse FEFO)
       for (const item of itemsByLockOrder) {
+        // 2a. Update total stok produk di tabel products
         await tx
           .update(products)
           .set({
@@ -209,6 +212,50 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
             updatedAt: now,
           })
           .where(eq(products.id, item.productId));
+
+        // 2b. Sinkronisasi pengembalian stok ke batch (Reverse FEFO)
+        const candidateBatches = await tx
+          .select({
+            id:         stockBatches.id,
+            initialQty: stockBatches.initialQty,
+            currentQty: stockBatches.currentQty,
+          })
+          .from(stockBatches)
+          .where(eq(stockBatches.productId, item.productId))
+          .orderBy(desc(stockBatches.expiryDate), desc(stockBatches.createdAt));
+
+        if (candidateBatches.length > 0) {
+          let qtyToRestore = item.qty;
+
+          // Isi kembali batch yang berkurang (currentQty < initialQty)
+          for (const b of candidateBatches) {
+            if (qtyToRestore <= 0) break;
+            const spaceAvailable = Math.max(0, b.initialQty - b.currentQty);
+            if (spaceAvailable > 0) {
+              const restoreAmount = Math.min(spaceAvailable, qtyToRestore);
+              await tx
+                .update(stockBatches)
+                .set({
+                  currentQty: sql`${stockBatches.currentQty} + ${restoreAmount}`,
+                  updatedAt:  now,
+                })
+                .where(eq(stockBatches.id, b.id));
+              qtyToRestore -= restoreAmount;
+            }
+          }
+
+          // Fallback: Jika semua batch sudah berstatus initialQty (atau ada sisa),
+          // kembalikan ke batch aktif teratas
+          if (qtyToRestore > 0 && candidateBatches[0]) {
+            await tx
+              .update(stockBatches)
+              .set({
+                currentQty: sql`${stockBatches.currentQty} + ${qtyToRestore}`,
+                updatedAt:  now,
+              })
+              .where(eq(stockBatches.id, candidateBatches[0].id));
+          }
+        }
       }
 
       // Step 3: Catat di audit_logs

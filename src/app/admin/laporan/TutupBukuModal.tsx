@@ -14,7 +14,34 @@ import {
   FileText,
   ShieldCheck,
   TrendingUp,
+  Sun,
+  Sunset,
+  User,
+  Clock,
 } from 'lucide-react';
+
+type ShiftReportItem = {
+  shiftId: string;
+  shiftName: string; // 'Shift 1 (Pagi)' | 'Shift 2 (Siang)'
+  employeeId: string;
+  employeeName: string;
+  employeeNim: string;
+  status: 'ACTIVE' | 'CLOSED';
+  clockIn: string;
+  clockOut: string | null;
+  modalAwal: number;
+  cashSales: number;
+  qrisSales: number;
+  totalOmzet: number;
+  txCount: number;
+  cashIn: number;
+  cashOut: number;
+  expectedCash: number;
+  actualCash: number | null;
+  selisih: number | null;
+  auditFlags: string | null;
+  notes: string | null;
+};
 
 type ClosingPreview = {
   omzet: number;
@@ -59,6 +86,20 @@ function fmtRp(n: number | string | null | undefined): string {
   return 'Rp ' + (isNaN(num) ? 0 : Math.round(num)).toLocaleString('id-ID');
 }
 
+function fmtTimeOnly(iso: string | null | undefined): string {
+  if (!iso) return '-';
+  try {
+    return new Intl.DateTimeFormat('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(iso));
+  } catch {
+    return '-';
+  }
+}
+
 export default function TutupBukuModal({
   isOpen,
   onClose,
@@ -77,6 +118,7 @@ export default function TutupBukuModal({
   const [isLocked, setIsLocked] = useState(false);
   const [closing, setClosing] = useState<ClosingData | null>(null);
   const [preview, setPreview] = useState<ClosingPreview | null>(null);
+  const [shiftsData, setShiftsData] = useState<ShiftReportItem[]>([]);
   const [notes, setNotes] = useState('');
 
   const fetchStatus = useCallback(async (date: string) => {
@@ -89,6 +131,7 @@ export default function TutupBukuModal({
         setIsLocked(json.data.isLocked);
         setClosing(json.data.closing);
         setPreview(json.data.preview);
+        setShiftsData(json.data.shifts || []);
         setNotes(json.data.closing?.notes || '');
       } else {
         setError(json.error || 'Gagal memuat status tutup buku.');
@@ -168,8 +211,8 @@ export default function TutupBukuModal({
         className="card"
         style={{
           width: '100%',
-          maxWidth: 520,
-          maxHeight: '92vh',
+          maxWidth: 580,
+          maxHeight: '94vh',
           display: 'flex',
           flexDirection: 'column',
           margin: 0,
@@ -312,6 +355,154 @@ export default function TutupBukuModal({
                   </div>
                 </div>
               ) : null}
+
+              {/* ── BAGIAN 1: Rincian Laci Per-Shift (Modal Rp 100k Absolut) ── */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    1. Rincian Laci Per-Shift (Modal Rp 100k Absolut)
+                  </div>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
+                    {shiftsData.length} Sesi Terdeteksi
+                  </span>
+                </div>
+
+                {shiftsData.length === 0 ? (
+                  <div style={{
+                    padding: '12px',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'var(--color-surface-elevated)',
+                    border: '1px dashed var(--color-border)',
+                    textAlign: 'center',
+                    fontSize: 'var(--text-xs)',
+                    color: 'var(--color-text-muted)',
+                  }}>
+                    Belum ada sesi shift kasir yang tercatat pada tanggal ini.
+                  </div>
+                ) : (
+                  shiftsData.map((sh) => {
+                    const isShiftPagi = sh.shiftName.includes('Pagi');
+                    return (
+                      <div
+                        key={sh.shiftId}
+                        style={{
+                          border: '1px solid var(--color-border)',
+                          borderRadius: 'var(--radius-md)',
+                          background: 'var(--color-surface)',
+                          padding: '10px 12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 8,
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                        }}
+                      >
+                        {/* Shift Header */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {isShiftPagi ? (
+                              <Sun size={15} style={{ color: 'hsl(38, 95%, 45%)' }} />
+                            ) : (
+                              <Sunset size={15} style={{ color: 'hsl(28, 95%, 45%)' }} />
+                            )}
+                            <span style={{ fontWeight: 800, fontSize: '0.8rem', color: 'var(--color-text)' }}>
+                              {sh.shiftName}
+                            </span>
+                            <span style={{
+                              fontSize: '0.65rem',
+                              fontWeight: 700,
+                              padding: '1px 6px',
+                              borderRadius: 'var(--radius-full)',
+                              background: sh.status === 'CLOSED' ? 'hsl(142, 60%, 92%)' : 'hsl(38, 90%, 90%)',
+                              color: sh.status === 'CLOSED' ? 'hsl(142, 70%, 25%)' : 'hsl(38, 90%, 25%)',
+                            }}>
+                              {sh.status === 'CLOSED' ? 'TUTUP SHIFT' : 'MASIH AKTIF'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Clock size={12} />
+                            {fmtTimeOnly(sh.clockIn)} – {fmtTimeOnly(sh.clockOut)} WIB
+                          </div>
+                        </div>
+
+                        {/* Kasir Identity */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>
+                          <User size={13} style={{ color: 'var(--color-primary)' }} />
+                          <span>Kasir: <strong>{sh.employeeName}</strong> ({sh.employeeNim})</span>
+                        </div>
+
+                        {/* Breakdown Angka Laci Shift */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(3, 1fr)',
+                          gap: 6,
+                          background: 'var(--color-surface-elevated)',
+                          padding: '6px 8px',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: '0.7rem',
+                        }}>
+                          <div>
+                            <div style={{ color: 'var(--color-text-muted)' }}>Modal Laci:</div>
+                            <div style={{ fontWeight: 700 }}>{fmtRp(sh.modalAwal)}</div>
+                          </div>
+                          <div>
+                            <div style={{ color: 'var(--color-text-muted)' }}>Penjualan Cash:</div>
+                            <div style={{ fontWeight: 700, color: 'var(--color-primary)' }}>{fmtRp(sh.cashSales)}</div>
+                          </div>
+                          <div>
+                            <div style={{ color: 'var(--color-text-muted)' }}>Penjualan QRIS:</div>
+                            <div style={{ fontWeight: 700, color: 'hsl(260, 70%, 45%)' }}>{fmtRp(sh.qrisSales)}</div>
+                          </div>
+                        </div>
+
+                        {/* Petty Cash & Expected vs Actual */}
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          fontSize: '0.72rem',
+                          borderTop: '1px dashed var(--color-border)',
+                          paddingTop: 6,
+                        }}>
+                          <div>
+                            <span style={{ color: 'var(--color-text-muted)' }}>Petty Cash: </span>
+                            {sh.cashOut > 0 ? (
+                              <span style={{ color: 'var(--color-error)', fontWeight: 600 }}>Keluar -{fmtRp(sh.cashOut)} </span>
+                            ) : null}
+                            {sh.cashIn > 0 ? (
+                              <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>Masuk +{fmtRp(sh.cashIn)} </span>
+                            ) : null}
+                            {sh.cashOut === 0 && sh.cashIn === 0 ? <span>Rp 0</span> : null}
+                          </div>
+                          <div>
+                            <span style={{ color: 'var(--color-text-muted)' }}>Fisik Laci: </span>
+                            <strong style={{ color: 'var(--color-text)' }}>
+                              {sh.actualCash !== null ? fmtRp(sh.actualCash) : 'Belum dihitung'}
+                            </strong>
+                            {sh.selisih !== null && (
+                              <span style={{
+                                marginLeft: 6,
+                                fontWeight: 800,
+                                color: sh.selisih === 0
+                                  ? 'hsl(142, 70%, 35%)'
+                                  : sh.selisih > 0
+                                  ? 'hsl(200, 80%, 40%)'
+                                  : 'var(--color-error)',
+                              }}>
+                                ({sh.selisih === 0 ? 'Pas' : (sh.selisih > 0 ? `+${fmtRp(sh.selisih)}` : fmtRp(sh.selisih))})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* ── BAGIAN 2: Penggabungan Konsolidasi Toko (Jam 15:00 WIB) ── */}
+              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-text)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 4 }}>
+                2. Penggabungan Konsolidasi Toko (Jam 15:00 WIB)
+              </div>
 
               {/* Rincian Angka Finansial */}
               {preview && (

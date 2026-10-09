@@ -1,22 +1,22 @@
 // =============================================================
 // GET /api/admin/database/backup — Unduh Snapshot Utuh Database
-// Auth: Admin Only (requireAdmin)
+// Auth: Manager Only (requireManager)
 // Output: JSON Snapshot Terverifikasi (Content-Disposition: attachment)
 // =============================================================
 
 import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
-import { requireAdmin } from '@/lib/utils/auth';
+import { requireManager } from '@/lib/utils/auth';
 import { db } from '@/lib/db/client';
 import { admins } from '@/lib/db/schema';
 import { databaseBackupService } from '@/lib/db/backup/DatabaseBackupService';
-import { apiError } from '@/lib/utils/helpers';
+import { apiError, AppError } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
 
 export async function GET(): Promise<Response> {
   try {
-    const session = await requireAdmin();
+    const session = await requireManager();
     const adminRecord = await db.query.admins.findFirst({
       where: eq(admins.id, session.sub),
     });
@@ -39,6 +39,9 @@ export async function GET(): Promise<Response> {
       },
     });
   } catch (err: unknown) {
+    if (err instanceof AppError) {
+      return apiError(err.message, err.code, err.statusCode);
+    }
     const message = err instanceof Error ? err.message : 'Gagal membuat file backup database';
     return apiError(message, 'BACKUP_FAILED', 500);
   }
