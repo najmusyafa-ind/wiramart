@@ -185,6 +185,7 @@ function BukaShiftOverlay({
           modalAwal: nominal,
           breakdown: Object.keys(breakdown).length > 0 ? breakdown : undefined,
           pin: pinInput || undefined,
+          pinKetuaShift: pinInput || undefined,
         }),
       });
       const json = await res.json() as { success: boolean; error?: string };
@@ -475,12 +476,11 @@ function BukaShiftOverlay({
                 </label>
                 <input
                   type="password"
-                  maxLength={6}
-                  pattern="\d{6}"
+                  maxLength={8}
                   className="form-input"
-                  placeholder="Ketik 6 digit PIN (jika Ketua Shift)..."
+                  placeholder="Ketik PIN Ketua Shift..."
                   value={pinInput}
-                  onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 8))}
                   style={{ letterSpacing: 4, fontWeight: 700, maxWidth: 220 }}
                 />
                 <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
@@ -1589,6 +1589,7 @@ export default function PosPage() {
           breakdown: Object.keys(tutupBreakdown).length > 0 ? tutupBreakdown : undefined,
           notes: tutupNotes.trim() ? tutupNotes.trim() : undefined,
           pin: tutupPin || undefined,
+          pinKetuaShift: tutupPin || undefined,
         }),
       });
       const json = await res.json() as {
@@ -1765,16 +1766,15 @@ export default function PosPage() {
                 padding: 'var(--space-3)',
               }}>
                 <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#854d0e', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <KeyRound size={14} /> PIN Otorisasi Ketua Shift (6 Digit)
+                  <KeyRound size={14} /> PIN Otorisasi Ketua Shift
                 </label>
                 <input
                   type="password"
-                  maxLength={6}
-                  pattern="\d{6}"
+                  maxLength={8}
                   className="form-input"
-                  placeholder="Ketik 6 digit PIN (jika Ketua Shift)..."
+                  placeholder="Ketik PIN Ketua Shift..."
                   value={tutupPin}
-                  onChange={(e) => setTutupPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onChange={(e) => setTutupPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
                   style={{ letterSpacing: 4, fontWeight: 700, maxWidth: 220 }}
                 />
                 <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 4 }}>

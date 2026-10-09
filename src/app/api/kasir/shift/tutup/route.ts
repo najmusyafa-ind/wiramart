@@ -29,7 +29,8 @@ const tutupShiftSchema = z.object({
   actualCash: z.number().min(0, 'Saldo fisik kas tidak boleh negatif').max(50_000_000, 'Nilai terlalu besar').optional(),
   breakdown: z.record(z.string(), z.number()).optional(),
   notes: z.string().max(500).optional(),
-  pinKetuaShift: z.string().length(6, 'PIN harus 6 digit angka').optional(),
+  pinKetuaShift: z.string().min(1, 'PIN tidak boleh kosong').max(20).optional(),
+  pin: z.string().min(1, 'PIN tidak boleh kosong').max(20).optional(),
 });
 
 export async function PATCH(req: NextRequest): Promise<Response> {
@@ -58,7 +59,8 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  const { notes, actualCash, breakdown, pinKetuaShift } = parsed.data;
+  const { notes, actualCash, breakdown } = parsed.data;
+  const pin = (parsed.data.pinKetuaShift || parsed.data.pin)?.trim();
 
   // 3. Verifikasi PIN Ketua Shift jika karyawan adalah Ketua Shift
   const currentEmployee = await db.query.employees.findFirst({
@@ -71,11 +73,11 @@ export async function PATCH(req: NextRequest): Promise<Response> {
       return apiError('Akses Ketua Shift terkunci sementara.', 'PIN_LOCKED', 403);
     }
 
-    if (!pinKetuaShift) {
-      return apiError('Ketua Shift wajib memasukkan PIN 6 digit untuk otorisasi tutup laci kas.', 'PIN_REQUIRED', 403);
+    if (!pin) {
+      return apiError('Ketua Shift wajib memasukkan PIN untuk otorisasi tutup laci kas.', 'PIN_REQUIRED', 403);
     }
 
-    const isPinValid = await bcrypt.compare(pinKetuaShift, currentEmployee.pinHash);
+    const isPinValid = await bcrypt.compare(pin, currentEmployee.pinHash);
     if (!isPinValid) {
       const attempts = (currentEmployee.pinFailedAttempts ?? 0) + 1;
       const willLock = attempts >= 5;
