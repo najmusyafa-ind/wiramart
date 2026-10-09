@@ -1205,6 +1205,7 @@ export default function PosPage() {
   const posScanInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   // mounted: mencegah hydration mismatch untuk elemen client-only di header
   const [mounted, setMounted] = useState(false);
+  const [isTitipanCollapsed, setIsTitipanCollapsed] = useState(false);
 
   // Client-side mount flag — prevents hydration mismatch
   useEffect(() => { setMounted(true); }, []);
@@ -2050,42 +2051,24 @@ export default function PosPage() {
 
         {/* Actions Container */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          {/* Tombol Scan Barcode — selalu tampil di desktop & mobile */}
+          {/* Tombol Scan Barcode Mobile (< 800px) */}
           <button
             onClick={startPosScanner}
             aria-label="Scan barcode produk"
-            title="Scan Barcode"
+            title="Scan Barcode Kamera"
+            className="pos-cart-toggle"
             style={{
               background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 'var(--radius-md)', padding: '6px 11px', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-              color: 'white', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
-              flexShrink: 0,
+              borderRadius: 'var(--radius-md)', padding: '6px 9px', cursor: 'pointer',
+              color: 'white', display: 'flex', alignItems: 'center', gap: 4,
+              fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
             }}
           >
             <ScanLine size={15} aria-hidden="true" />
-            <span className="pos-search-wrap">Scan</span>
+            <span>Scan</span>
           </button>
 
-          {/* Tombol Akses Produk / Stok — selalu tampil di mobile & desktop */}
-          <a
-            href="/kasir/produk"
-            id="btn-nav-produk-topbar"
-            title="Kelola & Tambah Produk / Stok"
-            aria-label="Tambah dan kelola produk"
-            style={{
-              background: 'rgba(34, 197, 94, 0.22)', border: '1px solid rgba(34, 197, 94, 0.45)',
-              borderRadius: 'var(--radius-md)', padding: '6px 11px',
-              display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-              color: 'hsl(142 80% 85%)', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
-              textDecoration: 'none', flexShrink: 0,
-            }}
-          >
-            <Plus size={14} aria-hidden="true" />
-            <span>+ Produk</span>
-          </a>
-
-          {/* Tombol Keranjang — selalu tampil di desktop & mobile */}
+          {/* Tombol Keranjang Mobile (< 800px) */}
           <button
             id="btn-show-cart"
             onClick={() => setShowCart((v) => !v)}
@@ -2098,22 +2081,69 @@ export default function PosPage() {
             )}
           </button>
 
-          {/* DESKTOP ACTIONS ONLY (di desktop >= 1024px tampil lengkap) */}
+          {/* Tombol Menu Kasir Mobile (Drawer Lengkap) */}
+          <button
+            id="btn-mobile-kasir-menu"
+            onClick={() => setShowKasirMenu(true)}
+            className="pos-mobile-menu-btn"
+            aria-label="Menu Kasir & Fitur"
+            title="Menu Kasir Lengkap"
+          >
+            <Zap size={13} style={{ color: 'hsl(45 95% 65%)' }} />
+            <span>Fitur</span>
+          </button>
+
+          {/* DESKTOP ACTIONS ONLY (di layar >= 800px tampil lengkap side-by-side) */}
           <div className="pos-desktop-actions">
+            {/* Scan Desktop */}
+            <button
+              onClick={startPosScanner}
+              aria-label="Scan barcode produk"
+              title="Scan Barcode Kamera"
+              style={{
+                background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
+                borderRadius: 'var(--radius-md)', padding: '6px 11px', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                color: 'white', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
+                flexShrink: 0,
+              }}
+            >
+              <ScanLine size={15} aria-hidden="true" />
+              <span>Scan</span>
+            </button>
+
+            {/* Tambah Produk Desktop */}
+            <a
+              href="/kasir/produk"
+              id="btn-nav-produk-topbar"
+              title="Kelola & Tambah Produk / Stok"
+              aria-label="Tambah dan kelola produk"
+              style={{
+                background: 'rgba(34, 197, 94, 0.22)', border: '1px solid rgba(34, 197, 94, 0.45)',
+                borderRadius: 'var(--radius-md)', padding: '6px 11px',
+                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
+                color: 'hsl(142 80% 85%)', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
+                textDecoration: 'none', flexShrink: 0,
+              }}
+            >
+              <Plus size={14} aria-hidden="true" />
+              <span>Tambah Produk</span>
+            </a>
+
             {/* Kasir info */}
             <div className="pos-kasir-info">
               <div style={{
-                display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
                 color: 'var(--color-sidebar-text)',
               }}>
-                <User size={14} style={{ flexShrink: 0, opacity: 0.7 }} />
-                <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <User size={13} style={{ flexShrink: 0, opacity: 0.7 }} />
+                <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {kasirName || 'Kasir'}
                 </span>
               </div>
               {session?.shift && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', color: 'var(--color-sidebar-muted)' }}>
-                  <Clock size={12} style={{ flexShrink: 0 }} />
+                  <Clock size={11} style={{ flexShrink: 0 }} />
                   <span style={{ fontSize: 10 }}>
                     {formatTimeShort(session.shift.clockIn)} · {shiftDuration}
                   </span>
@@ -2147,7 +2177,7 @@ export default function PosPage() {
               </a>
             )}
 
-            {/* Tombol Kas Gerak (Petty Cash) — selalu tampil di desktop */}
+            {/* Tombol Kas Gerak (Petty Cash) — Desktop */}
             <button
               id="btn-kas-gerak"
               onClick={() => {
@@ -2170,14 +2200,14 @@ export default function PosPage() {
                 fontSize: 'var(--text-xs)',
                 fontWeight: 'var(--weight-semibold)',
                 transition: 'all var(--duration-fast)',
-                minHeight: 36,
+                minHeight: 34,
               }}
             >
               <Receipt size={14} />
               <span>Kas Gerak</span>
             </button>
 
-            {/* Tombol Opname Sisa Makanan Jam 15:00 — selalu tampil di desktop */}
+            {/* Tombol Opname Sisa Makanan Jam 15:00 — Desktop */}
             <button
               id="btn-opname-makanan"
               onClick={() => {
@@ -2200,14 +2230,14 @@ export default function PosPage() {
                 fontSize: 'var(--text-xs)',
                 fontWeight: 'var(--weight-semibold)',
                 transition: 'all var(--duration-fast)',
-                minHeight: 36,
+                minHeight: 34,
               }}
             >
               <Utensils size={14} />
               <span>Opname 15:00</span>
             </button>
 
-            {/* Tombol Tutup Kasir — selalu tampil di desktop */}
+            {/* Tombol Tutup Kasir — Desktop */}
             <button
               id="btn-tutup-kasir"
               onClick={() => {
@@ -2230,50 +2260,39 @@ export default function PosPage() {
                 fontSize: 'var(--text-xs)',
                 fontWeight: 'var(--weight-semibold)',
                 transition: 'all var(--duration-fast)',
-                minHeight: 36,
+                minHeight: 34,
               }}
             >
               <X size={14} />
               <span>Tutup Kasir</span>
             </button>
+
+            {/* Tombol Keluar — Desktop */}
+            <button
+              id="btn-logout-pos"
+              onClick={handleLogout}
+              title="Keluar dari sesi kasir"
+              aria-label="Keluar dari sesi"
+              style={{
+                background: 'rgba(239, 68, 68, 0.18)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                borderRadius: 'var(--radius-md)',
+                color: 'hsl(0 85% 85%)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+                padding: '6px 10px',
+                fontSize: 'var(--text-xs)',
+                fontWeight: 'var(--weight-semibold)',
+                transition: 'all var(--duration-fast)',
+                flexShrink: 0,
+              }}
+            >
+              <LogOut size={14} />
+              <span>Keluar</span>
+            </button>
           </div>
-
-          {/* Tombol Keluar — tampil di desktop & mobile topbar */}
-          <button
-            id="btn-logout-pos"
-            onClick={handleLogout}
-            title="Keluar dari sesi kasir"
-            aria-label="Keluar dari sesi"
-            style={{
-              background: 'rgba(239, 68, 68, 0.18)',
-              border: '1px solid rgba(239, 68, 68, 0.35)',
-              borderRadius: 'var(--radius-md)',
-              color: 'hsl(0 85% 85%)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-1)',
-              padding: '6px 10px',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 'var(--weight-semibold)',
-              transition: 'all var(--duration-fast)',
-              flexShrink: 0,
-            }}
-          >
-            <LogOut size={14} />
-            <span>Keluar</span>
-          </button>
-
-          {/* MOBILE ONLY MENU TRIGGER (Kebab ⋮ button — opsi menu tambahan) */}
-          <button
-            id="btn-mobile-kasir-menu"
-            onClick={() => setShowKasirMenu(true)}
-            className="pos-mobile-menu-btn"
-            aria-label="Menu Kasir & Akun"
-            title="Menu Kasir"
-          >
-            <MoreVertical size={18} />
-          </button>
         </div>
       </header>
 
@@ -2292,7 +2311,7 @@ export default function PosPage() {
               width: '100%',
               border: '1px solid var(--color-border)',
               borderRadius: 'var(--radius-full)',
-              padding: '8px 12px 8px 32px',
+              padding: '7px 12px 7px 32px',
               fontSize: 'var(--text-sm)',
               outline: 'none',
               background: 'var(--color-surface)',
@@ -2300,14 +2319,14 @@ export default function PosPage() {
           />
         </div>
 
-        {/* Mobile Quick Action Ribbon — Semua fitur kasir langsung 1 sentuhan di mobile */}
+        {/* Mobile Quick Action Ribbon — 1 Sentuhan ke Semua Fitur Kasir (Hanya tampil di Mobile <800px) */}
         <div className="pos-mobile-actions-ribbon">
           <a href="/kasir/produk" className="pos-ribbon-btn pos-ribbon-btn-primary" title="Tambah Produk Baru">
-            <Plus size={13} strokeWidth={2.5} />
-            <span>+ Tambah Produk</span>
+            <Plus size={12} strokeWidth={2.5} />
+            <span>Produk</span>
           </a>
           <a href="/kasir/tukar-shift" className="pos-ribbon-btn pos-ribbon-btn-info" title="Ajukan Tukar Shift">
-            <ArrowLeftRight size={13} />
+            <ArrowLeftRight size={12} />
             <span>Tukar Shift</span>
           </a>
           <button
@@ -2322,7 +2341,7 @@ export default function PosPage() {
             className="pos-ribbon-btn pos-ribbon-btn-warning"
             title="Pencatatan Kas Keluar / Masuk Laci"
           >
-            <Receipt size={13} />
+            <Receipt size={12} />
             <span>Kas Gerak</span>
           </button>
           <button
@@ -2337,7 +2356,7 @@ export default function PosPage() {
             className="pos-ribbon-btn pos-ribbon-btn-orange"
             title="Opname Sisa Makanan Jam 15:00"
           >
-            <Utensils size={13} />
+            <Utensils size={12} />
             <span>Opname 15:00</span>
           </button>
           <button
@@ -2352,7 +2371,7 @@ export default function PosPage() {
             className="pos-ribbon-btn pos-ribbon-btn-danger"
             title="Tutup Shift Kasir"
           >
-            <X size={13} />
+            <X size={12} />
             <span>Tutup Kasir</span>
           </button>
           <button
@@ -2361,7 +2380,7 @@ export default function PosPage() {
             className="pos-ribbon-btn pos-ribbon-btn-logout"
             title="Keluar dari akun kasir"
           >
-            <LogOut size={13} />
+            <LogOut size={12} />
             <span>Keluar</span>
           </button>
         </div>
@@ -2434,26 +2453,47 @@ export default function PosPage() {
                   {quickTapItems.length} item
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => setActiveCategory(activeCategory === 'QUICK_NON_BARCODE' ? '' : 'QUICK_NON_BARCODE')}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  color: 'hsl(32, 95%, 35%)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
-                {activeCategory === 'QUICK_NON_BARCODE' ? 'Semua Produk ✕' : 'Filter Titipan Saja →'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setIsTitipanCollapsed((v) => !v)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    color: 'hsl(32, 95%, 35%)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 3,
+                  }}
+                  title="Sembunyikan/Tampilkan Rak Titipan"
+                >
+                  {isTitipanCollapsed ? 'Buka Rak ▼' : 'Tutup Rak ▲'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveCategory(activeCategory === 'QUICK_NON_BARCODE' ? '' : 'QUICK_NON_BARCODE')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    color: 'hsl(32, 95%, 35%)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 3,
+                  }}
+                >
+                  {activeCategory === 'QUICK_NON_BARCODE' ? 'Semua Produk ✕' : 'Filter Titipan Saja →'}
+                </button>
+              </div>
             </div>
 
-            <div className="pos-quick-scroll">
+            {!isTitipanCollapsed && (
+              <div className="pos-quick-scroll">
               {quickTapItems.map((item) => {
                 const emoji = getProductEmoji(item.name);
                 return (
@@ -2510,8 +2550,9 @@ export default function PosPage() {
                 );
               })}
             </div>
-          </div>
-        )}
+          )}
+        </div>
+      )}
 
         {/* Products grid */}
         <div className="pos-products-grid" role="list" aria-label="Daftar produk">

@@ -1530,10 +1530,10 @@ p, h1, h2, h3, h4, h5, h6 {
 
 /* Quick Tap Shelf for Non-Barcode Cafeteria / Speed Goods */
 .pos-quick-shelf {
-  padding: 10px var(--space-4);
+  padding: 6px var(--space-3);
   background: linear-gradient(135deg, hsl(32, 95%, 97%) 0%, hsl(38, 90%, 94%) 100%);
-  border-bottom: 1.5px solid hsl(32, 85%, 82%);
-  box-shadow: 0 1px 3px rgba(217, 119, 6, 0.06);
+  border-bottom: 1px solid hsl(32, 85%, 82%);
+  box-shadow: 0 1px 3px rgba(217, 119, 6, 0.05);
   flex-shrink: 0;
 }
 
@@ -1541,32 +1541,32 @@ p, h1, h2, h3, h4, h5, h6 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
 }
 
 .pos-quick-scroll {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding-bottom: 3px;
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
 }
 
 .pos-quick-card {
   flex: 0 0 auto;
-  width: 126px;
-  padding: 8px 10px;
+  width: 112px;
+  padding: 5px 8px;
   background: white;
-  border: 1.5px solid hsl(32, 80%, 82%);
+  border: 1px solid hsl(32, 80%, 82%);
   border-radius: var(--radius-md);
-  box-shadow: 0 2px 4px rgba(217, 119, 6, 0.08);
+  box-shadow: 0 1px 3px rgba(217, 119, 6, 0.06);
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   text-align: left;
-  gap: 4px;
+  gap: 2px;
   transition: transform 0.12s var(--ease-spring), border-color 0.12s ease, box-shadow 0.12s ease;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
@@ -1575,7 +1575,7 @@ p, h1, h2, h3, h4, h5, h6 {
 .pos-quick-card:hover {
   border-color: hsl(32, 95%, 45%);
   transform: translateY(-2px);
-  box-shadow: 0 4px 10px rgba(217, 119, 6, 0.15);
+  box-shadow: 0 3px 8px rgba(217, 119, 6, 0.12);
 }
 
 .pos-quick-card:active {
@@ -1968,9 +1968,6 @@ p, h1, h2, h3, h4, h5, h6 {
 
 /* sm: 640px */
 @media (min-width: 640px) {
-  .layout-pos {
-    grid-template-columns: 1fr 360px;
-  }
   .grid-2 { grid-template-columns: repeat(2, 1fr); }
 }
 
@@ -2022,63 +2019,6 @@ p, h1, h2, h3, h4, h5, h6 {
     padding-bottom: calc(var(--space-4) + 64px + env(safe-area-inset-bottom, 0px));
   }
 
-  /* POS mobile: single column flex layout to guarantee sticky topbar */
-  .layout-pos {
-    display: flex;
-    flex-direction: column;
-    height: 100dvh;
-    max-height: 100dvh;
-    overflow: hidden;
-    position: relative;
-  }
-
-  /* Cart panel: slides up from bottom on mobile */
-  .pos-cart {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 70dvh;
-    z-index: 200;
-    border-left: none;
-    border-top: 1px solid var(--color-border);
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-    box-shadow: 0 -4px 24px rgba(0,0,0,0.15);
-    transform: translateY(100%);
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  .pos-cart.pos-cart-open {
-    transform: translateY(0);
-  }
-
-  .pos-cart-close-btn {
-    display: flex !important;
-  }
-
-  /* Show cart toggle button */
-  .pos-cart-toggle {
-    display: flex !important;
-  }
-
-  /* Hide desktop search in topbar */
-  .pos-search-wrap {
-    display: none;
-  }
-
-  /* Show mobile search below topbar */
-  .pos-mobile-search {
-    display: block;
-    flex-shrink: 0;
-  }
-
-  /* POS products grid — smaller cards */
-  .pos-products-grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr));
-    gap: var(--space-2);
-    padding: var(--space-3);
-  }
-
   .grid-2,
   .grid-3,
   .grid-4 { grid-template-columns: 1fr; }
@@ -2086,49 +2026,193 @@ p, h1, h2, h3, h4, h5, h6 {
   .grid-stats { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* POS Desktop Actions & Mobile Menu */
-.pos-desktop-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
+/* ==========================================================
+   POS (KASIR) RESPONSIVE SYSTEM
+   - Desktop, Laptop & Tablet Landscape / Situs Desktop (>= 800px):
+     Strict 2-column layout (1fr 360px), sticky full-width topbar,
+     permanently docked cart sidebar, all header tools side-by-side.
+   - Mobile Portrait (< 800px):
+     Single-column flex, bottom-sheet cart, compact topbar,
+     sleek 1-tap quick action ribbon, zero vertical bloat.
+   ========================================================== */
 
-.pos-mobile-menu-btn {
-  display: none;
-}
+/* POS Desktop & Tablet (>= 800px) */
+@media (min-width: 800px) {
+  .layout-pos {
+    display: grid !important;
+    grid-template-columns: 1fr 360px !important;
+    grid-template-rows: 54px 1fr !important;
+    height: 100svh !important;
+    max-height: 100svh !important;
+    overflow: hidden !important;
+  }
 
-/* Mobile Quick Action Ribbon (Pita Fitur Kasir) */
-.pos-mobile-actions-ribbon {
-  display: none;
-}
+  .pos-topbar {
+    grid-column: 1 / -1 !important;
+    min-height: 54px !important;
+    padding: 0 var(--space-4) !important;
+  }
 
-@media (max-width: 1023px) {
+  .pos-products {
+    grid-column: 1 / 2 !important;
+    grid-row: 2 / 3 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow-y: hidden !important;
+    background-color: var(--color-bg) !important;
+  }
+
+  .pos-cart {
+    grid-column: 2 / 3 !important;
+    grid-row: 2 / 3 !important;
+    position: static !important;
+    height: 100% !important;
+    transform: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    border-left: 1px solid var(--color-border) !important;
+    border-top: none !important;
+    display: flex !important;
+    background-color: var(--color-surface) !important;
+  }
+
   .pos-desktop-actions {
+    display: flex !important;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .pos-search-wrap {
+    display: flex !important;
+  }
+
+  .pos-mobile-search {
     display: none !important;
   }
 
   .pos-mobile-actions-ribbon {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    background: var(--color-surface);
-    border-bottom: 1.5px solid var(--color-border);
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-    flex-shrink: 0;
+    display: none !important;
   }
-  .pos-mobile-actions-ribbon::-webkit-scrollbar {
-    display: none;
+
+  .pos-cart-toggle {
+    display: none !important;
+  }
+
+  .pos-mobile-menu-btn {
+    display: none !important;
+  }
+
+  .pos-products-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(145px, 100%), 1fr)) !important;
+    gap: var(--space-3) !important;
+    padding: var(--space-4) !important;
   }
 }
 
+/* POS Mobile (< 800px) */
+@media (max-width: 799px) {
+  .layout-pos {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+    position: relative !important;
+  }
+
+  .pos-topbar {
+    min-height: 48px !important;
+    padding: 0 var(--space-3) !important;
+  }
+
+  .pos-cart {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    height: 75dvh !important;
+    z-index: 200 !important;
+    border-left: none !important;
+    border-top: 1px solid var(--color-border) !important;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0 !important;
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.18) !important;
+    transform: translateY(100%) !important;
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    background-color: var(--color-surface) !important;
+  }
+
+  .pos-cart.pos-cart-open {
+    transform: translateY(0) !important;
+  }
+
+  .pos-cart-close-btn {
+    display: flex !important;
+  }
+
+  .pos-cart-toggle {
+    display: flex !important;
+  }
+
+  .pos-desktop-actions {
+    display: none !important;
+  }
+
+  .pos-search-wrap {
+    display: none !important;
+  }
+
+  .pos-mobile-search {
+    display: block !important;
+    padding: 6px 12px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .pos-mobile-actions-ribbon {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    padding: 5px 12px !important;
+    background: var(--color-surface) !important;
+    border-bottom: 1px solid var(--color-border) !important;
+    overflow-x: auto !important;
+    scrollbar-width: none !important;
+    -webkit-overflow-scrolling: touch !important;
+    flex-shrink: 0 !important;
+  }
+  .pos-mobile-actions-ribbon::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .pos-mobile-menu-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    padding: 0 9px;
+    gap: 4px;
+    border-radius: var(--radius-full);
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .pos-products-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(125px, 100%), 1fr)) !important;
+    gap: var(--space-2) !important;
+    padding: var(--space-3) !important;
+  }
+}
+
+/* Mobile Ribbon Button Styling */
 .pos-ribbon-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 6px 12px;
+  gap: 4px;
+  padding: 4px 10px;
   border-radius: var(--radius-full);
   font-size: 11px;
   font-weight: 700;
@@ -2138,7 +2222,7 @@ p, h1, h2, h3, h4, h5, h6 {
   border: 1px solid transparent;
   flex-shrink: 0;
   transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.12s ease;
-  min-height: 32px;
+  min-height: 28px;
 }
 .pos-ribbon-btn:active {
   transform: scale(0.96);
@@ -2173,28 +2257,6 @@ p, h1, h2, h3, h4, h5, h6 {
   background: hsl(220 15% 92%);
   color: hsl(220 20% 30%);
   border-color: hsl(220 15% 80%);
-}
-
-@media (max-width: 640px) {
-  /* Show clean mobile kebab menu button */
-  .pos-mobile-menu-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.12);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: white;
-    cursor: pointer;
-    transition: background-color var(--duration-fast);
-    flex-shrink: 0;
-  }
-  .pos-mobile-menu-btn:hover,
-  .pos-mobile-menu-btn:active {
-    background: rgba(255, 255, 255, 0.22);
-  }
 }
 
 /* ── Mobile Kasir Drawer (Bottom Sheet) ── */
