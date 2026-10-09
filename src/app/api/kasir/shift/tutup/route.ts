@@ -18,10 +18,9 @@ import { z } from 'zod';
 import { eq, and, sql } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { shifts, transactions, transactionPayments, employees } from '@/lib/db/schema';
+import { shifts, transactions, transactionPayments } from '@/lib/db/schema';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
-import bcrypt from 'bcryptjs';
 
 export const runtime = 'nodejs';
 
@@ -60,51 +59,8 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   }
 
   const { notes, actualCash, breakdown } = parsed.data;
-  const pin = (parsed.data.pinKetuaShift || parsed.data.pin)?.trim();
 
-  // 3. Verifikasi PIN Ketua Shift jika karyawan adalah Ketua Shift
-  const currentEmployee = await db.query.employees.findFirst({
-    where: eq(employees.id, employeeId),
-    columns: { id: true, isKetuaShift: true, pinHash: true, pinFailedAttempts: true, pinLockedUntil: true },
-  });
-
-  if (currentEmployee?.isKetuaShift && currentEmployee.pinHash) {
-    if (currentEmployee.pinLockedUntil && new Date(currentEmployee.pinLockedUntil) > new Date()) {
-      return apiError('Akses Ketua Shift terkunci sementara.', 'PIN_LOCKED', 403);
-    }
-
-    if (!pin) {
-      return apiError('Ketua Shift wajib memasukkan PIN untuk otorisasi tutup laci kas.', 'PIN_REQUIRED', 403);
-    }
-
-    const isPinValid = await bcrypt.compare(pin, currentEmployee.pinHash);
-    if (!isPinValid) {
-      const attempts = (currentEmployee.pinFailedAttempts ?? 0) + 1;
-      const willLock = attempts >= 5;
-      await db
-        .update(employees)
-        .set({
-          pinFailedAttempts: attempts,
-          pinLockedUntil: willLock ? new Date(Date.now() + 15 * 60 * 1000) : null,
-        })
-        .where(eq(employees.id, employeeId));
-
-      return apiError(
-        willLock ? 'PIN salah 5x. Akses terkunci 15 menit.' : `PIN salah. Percobaan ${attempts}/5.`,
-        'INVALID_PIN',
-        401,
-      );
-    }
-
-    if ((currentEmployee.pinFailedAttempts ?? 0) > 0) {
-      await db
-        .update(employees)
-        .set({ pinFailedAttempts: 0, pinLockedUntil: null })
-        .where(eq(employees.id, employeeId));
-    }
-  }
-
-  // 4. Cari shift aktif milik karyawan ini
+  // 3. Cari shift aktif milik karyawan ini
   const activeShift = await db.query.shifts.findFirst({
     where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
     columns: { id: true, clockIn: true, modalAwal: true, auditFlags: true },

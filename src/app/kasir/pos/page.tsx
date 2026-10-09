@@ -148,7 +148,6 @@ function BukaShiftOverlay({
 }) {
   // Default modal awal paten dari owner: Rp 100.000
   const [modalInput, setModalInput] = useState('100000');
-  const [pinInput, setPinInput]     = useState('');
   const [breakdown, setBreakdown]   = useState<DenominasiMap>({});
   const [inputMode, setInputMode]   = useState<'QUICK' | 'CALCULATOR'>('QUICK');
   const [loading, setLoading]       = useState(false);
@@ -184,8 +183,6 @@ function BukaShiftOverlay({
         body: JSON.stringify({
           modalAwal: nominal,
           breakdown: Object.keys(breakdown).length > 0 ? breakdown : undefined,
-          pin: pinInput || undefined,
-          pinKetuaShift: pinInput || undefined,
         }),
       });
       const json = await res.json() as { success: boolean; error?: string };
@@ -464,29 +461,7 @@ function BukaShiftOverlay({
                 </div>
               )}
 
-              {/* Otorisasi PIN Ketua Shift jika pemegang laci */}
-              <div style={{
-                background: 'rgba(234, 179, 8, 0.08)',
-                border: '1px solid rgba(234, 179, 8, 0.25)',
-                borderRadius: 'var(--radius-md)',
-                padding: 'var(--space-3)',
-              }}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#854d0e', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <KeyRound size={14} /> PIN Ketua Shift (Khusus Admin Kasir / Ketua Shift)
-                </label>
-                <input
-                  type="password"
-                  maxLength={8}
-                  className="form-input"
-                  placeholder="Ketik PIN Ketua Shift..."
-                  value={pinInput}
-                  onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                  style={{ letterSpacing: 4, fontWeight: 700, maxWidth: 220 }}
-                />
-                <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
-                  *Wajib diisi jika Anda ditugaskan sebagai Ketua Shift pemegang laci toko.
-                </div>
-              </div>
+
 
               {error && (
                 <div style={{ padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--color-error-light)', fontSize: '0.8rem', color: 'var(--color-error)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -1180,7 +1155,6 @@ export default function PosPage() {
   const [tutupActualCash, setTutupActualCash] = useState<string>('');
   const [tutupBreakdown, setTutupBreakdown]   = useState<DenominasiMap>({});
   const [tutupNotes, setTutupNotes]           = useState<string>('');
-  const [tutupPin, setTutupPin]               = useState<string>('');
   const [tutupMode, setTutupMode]             = useState<'QUICK' | 'CALCULATOR'>('QUICK');
   const [tutupResult, setTutupResult] = useState<{
     txCount: number;
@@ -1565,8 +1539,6 @@ export default function PosPage() {
           actualCash: nominalFisik !== undefined && !isNaN(nominalFisik) ? nominalFisik : undefined,
           breakdown: Object.keys(tutupBreakdown).length > 0 ? tutupBreakdown : undefined,
           notes: tutupNotes.trim() ? tutupNotes.trim() : undefined,
-          pin: tutupPin || undefined,
-          pinKetuaShift: tutupPin || undefined,
         }),
       });
       const json = await res.json() as {
@@ -1585,7 +1557,6 @@ export default function PosPage() {
       setTutupActualCash('');
       setTutupBreakdown({});
       setTutupNotes('');
-      setTutupPin('');
       // Update session: shift = null setelah tutup
       setSession((prev) => prev ? { ...prev, shift: null } : prev);
     } catch {
@@ -1735,29 +1706,7 @@ export default function PosPage() {
                 />
               </div>
 
-              {/* Otorisasi PIN Ketua Shift saat Tutup Shift */}
-              <div style={{
-                background: 'rgba(234, 179, 8, 0.08)',
-                border: '1px solid rgba(234, 179, 8, 0.25)',
-                borderRadius: 'var(--radius-md)',
-                padding: 'var(--space-3)',
-              }}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#854d0e', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <KeyRound size={14} /> PIN Otorisasi Ketua Shift
-                </label>
-                <input
-                  type="password"
-                  maxLength={8}
-                  className="form-input"
-                  placeholder="Ketik PIN Ketua Shift..."
-                  value={tutupPin}
-                  onChange={(e) => setTutupPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                  style={{ letterSpacing: 4, fontWeight: 700, maxWidth: 220 }}
-                />
-                <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
-                  *Wajib diisi untuk memverifikasi hitungan fisik laci kasir oleh Ketua Shift.
-                </div>
-              </div>
+
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 4 }}>
                 <button
