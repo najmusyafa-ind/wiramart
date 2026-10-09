@@ -1205,7 +1205,6 @@ export default function PosPage() {
   const posScanInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   // mounted: mencegah hydration mismatch untuk elemen client-only di header
   const [mounted, setMounted] = useState(false);
-  const [isTitipanCollapsed, setIsTitipanCollapsed] = useState(false);
 
   // Client-side mount flag — prevents hydration mismatch
   useEffect(() => { setMounted(true); }, []);
@@ -1297,29 +1296,6 @@ export default function PosPage() {
     return true;
   });
 
-  // ── Tombol Cepat (Quick Tap) Makanan Basah / Titipan Non-Barcode & Terlaris ──
-  const quickTapItems = useMemo(() => {
-    return products
-      .filter((p) => {
-        const isNoBarcode = !p.barcode || p.barcode.trim() === '';
-        const nameLower = p.name.toLowerCase();
-        const isFastFood =
-          isNoBarcode ||
-          nameLower.includes('ades') ||
-          nameLower.includes('cilok') ||
-          nameLower.includes('sando') ||
-          nameLower.includes('tahu') ||
-          nameLower.includes('nasi') ||
-          nameLower.includes('pentol') ||
-          nameLower.includes('macaroni') ||
-          nameLower.includes('burger') ||
-          nameLower.includes('klepon') ||
-          nameLower.includes('geprek') ||
-          nameLower.includes('basreng');
-        return isFastFood && p.stockQty > 0;
-      })
-      .slice(0, 20);
-  }, [products]);
 
   // ── Barcode POS scanner (DB-first -> notif) ─────────────
   async function startPosScanner() {
@@ -1992,23 +1968,56 @@ export default function PosPage() {
 
       {/* ── Top bar ────────────────────────────────────── */}
       <header className="pos-topbar">
-        {/* Brand */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+        {/* Brand & Kasir + Shift Duration Info */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
             <span style={{
               color: 'var(--color-text-inverse)', fontWeight: 'var(--weight-bold)',
               fontSize: 'var(--text-sm)', letterSpacing: 'var(--tracking-wide)',
             }}>
               🏪 WIRAMART
             </span>
-            <span style={{ color: 'var(--color-sidebar-muted)', fontSize: 'var(--text-xs)' }}>
-              UKM Kewirausahaan UNPERBA
+            <span style={{ color: 'var(--color-sidebar-muted)', fontSize: '10px' }}>
+              UKM UNPERBA
             </span>
           </div>
+
+          {/* Jam Shift & Kasir Info — Selalu tampil di desktop & mobile */}
+          {session?.shift && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              background: 'rgba(255, 255, 255, 0.12)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: 'var(--radius-full)',
+              padding: '3px 8px',
+              color: 'white',
+              fontSize: '11px',
+              fontWeight: 600,
+            }}>
+              <span style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: 'hsl(142, 70%, 50%)',
+                boxShadow: '0 0 6px hsl(142, 70%, 50%)',
+                display: 'inline-block',
+                flexShrink: 0,
+              }} />
+              <span style={{ maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {kasirName || 'Kasir'}
+              </span>
+              <span style={{ opacity: 0.5 }}>•</span>
+              <span style={{ color: 'hsl(142, 80%, 75%)', fontFamily: 'var(--font-mono)', fontSize: '10px' }}>
+                {shiftDuration}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Search — hidden on mobile */}
-        <div style={{ flex: 1, maxWidth: 380, position: 'relative' }} className="pos-search-wrap">
+        {/* Search — desktop only (Ctrl+K) */}
+        <div style={{ flex: 1, maxWidth: 360, position: 'relative' }} className="pos-search-wrap">
           <Search
             size={14}
             style={{
@@ -2021,7 +2030,7 @@ export default function PosPage() {
             ref={searchRef}
             id={`${uid}-search`}
             type="search"
-            placeholder="Cari produk / scan barcode... (Ctrl+K)"
+            placeholder="Cari produk / barcode... (Ctrl+K)"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {
@@ -2048,20 +2057,19 @@ export default function PosPage() {
           />
         </div>
 
-
-        {/* Actions Container */}
+        {/* Action buttons (Clean POS Toolbar: Scan, Cart, Fitur) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          {/* Tombol Scan Barcode Mobile (< 800px) */}
+          {/* Tombol Scan Barcode Kamera */}
           <button
             onClick={startPosScanner}
             aria-label="Scan barcode produk"
             title="Scan Barcode Kamera"
-            className="pos-cart-toggle"
             style={{
               background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 'var(--radius-md)', padding: '6px 9px', cursor: 'pointer',
-              color: 'white', display: 'flex', alignItems: 'center', gap: 4,
+              borderRadius: 'var(--radius-md)', padding: '6px 10px', cursor: 'pointer',
+              color: 'white', display: 'flex', alignItems: 'center', gap: 5,
               fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
+              minHeight: 34,
             }}
           >
             <ScanLine size={15} aria-hidden="true" />
@@ -2074,6 +2082,7 @@ export default function PosPage() {
             onClick={() => setShowCart((v) => !v)}
             className="pos-cart-toggle"
             aria-label="Buka keranjang"
+            title="Keranjang Belanja"
           >
             <ShoppingCart size={18} />
             {totalItems > 0 && (
@@ -2081,218 +2090,32 @@ export default function PosPage() {
             )}
           </button>
 
-          {/* Tombol Menu Kasir Mobile (Drawer Lengkap) */}
+          {/* Tombol [⚡ FITUR] — Menyimpan semua fitur operasional kasir */}
           <button
-            id="btn-mobile-kasir-menu"
+            id="btn-kasir-fitur"
             onClick={() => setShowKasirMenu(true)}
-            className="pos-mobile-menu-btn"
-            aria-label="Menu Kasir & Fitur"
-            title="Menu Kasir Lengkap"
+            aria-label="Menu Fitur Kasir"
+            title="Menu Fitur Kasir Lengkap"
+            style={{
+              background: 'linear-gradient(135deg, hsl(142, 65%, 26%) 0%, hsl(142, 70%, 20%) 100%)',
+              border: '1px solid hsl(142, 60%, 42%)',
+              borderRadius: 'var(--radius-md)',
+              padding: '6px 12px',
+              color: 'white',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontSize: 'var(--text-xs)',
+              fontWeight: 'var(--weight-bold)',
+              boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+              minHeight: 34,
+              transition: 'transform 0.12s ease',
+            }}
           >
-            <Zap size={13} style={{ color: 'hsl(45 95% 65%)' }} />
+            <Zap size={14} style={{ color: 'hsl(45 95% 65%)' }} />
             <span>Fitur</span>
           </button>
-
-          {/* DESKTOP ACTIONS ONLY (di layar >= 800px tampil lengkap side-by-side) */}
-          <div className="pos-desktop-actions">
-            {/* Scan Desktop */}
-            <button
-              onClick={startPosScanner}
-              aria-label="Scan barcode produk"
-              title="Scan Barcode Kamera"
-              style={{
-                background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-                borderRadius: 'var(--radius-md)', padding: '6px 11px', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                color: 'white', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
-                flexShrink: 0,
-              }}
-            >
-              <ScanLine size={15} aria-hidden="true" />
-              <span>Scan</span>
-            </button>
-
-            {/* Tambah Produk Desktop */}
-            <a
-              href="/kasir/produk"
-              id="btn-nav-produk-topbar"
-              title="Kelola & Tambah Produk / Stok"
-              aria-label="Tambah dan kelola produk"
-              style={{
-                background: 'rgba(34, 197, 94, 0.22)', border: '1px solid rgba(34, 197, 94, 0.45)',
-                borderRadius: 'var(--radius-md)', padding: '6px 11px',
-                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                color: 'hsl(142 80% 85%)', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
-                textDecoration: 'none', flexShrink: 0,
-              }}
-            >
-              <Plus size={14} aria-hidden="true" />
-              <span>Tambah Produk</span>
-            </a>
-
-            {/* Kasir info */}
-            <div className="pos-kasir-info">
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                color: 'var(--color-sidebar-text)',
-              }}>
-                <User size={13} style={{ flexShrink: 0, opacity: 0.7 }} />
-                <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {kasirName || 'Kasir'}
-                </span>
-              </div>
-              {session?.shift && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', color: 'var(--color-sidebar-muted)' }}>
-                  <Clock size={11} style={{ flexShrink: 0 }} />
-                  <span style={{ fontSize: 10 }}>
-                    {formatTimeShort(session.shift.clockIn)} · {shiftDuration}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Tombol Tukar Shift (Desktop) */}
-            {mounted && (
-              <a
-                href="/kasir/tukar-shift"
-                id="btn-tukar-shift"
-                title="Ajukan Tukar Shift"
-                aria-label="Ajukan tukar shift"
-                style={{
-                  background: 'rgba(255,255,255,0.08)',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                  borderRadius: 'var(--radius-md)',
-                  color: 'var(--color-sidebar-muted)',
-                  cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                  padding: '6px 10px',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 'var(--weight-medium)',
-                  transition: 'all var(--duration-fast)',
-                  textDecoration: 'none',
-                }}
-              >
-                <ArrowLeftRight size={14} />
-                <span>Tukar Shift</span>
-              </a>
-            )}
-
-            {/* Tombol Kas Gerak (Petty Cash) — Desktop */}
-            <button
-              id="btn-kas-gerak"
-              onClick={() => {
-                if (!session?.shift) {
-                  alert('Silakan buka shift terlebih dahulu untuk mencatat kas laci.');
-                  return;
-                }
-                setShowKasGerak(true);
-              }}
-              title="Pencatatan Kas Keluar / Masuk Laci (Galon, Bensin, ATK)"
-              aria-label="Kas Keluar Masuk Laci"
-              style={{
-                background: 'rgba(234, 179, 8, 0.15)',
-                border: '1px solid rgba(234, 179, 8, 0.35)',
-                borderRadius: 'var(--radius-md)',
-                color: 'hsl(45 95% 75%)',
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                padding: '6px 10px',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-semibold)',
-                transition: 'all var(--duration-fast)',
-                minHeight: 34,
-              }}
-            >
-              <Receipt size={14} />
-              <span>Kas Gerak</span>
-            </button>
-
-            {/* Tombol Opname Sisa Makanan Jam 15:00 — Desktop */}
-            <button
-              id="btn-opname-makanan"
-              onClick={() => {
-                if (!session?.shift) {
-                  alert('Silakan buka shift terlebih dahulu untuk opname sisa makanan.');
-                  return;
-                }
-                setShowSisaMakanan(true);
-              }}
-              title="Opname Sisa Makanan Harian & Non-Barcode Jam 15:00"
-              aria-label="Opname Makanan Jam 15:00"
-              style={{
-                background: 'rgba(249, 115, 22, 0.15)',
-                border: '1px solid rgba(249, 115, 22, 0.35)',
-                borderRadius: 'var(--radius-md)',
-                color: 'hsl(24 95% 75%)',
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                padding: '6px 10px',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-semibold)',
-                transition: 'all var(--duration-fast)',
-                minHeight: 34,
-              }}
-            >
-              <Utensils size={14} />
-              <span>Opname 15:00</span>
-            </button>
-
-            {/* Tombol Tutup Kasir — Desktop */}
-            <button
-              id="btn-tutup-kasir"
-              onClick={() => {
-                if (!session?.shift) {
-                  alert('Tidak ada shift aktif yang perlu ditutup.');
-                  return;
-                }
-                setShowTutupConfirm(true);
-              }}
-              title="Tutup Kasir"
-              aria-label="Tutup shift kasir"
-              style={{
-                background: 'rgba(220, 38, 38, 0.15)',
-                border: '1px solid rgba(220, 38, 38, 0.35)',
-                borderRadius: 'var(--radius-md)',
-                color: 'hsl(0 80% 75%)',
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                padding: '6px 10px',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-semibold)',
-                transition: 'all var(--duration-fast)',
-                minHeight: 34,
-              }}
-            >
-              <X size={14} />
-              <span>Tutup Kasir</span>
-            </button>
-
-            {/* Tombol Keluar — Desktop */}
-            <button
-              id="btn-logout-pos"
-              onClick={handleLogout}
-              title="Keluar dari sesi kasir"
-              aria-label="Keluar dari sesi"
-              style={{
-                background: 'rgba(239, 68, 68, 0.18)',
-                border: '1px solid rgba(239, 68, 68, 0.35)',
-                borderRadius: 'var(--radius-md)',
-                color: 'hsl(0 85% 85%)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
-                padding: '6px 10px',
-                fontSize: 'var(--text-xs)',
-                fontWeight: 'var(--weight-semibold)',
-                transition: 'all var(--duration-fast)',
-                flexShrink: 0,
-              }}
-            >
-              <LogOut size={14} />
-              <span>Keluar</span>
-            </button>
-          </div>
         </div>
       </header>
 
@@ -2317,72 +2140,6 @@ export default function PosPage() {
               background: 'var(--color-surface)',
             }}
           />
-        </div>
-
-        {/* Mobile Quick Action Ribbon — 1 Sentuhan ke Semua Fitur Kasir (Hanya tampil di Mobile <800px) */}
-        <div className="pos-mobile-actions-ribbon">
-          <a href="/kasir/produk" className="pos-ribbon-btn pos-ribbon-btn-primary" title="Tambah Produk Baru">
-            <Plus size={12} strokeWidth={2.5} />
-            <span>Produk</span>
-          </a>
-          <a href="/kasir/tukar-shift" className="pos-ribbon-btn pos-ribbon-btn-info" title="Ajukan Tukar Shift">
-            <ArrowLeftRight size={12} />
-            <span>Tukar Shift</span>
-          </a>
-          <button
-            type="button"
-            onClick={() => {
-              if (!session?.shift) {
-                alert('Silakan buka shift terlebih dahulu untuk mencatat kas laci.');
-                return;
-              }
-              setShowKasGerak(true);
-            }}
-            className="pos-ribbon-btn pos-ribbon-btn-warning"
-            title="Pencatatan Kas Keluar / Masuk Laci"
-          >
-            <Receipt size={12} />
-            <span>Kas Gerak</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (!session?.shift) {
-                alert('Silakan buka shift terlebih dahulu untuk opname sisa makanan.');
-                return;
-              }
-              setShowSisaMakanan(true);
-            }}
-            className="pos-ribbon-btn pos-ribbon-btn-orange"
-            title="Opname Sisa Makanan Jam 15:00"
-          >
-            <Utensils size={12} />
-            <span>Opname 15:00</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (!session?.shift) {
-                alert('Tidak ada shift aktif yang perlu ditutup.');
-                return;
-              }
-              setShowTutupConfirm(true);
-            }}
-            className="pos-ribbon-btn pos-ribbon-btn-danger"
-            title="Tutup Shift Kasir"
-          >
-            <X size={12} />
-            <span>Tutup Kasir</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="pos-ribbon-btn pos-ribbon-btn-logout"
-            title="Keluar dari akun kasir"
-          >
-            <LogOut size={12} />
-            <span>Keluar</span>
-          </button>
         </div>
 
         {/* Category tabs */}
@@ -2426,133 +2183,6 @@ export default function PosPage() {
             </button>
           ))}
         </div>
-
-        {/* ── Rak Tombol Cepat Titipan & Makanan Non-Barcode (Quick Action Shelf) ── */}
-        {!search && quickTapItems.length > 0 && (
-          <div className="pos-quick-shelf">
-            <div className="pos-quick-shelf-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Zap size={16} style={{ color: 'hsl(32, 95%, 45%)' }} />
-                <span style={{
-                  fontSize: '0.8rem',
-                  fontWeight: 800,
-                  color: 'hsl(32, 95%, 28%)',
-                  letterSpacing: '0.02em',
-                  textTransform: 'uppercase',
-                }}>
-                  Tombol Cepat Titipan (Sekali Sentuh)
-                </span>
-                <span style={{
-                  fontSize: '0.7rem',
-                  fontWeight: 700,
-                  background: 'hsl(32, 95%, 88%)',
-                  color: 'hsl(32, 95%, 25%)',
-                  padding: '1px 7px',
-                  borderRadius: 'var(--radius-full)',
-                }}>
-                  {quickTapItems.length} item
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => setIsTitipanCollapsed((v) => !v)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    color: 'hsl(32, 95%, 35%)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                  }}
-                  title="Sembunyikan/Tampilkan Rak Titipan"
-                >
-                  {isTitipanCollapsed ? 'Buka Rak ▼' : 'Tutup Rak ▲'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveCategory(activeCategory === 'QUICK_NON_BARCODE' ? '' : 'QUICK_NON_BARCODE')}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    color: 'hsl(32, 95%, 35%)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                  }}
-                >
-                  {activeCategory === 'QUICK_NON_BARCODE' ? 'Semua Produk ✕' : 'Filter Titipan Saja →'}
-                </button>
-              </div>
-            </div>
-
-            {!isTitipanCollapsed && (
-              <div className="pos-quick-scroll">
-              {quickTapItems.map((item) => {
-                const emoji = getProductEmoji(item.name);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    id={`quick-tap-${item.id}`}
-                    onClick={() => {
-                      if (addToCart(item)) {
-                        playScanBeep();
-                        setScanToast(`+1 ${item.name}`);
-                        setTimeout(() => setScanToast(null), 1800);
-                      }
-                    }}
-                    className="pos-quick-card"
-                    title={`Klik untuk langsung tambah 1 ${item.name}`}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                      <span style={{ fontSize: 20 }}>{emoji}</span>
-                      <span style={{
-                        fontSize: '0.65rem',
-                        fontWeight: 700,
-                        color: item.stockQty <= 3 ? 'hsl(0, 80%, 45%)' : 'hsl(142, 70%, 35%)',
-                        background: item.stockQty <= 3 ? 'hsl(0, 90%, 95%)' : 'hsl(142, 70%, 95%)',
-                        padding: '1px 5px',
-                        borderRadius: 4,
-                      }}>
-                        sisa {item.stockQty}
-                      </span>
-                    </div>
-                    <div style={{
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
-                      color: 'var(--color-text)',
-                      lineHeight: 1.25,
-                      maxHeight: 28,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                    }}>
-                      {item.name}
-                    </div>
-                    <div style={{
-                      fontSize: '0.75rem',
-                      fontWeight: 800,
-                      color: 'hsl(32, 95%, 40%)',
-                      marginTop: 'auto',
-                    }}>
-                      {rp(parseFloat(item.sellingPrice))}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
 
         {/* Products grid */}
         <div className="pos-products-grid" role="list" aria-label="Daftar produk">

@@ -1528,60 +1528,6 @@ p, h1, h2, h3, h4, h5, h6 {
   font-weight: var(--weight-semibold);
 }
 
-/* Quick Tap Shelf for Non-Barcode Cafeteria / Speed Goods */
-.pos-quick-shelf {
-  padding: 6px var(--space-3);
-  background: linear-gradient(135deg, hsl(32, 95%, 97%) 0%, hsl(38, 90%, 94%) 100%);
-  border-bottom: 1px solid hsl(32, 85%, 82%);
-  box-shadow: 0 1px 3px rgba(217, 119, 6, 0.05);
-  flex-shrink: 0;
-}
-
-.pos-quick-shelf-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 5px;
-}
-
-.pos-quick-scroll {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 3px;
-  scrollbar-width: thin;
-  -webkit-overflow-scrolling: touch;
-}
-
-.pos-quick-card {
-  flex: 0 0 auto;
-  width: 112px;
-  padding: 5px 8px;
-  background: white;
-  border: 1px solid hsl(32, 80%, 82%);
-  border-radius: var(--radius-md);
-  box-shadow: 0 1px 3px rgba(217, 119, 6, 0.06);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  gap: 2px;
-  transition: transform 0.12s var(--ease-spring), border-color 0.12s ease, box-shadow 0.12s ease;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.pos-quick-card:hover {
-  border-color: hsl(32, 95%, 45%);
-  transform: translateY(-2px);
-  box-shadow: 0 3px 8px rgba(217, 119, 6, 0.12);
-}
-
-.pos-quick-card:active {
-  transform: scale(0.96);
-}
-
 /* Products grid */
 .pos-products-grid {
   flex: 1;
@@ -2076,12 +2022,6 @@ p, h1, h2, h3, h4, h5, h6 {
     background-color: var(--color-surface) !important;
   }
 
-  .pos-desktop-actions {
-    display: flex !important;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
   .pos-search-wrap {
     display: flex !important;
   }
@@ -2090,15 +2030,7 @@ p, h1, h2, h3, h4, h5, h6 {
     display: none !important;
   }
 
-  .pos-mobile-actions-ribbon {
-    display: none !important;
-  }
-
   .pos-cart-toggle {
-    display: none !important;
-  }
-
-  .pos-mobile-menu-btn {
     display: none !important;
   }
 
@@ -2106,6 +2038,23 @@ p, h1, h2, h3, h4, h5, h6 {
     grid-template-columns: repeat(auto-fill, minmax(min(145px, 100%), 1fr)) !important;
     gap: var(--space-3) !important;
     padding: var(--space-4) !important;
+  }
+
+  /* Desktop Kasir Drawer modal style */
+  .pos-kasir-drawer-overlay {
+    align-items: center !important;
+    justify-content: center !important;
+    padding: var(--space-4) !important;
+  }
+  .pos-kasir-drawer {
+    width: 100% !important;
+    max-width: 480px !important;
+    border-radius: var(--radius-2xl) !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35) !important;
+    animation: fadeInModal 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+  .pos-drawer-handle {
+    display: none !important;
   }
 }
 
@@ -2153,10 +2102,6 @@ p, h1, h2, h3, h4, h5, h6 {
     display: flex !important;
   }
 
-  .pos-desktop-actions {
-    display: none !important;
-  }
-
   .pos-search-wrap {
     display: none !important;
   }
@@ -2167,96 +2112,11 @@ p, h1, h2, h3, h4, h5, h6 {
     flex-shrink: 0 !important;
   }
 
-  .pos-mobile-actions-ribbon {
-    display: flex !important;
-    align-items: center !important;
-    gap: 6px !important;
-    padding: 5px 12px !important;
-    background: var(--color-surface) !important;
-    border-bottom: 1px solid var(--color-border) !important;
-    overflow-x: auto !important;
-    scrollbar-width: none !important;
-    -webkit-overflow-scrolling: touch !important;
-    flex-shrink: 0 !important;
-  }
-  .pos-mobile-actions-ribbon::-webkit-scrollbar {
-    display: none !important;
-  }
-
-  .pos-mobile-menu-btn {
-    display: flex !important;
-    align-items: center;
-    justify-content: center;
-    height: 32px;
-    padding: 0 9px;
-    gap: 4px;
-    border-radius: var(--radius-full);
-    background: rgba(255, 255, 255, 0.15);
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    color: white;
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-
   .pos-products-grid {
     grid-template-columns: repeat(auto-fill, minmax(min(125px, 100%), 1fr)) !important;
     gap: var(--space-2) !important;
     padding: var(--space-3) !important;
   }
-}
-
-/* Mobile Ribbon Button Styling */
-.pos-ribbon-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: var(--radius-full);
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-  text-decoration: none;
-  cursor: pointer;
-  border: 1px solid transparent;
-  flex-shrink: 0;
-  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.12s ease;
-  min-height: 28px;
-}
-.pos-ribbon-btn:active {
-  transform: scale(0.96);
-}
-
-.pos-ribbon-btn-primary {
-  background: hsl(142 65% 92%);
-  color: hsl(142 75% 20%);
-  border-color: hsl(142 60% 75%);
-}
-.pos-ribbon-btn-info {
-  background: hsl(200 85% 92%);
-  color: hsl(200 85% 22%);
-  border-color: hsl(200 70% 75%);
-}
-.pos-ribbon-btn-warning {
-  background: hsl(45 95% 90%);
-  color: hsl(45 95% 20%);
-  border-color: hsl(45 90% 70%);
-}
-.pos-ribbon-btn-orange {
-  background: hsl(24 95% 92%);
-  color: hsl(24 95% 25%);
-  border-color: hsl(24 85% 75%);
-}
-.pos-ribbon-btn-danger {
-  background: hsl(0 85% 92%);
-  color: hsl(0 75% 35%);
-  border-color: hsl(0 70% 78%);
-}
-.pos-ribbon-btn-logout {
-  background: hsl(220 15% 92%);
-  color: hsl(220 20% 30%);
-  border-color: hsl(220 15% 80%);
 }
 
 /* ── Mobile Kasir Drawer (Bottom Sheet) ── */
