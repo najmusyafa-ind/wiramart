@@ -6,9 +6,9 @@
 // =============================================================
 
 import { NextRequest } from 'next/server';
-import { and, gte, lte, inArray, desc } from 'drizzle-orm';
+import { and, gte, lte, inArray, desc, eq, lt, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { attendances } from '@/lib/db/schema';
+import { attendances, transactions, shifts } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import { resolveReportRange, getFinancialReport, type PeriodKey } from '@/lib/finance/report';
 
@@ -18,6 +18,9 @@ export async function GET(req: NextRequest): Promise<Response> {
   const session = await verifyJwt(req);
   if (!session || session.role !== 'admin') {
     return apiError('Akses ditolak. Khusus Admin/Manager.', 403);
+  }
+  if (session.adminRole !== 'MANAGER') {
+    return apiError('Akses ditolak. Perhitungan bagi hasil hanya dapat diakses oleh Manager.', 403);
   }
 
   const { searchParams } = new URL(req.url);
@@ -45,6 +48,36 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     // 1. Ambil laporan keuangan resmi untuk rentang ini
     const financial = await getFinancialReport(range);
+
+    // 1b. Ambil laba kotor transaksi per shift dalam rentang waktu ini
+    const shiftProfits = await db
+      .select({
+        shiftId: transactions.shiftId,
+        grossProfit: sql<string>`COALESCE(SUM(${transactions.grossProfit}), 0)`,
+      })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.status, 'COMPLETED'),
+          eq(transactions.isTest, false),
+          gte(transactions.createdAt, range.start),
+          lt(transactions.createdAt, range.endExclusive),
+        ),
+      )
+      .groupBy(transactions.shiftId);
+
+    const profitByShiftId = new Map<string, number>();
+    for (const sp of shiftProfits) {
+      if (sp.shiftId) {
+        profitByShiftId.set(sp.shiftId, parseFloat(sp.grossProfit));
+      }
+    }
+
+    // Ambil shifts dalam rentang waktu ini untuk memetakan jam shift
+    const shiftList = await db.query.shifts.findMany({
+      where: and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)),
+      columns: { id: true, clockIn: true, clockOut: true },
+    });
 
     // 2. Ambil absensi yang hadir (HADIR, TELAT, PENGGANTI) pada rentang ini
     const attList = await db.query.attendances.findMany({
@@ -122,9 +155,65 @@ export async function GET(req: NextRequest): Promise<Response> {
       const attendees = attByDate.get(d.date) ?? [];
       const poolHariIni = d.alokasiGajiKaryawan ?? 0;
       const count = attendees.length;
-      const nominalPerOrang = count > 0 ? Math.floor(poolHariIni / count) : 0;
+
+      // Filter shift pada tanggal d.date (WIB)
+      const shiftsOnDate = shiftList.filter((s) => {
+        const wibDate = new Date(s.clockIn.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+        return wibDate === d.date;
+      });
+
+      const hasMultiShift = shiftsOnDate.length > 1;
+      const shiftPoolMap = new Map<string, { pool: number; attendees: typeof attendees }>();
+
+      if (hasMultiShift) {
+        for (const s of shiftsOnDate) {
+          const profit = profitByShiftId.get(s.id) ?? 0;
+          const pool = Math.floor(profit * 0.5);
+          shiftPoolMap.set(s.id, { pool, attendees: [] });
+        }
+
+        // Kelompokkan attendee ke shift terdekat
+        for (const att of attendees) {
+          const slotHour = att.schedule?.slotStart ? parseInt(att.schedule.slotStart.split(':')[0] ?? '8', 10) : 8;
+          let matchedShift = shiftsOnDate[0];
+          for (const s of shiftsOnDate) {
+            const shiftHourWib = new Date(s.clockIn.getTime() + 7 * 3600 * 1000).getUTCHours();
+            if (slotHour >= 11 && shiftHourWib >= 11) {
+              matchedShift = s;
+              break;
+            } else if (slotHour < 11 && shiftHourWib < 11) {
+              matchedShift = s;
+              break;
+            }
+          }
+          if (matchedShift && shiftPoolMap.has(matchedShift.id)) {
+            shiftPoolMap.get(matchedShift.id)!.attendees.push(att);
+          }
+        }
+      }
+
+      // Hitung nominal bagi hasil per orang (sesuai shift jika multi-shift)
+      const attendeeNominalMap = new Map<string, number>();
+      if (hasMultiShift) {
+        for (const [, group] of shiftPoolMap.entries()) {
+          const groupCount = group.attendees.length;
+          const nominalGroup = groupCount > 0 ? Math.floor(group.pool / groupCount) : 0;
+          for (const a of group.attendees) {
+            attendeeNominalMap.set(a.id, nominalGroup);
+          }
+        }
+      } else {
+        const nominalRata = count > 0 ? Math.floor(poolHariIni / count) : 0;
+        for (const a of attendees) {
+          attendeeNominalMap.set(a.id, nominalRata);
+        }
+      }
+
+      const defaultNominal = count > 0 ? Math.floor(poolHariIni / count) : 0;
 
       const personnelDetails: WorkerDetail[] = attendees.map((att) => {
+        const nominalPerOrang = attendeeNominalMap.get(att.id) ?? defaultNominal;
+
         // Ekstrak peran dari notes jika ada (cth: "Peran: Kasir | ...")
         let roleTask = att.employee.jabatan;
         if (att.notes?.startsWith('Peran: ')) {
@@ -186,7 +275,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         biayaOperasional: d.biayaOperasional,
         poolBagiHasil: poolHariIni,
         personnelCount: count,
-        nominalPerOrang,
+        nominalPerOrang: defaultNominal,
         personnel: personnelDetails,
       });
     }

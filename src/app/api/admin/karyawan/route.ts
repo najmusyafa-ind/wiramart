@@ -65,7 +65,41 @@ export async function GET(req: NextRequest) {
     )
     .orderBy(employees.fullName);
 
-  return apiOk(rows);
+  // Kelompokkan shift per karyawan agar tidak ada baris duplikat di tabel admin
+  type ShiftSlotInfo = { day: string; start: string; end: string; slotId: string };
+  type EmployeeResponse = (typeof rows)[number] & { allShifts: ShiftSlotInfo[] };
+
+  const employeeMap = new Map<string, EmployeeResponse>();
+
+  for (const r of rows) {
+    const existing = employeeMap.get(r.id);
+    const shiftInfo: ShiftSlotInfo | null =
+      r.shiftDay && r.shiftStart && r.shiftEnd && r.shiftSlotId
+        ? {
+            day: r.shiftDay,
+            start: r.shiftStart,
+            end: r.shiftEnd,
+            slotId: r.shiftSlotId,
+          }
+        : null;
+
+    if (!existing) {
+      employeeMap.set(r.id, {
+        ...r,
+        allShifts: shiftInfo ? [shiftInfo] : [],
+      });
+    } else {
+      if (shiftInfo && !existing.allShifts.some((s) => s.slotId === shiftInfo.slotId)) {
+        existing.allShifts.push(shiftInfo);
+      }
+      if (r.activeShiftId && !existing.activeShiftId) {
+        existing.activeShiftId = r.activeShiftId;
+        existing.activeShiftClockIn = r.activeShiftClockIn;
+      }
+    }
+  }
+
+  return apiOk(Array.from(employeeMap.values()));
 }
 
 // ── POST: tambah karyawan baru (Manager Dosen Only — Cacat 6 Opsi A) ───────────────

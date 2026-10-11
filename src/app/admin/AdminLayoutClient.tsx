@@ -80,12 +80,14 @@ const NAV_ITEMS: NavItem[] = [
     href: '/admin/laporan',
     icon: <BarChart3 size={18} aria-hidden="true" />,
     section: 'Menu Utama',
+    managerOnly: true,
   },
   {
     label: 'Rekonsiliasi QRIS',
     href: '/admin/qris',
     icon: <QrCode size={18} aria-hidden="true" />,
     section: 'Menu Utama',
+    managerOnly: true,
   },
   {
     label: 'Pengaturan',
@@ -99,6 +101,7 @@ const NAV_ITEMS: NavItem[] = [
     href: '/admin/export',
     icon: <Download size={18} aria-hidden="true" />,
     section: 'Sistem',
+    managerOnly: true,
   },
 ];
 
@@ -533,7 +536,7 @@ export default function AdminLayoutClient({
 
       {/* Mobile bottom nav — hanya tampil di layar < 1024px.
           Dibungkus mounted guard agar tidak ada hydration mismatch. */}
-      {mounted && <MobileBottomNav />}
+      {mounted && <MobileBottomNav adminRole={adminRole} />}
     </div>
   );
 }

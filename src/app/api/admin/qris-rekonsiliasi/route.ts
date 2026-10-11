@@ -53,6 +53,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!payload || payload.role !== 'admin') {
     return apiError('Akses ditolak.', 403);
   }
+  if (payload.adminRole !== 'MANAGER') {
+    return apiError('Akses ditolak. Rekonsiliasi QRIS bank khusus untuk Manager.', 403);
+  }
 
   const { searchParams } = new URL(req.url);
   const bulan = searchParams.get('bulan'); // format: 'YYYY-MM'
@@ -124,6 +127,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') {
     return apiError('Akses ditolak.', 403);
+  }
+  if (payload.adminRole !== 'MANAGER') {
+    return apiError('Akses ditolak. Rekonsiliasi QRIS bank khusus untuk Manager.', 403);
   }
 
   let body: unknown;

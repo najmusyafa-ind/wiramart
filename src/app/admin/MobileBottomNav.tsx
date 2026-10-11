@@ -9,9 +9,12 @@ import {
   Users,
   ClipboardList,
   BarChart3,
+  CalendarDays,
 } from 'lucide-react';
 
-const BOTTOM_NAV = [
+type AdminRole = 'MANAGER' | 'ADMIN_SHIFT';
+
+const BOTTOM_NAV_MANAGER = [
   { label: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
   { label: 'Produk',    href: '/admin/produk',    icon: Package },
   { label: 'Karyawan',  href: '/admin/karyawan',  icon: Users },
@@ -19,11 +22,19 @@ const BOTTOM_NAV = [
   { label: 'Laporan',   href: '/admin/laporan',   icon: BarChart3 },
 ];
 
+const BOTTOM_NAV_SHIFT = [
+  { label: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
+  { label: 'Produk',    href: '/admin/produk',    icon: Package },
+  { label: 'Jadwal',    href: '/admin/jadwal',    icon: CalendarDays },
+  { label: 'Absensi',   href: '/admin/absensi',   icon: ClipboardList },
+  { label: 'Karyawan',  href: '/admin/karyawan',  icon: Users },
+];
+
 // matchMedia — identik dengan cara CSS @media query bekerja,
 // tidak terpengaruh lebar scrollbar seperti window.innerWidth
 const MOBILE_MQ = '(max-width: 1023px)';
 
-export default function MobileBottomNav() {
+export default function MobileBottomNav({ adminRole = 'ADMIN_SHIFT' }: { adminRole?: AdminRole }) {
   const pathname = usePathname();
   const [isMobile, setIsMobile] = useState(false);
 
@@ -38,12 +49,14 @@ export default function MobileBottomNav() {
   // Jika sidebar desktop tampil (≥ 1024px CSS width), nav ini tidak di-render sama sekali
   if (!isMobile) return null;
 
+  const navItems = adminRole === 'MANAGER' ? BOTTOM_NAV_MANAGER : BOTTOM_NAV_SHIFT;
+
   return (
     <nav
       className="admin-bottom-nav"
       aria-label="Navigasi bawah mobile"
     >
-      {BOTTOM_NAV.map(({ label, href, icon: Icon }) => {
+      {navItems.map(({ label, href, icon: Icon }) => {
         const isActive =
           href === '/admin/dashboard'
             ? pathname === '/admin/dashboard'
@@ -70,3 +83,4 @@ export default function MobileBottomNav() {
     </nav>
   );
 }
+

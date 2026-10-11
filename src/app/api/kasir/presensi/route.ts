@@ -18,7 +18,7 @@ const presensiSchema = z.object({
   scheduleId: z.string().uuid('ID Jadwal tidak valid'),
   roleTask:   z.enum([
     'Admin Shift', 'Kepala Gudang', 'Kasir', 'Customer Service',
-    'Ketua Admin', 'Pelayan', 'Gudang', 'Admin Kasir',
+    'Ketua Admin', 'Pelayan', 'Gudang', 'Admin Kasir', 'Kepala Kasir',
   ]).optional(),
   notes:      z.string().max(255).optional(),
 });

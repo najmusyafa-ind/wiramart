@@ -217,22 +217,41 @@ export async function requireEmployee(): Promise<EmployeeTokenPayload> {
 
 /**
  * Baca dan verifikasi JWT dari cookie di API route request.
- * Cek sk_kasir dulu (prioritas kasir API), lalu sk_admin.
+ * Prioritas otomatis berdasarkan path:
+ * - Jika route /api/admin/* → cek sk_admin dulu, fallback sk_kasir
+ * - Jika route /api/kasir/* atau lainnya → cek sk_kasir dulu, fallback sk_admin
  * Role dicek secara eksplisit di masing-masing route handler.
  */
 export async function verifyJwt(req: NextRequest): Promise<TokenPayload | null> {
-  // Coba kasir token
-  const kasirToken = req.cookies.get(KASIR_ACCESS_COOKIE)?.value;
-  if (kasirToken) {
-    const payload = await verifyToken(kasirToken);
-    if (payload) return payload;
+  const pathname = req.nextUrl.pathname;
+  const isAdminRoute = pathname.startsWith('/api/admin');
+
+  if (isAdminRoute) {
+    // Prioritaskan admin token untuk /api/admin/*
+    const adminToken = req.cookies.get(ADMIN_ACCESS_COOKIE)?.value;
+    if (adminToken) {
+      const payload = await verifyToken(adminToken);
+      if (payload) return payload;
+    }
+    const kasirToken = req.cookies.get(KASIR_ACCESS_COOKIE)?.value;
+    if (kasirToken) {
+      const payload = await verifyToken(kasirToken);
+      if (payload) return payload;
+    }
+  } else {
+    // Prioritaskan kasir token untuk /api/kasir/* dan route publik lainnya
+    const kasirToken = req.cookies.get(KASIR_ACCESS_COOKIE)?.value;
+    if (kasirToken) {
+      const payload = await verifyToken(kasirToken);
+      if (payload) return payload;
+    }
+    const adminToken = req.cookies.get(ADMIN_ACCESS_COOKIE)?.value;
+    if (adminToken) {
+      const payload = await verifyToken(adminToken);
+      if (payload) return payload;
+    }
   }
-  // Coba admin token
-  const adminToken = req.cookies.get(ADMIN_ACCESS_COOKIE)?.value;
-  if (adminToken) {
-    const payload = await verifyToken(adminToken);
-    if (payload) return payload;
-  }
+
   return null;
 }
 

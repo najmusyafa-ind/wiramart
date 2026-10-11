@@ -234,7 +234,7 @@ export default function LandingPage() {
               <Calendar size={15} aria-hidden="true" />
               <span>Daftar Shift</span>
             </Link>
-            <Link href="/kasir/pos" prefetch={false} className="btn btn-primary btn-sm lp-nav__cta">
+            <Link href="/kasir/login" prefetch={false} className="btn btn-primary btn-sm lp-nav__cta" suppressHydrationWarning>
               <ShoppingBag size={15} aria-hidden="true" />
               <span>Buka Kasir</span>
             </Link>
@@ -296,7 +296,7 @@ export default function LandingPage() {
 
             {/* CTA Buttons */}
             <div className="lp-hero__ctas">
-              <Link href="/kasir/pos" prefetch={false} className="btn btn-primary btn-lg lp-hero__cta-primary">
+              <Link href="/kasir/login" prefetch={false} className="btn btn-primary btn-lg lp-hero__cta-primary" suppressHydrationWarning>
                 <Store size={20} aria-hidden="true" />
                 <span>Masuk Terminal Kasir POS</span>
                 <ArrowRight size={18} aria-hidden="true" />
@@ -537,7 +537,7 @@ export default function LandingPage() {
               </p>
 
               <div className="lp-cta__actions">
-                <Link href="/kasir/pos" prefetch={false} className="btn btn-lg lp-cta__btn-primary">
+                <Link href="/kasir/login" prefetch={false} className="btn btn-lg lp-cta__btn-primary" suppressHydrationWarning>
                   <Store size={18} aria-hidden="true" />
                   <span>Buka Terminal Kasir</span>
                 </Link>
@@ -588,7 +588,7 @@ export default function LandingPage() {
               <div className="lp-footer__link-group">
                 <div className="lp-footer__link-title">Layanan Utama</div>
                 <ul>
-                  <li><Link href="/kasir/pos" prefetch={false}>Terminal Kasir POS</Link></li>
+                  <li><Link href="/kasir/login" prefetch={false} suppressHydrationWarning>Terminal Kasir POS</Link></li>
                   <li><Link href="/daftar">Pendaftaran &amp; Jadwal Shift</Link></li>
                   <li><Link href="/login">Masuk Portal Dosen / Admin</Link></li>
                 </ul>

@@ -5,7 +5,7 @@
 // =============================================================
 
 import { NextResponse } from 'next/server';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { shiftSchedules, employees, attendances, qrisSettings } from '@/lib/db/schema';
 import { apiOk, apiError } from '@/lib/utils/helpers';
@@ -161,12 +161,26 @@ export async function GET(): Promise<Response> {
       }
     }
 
+    // Ambil daftar seluruh mahasiswa aktif untuk kemudahan Kasir Pengganti (Badal) & Oper Kasir
+    const allEmployees = await db
+      .select({
+        id: employees.id,
+        fullName: employees.fullName,
+        nim: employees.nim,
+        programStudi: employees.programStudi,
+        jabatan: employees.jabatan,
+      })
+      .from(employees)
+      .where(and(eq(employees.isActive, true), isNull(employees.deletedAt)))
+      .orderBy(employees.fullName);
+
     return apiOk({
       hari: dayOfWeek,
       tanggal: tanggalHari,
       jamSekarang: jamMenitSekarang,
       toleransiMenit,
       shifts: Array.from(grouped.values()),
+      allEmployees,
     });
   } catch (err) {
     console.error('Error fetching presensi hari ini:', err);

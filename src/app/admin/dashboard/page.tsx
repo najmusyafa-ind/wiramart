@@ -10,10 +10,12 @@ import {
   qrisReconciliations,
   productProposals,
   stockBatches,
+  admins,
 } from '@/lib/db/schema';
 import { eq, and, gte, lte, sql, count, isNull, desc } from 'drizzle-orm';
 import { formatRupiah, formatDateTime } from '@/lib/utils/helpers';
 import { resolveReportRange, getFinancialReport, wibToday } from '@/lib/finance/report';
+import { getAdminSession } from '@/lib/utils/auth';
 import {
   TrendingUp,
   ShoppingBag,
@@ -24,14 +26,14 @@ import {
   Coins,
   Building2,
   Percent,
-  Wallet,
   ShieldCheck,
   Download,
 } from 'lucide-react';
 import DashboardWidgets from './DashboardWidgets';
 import ApprovalCenterWidget, { type AutoClosedShiftInfo } from './ApprovalCenterWidget';
+import AdminShiftDashboard from './AdminShiftDashboard';
 
-export const metadata: Metadata = { title: 'Dashboard Manajer & Dosen Pembina' };
+export const metadata: Metadata = { title: 'Dashboard Admin — Smartkasir Perwira' };
 
 // Revalidate every 60 seconds
 export const revalidate = 60;
@@ -158,7 +160,97 @@ async function getDashboardData() {
   };
 }
 
+// ─────────────────────────────────────────────────────────────
+// Data minimal untuk Admin Shift (tidak mengambil data finansial)
+// ─────────────────────────────────────────────────────────────
+async function getShiftDashboardData() {
+  const range = resolveReportRange({ period: 'daily' });
+
+  const [activeShiftsResult] = await db
+    .select({ count: count(shifts.id) })
+    .from(shifts)
+    .where(eq(shifts.status, 'ACTIVE'));
+
+  const [totalEmployeesResult] = await db
+    .select({ count: count(employees.id) })
+    .from(employees)
+    .where(and(eq(employees.isActive, true), isNull(employees.deletedAt)));
+
+  const [pendingSwapsResult] = await db
+    .select({ count: count(shiftSwapRequests.id) })
+    .from(shiftSwapRequests)
+    .where(eq(shiftSwapRequests.status, 'PENDING'));
+
+  const in7Days = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const [criticalBatchesResult] = await db
+    .select({
+      count: sql<number>`COALESCE(COUNT(*) FILTER (WHERE ${stockBatches.expiryDate} IS NOT NULL AND ${stockBatches.expiryDate} <= ${in7Days} AND ${stockBatches.currentQty} > 0), 0)::int`,
+    })
+    .from(stockBatches);
+
+  const [pettyCashResult] = await db
+    .select({
+      cashOut: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_OUT'), 0)`,
+      cashIn:  sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_IN'), 0)`,
+    })
+    .from(shiftCashMovements)
+    .where(gte(shiftCashMovements.createdAt, range.start));
+
+  const [txCountResult] = await db
+    .select({ count: count(transactions.id) })
+    .from(transactions)
+    .where(and(
+      gte(transactions.createdAt, range.start),
+      lte(transactions.createdAt, range.endExclusive),
+      eq(transactions.status, 'COMPLETED'),
+    ));
+
+  return {
+    todayLabel: range.label,
+    activeShifts: activeShiftsResult?.count ?? 0,
+    totalEmployees: totalEmployeesResult?.count ?? 0,
+    pendingSwaps: pendingSwapsResult?.count ?? 0,
+    criticalBatches: criticalBatchesResult?.count ?? 0,
+    pettyCashOut: Number(pettyCashResult?.cashOut ?? 0),
+    pettyCashIn:  Number(pettyCashResult?.cashIn ?? 0),
+    todayTransactions: txCountResult?.count ?? 0,
+  };
+}
+
 export default async function AdminDashboardPage() {
+  // ── Baca role dari session & database ──
+  const session = await getAdminSession();
+  const adminRecord = session
+    ? await db.query.admins.findFirst({
+        where: eq(admins.id, session.sub),
+        columns: { fullName: true, role: true },
+      })
+    : null;
+
+  const adminRole = (adminRecord?.role as 'MANAGER' | 'ADMIN_SHIFT') ?? 'ADMIN_SHIFT';
+  const adminName = adminRecord?.fullName ?? 'Admin';
+
+  // ── ADMIN_SHIFT → dashboard operasional terbatas ──
+  if (adminRole === 'ADMIN_SHIFT') {
+    const shiftData = await getShiftDashboardData();
+    return (
+      <AdminShiftDashboard
+        adminName={adminName}
+        todayLabel={shiftData.todayLabel}
+        summary={{
+          activeShifts:      shiftData.activeShifts,
+          totalEmployees:    shiftData.totalEmployees,
+          pendingSwaps:      shiftData.pendingSwaps,
+          criticalBatches:   shiftData.criticalBatches,
+          pettyCashOut:      shiftData.pettyCashOut,
+          pettyCashIn:       shiftData.pettyCashIn,
+          todayTransactions: shiftData.todayTransactions,
+        }}
+      />
+    );
+  }
+
+  // ── MANAGER → dashboard eksekutif penuh ──
   const data = await getDashboardData();
   const { summary } = data;
 

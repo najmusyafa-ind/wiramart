@@ -7,7 +7,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { employees, shifts, shiftSchedules, admins, auditLogs } from '@/lib/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, ne } from 'drizzle-orm';
 import { verifyJwt, requireManager, apiOk, apiError } from '@/lib/utils/auth';
 import { AppError } from '@/lib/utils/helpers';
 import bcrypt from 'bcryptjs';
@@ -16,6 +16,8 @@ type Context = { params: Promise<{ id: string }> };
 
 const PatchSchema = z.object({
   fullName: z.string().min(2).max(200).optional(),
+  nim: z.string().min(5).max(20).optional(),
+  programStudi: z.string().min(2).max(100).optional(),
   jabatan: z.string().max(100).optional(),
   isActive: z.boolean().optional(),
   isKetuaShift: z.boolean().optional(),
@@ -47,7 +49,25 @@ export async function PATCH(req: NextRequest, ctx: Context) {
       updatedAt: new Date(),
     };
 
-    if (parsed.data.fullName !== undefined) updateData.fullName = parsed.data.fullName;
+    if (parsed.data.fullName !== undefined) updateData.fullName = parsed.data.fullName.trim();
+    if (parsed.data.nim !== undefined) {
+      const trimmedNim = parsed.data.nim.trim().toUpperCase();
+      // Pastikan NIM tidak dipakai oleh mahasiswa lain
+      const duplicate = await db.query.employees.findFirst({
+        where: and(
+          eq(employees.nim, trimmedNim),
+          isNull(employees.deletedAt),
+          ne(employees.id, id),
+        ),
+      });
+      if (duplicate) {
+        return apiError('NIM sudah digunakan oleh mahasiswa lain.', 409);
+      }
+      updateData.nim = trimmedNim;
+    }
+    if (parsed.data.programStudi !== undefined) {
+      updateData.programStudi = parsed.data.programStudi.trim();
+    }
     if (parsed.data.jabatan !== undefined) updateData.jabatan = parsed.data.jabatan;
     if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
     if (parsed.data.isKetuaShift !== undefined) {

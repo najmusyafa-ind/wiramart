@@ -29,6 +29,9 @@ const PERIODS: readonly PeriodKey[] = ['daily', 'weekly', 'monthly', 'semi_annua
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
+  if (payload.adminRole !== 'MANAGER') {
+    return apiError('Akses ditolak. Laporan keuangan hanya dapat diakses oleh Manager (Dosen).', 403);
+  }
 
   const sp = new URL(req.url).searchParams;
   const rawPeriod = sp.get('period');

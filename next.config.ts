@@ -31,6 +31,8 @@ const ContentSecurityPolicy = `
 `.replace(/\n/g, ' ').replace(/\s{2,}/g, ' ').trim();
 
 const nextConfig: NextConfig = {
+  // Cegah error Cross-Origin dev resources saat diakses dari 127.0.0.1 atau localhost
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
   images: {
     qualities: [75, 90],
     remotePatterns: [

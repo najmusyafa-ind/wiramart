@@ -15,7 +15,8 @@ import {
   transactionPayments,
   shiftCashMovements,
 } from '@/lib/db/schema';
-import { requireAdmin } from '@/lib/utils/auth';
+import { requireManager } from '@/lib/utils/auth';
+import { AppError } from '@/lib/utils/helpers';
 import {
   getFinancialReport,
   resolveReportRange,
@@ -52,7 +53,7 @@ function getShiftLabel(clockIn: Date): string {
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    await requireAdmin();
+    await requireManager();
 
     const { searchParams } = new URL(req.url);
     const period = (searchParams.get('period') as PeriodKey) ?? 'daily';
@@ -464,6 +465,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       },
     });
   } catch (err: unknown) {
+    if (err instanceof AppError) {
+      return NextResponse.json({ success: false, error: err.message }, { status: err.statusCode });
+    }
     const errorMsg = err instanceof Error ? err.message : 'Gagal ekspor laporan skema harian';
     return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
   }

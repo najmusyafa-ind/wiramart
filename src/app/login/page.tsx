@@ -4,16 +4,16 @@ import { useState, useId, useEffect } from 'react';
 import Image from 'next/image';
 import {
   Eye, EyeOff, LogIn, AlertCircle, CheckCircle2,
-  ShieldCheck, GraduationCap, User, Hash, BookOpen, KeyRound, Building2,
+  ShieldCheck, Hash, KeyRound, Building2,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────
-// Unified Login Page — Mendukung 3 Role Resmi:
-// 1. Karyawan (Kasir POS): Nama + NIM + Prodi
-// 2. Admin Kasir (Admin Shift / Kepala Admin): NIM + PIN 6-Digit
-// 3. Manager (Dosen / Owner): NIDN + Password
+// Portal Login Pengelola Wiramart UNPERBA:
+// 1. Admin Kasir / Ketua Admin (Mahasiswa Pengelola): NIM + PIN 6-Digit
+// 2. Manager (Dosen Pembimbing / Owner): NIDN + Password
+// (Petugas Kasir lapangan dialokasikan khusus ke /kasir/login)
 // ─────────────────────────────────────────────────────────────
-type Role = 'kasir' | 'admin_shift' | 'manager';
+type Role = 'admin_shift' | 'manager';
 
 type SetupPinData = {
   nim: string;
@@ -34,11 +34,6 @@ export default function LoginPage() {
   const [managerNidn, setManagerNidn] = useState('');
   const [managerPassword, setManagerPassword] = useState('');
   const [showManagerPassword, setShowManagerPassword] = useState(false);
-
-  // State: Karyawan Kasir POS (Nama + NIM + Prodi)
-  const [fullName, setFullName] = useState('');
-  const [nim, setNim] = useState('');
-  const [programStudi, setProgramStudi] = useState('');
 
   // Shared state
   const [isLoading, setIsLoading] = useState(false);
@@ -147,42 +142,6 @@ export default function LoginPage() {
       } finally {
         setIsLoading(false);
       }
-      return;
-    }
-
-    // ── ROLE 3: KARYAWAN KASIR POS (NAMA + NIM + PRODI) ──
-    if (role === 'kasir') {
-      if (!fullName.trim() || !nim.trim() || !programStudi.trim()) {
-        setError('Nama Lengkap, NIM, dan Program Studi wajib diisi.');
-        return;
-      }
-
-      setIsLoading(true);
-      try {
-        const res = await fetch('/api/auth/kasir', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fullName: fullName.trim(),
-            nim: nim.trim(),
-            programStudi: programStudi.trim(),
-          }),
-        });
-        const json = await res.json() as {
-          success: boolean;
-          data?: { redirect?: string };
-          error?: string;
-        };
-        if (!res.ok || !json.success) {
-          setError(json.error ?? 'Data tidak ditemukan. Periksa kembali Nama, NIM, dan Program Studi.');
-          return;
-        }
-        window.location.href = json.data?.redirect ?? '/kasir/pos';
-      } catch {
-        setError('Koneksi gagal. Periksa jaringan Anda.');
-      } finally {
-        setIsLoading(false);
-      }
     }
   }
 
@@ -191,24 +150,26 @@ export default function LoginPage() {
     e.preventDefault();
     if (!setupPinData) return;
 
-    setSetupPinError(null);
-
-    if (!/^\d{6,8}$/.test(newPin)) {
-      setSetupPinError('PIN wajib 6 hingga 8 digit angka.');
+    if (newPin.length < 6 || newPin.length > 8) {
+      setSetupPinError('PIN harus berupa 6 hingga 8 digit angka.');
       return;
     }
-
     if (newPin !== confirmPin) {
-      setSetupPinError('Konfirmasi PIN tidak cocok dengan PIN baru.');
+      setSetupPinError('Konfirmasi PIN tidak cocok.');
       return;
     }
 
     setSetupPinLoading(true);
+    setSetupPinError(null);
+
     try {
       const res = await fetch('/api/auth/setup-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nim: setupPinData.nim, pin: newPin }),
+        body: JSON.stringify({
+          nim: setupPinData.nim,
+          pin: newPin,
+        }),
       });
 
       const json = await res.json() as {
@@ -241,28 +202,29 @@ export default function LoginPage() {
 
         {/* ── Logo ─────────────────────────────────────────── */}
         <div className="auth-logo">
-          <div style={{ width: 68, height: 68, position: 'relative', flexShrink: 0 }}>
+          <div style={{ width: 68, height: 68, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <Image
               src="/logo.png"
               alt="Logo Wiramart UNPERBA"
-              fill
+              width={68}
+              height={68}
               style={{ objectFit: 'contain' }}
               priority
             />
           </div>
           <div>
             <div className="auth-logo-name">WIRAMART UNPERBA</div>
-            <div className="auth-logo-sub">Unit Kegiatan Mahasiswa Kewirausahaan</div>
+            <div className="auth-logo-sub">Portal Pengelola Toko &amp; Manajemen</div>
           </div>
         </div>
 
-        {/* ── 3-Way Role Switcher ──────────────────────────── */}
+        {/* ── 2-Way Role Switcher: Admin Kasir vs Manager Dosen ──────────────── */}
         <div
           role="tablist"
-          aria-label="Pilih jenis login"
+          aria-label="Pilih jenis login pengelola"
           style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
+            gridTemplateColumns: '1fr 1fr',
             gap: 4,
             backgroundColor: 'var(--color-surface-alt, #f1f5f9)',
             borderRadius: 'var(--radius-lg)',
@@ -271,16 +233,13 @@ export default function LoginPage() {
           }}
         >
           {([
-            { id: 'admin_shift', label: 'Admin Kasir', icon: <ShieldCheck size={15} aria-hidden="true" /> },
-            { id: 'manager',     label: 'Manager',     icon: <Building2 size={15} aria-hidden="true" /> },
-            { id: 'kasir',       label: 'Karyawan',    icon: <GraduationCap size={15} aria-hidden="true" /> },
+            { id: 'admin_shift', label: 'Admin Kasir', icon: <ShieldCheck size={16} aria-hidden="true" /> },
+            { id: 'manager',     label: 'Manager Dosen', icon: <Building2 size={16} aria-hidden="true" /> },
           ] as { id: Role; label: string; icon: React.ReactNode }[]).map((tab) => (
             <button
               key={tab.id}
-              id={`${uid}-tab-${tab.id}`}
               role="tab"
               aria-selected={role === tab.id}
-              aria-controls={`${uid}-panel-${tab.id}`}
               type="button"
               onClick={() => setRole(tab.id)}
               disabled={isLoading}
@@ -288,18 +247,17 @@ export default function LoginPage() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: 5,
-                padding: '8px 6px',
-                borderRadius: 'calc(var(--radius-lg) - 2px)',
+                gap: 6,
+                padding: '10px 12px',
+                borderRadius: 'var(--radius-md)',
                 border: 'none',
-                cursor: 'pointer',
-                fontSize: '12px',
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                fontSize: 'var(--text-xs)',
                 fontWeight: role === tab.id ? 'var(--weight-bold)' : 'var(--weight-medium)',
-                fontFamily: 'var(--font-sans)',
-                transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
-                backgroundColor: role === tab.id ? 'var(--color-primary)' : 'transparent',
-                color: role === tab.id ? 'white' : 'var(--color-text-muted)',
+                backgroundColor: role === tab.id ? 'var(--color-surface, #ffffff)' : 'transparent',
+                color: role === tab.id ? 'var(--color-primary)' : 'var(--color-text-muted)',
                 boxShadow: role === tab.id ? 'var(--shadow-sm)' : 'none',
+                transition: 'all 0.15s ease',
               }}
             >
               {tab.icon}
@@ -308,96 +266,83 @@ export default function LoginPage() {
           ))}
         </div>
 
-        {/* ── Heading ─────────────────────────────────────── */}
-        <div style={{ marginBottom: 'var(--space-4)', textAlign: 'center' }}>
-          <h1 className="auth-title" style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-1)' }}>
-            {role === 'admin_shift' && 'Masuk sebagai Admin Kasir'}
-            {role === 'manager' && 'Masuk sebagai Manager (Dosen)'}
-            {role === 'kasir' && 'Masuk sebagai Karyawan Kasir'}
-          </h1>
-          <p className="auth-subtitle" style={{ fontSize: 'var(--text-xs)' }}>
-            {role === 'admin_shift' && 'Khusus Mahasiswa Koordinator Shift (Gunakan NIM & PIN / Password).'}
-            {role === 'manager' && 'Khusus Dosen Pembina & Owner UKM (Gunakan NIDN & Password).'}
-            {role === 'kasir' && 'Petugas pelaksana kasir membuka sesi POS toko.'}
-          </p>
+        {/* ── Role Description ──────────────────────────────── */}
+        <div
+          style={{
+            backgroundColor: 'var(--color-surface-muted, #f8fafc)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-md)',
+            padding: '8px 12px',
+            marginBottom: 'var(--space-4)',
+            fontSize: 'var(--text-xs)',
+            color: 'var(--color-text-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          {role === 'admin_shift' ? (
+            <>
+              <ShieldCheck size={16} style={{ color: 'var(--color-primary)', flexShrink: 0 }} />
+              <span>
+                <strong>Admin Kasir / Ketua Admin:</strong> Kelola katalog, stok barang, roster shift, dan audit kasir.
+              </span>
+            </>
+          ) : (
+            <>
+              <Building2 size={16} style={{ color: 'var(--color-primary)', flexShrink: 0 }} />
+              <span>
+                <strong>Manager Dosen:</strong> Supervisi laporan keuangan, bagi hasil, dan rekap kehadiran UKM.
+              </span>
+            </>
+          )}
         </div>
 
-        {/* ── Success Alert ────────────────────────────────── */}
-        {successMsg && (
-          <div
-            role="alert"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--space-2)',
-              padding: '10px 12px',
-              backgroundColor: 'var(--color-success-light, #dcfce7)',
-              border: '1px solid var(--color-success)',
-              borderRadius: 'var(--radius-md)',
-              marginBottom: 'var(--space-4)',
-              color: 'var(--color-success)',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 'var(--weight-semibold)',
-            }}
-          >
-            <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-            <span>{successMsg}</span>
-          </div>
-        )}
-
-        {/* ── Error Alert ─────────────────────────────────── */}
+        {/* ── Global Alert: Error ──────────────────────────── */}
         {error && (
           <div
             role="alert"
-            aria-live="assertive"
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 'var(--space-2)',
-              padding: '10px 12px',
-              backgroundColor: 'var(--color-error-light)',
-              border: '1px solid var(--color-error)',
-              borderRadius: 'var(--radius-md)',
-              marginBottom: 'var(--space-4)',
-              color: 'var(--color-error)',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 'var(--weight-medium)',
-            }}
+            className="alert alert-error"
+            style={{ marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
           >
-            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} aria-hidden="true" />
+            <AlertCircle size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
             <span>{error}</span>
           </div>
         )}
 
-        {/* ── Form ────────────────────────────────────────── */}
-        <form
-          id={`${uid}-panel-${role}`}
-          role="tabpanel"
-          aria-labelledby={`${uid}-tab-${role}`}
-          className="auth-form"
-          onSubmit={handleSubmit}
-          noValidate
-          autoComplete="off"
-        >
-          {/* TAB 1: ADMIN KASIR (NIM + PIN 6-DIGIT) */}
+        {/* ── Global Alert: Sukses ─────────────────────────── */}
+        {successMsg && (
+          <div
+            role="status"
+            className="alert alert-success"
+            style={{ marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+          >
+            <CheckCircle2 size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+            <span>{successMsg}</span>
+          </div>
+        )}
+
+        {/* ── Form Utama ───────────────────────────────────── */}
+        <form onSubmit={handleSubmit} noValidate>
+
+          {/* TAB 1: ADMIN KASIR / KETUA ADMIN (NIM + PIN 6-DIGIT) */}
           {role === 'admin_shift' && (
             <>
               <div className="form-group">
-                <label className="form-label" htmlFor={`${uid}-admin-shift-nim`}>
+                <label className="form-label" htmlFor={`${uid}-admin-nim`}>
                   NIM Admin Kasir <span className="required" aria-hidden="true">*</span>
                 </label>
                 <div style={{ position: 'relative' }}>
                   <Hash size={15} style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
                   <input
-                    id={`${uid}-admin-shift-nim`}
+                    id={`${uid}-admin-nim`}
                     type="text"
+                    inputMode="numeric"
                     className="form-input"
                     placeholder="Contoh: 02301001"
                     value={adminShiftNim}
                     onChange={(e) => setAdminShiftNim(e.target.value)}
-                    autoComplete="off"
-                    autoCorrect="off"
-                    spellCheck="false"
+                    autoComplete="username"
                     required
                     disabled={isLoading}
                     style={{ paddingLeft: 'calc(var(--space-3) + 15px + var(--space-2))', fontFamily: 'var(--font-mono)' }}
@@ -406,65 +351,29 @@ export default function LoginPage() {
               </div>
 
               <div className="form-group">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <label className="form-label" htmlFor={`${uid}-admin-shift-pin`} style={{ margin: 0 }}>
-                    PIN / Password <span className="required" aria-hidden="true">*</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label className="form-label" htmlFor={`${uid}-admin-pin`}>
+                    PIN Pengelola (8 Digit) <span className="required" aria-hidden="true">*</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!adminShiftNim.trim()) {
-                        setError('Masukkan NIM Anda terlebih dahulu untuk mengatur PIN.');
-                        return;
-                      }
-                      // Panggil pengecekan NIM
-                      fetch('/api/auth/admin', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ nidn: adminShiftNim.trim(), checkOnly: true }),
-                      })
-                        .then(r => r.json())
-                        .then(j => {
-                          if (j.success && j.data?.exists) {
-                            setSetupPinData({
-                              nim: adminShiftNim.trim(),
-                              fullName: j.data.fullName,
-                              jabatan: j.data.jabatan ?? 'Kepala Admin',
-                            });
-                          } else {
-                            setError('NIM tidak terdaftar sebagai Admin Shift / Kepala Admin.');
-                          }
-                        });
-                    }}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      padding: 0,
-                      fontSize: 11,
-                      color: 'var(--color-primary)',
-                      cursor: 'pointer',
-                      fontWeight: 'var(--weight-semibold)',
-                    }}
-                  >
-                    Belum punya PIN?
-                  </button>
                 </div>
                 <div style={{ position: 'relative' }}>
                   <KeyRound size={15} style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
                   <input
-                    id={`${uid}-admin-shift-pin`}
+                    id={`${uid}-admin-pin`}
                     type={showAdminShiftPin ? 'text' : 'password'}
+                    inputMode="numeric"
+                    maxLength={8}
                     className="form-input"
-                    placeholder="Masukkan PIN / Password"
+                    placeholder="Masukkan 8-digit PIN (contoh: 02405013)"
                     value={adminShiftPin}
-                    onChange={(e) => setAdminShiftPin(e.target.value.slice(0, 50))}
-                    autoComplete="new-password"
+                    onChange={(e) => setAdminShiftPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                    autoComplete="current-password"
                     disabled={isLoading}
                     style={{
                       paddingLeft: 'calc(var(--space-3) + 15px + var(--space-2))',
                       paddingRight: 'var(--space-10)',
-                      letterSpacing: showAdminShiftPin ? 'normal' : '2px',
                       fontFamily: 'var(--font-mono)',
+                      letterSpacing: showAdminShiftPin ? '2px' : '4px',
                     }}
                   />
                   <button
@@ -503,7 +412,7 @@ export default function LoginPage() {
                     placeholder="Contoh: 0612345678"
                     value={managerNidn}
                     onChange={(e) => setManagerNidn(e.target.value)}
-                    autoComplete="off"
+                    autoComplete="username"
                     autoCapitalize="none"
                     spellCheck="false"
                     required
@@ -525,7 +434,7 @@ export default function LoginPage() {
                     placeholder="Password Akun Dosen"
                     value={managerPassword}
                     onChange={(e) => setManagerPassword(e.target.value)}
-                    autoComplete="new-password"
+                    autoComplete="current-password"
                     required
                     disabled={isLoading}
                     style={{ paddingRight: 'var(--space-10)' }}
@@ -550,76 +459,6 @@ export default function LoginPage() {
             </>
           )}
 
-          {/* TAB 3: KARYAWAN KASIR POS (NAMA + NIM + PRODI) */}
-          {role === 'kasir' && (
-            <>
-              <div className="form-group">
-                <label className="form-label" htmlFor={`${uid}-name`}>
-                  Nama Lengkap <span className="required" aria-hidden="true">*</span>
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <User size={15} style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
-                  <input
-                    id={`${uid}-name`}
-                    type="text"
-                    className="form-input"
-                    placeholder="Sesuai jadwal yang terdaftar"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    autoComplete="off"
-                    autoCapitalize="words"
-                    required
-                    disabled={isLoading}
-                    style={{ paddingLeft: 'calc(var(--space-3) + 15px + var(--space-2))' }}
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor={`${uid}-nim`}>
-                  NIM <span className="required" aria-hidden="true">*</span>
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <Hash size={15} style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
-                  <input
-                    id={`${uid}-nim`}
-                    type="text"
-                    className="form-input"
-                    placeholder="Nomor Induk Mahasiswa"
-                    value={nim}
-                    onChange={(e) => setNim(e.target.value)}
-                    autoComplete="off"
-                    autoCorrect="off"
-                    required
-                    disabled={isLoading}
-                    style={{ paddingLeft: 'calc(var(--space-3) + 15px + var(--space-2))', fontFamily: 'var(--font-mono)' }}
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor={`${uid}-prodi`}>
-                  Program Studi <span className="required" aria-hidden="true">*</span>
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <BookOpen size={15} style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
-                  <input
-                    id={`${uid}-prodi`}
-                    type="text"
-                    className="form-input"
-                    placeholder="Contoh: Manajemen / Informatika"
-                    value={programStudi}
-                    onChange={(e) => setProgramStudi(e.target.value)}
-                    autoComplete="off"
-                    required
-                    disabled={isLoading}
-                    style={{ paddingLeft: 'calc(var(--space-3) + 15px + var(--space-2))' }}
-                  />
-                </div>
-              </div>
-            </>
-          )}
-
           {/* Submit Button */}
           <button
             type="submit"
@@ -631,39 +470,39 @@ export default function LoginPage() {
             {!isLoading && (
               <>
                 <LogIn size={18} aria-hidden="true" />
-                {role === 'admin_shift' && 'Masuk sebagai Admin Kasir'}
-                {role === 'manager' && 'Masuk sebagai Manager'}
-                {role === 'kasir' && 'Buka Sesi Kerja POS'}
+                {role === 'admin_shift' ? 'Masuk sebagai Admin Kasir' : 'Masuk sebagai Manager'}
               </>
             )}
           </button>
         </form>
 
-        {/* ── Footer Link ─────────────────────────────────── */}
-        <p
+        {/* ── Footer Link: Pengalihan Khusus Petugas Kasir ──────────────── */}
+        <div
           style={{
-            marginTop: 'var(--space-5)',
+            marginTop: 'var(--space-6)',
+            paddingTop: 'var(--space-4)',
+            borderTop: '1px solid var(--color-border)',
             textAlign: 'center',
-            fontSize: 'var(--text-xs)',
-            color: 'var(--color-text-muted)',
           }}
         >
-          {role === 'kasir' ? (
-            <>
-              Belum terdaftar di jadwal?{' '}
-              <a href="/daftar" style={{ color: 'var(--color-primary)', fontWeight: 'var(--weight-semibold)' }}>
-                Daftar &amp; Pilih Shift →
-              </a>
-            </>
-          ) : (
-            <>
-              Ingin absen shift bersama tim?{' '}
-              <a href="/kasir/login" style={{ color: 'var(--color-primary)', fontWeight: 'var(--weight-semibold)' }}>
-                Buka Kiosk Presensi Shift →
-              </a>
-            </>
-          )}
-        </p>
+          <p style={{ margin: '0 0 6px', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+            Bertugas menjaga kasir hari ini?
+          </p>
+          <a
+            href="/kasir/login"
+            style={{
+              fontSize: 'var(--text-xs)',
+              color: 'var(--color-primary)',
+              fontWeight: 'var(--weight-semibold)',
+              textDecoration: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            &larr; Buka Portal Presensi &amp; Shift Kasir
+          </a>
+        </div>
       </main>
 
       {/* ── MODAL SETUP PIN (JIKA ADMIN SHIFT BELUM BIKIN PIN) ── */}
@@ -709,7 +548,7 @@ export default function LoginPage() {
                 <KeyRound size={24} />
               </div>
               <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-bold)', margin: 0 }}>
-                Buat PIN Baru (6–8 Digit)
+                Buat PIN Baru (8 Digit Angka)
               </h2>
               <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 4 }}>
                 Halo <strong>{setupPinData.fullName}</strong>! Akun Anda ({setupPinData.jabatan}) belum memiliki PIN pengelola.
@@ -740,7 +579,7 @@ export default function LoginPage() {
             <form onSubmit={handleSetupPinSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label" style={{ fontSize: 11 }}>
-                  PIN Baru (6–8 Digit Angka) <span className="required">*</span>
+                  PIN Baru (8 Digit Angka) <span className="required">*</span>
                 </label>
                 <input
                   type="password"
@@ -748,7 +587,7 @@ export default function LoginPage() {
                   pattern="[0-9]*"
                   maxLength={8}
                   className="form-input"
-                  placeholder="6–8 digit angka (contoh: 123456 atau NIM)"
+                  placeholder="8 digit angka (contoh: 02405013)"
                   value={newPin}
                   onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
                   required
@@ -759,7 +598,7 @@ export default function LoginPage() {
 
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label" style={{ fontSize: 11 }}>
-                  Ulangi PIN Baru <span className="required">*</span>
+                  Ulangi PIN Baru (8 Digit) <span className="required">*</span>
                 </label>
                 <input
                   type="password"
@@ -767,7 +606,7 @@ export default function LoginPage() {
                   pattern="[0-9]*"
                   maxLength={8}
                   className="form-input"
-                  placeholder="Ketik ulang 6–8 digit"
+                  placeholder="Ketik ulang 8 digit"
                   value={confirmPin}
                   onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
                   required
@@ -789,7 +628,7 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={setupPinLoading || newPin.length !== 6 || confirmPin.length !== 6}
+                  disabled={setupPinLoading || newPin.length < 6 || confirmPin.length < 6}
                   style={{ flex: 2, padding: '8px 12px', fontSize: 'var(--text-xs)', fontWeight: 'bold' }}
                 >
                   {setupPinLoading ? 'Menyimpan...' : 'Simpan PIN & Masuk'}

@@ -97,13 +97,10 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // --- Auth routes (login pages): redirect jika sudah login ---
   if (pathname === '/login') {
     if (adminSession) return NextResponse.redirect(new URL('/admin/dashboard', request.url));
-    if (kasirSession) return NextResponse.redirect(new URL('/kasir/pos', request.url));
     return NextResponse.next();
   }
 
   if (pathname === '/kasir/login') {
-    if (kasirSession) return NextResponse.redirect(new URL('/kasir/pos', request.url));
-    if (adminSession) return NextResponse.redirect(new URL('/admin/dashboard', request.url));
     return NextResponse.next();
   }
 

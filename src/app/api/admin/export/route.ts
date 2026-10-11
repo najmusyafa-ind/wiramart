@@ -23,7 +23,7 @@ import {
   shifts,
   categories,
 } from '@/lib/db/schema';
-import { requireAdmin } from '@/lib/utils/auth';
+import { requireManager } from '@/lib/utils/auth';
 import { AppError } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
@@ -358,7 +358,7 @@ async function buildStockAdjSheet(wb: ExcelJS.Workbook) {
 // ─────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    await requireAdmin();
+    await requireManager();
 
     const { searchParams } = new URL(req.url);
     const type     = searchParams.get('type') ?? 'full';

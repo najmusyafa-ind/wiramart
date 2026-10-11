@@ -87,7 +87,9 @@ export async function POST(request: Request): Promise<Response> {
     employee &&
       (employee.isKetuaShift ||
         employee.jabatan.toLowerCase().includes('admin') ||
-        employee.jabatan.toLowerCase().includes('kepala')),
+        employee.jabatan.toLowerCase().includes('kepala') ||
+        employee.jabatan.toLowerCase().includes('gudang') ||
+        employee.jabatan.toLowerCase().includes('manager')),
   );
 
   // ── FITUR CHECK ONLY (Frontend Inspection Saat User Mengetik NIM/NIDN) ──
@@ -136,7 +138,7 @@ export async function POST(request: Request): Promise<Response> {
           fullName: targetName,
           jabatan: targetJabatan,
         },
-        message: `Halo ${targetName}! Akun Anda terdaftar sebagai ${targetJabatan} tetapi belum membuat PIN 6-digit. Silakan buat PIN baru untuk melanjutkan.`,
+        message: `Halo ${targetName}! Akun Anda terdaftar sebagai ${targetJabatan} tetapi belum membuat PIN 8-digit. Silakan buat PIN baru untuk melanjutkan.`,
       },
       { status: 200 },
     );
@@ -211,7 +213,7 @@ export async function POST(request: Request): Promise<Response> {
             fullName: employee.fullName,
             jabatan: employee.jabatan,
           },
-          message: `Halo ${employee.fullName}! Akun Anda belum memiliki PIN 6-digit. Silakan buat PIN baru.`,
+          message: `Halo ${employee.fullName}! Akun Anda belum memiliki PIN 8-digit. Silakan buat PIN baru.`,
         },
         { status: 200 },
       );
@@ -221,7 +223,7 @@ export async function POST(request: Request): Promise<Response> {
     const isValidPin = await verifyPassword(password, employee.pinHash);
     if (!isValidPin) {
       adminAuthLimiter.check(rateKey, true);
-      return apiError('PIN Admin Kasir salah. Masukkan 6 digit PIN yang benar.', 'INVALID_CREDENTIALS', 401);
+      return apiError('PIN otorisasi salah. Masukkan PIN yang benar (8 digit).', 'INVALID_CREDENTIALS', 401);
     }
 
     // Sinkronkan ke tabel admins

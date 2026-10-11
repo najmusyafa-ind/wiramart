@@ -25,6 +25,9 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   if (!payload || payload.role !== 'admin') {
     return apiError('Akses ditolak.', 403);
   }
+  if (payload.adminRole !== 'MANAGER') {
+    return apiError('Akses ditolak. Rekonsiliasi QRIS bank khusus untuk Manager.', 403);
+  }
 
   const { date } = await ctx.params;
 

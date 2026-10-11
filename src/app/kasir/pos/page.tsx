@@ -481,6 +481,20 @@ function BukaShiftOverlay({
                   ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Membuka shift...</>
                   : <><CheckCircle size={16} /> Buka Shift &amp; Mulai Jaga</>}
               </button>
+
+              <div style={{ textAlign: 'center', marginTop: 'var(--space-2)' }}>
+                <a
+                  href="/kasir/login"
+                  style={{
+                    fontSize: '0.8rem',
+                    color: 'var(--color-text-muted)',
+                    textDecoration: 'none',
+                    fontWeight: 600,
+                  }}
+                >
+                  &larr; Lihat Jadwal Shift &amp; Presensi Kasir
+                </a>
+              </div>
             </> /* end: form normal */
           )} {/* end: ternary handover vs form */}
         </div>
@@ -2007,22 +2021,16 @@ export default function PosPage() {
         </div>
 
         {/* Action buttons (Clean POS Toolbar: Scan, Cart, Fitur) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <div className="pos-topbar-actions">
           {/* Tombol Scan Barcode Kamera */}
           <button
             onClick={startPosScanner}
             aria-label="Scan barcode produk"
             title="Scan Barcode Kamera"
-            style={{
-              background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 'var(--radius-md)', padding: '6px 10px', cursor: 'pointer',
-              color: 'white', display: 'flex', alignItems: 'center', gap: 5,
-              fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
-              minHeight: 34,
-            }}
+            className="pos-scan-btn"
           >
             <ScanLine size={15} aria-hidden="true" />
-            <span>Scan</span>
+            <span className="pos-btn-text">Scan</span>
           </button>
 
           {/* Tombol Keranjang Mobile (< 800px) */}
@@ -2045,22 +2053,7 @@ export default function PosPage() {
             onClick={() => setShowKasirMenu(true)}
             aria-label="Menu Fitur Kasir"
             title="Menu Fitur Kasir Lengkap"
-            style={{
-              background: 'linear-gradient(135deg, hsl(142, 65%, 26%) 0%, hsl(142, 70%, 20%) 100%)',
-              border: '1px solid hsl(142, 60%, 42%)',
-              borderRadius: 'var(--radius-md)',
-              padding: '6px 12px',
-              color: 'white',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              fontSize: 'var(--text-xs)',
-              fontWeight: 'var(--weight-bold)',
-              boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
-              minHeight: 34,
-              transition: 'transform 0.12s ease',
-            }}
+            className="pos-fitur-btn"
           >
             <Zap size={14} style={{ color: 'hsl(45 95% 65%)' }} />
             <span>Fitur</span>

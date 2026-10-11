@@ -17,9 +17,9 @@ import { kasirAuthLimiter } from '@/lib/utils/rate-limit';
 export const runtime = 'nodejs';
 
 const kasirLoginSchema = z.object({
-  fullName: z.string().min(2, 'Nama lengkap wajib diisi').max(200).trim(),
   nim: z.string().min(1, 'NIM wajib diisi').max(20).trim(),
-  programStudi: z.string().min(2, 'Program studi wajib diisi').max(100).trim(),
+  fullName: z.string().max(200).trim().optional(),
+  programStudi: z.string().max(100).trim().optional(),
 });
 
 export async function POST(request: Request): Promise<Response> {
@@ -33,10 +33,10 @@ export async function POST(request: Request): Promise<Response> {
 
   const parsed = kasirLoginSchema.safeParse(body);
   if (!parsed.success) {
-    return apiError('Data tidak lengkap', 'VALIDATION_ERROR', 422, parsed.error.format());
+    return apiError('NIM wajib diisi', 'VALIDATION_ERROR', 422, parsed.error.format());
   }
 
-  const { fullName, nim, programStudi } = parsed.data;
+  const { fullName, nim } = parsed.data;
 
   // Rate limit per NIM — via centralized sliding window limiter (25x / 30 menit)
   const rateKey = `kasir:${nim}`;
@@ -50,26 +50,34 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  // 3. Find employee — case-insensitive match untuk nama dan prodi
-  // NIM case-sensitive (angka tidak punya case masalah)
-  const employee = await db.query.employees.findFirst({
+  // 3. Find employee — fleksibel & aman:
+  // Prioritas 1: Cari berdasarkan NIM (ID resmi unik mahasiswa UNPERBA)
+  let employee = await db.query.employees.findFirst({
     where: and(
       eq(employees.nim, nim),
       eq(employees.isActive, true),
       isNull(employees.deletedAt),
-      // Case-insensitive comparison via SQL lower()
-      sql`LOWER(${employees.fullName}) = LOWER(${fullName})`,
-      sql`LOWER(${employees.programStudi}) = LOWER(${programStudi})`,
     ),
     columns: { id: true, fullName: true, jabatan: true, nim: true, programStudi: true },
   });
 
+  // Prioritas 2 (Fallback): Jika NIM tidak ditemukan namun ada Nama
+  if (!employee && fullName && fullName.length >= 3) {
+    employee = await db.query.employees.findFirst({
+      where: and(
+        sql`LOWER(${employees.fullName}) = LOWER(${fullName})`,
+        eq(employees.isActive, true),
+        isNull(employees.deletedAt),
+      ),
+      columns: { id: true, fullName: true, jabatan: true, nim: true, programStudi: true },
+    });
+  }
+
   if (!employee) {
     // Consume rate limit slot pada setiap percobaan gagal
     kasirAuthLimiter.check(rateKey, true);
-    // SECURITY: Generic error message
     return apiError(
-      'Data tidak ditemukan. Pastikan Nama, NIM, dan Program Studi sudah benar.',
+      'Data mahasiswa tidak ditemukan di sistem Wiramart. Pastikan NIM sudah terdaftar oleh Admin/Koordinator.',
       'INVALID_CREDENTIALS',
       401,
     );
