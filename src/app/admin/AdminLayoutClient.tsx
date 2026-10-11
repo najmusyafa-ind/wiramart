@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import MobileBottomNav from './MobileBottomNav';
 import {
   LayoutDashboard,
@@ -116,6 +116,10 @@ function AdminSidebar({ adminName, adminRole = 'ADMIN_SHIFT', isMobileOpen, onCl
   const pathname = usePathname();
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  // ── Mounted guard: hindari SSR/CSR mismatch pada elemen yang bergantung
+  // pada pathname atau adminRole yang mungkin berbeda saat hydration ──
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   async function handleLogout() {
     setIsLoggingOut(true);
@@ -134,21 +138,25 @@ function AdminSidebar({ adminName, adminRole = 'ADMIN_SHIFT', isMobileOpen, onCl
     }
   }
 
-  // Group nav items by section (hanya tampilkan managerOnly jika user adalah MANAGER)
-  const sections = NAV_ITEMS
-    .filter((item) => !item.managerOnly || adminRole === 'MANAGER')
-    .reduce<Record<string, NavItem[]>>((acc, item) => {
-      const section = item.section ?? 'Lainnya';
-      if (!acc[section]) acc[section] = [];
-      acc[section].push(item);
-      return acc;
-    }, {});
+  // Group nav items by section.
+  // useMemo → hanya dihitung ulang jika adminRole berubah (stabil saat hydration)
+  const sections = useMemo(() =>
+    NAV_ITEMS
+      .filter((item) => !item.managerOnly || adminRole === 'MANAGER')
+      .reduce<Record<string, NavItem[]>>((acc, item) => {
+        const section = item.section ?? 'Lainnya';
+        if (!acc[section]) acc[section] = [];
+        acc[section].push(item);
+        return acc;
+      }, {})
+  , [adminRole]);
 
   return (
     <nav
       id="admin-sidebar"
       className={`layout-sidebar${isMobileOpen ? ' mobile-open' : ''}`}
       aria-label="Navigasi Admin"
+      suppressHydrationWarning
     >
       {/* Logo */}
       <div className="sidebar-logo">
@@ -194,10 +202,12 @@ function AdminSidebar({ adminName, adminRole = 'ADMIN_SHIFT', isMobileOpen, onCl
           <div key={section} role="group" aria-label={section}>
             <div className="sidebar-section-label">{section}</div>
             {items.map((item) => {
-              const isActive =
-                item.href === '/admin/dashboard'
+              // isActive hanya dihitung setelah mounted agar SSR dan CSR konsisten
+              // SSR: semua item non-active (className stabil) → tidak ada mismatch
+              const isActive = mounted &&
+                (item.href === '/admin/dashboard'
                   ? pathname === '/admin/dashboard'
-                  : pathname.startsWith(item.href);
+                  : pathname.startsWith(item.href));
               // Item yang mengarah ke API route → gunakan <a> native untuk trigger download
               if (item.href.startsWith('/api/')) {
                 return (
