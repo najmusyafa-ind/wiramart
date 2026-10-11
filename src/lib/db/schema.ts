@@ -220,6 +220,11 @@ export const products = pgTable(
     unit: varchar('unit', { length: 20 }).notNull().default('pcs'),
     photoUrl: text('photo_url'),
     isActive: boolean('is_active').notNull().default(true),
+    // Penanganan Makanan Basah / Perishable Harian (Same-day expiration)
+    // isPerishable = true untuk makanan yang wajib habis hari itu juga
+    // perishableType = 'KONSINYASI' (titip jual mitra/ibu kantin) atau 'BELI_LEPAS' (modal toko)
+    isPerishable: boolean('is_perishable').notNull().default(false),
+    perishableType: varchar('perishable_type', { length: 20 }).default('KONSINYASI'),
     createdByAdminId: uuid('created_by_admin_id')
       .notNull()
       .references(() => admins.id),

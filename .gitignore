@@ -48,6 +48,7 @@ next-env.d.ts
 
 # database backup snapshots (STRICT: never commit database dumps)
 /backups/
+scripts/*.json
 
 
 .vercel

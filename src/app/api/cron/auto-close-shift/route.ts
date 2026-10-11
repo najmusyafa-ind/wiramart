@@ -26,8 +26,16 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
-import { shifts, shiftSchedules, attendances } from '@/lib/db/schema';
-import { eq, and, isNull, desc } from 'drizzle-orm';
+import {
+  shifts,
+  shiftSchedules,
+  attendances,
+  products,
+  stockAdjustments,
+  admins,
+  stockBatches,
+} from '@/lib/db/schema';
+import { eq, and, isNull, desc, gt } from 'drizzle-orm';
 
 // Tipe literal enum hari dari skema DB
 type DayOfWeek = 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU';
@@ -291,12 +299,91 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // PASS 2 gagal total — tetap return hasil PASS 1
     }
 
+    // =========================================================================
+    // PASS 3: PERISHABLE DAILY FOOD MIDNIGHT SWEEP (Sapu Makanan Basah Jam 00:00 WIB)
+    // Makanan basah harian (is_perishable = true) memiliki batas konsumsi 1 hari.
+    // Jika kasir lupa lapor cut-off saat shift sore, cron tengah malam akan
+    // mereset stok ke 0 secara aman (ACID) & mencatat riwayat ke stock_adjustments.
+    // =========================================================================
+    let sweptPerishableCount = 0;
+    try {
+      const perishableList = await db
+        .select({
+          id: products.id,
+          name: products.name,
+          stockQty: products.stockQty,
+          unit: products.unit,
+          perishableType: products.perishableType,
+        })
+        .from(products)
+        .where(
+          and(
+            eq(products.isPerishable, true),
+            eq(products.isActive, true),
+            isNull(products.deletedAt),
+            gt(products.stockQty, 0),
+          ),
+        );
+
+      if (perishableList.length > 0) {
+        // Cari admin aktif untuk audit record
+        const adminRow = await db.query.admins.findFirst({
+          where: eq(admins.isActive, true),
+          columns: { id: true },
+        });
+
+        const auditAdminId = adminRow?.id;
+
+        if (auditAdminId) {
+          await db.transaction(async (tx) => {
+            for (const item of perishableList) {
+              const qtyBefore = item.stockQty;
+              const qtyDiff = -qtyBefore;
+
+              // 1. Reset stok master produk ke 0
+              await tx
+                .update(products)
+                .set({ stockQty: 0, updatedAt: nowWib })
+                .where(eq(products.id, item.id));
+
+              // 2. Kosongkan seluruh batch aktif produk ini
+              await tx
+                .update(stockBatches)
+                .set({ currentQty: 0, updatedAt: nowWib })
+                .where(
+                  and(
+                    eq(stockBatches.productId, item.id),
+                    gt(stockBatches.currentQty, 0),
+                  ),
+                );
+
+              // 3. Catat ke stock_adjustments (audit trail)
+              await tx.insert(stockAdjustments).values({
+                productId: item.id,
+                qtyBefore,
+                qtyAfter: 0,
+                qtyDiff,
+                reason: `[AUTO-CRON-MIDNIGHT] Sapu otomatis sisa makanan basah ${item.perishableType || 'KONSINYASI'}. Kasir tidak melapor / sisa sore dibersihkan (${qtyBefore} ${item.unit}).`,
+                adjustedByAdminId: auditAdminId,
+                createdAt: nowWib,
+              });
+
+              sweptPerishableCount++;
+            }
+          });
+        }
+      }
+    } catch {
+      // PASS 3 gagal — tidak menghentikan respon cron
+    }
+
     return NextResponse.json({
       success: true,
-      message: `Cron selesai. Ditutup: ${closedCount}, Dilewati: ${skippedCount}, Auto-Absen: ${absenCount}.`,
+      message: `Cron selesai. Ditutup: ${closedCount}, Dilewati: ${skippedCount}, Auto-Absen: ${absenCount}, Sapu Makanan Basah: ${sweptPerishableCount}.`,
       closedCount,
       skippedCount,
       absenCount,
+      sweptPerishableCount,
       errors: errors.length > 0 ? errors : undefined,
       timestamp: nowWib.toISOString(),
     });

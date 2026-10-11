@@ -12,15 +12,24 @@ import { apiOk, apiError } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
 
-const HARI_MAP: Record<number, 'MINGGU' | 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU'> = {
-  0: 'MINGGU', 1: 'SENIN', 2: 'SELASA', 3: 'RABU',
-  4: 'KAMIS',  5: 'JUMAT', 6: 'SABTU',
+const HARI_MAP: Record<string, 'MINGGU' | 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU'> = {
+  Minggu: 'MINGGU',
+  Senin:  'SENIN',
+  Selasa: 'SELASA',
+  Rabu:   'RABU',
+  Kamis:  'KAMIS',
+  Jumat:  'JUMAT',
+  Sabtu:  'SABTU',
 };
 
 export async function GET(): Promise<Response> {
   try {
     const nowWib = new Date();
-    const dayOfWeek = HARI_MAP[nowWib.getDay()]!;
+    const hariRaw = new Intl.DateTimeFormat('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      weekday: 'long',
+    }).format(nowWib);
+    const dayOfWeek = HARI_MAP[hariRaw] ?? (hariRaw.toUpperCase() as 'MINGGU' | 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU');
     const tanggalHari = nowWib.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
     const jamMenitSekarang = nowWib.toLocaleTimeString('en-GB', {
       timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',

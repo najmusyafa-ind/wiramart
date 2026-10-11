@@ -1720,7 +1720,43 @@ export default function PosPage() {
                 />
               </div>
 
-
+              {/* Reminder Sisa Makanan Sore */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 10px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'hsl(38 92% 95%)',
+                  border: '1px solid hsl(38 92% 80%)',
+                  fontSize: '0.75rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'hsl(38 92% 30%)' }}>
+                  <Utensils size={15} />
+                  <span>Ada sisa makanan basah sore?</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTutupConfirm(false);
+                    setShowSisaMakanan(true);
+                  }}
+                  className="btn btn-secondary"
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: '0.7rem',
+                    height: 'auto',
+                    minHeight: 'unset',
+                    fontWeight: 700,
+                    color: 'hsl(38 92% 25%)',
+                    background: '#fff',
+                  }}
+                >
+                  Catat Sisa Makanan
+                </button>
+              </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 4 }}>
                 <button

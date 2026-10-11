@@ -61,7 +61,6 @@ const JABATAN_OPTIONS = [
   { value: 'Kepala Gudang', label: 'Kepala Gudang', desc: 'Koordinator logistik, restock barcode, dan cek expired FEFO' },
   { value: 'Gudang', label: 'Gudang', desc: 'Staf inventaris toko, penerimaan barang titipan & stok' },
   { value: 'Pelayan', label: 'Pelayan (Pramuniaga)', desc: 'Layanan pelanggan toko, display etalase, dan cek makanan basi' },
-  { value: 'Manager', label: 'Manager (Dosen)', desc: 'Pengelola utama toko, laporan laba rugi, dan kebijakan' },
 ];
 
 const PRODI_OPTIONS: { fakultas: string; prodi: string[] }[] = [
@@ -563,10 +562,9 @@ export default function KaryawanPage() {
     if (activeRoleFilter === 'Semua') return true;
     const jab = emp.jabatan.toLowerCase();
     if (activeRoleFilter === 'Kasir') return jab === 'kasir';
-    if (activeRoleFilter === 'Kepala Kasir') return jab.includes('kepala kasir') || jab.includes('ketua');
+    if (activeRoleFilter === 'Kepala Kasir') return jab.includes('kepala kasir') || jab.includes('ketua') || jab.includes('admin');
     if (activeRoleFilter === 'Gudang') return jab.includes('gudang');
     if (activeRoleFilter === 'Pelayan') return jab.includes('pelayan');
-    if (activeRoleFilter === 'Manager') return jab.includes('manager') || jab.includes('koordinator');
     return true;
   });
 
@@ -837,7 +835,7 @@ export default function KaryawanPage() {
               <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginRight: 4 }}>
                 <Filter size={13} /> Filter:
               </span>
-              {['Semua', 'Kasir', 'Kepala Kasir', 'Gudang', 'Pelayan', 'Manager'].map((role) => {
+              {['Semua', 'Kasir', 'Kepala Kasir', 'Gudang', 'Pelayan'].map((role) => {
                 const isActive = activeRoleFilter === role;
                 return (
                   <button

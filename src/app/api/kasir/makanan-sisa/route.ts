@@ -4,7 +4,7 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, isNull, or, ilike, gt, asc, sql } from 'drizzle-orm';
+import { eq, and, isNull, or, ilike, gt, asc, desc, sql } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import { products, categories, stockAdjustments, admins, stockBatches } from '@/lib/db/schema';
@@ -15,7 +15,7 @@ export const runtime = 'nodejs';
 const cutOffItemSchema = z.object({
   productId: z.string().uuid(),
   qtySisaFisik: z.number().min(0).max(10_000),
-  disposition: z.enum(['RETUR', 'BUANG_BASI', 'HABIS', 'SIMPAN']),
+  disposition: z.enum(['RETUR', 'BUANG_BASI', 'HABIS', 'SIMPAN', 'MAKAN_PETUGAS', 'OBRAL']),
   notes: z.string().max(200).optional(),
 });
 
@@ -23,7 +23,7 @@ const cutOffBatchSchema = z.object({
   items: z.array(cutOffItemSchema).min(1, 'Minimal satu item makanan harus dilaporkan'),
 });
 
-// GET: Ambil daftar makanan harian / non-barcode untuk formulir cut-off
+// GET: Ambil daftar makanan harian / perishable untuk formulir cut-off
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'employee') {
@@ -39,6 +39,8 @@ export async function GET(req: NextRequest) {
       stockQty: products.stockQty,
       unit: products.unit,
       categoryName: categories.name,
+      isPerishable: products.isPerishable,
+      perishableType: products.perishableType,
     })
     .from(products)
     .leftJoin(categories, eq(products.categoryId, categories.id))
@@ -47,20 +49,13 @@ export async function GET(req: NextRequest) {
         eq(products.isActive, true),
         isNull(products.deletedAt),
         or(
-          isNull(products.barcode),
-          ilike(categories.name, '%makanan%'),
-          ilike(categories.name, '%kue%'),
-          ilike(categories.name, '%snack%'),
+          eq(products.isPerishable, true),
           ilike(categories.name, '%basah%'),
           ilike(categories.name, '%konsinyasi%'),
-          ilike(products.name, '%cilok%'),
-          ilike(products.name, '%siomai%'),
-          ilike(products.name, '%ricebowl%'),
-          ilike(products.name, '%gorengan%'),
         ),
       ),
     )
-    .orderBy(products.name);
+    .orderBy(desc(products.stockQty), asc(products.name));
 
   return apiOk({ items: rows });
 }
@@ -122,16 +117,22 @@ export async function POST(req: NextRequest) {
         let qtyAfter = qtyBefore;
 
         if (item.disposition === 'RETUR') {
-          // Sisa diretur ke penitip -> stok toko dikurangi sisa fisik tsb (atau diset 0 jika seluruh sisa diretur)
-          qtyAfter = Math.max(0, qtyBefore - item.qtySisaFisik);
+          // Sisa fisik dikembalikan ke mitra penitip (konsinyasi) -> stok toko di-reset ke 0
+          qtyAfter = 0;
         } else if (item.disposition === 'BUANG_BASI') {
-          // Sisa basi dibuang -> stok toko disesuaikan (dikeluarkan dari inventaris)
-          qtyAfter = Math.max(0, qtyBefore - item.qtySisaFisik);
+          // Sisa basi dibuang (waste) -> stok toko di-reset ke 0
+          qtyAfter = 0;
+        } else if (item.disposition === 'MAKAN_PETUGAS') {
+          // Dimakan petugas / konsumsi internal -> stok toko di-reset ke 0
+          qtyAfter = 0;
+        } else if (item.disposition === 'OBRAL') {
+          // Diobral balik modal HPP -> stok toko di-reset ke 0
+          qtyAfter = 0;
         } else if (item.disposition === 'HABIS') {
-          // Barang sudah habis terjual
+          // Barang sudah habis terjual -> stok toko disetel ke 0
           qtyAfter = 0;
         } else if (item.disposition === 'SIMPAN') {
-          // Masih layak dan disimpan di etalase
+          // Masih layak dan disimpan di etalase / chiller
           qtyAfter = item.qtySisaFisik;
         }
 
@@ -202,18 +203,30 @@ export async function POST(req: NextRequest) {
 
           const dispLabel =
             item.disposition === 'RETUR'
-              ? 'Retur ke Pemasok'
+              ? 'Retur ke Mitra Penitip'
               : item.disposition === 'BUANG_BASI'
               ? 'Dibuang (Basi)'
+              : item.disposition === 'MAKAN_PETUGAS'
+              ? 'Makan Petugas / Konsumsi Internal'
+              : item.disposition === 'OBRAL'
+              ? 'Obral Balik Modal HPP'
               : item.disposition === 'HABIS'
               ? 'Habis Terjual'
-              : 'Disimpan';
+              : 'Disimpan di Kulkas';
 
           const costNum = parseFloat(existing.costPrice) || 0;
-          const lossCost = item.disposition === 'BUANG_BASI' ? Math.abs(qtyDiff) * costNum : 0;
-          const lossInfo = lossCost > 0 ? ` [Nilai Susut HPP: Rp ${lossCost.toLocaleString('id-ID')}]` : '';
+          const lossCost =
+            item.disposition === 'BUANG_BASI' || item.disposition === 'MAKAN_PETUGAS'
+              ? Math.abs(qtyDiff) * costNum
+              : 0;
+          const lossInfo =
+            lossCost > 0
+              ? item.disposition === 'MAKAN_PETUGAS'
+                ? ` [Beban Konsumsi Toko: Rp ${lossCost.toLocaleString('id-ID')}]`
+                : ` [Nilai Susut Basi: Rp ${lossCost.toLocaleString('id-ID')}]`
+              : '';
 
-          const reasonNote = `[CUTOFF-15:00 ${timeStr}] ${dispLabel} (Sisa fisik: ${item.qtySisaFisik} pcs). ${item.notes ? `Catatan: ${item.notes}` : ''}${lossInfo}`.trim();
+          const reasonNote = `[SISA-MAKANAN ${timeStr}] ${dispLabel} (Sisa fisik: ${item.qtySisaFisik} pcs). ${item.notes ? `Catatan: ${item.notes}` : ''}${lossInfo}`.trim();
 
           await tx.insert(stockAdjustments).values({
             productId: item.productId,
