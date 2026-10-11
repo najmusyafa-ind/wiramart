@@ -1096,12 +1096,16 @@ export default function ProdukPage() {
           marginBottom: 'var(--space-4)',
           borderBottom: '1px solid var(--color-border)',
           paddingBottom: 10,
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch' as const,
+          scrollbarWidth: 'none' as const,
+          msOverflowStyle: 'none' as const,
         }}>
           <button
             type="button"
             onClick={() => setActiveTab('katalog')}
             className={`btn btn-sm ${activeTab === 'katalog' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}
           >
             <Package size={15} /> Katalog Produk ({products.length})
           </button>
@@ -1109,7 +1113,7 @@ export default function ProdukPage() {
             type="button"
             onClick={() => setActiveTab('usulan')}
             className={`btn btn-sm ${activeTab === 'usulan' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}
           >
             💡 Usulan dari Kasir
             {pendingProposalCount > 0 && (
@@ -1129,7 +1133,7 @@ export default function ProdukPage() {
             type="button"
             onClick={() => setActiveTab('batch')}
             className={`btn btn-sm ${activeTab === 'batch' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}
+            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}
           >
             📦 Batch &amp; Kedaluwarsa (FEFO)
             {criticalBatchCount > 0 && (
