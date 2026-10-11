@@ -28,10 +28,29 @@ Implementasi pengamanan database aerospace-grade (Database Security Hardening) d
 
 - [x] Phase 7: Admin UI Integration (`/admin/pengaturan` Database Security, Backup Download, & Atomic Double-Confirmation Restore Modal).
 
-## 🔄 Current Phase (In Progress)
-- [x] All 7 Phases Fully Completed & Verified.
+## 📜 Historical Data Ingestion (Buku Kas SiDU - FINAL SELESAI)
+- [x] **15 Agustus 2026:** 97 Transaksi | Omzet Rp 460.000 (Shift Administratif)
+- [x] **27 Agustus s/d 10 September 2026 (12 Hari):** 141 Transaksi | Omzet Rp 603.500 | Kas Gerak Keluar Rp 535.000
+- [x] **14 September 2026 (Mulai Sistem Shift - Opsi B):** 82 Transaksi | Omzet Rp 501.500 | Kas Gerak Keluar Rp 600.000
+  - Shift 1: Siska Febriani & Meizin Shinta Resmi (Fisik Kas Rp 389.500, Belanja Bu Dyah Rp 300.000)
+  - Shift 2: Nazila Awalia Solikhah & Aulia Putra Ramadhan (Fisik Kas Rp 188.000, Setor Kas Rp 300.000)
+- [x] **15 September 2026 (Perdana QRIS):** 80 Transaksi | Omzet Rp 550.000 (Cash Rp 352.000 + QRIS Rp 198.000) | Piket: Annisa, Faizah, Ratih, Najua, Liliyana
+- [x] **16 September 2026:** 127 Transaksi | Omzet Rp 808.000 (Cash Rp 601.500 + QRIS Rp 206.500) | Bayar Titipan Konsinyasi Rp 543.000 | Piket: Dwi Lia & Nur Asshifah
+- [x] **17 September 2026:** 90 Transaksi | Omzet Rp 470.500 (Cash Rp 364.000 + QRIS Rp 106.500) | Bayar Titipan Rp 88.000 | Piket: Devi, Putri, Gita, Erika, Aprianti
+- [x] **18 September 2026 (Titik Akhir Buku Manual SiDU):** 67 Transaksi | Omzet Rp 402.000 (Cash Rp 318.000 + QRIS Rp 84.000) | Bayar Titipan Rp 190.000 | Sisa Fisik Kas Rp 40.000 | Piket: Zahara, Nova, Dea, Agus
+- [x] **GRAND TOTAL SELESAI (15 Ags s/d 18 Sep 2026):**
+  - **Total Transaksi:** 684 Transaksi Selesai
+  - **Total Omzet:** **Rp 3.755.500**
+  - **Omzet Cash:** **Rp 3.160.500**
+  - **Omzet QRIS:** **Rp 595.000**
+  - **HPP Terjual:** Rp 2.943.854
+  - **Laba Kotor:** Rp 792.646
+  - **Alokasi Gaji (50%):** Rp 396.326
+  - **Laba Bersih Hak Toko:** Rp 396.320
+  - **Triple Integrity Check:** 100% PASSED ✅ (`methodSplitMatches`, `itemsMatchOmzet`, `dailyMatchesSummary`)
 
 ## ⏭️ Next Phases (Queued)
+- [ ] Transisi Digital & Operasional Penuh Wiramart
 - [ ] Production Deployment (DevOps Pre-Launch Gate).
 
 ## 🚨 Known Risks & Blockers
