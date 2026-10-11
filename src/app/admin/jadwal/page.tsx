@@ -79,13 +79,36 @@ function SlotModal({
 
   // Fetch karyawan untuk reassign
   const fetchEmployees = useCallback(async (q: string) => {
-    if (!q.trim()) { setEmployees([]); return; }
     setLoadingEmp(true);
     try {
-      const res = await fetch(`/api/admin/karyawan?q=${encodeURIComponent(q)}&limit=8`);
-      const json = await res.json() as { success: boolean; data?: { employees: EmployeeOption[] } };
-      if (json.success && json.data) setEmployees(json.data.employees);
-    } finally { setLoadingEmp(false); }
+      const url = q.trim()
+        ? `/api/admin/karyawan?q=${encodeURIComponent(q.trim())}&limit=12`
+        : `/api/admin/karyawan?limit=12`;
+      const res = await fetch(url);
+      const json = await res.json() as { success: boolean; data?: unknown };
+      if (json.success && json.data) {
+        const rawList = Array.isArray(json.data)
+          ? json.data
+          : Array.isArray((json.data as { employees?: unknown })?.employees)
+          ? (json.data as { employees: unknown[] }).employees
+          : [];
+
+        const validEmployees: EmployeeOption[] = (rawList as Array<Record<string, unknown>>).map((item) => ({
+          id: String(item.id ?? ''),
+          fullName: String(item.fullName || item.name || ''),
+          nim: String(item.nim || ''),
+          programStudi: String(item.programStudi || ''),
+        }));
+
+        setEmployees(validEmployees);
+      } else {
+        setEmployees([]);
+      }
+    } catch {
+      setEmployees([]);
+    } finally {
+      setLoadingEmp(false);
+    }
   }, []);
 
   // Fetch jadwal untuk swap
@@ -100,8 +123,10 @@ function SlotModal({
   }, [modal]);
 
   useEffect(() => {
-    const t = setTimeout(() => { if (modal?.type === 'reassign') fetchEmployees(search); }, 350);
-    return () => clearTimeout(t);
+    if (modal?.type === 'reassign') {
+      const t = setTimeout(() => { fetchEmployees(search); }, 300);
+      return () => clearTimeout(t);
+    }
   }, [search, modal, fetchEmployees]);
 
   if (!modal) return null;
@@ -143,9 +168,9 @@ function SlotModal({
     }
   }
 
-  const selectedTargetEntry = schedule
-    .flatMap(d => d.slots)
-    .flatMap(s => s.entries)
+  const selectedTargetEntry = (schedule || [])
+    .flatMap(d => d.slots || [])
+    .flatMap(s => s.entries || [])
     .find(e => e.id === targetSlotId);
   const selectedTargetIsEmpty = Boolean(selectedTargetEntry && !selectedTargetEntry.isFilled);
 
@@ -214,22 +239,33 @@ function SlotModal({
                 style={{ paddingLeft: 32 }}
               />
             </div>
-            {employees.map(emp => (
-              <div
-                key={emp.id}
-                onClick={() => setSelectedEmp(emp)}
-                style={{
-                  padding: 'var(--space-3)', borderRadius: 'var(--radius-md)',
-                  border: selectedEmp?.id === emp.id ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
-                  cursor: 'pointer', marginBottom: 'var(--space-2)',
-                  background: selectedEmp?.id === emp.id ? 'var(--color-primary-light)' : 'transparent',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <div style={{ fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-sm)' }}>{emp.fullName}</div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>NIM {emp.nim} · {emp.programStudi}</div>
+            {loadingEmp ? (
+              <div style={{ textAlign: 'center', padding: 'var(--space-4)', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
+                <Loader2 size={16} className="spin-icon" style={{ margin: '0 auto 6px' }} />
+                <span>Memuat daftar karyawan...</span>
               </div>
-            ))}
+            ) : !employees || employees.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 'var(--space-4)', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)', background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)' }}>
+                {search.trim() ? 'Tidak ada karyawan yang cocok dengan pencarian.' : 'Belum ada data karyawan aktif.'}
+              </div>
+            ) : (
+              (employees || []).map(emp => (
+                <div
+                  key={emp.id}
+                  onClick={() => setSelectedEmp(emp)}
+                  style={{
+                    padding: 'var(--space-3)', borderRadius: 'var(--radius-md)',
+                    border: selectedEmp?.id === emp.id ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
+                    cursor: 'pointer', marginBottom: 'var(--space-2)',
+                    background: selectedEmp?.id === emp.id ? 'var(--color-primary-light)' : 'transparent',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div style={{ fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-sm)' }}>{emp.fullName}</div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>NIM {emp.nim} · {emp.programStudi}</div>
+                </div>
+              ))
+            )}
             {selectedEmp && (
               <label style={{
                 display: 'flex', alignItems: 'center', gap: 8,

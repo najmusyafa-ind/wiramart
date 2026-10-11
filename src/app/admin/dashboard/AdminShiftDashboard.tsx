@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 // ================================================================
 // AdminShiftDashboard — Dashboard Operasional untuk ADMIN_SHIFT
 // Fokus: Shift aktif, jadwal hari ini, absensi, stok kritis, kas gerak
@@ -302,6 +302,87 @@ function KasGerakWidget({ cashOut, cashIn }: { cashOut: number; cashIn: number }
 }
 
 // ─────────────────────────────────────────────────────────────
+// Widget Aktivitas Petugas Gudang Shift
+// ─────────────────────────────────────────────────────────────
+function GudangShiftActivityWidget() {
+  const [activities, setActivities] = useState<{ id: string; productName: string; qtyDiff: number; reason: string; createdAt: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchActivities = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/gudang/aktivitas');
+      const json = await res.json() as { success: boolean; data?: { activities: typeof activities } };
+      if (json.success && json.data) {
+        setActivities(json.data.activities);
+      }
+    } catch { /* silent */ } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchActivities();
+    const interval = setInterval(fetchActivities, 60 * 1000);
+    return () => clearInterval(interval);
+  }, [fetchActivities]);
+
+  return (
+    <div className="card">
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <Package size={15} aria-hidden="true" /> Aktivitas Input Petugas Gudang
+        </h2>
+        <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>
+          {activities.length} Restock Hari Ini
+        </span>
+      </div>
+      <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        {loading ? (
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'center', padding: 'var(--space-3)' }}>
+            Memuat aktivitas gudang...
+          </div>
+        ) : activities.length === 0 ? (
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'center', padding: 'var(--space-4)', background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)' }}>
+            Belum ada mutasi restock barang masuk yang dicatat oleh petugas gudang hari ini.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+            {activities.map((act) => (
+              <div
+                key={act.id}
+                style={{
+                  padding: '8px 10px',
+                  background: 'var(--color-surface-elevated, var(--color-surface))',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: '0.78rem',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <span style={{ fontWeight: 700, color: 'var(--color-text)' }}>{act.productName}</span>
+                  <span style={{ fontWeight: 800, color: 'var(--color-success)', background: 'hsl(142 71% 45% / 0.12)', padding: '1px 6px', borderRadius: 4, fontSize: '0.72rem' }}>
+                    +{act.qtyDiff}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                  {act.reason}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ marginTop: 'var(--space-2)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-2)' }}>
+          <Link href="/admin/restock" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-primary)', textDecoration: 'none' }}>
+            <span>Buka Halaman Restock Lengkap</span>
+            <ChevronRight size={13} />
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Main Export — Admin Shift Dashboard
 // ─────────────────────────────────────────────────────────────
 export default function AdminShiftDashboard({
@@ -564,10 +645,11 @@ export default function AdminShiftDashboard({
         </div>
       </div>
 
-      {/* ── Row: Jadwal Hari Ini + Kas Gerak ── */}
+      {/* ── Row: Jadwal Hari Ini + Kas Gerak + Aktivitas Gudang ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: 'var(--space-5)' }}>
         <JadwalShiftWidget />
         <KasGerakWidget cashOut={summary.pettyCashOut} cashIn={summary.pettyCashIn} />
+        <GudangShiftActivityWidget />
       </div>
     </div>
   );

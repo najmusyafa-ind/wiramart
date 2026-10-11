@@ -7,7 +7,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import { products, categories } from '@/lib/db/schema';
-import { eq, and, isNull, ilike, or } from 'drizzle-orm';
+import { eq, and, isNull, ilike, or, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export async function GET(req: NextRequest) {
@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get('q')?.trim() ?? '';
   const categoryId = searchParams.get('categoryId') ?? '';
+  const nonBarcode = searchParams.get('nonBarcode') === '1' || searchParams.get('nonBarcode') === 'true';
 
   const rows = await db
     .select({
@@ -32,6 +33,7 @@ export async function GET(req: NextRequest) {
       photoUrl: products.photoUrl,
       categoryId: products.categoryId,
       categoryName: categories.name,
+      isPerishable: products.isPerishable,
     })
     .from(products)
     .leftJoin(categories, eq(products.categoryId, categories.id))
@@ -49,6 +51,15 @@ export async function GET(req: NextRequest) {
             )
           : undefined,
         categoryId ? eq(products.categoryId, categoryId) : undefined,
+        nonBarcode
+          ? or(
+              isNull(products.barcode),
+              sql`LENGTH(TRIM(${products.barcode})) = 0`,
+              sql`${products.barcode} = ${products.name}`,
+              eq(products.isPerishable, true),
+              sql`LOWER(${categories.name}) = 'makanan'`,
+            )
+          : undefined,
       ),
     )
     .orderBy(products.name)

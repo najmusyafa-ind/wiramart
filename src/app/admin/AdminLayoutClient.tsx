@@ -22,6 +22,7 @@ import {
   ClipboardList,
   ArrowLeftRight,
   QrCode,
+  Boxes,
 } from 'lucide-react';
 
 type NavItem = {
@@ -43,6 +44,12 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Produk',
     href: '/admin/produk',
     icon: <Package size={18} aria-hidden="true" />,
+    section: 'Menu Utama',
+  },
+  {
+    label: 'Portal Gudang (FEFO)',
+    href: '/kasir/gudang',
+    icon: <Boxes size={18} aria-hidden="true" />,
     section: 'Menu Utama',
   },
   {

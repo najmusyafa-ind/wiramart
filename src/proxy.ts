@@ -116,7 +116,8 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
   // --- Kasir routes (/kasir/**) ---
   if (pathname.startsWith('/kasir')) {
-    if (!kasirSession) {
+    // Izinkan jika memiliki sesi kasir ATAU sesi admin (Admin berhak memantau portal gudang & POS)
+    if (!kasirSession && !adminSession) {
       const url = new URL('/kasir/login', request.url);
       url.searchParams.set('from', pathname);
       return NextResponse.redirect(url);

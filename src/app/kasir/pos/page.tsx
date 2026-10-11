@@ -32,6 +32,7 @@ type Product = {
   categoryId: string;
   categoryName: string | null;
   photoUrl: string | null;
+  isPerishable?: boolean | null;
 };
 type CartItem = Product & { qty: number };
 type PaymentMethod = 'CASH' | 'QRIS' | 'SPLIT';
@@ -1234,7 +1235,11 @@ export default function PosPage() {
     try {
       const isQuickFood = catId === 'QUICK_NON_BARCODE';
       const actualCatId = isQuickFood ? '' : catId;
-      const params = new URLSearchParams({ q, ...(actualCatId && { categoryId: actualCatId }) });
+      const params = new URLSearchParams({
+        q,
+        ...(actualCatId && { categoryId: actualCatId }),
+        ...(isQuickFood && { nonBarcode: '1' }),
+      });
       const res = await fetch(`/api/kasir/produk?${params}`);
       if (res.status === 401) { router.push('/kasir/login'); return; }
       const json = await res.json();
@@ -1256,30 +1261,11 @@ export default function PosPage() {
 
   const displayedProducts = products.filter((p) => {
     if (activeCategory === 'QUICK_NON_BARCODE') {
-      const isNoBarcode = !p.barcode || p.barcode.trim() === '';
-      const catLower = (p.categoryName ?? '').toLowerCase();
-      const nameLower = p.name.toLowerCase();
-      const isFood =
-        catLower.includes('makan') ||
-        catLower.includes('kue') ||
-        catLower.includes('snack') ||
-        catLower.includes('basah') ||
-        catLower.includes('konsinyasi') ||
-        catLower.includes('jajan') ||
-        catLower.includes('titip') ||
-        nameLower.includes('cilok') ||
-        nameLower.includes('siomai') ||
-        nameLower.includes('gorengan') ||
-        nameLower.includes('ricebowl') ||
-        nameLower.includes('nasi') ||
-        nameLower.includes('tahu') ||
-        nameLower.includes('pentol') ||
-        nameLower.includes('sando') ||
-        nameLower.includes('klepon') ||
-        nameLower.includes('burger') ||
-        nameLower.includes('macaroni') ||
-        nameLower.includes('ades');
-      return isNoBarcode || isFood;
+      const b = p.barcode?.trim() ?? '';
+      const hasNoBarcode = !b || b === p.name;
+      const isPerishable = Boolean(p.isPerishable);
+      const isMakanan = (p.categoryName ?? '').toLowerCase() === 'makanan';
+      return hasNoBarcode || isPerishable || isMakanan;
     }
     return true;
   });

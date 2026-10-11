@@ -201,14 +201,19 @@ export async function POST(request: Request): Promise<Response> {
   });
   const refreshToken = await signRefreshToken(employee.id, 'employee');
 
+  // Cek apakah karyawan bertugas sebagai petugas Gudang
+  const isGudang = (employee.jabatan ?? '').toLowerCase().includes('gudang');
+  const redirectUrl = isGudang ? '/kasir/gudang' : '/kasir/pos';
+
   // Set cookies langsung di NextResponse (reliable di Next.js 16+)
   const response = NextResponse.json({
     success: true,
     data: {
       role: 'employee',
       name: employee.fullName,
+      jabatan: employee.jabatan,
       shiftId: shiftToUseId,
-      redirect: '/kasir/pos',
+      redirect: redirectUrl,
     },
   });
 
