@@ -337,12 +337,15 @@ export default function LoginPage() {
                   <input
                     id={`${uid}-admin-nim`}
                     type="text"
-                    inputMode="numeric"
+                    inputMode="text"
                     className="form-input"
-                    placeholder="Contoh: 02301001"
+                    placeholder="Contoh: restok123 atau 02301001"
                     value={adminShiftNim}
                     onChange={(e) => setAdminShiftNim(e.target.value)}
                     autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     disabled={isLoading}
                     style={{ paddingLeft: 'calc(var(--space-3) + 15px + var(--space-2))', fontFamily: 'var(--font-mono)' }}
