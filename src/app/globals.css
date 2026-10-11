@@ -2411,39 +2411,53 @@ p, h1, h2, h3, h4, h5, h6 {
   .grid-stats { grid-template-columns: 1fr; }
   .toast-container { left: var(--space-4); right: var(--space-4); max-width: none; }
 
-  /* POS mobile: 2 kolom cukup agar card tidak terlalu sempit */
+  /* POS mobile: 2 kolom compact */
   .pos-products-grid {
     grid-template-columns: repeat(2, 1fr);
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
+    gap: 6px;
+    padding: var(--space-2);
   }
 
-  /* Mobile card: horizontal layout (gambar kiri, teks kanan) */
+  /* Mobile card: vertikal kecil — lebih mudah di-tap */
   .pos-product-card {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    padding: var(--space-2);
   }
 
+  /* Gambar full-width dalam card, rasio 1:1 */
   .pos-product-img {
-    width: 56px;
-    height: 56px;
-    flex-shrink: 0;
+    width: 100%;
+    height: auto;
     aspect-ratio: 1;
-    margin-bottom: 0;
+    flex-shrink: unset;
+    margin-bottom: 2px;
   }
 
+  /* Nama: 1 baris saja, terpotong dengan ellipsis */
   .pos-product-name {
-    font-size: var(--text-sm);
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
+    font-size: 11px;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    width: 100%;
   }
 
+  /* Harga sedikit lebih kecil agar muat */
   .pos-product-price {
-    font-size: var(--text-base);
+    font-size: var(--text-sm);
+  }
+
+  /* Stok disembunyikan di mobile — info stok sudah cukup dari badge 'Sisa X' */
+  .pos-product-stock {
+    display: none;
   }
 }
+
 
 
 /* ==========================================================
