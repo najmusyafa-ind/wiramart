@@ -330,7 +330,7 @@ export default function LoginPage() {
             <>
               <div className="form-group">
                 <label className="form-label" htmlFor={`${uid}-admin-nim`}>
-                  NIM Admin Kasir <span className="required" aria-hidden="true">*</span>
+                  ID / NIM Pengelola <span className="required" aria-hidden="true">*</span>
                 </label>
                 <div style={{ position: 'relative' }}>
                   <Hash size={15} style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
@@ -339,7 +339,7 @@ export default function LoginPage() {
                     type="text"
                     inputMode="text"
                     className="form-input"
-                    placeholder="Contoh: restok123 atau 02301001"
+                    placeholder="ID atau NIM terdaftar"
                     value={adminShiftNim}
                     onChange={(e) => setAdminShiftNim(e.target.value)}
                     autoComplete="username"
