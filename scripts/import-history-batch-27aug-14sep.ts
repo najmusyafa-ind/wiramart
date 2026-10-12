@@ -11,7 +11,7 @@ import {
   shiftCashMovements,
 } from '../src/lib/db/schema';
 import { eq, isNull, and, sql } from 'drizzle-orm';
-import { getFinancialReport } from '../src/lib/finance/report';
+import { getFinancialReport, resolveReportRange } from '../src/lib/finance/report';
 
 interface Entry {
   name: string;
@@ -727,19 +727,20 @@ async function main() {
 
   // 6. Verifikasi Laporan Keuangan
   console.log('🔍 Memverifikasi Laporan Keuangan 27 Agustus s/d 14 September 2026...');
-  const report = await getFinancialReport({
-    startDate: '2026-08-27',
-    endDate: '2026-09-14',
+  const range = resolveReportRange({
+    dateFrom: '2026-08-27',
+    dateTo: '2026-09-14',
   });
+  const report = await getFinancialReport(range);
 
   console.log('📊 Ringkasan Laporan Terkini:');
   console.log(`   - Total Omzet: Rp ${report.summary.omzet.toLocaleString('id-ID')}`);
   console.log(`   - Omzet Tunai (Cash): Rp ${report.summary.omzetCash.toLocaleString('id-ID')}`);
-  console.log(`   - Total HPP Terjual: Rp ${report.summary.totalHpp.toLocaleString('id-ID')}`);
-  console.log(`   - Laba Kotor: Rp ${report.summary.grossProfit.toLocaleString('id-ID')}`);
-  console.log(`   - Alokasi Gaji (50%): Rp ${report.summary.gajiPegawai.toLocaleString('id-ID')}`);
-  console.log(`   - Laba Bersih (50%): Rp ${report.summary.netProfit.toLocaleString('id-ID')}`);
-  console.log(`   - Total Transaksi: ${report.summary.transactionCount}`);
+  console.log(`   - Total HPP Terjual: Rp ${report.summary.hppTerjual.toLocaleString('id-ID')}`);
+  console.log(`   - Laba Kotor: Rp ${report.summary.labaKotor.toLocaleString('id-ID')}`);
+  console.log(`   - Alokasi Gaji (50%): Rp ${report.summary.alokasiGajiKaryawan.toLocaleString('id-ID')}`);
+  console.log(`   - Laba Bersih (50%): Rp ${report.summary.labaBersih.toLocaleString('id-ID')}`);
+  console.log(`   - Total Transaksi: ${report.summary.txCount}`);
 }
 
 main()
