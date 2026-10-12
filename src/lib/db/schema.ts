@@ -117,9 +117,9 @@ export const employees = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
-    // Produksi: constraint UNIQUE bernama employees_nim_program_studi_key (bukan index)
-    unique('employees_nim_program_studi_key').on(table.nim, table.programStudi),
-    // Catatan Fase 0.3: idx_employees_login ada di deklarasi lama tetapi TIDAK ada di produksi.
+    uniqueIndex('idx_employees_nim_unique')
+      .on(table.nim)
+      .where(sql`${table.deletedAt} IS NULL`),
   ],
 );
 

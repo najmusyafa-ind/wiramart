@@ -128,21 +128,15 @@ export async function POST(req: NextRequest) {
 
   const { fullName, nim, programStudi, jabatan, isKetuaShift, pin } = parsed.data;
 
-  // Cek duplikat NIM + Prodi
-  const existing = await db
-    .select({ id: employees.id })
+  // Cek duplikat NIM
+  const [existing] = await db
+    .select({ id: employees.id, deletedAt: employees.deletedAt })
     .from(employees)
-    .where(
-      and(
-        eq(employees.nim, nim.toUpperCase()),
-        eq(employees.programStudi, programStudi),
-        isNull(employees.deletedAt),
-      ),
-    )
+    .where(eq(employees.nim, nim.toUpperCase()))
     .limit(1);
 
-  if (existing.length > 0) {
-    return apiError('NIM + Program Studi sudah terdaftar', 409);
+  if (existing && !existing.deletedAt) {
+    return apiError('NIM sudah terdaftar dan masih aktif', 409);
   }
 
   let pinHash: string | null = null;
@@ -150,20 +144,44 @@ export async function POST(req: NextRequest) {
     pinHash = await bcrypt.hash(pin, 10);
   }
 
-  const [created] = await db
-    .insert(employees)
-    .values({
-      fullName: fullName.trim(),
-      nim: nim.toUpperCase().trim(),
-      programStudi: programStudi.trim(),
-      jabatan: jabatan.trim(),
-      isKetuaShift: isKetuaShift ?? false,
-      pinHash,
-      createdByAdminId: manager.sub,
-    })
-    .returning();
+  let created;
+  if (existing && existing.deletedAt) {
+    // Re-aktifkan karyawan yang sebelumnya dihapus
+    const [revived] = await db
+      .update(employees)
+      .set({
+        fullName: fullName.trim(),
+        programStudi: programStudi.trim(),
+        jabatan: jabatan.trim(),
+        isActive: true,
+        deletedAt: null,
+        isKetuaShift: isKetuaShift ?? false,
+        pinHash,
+        pinFailedAttempts: 0,
+        pinLockedUntil: null,
+        updatedAt: new Date(),
+        createdByAdminId: manager.sub,
+      })
+      .where(eq(employees.id, existing.id))
+      .returning();
+    created = revived;
+  } else {
+    const [inserted] = await db
+      .insert(employees)
+      .values({
+        fullName: fullName.trim(),
+        nim: nim.toUpperCase().trim(),
+        programStudi: programStudi.trim(),
+        jabatan: jabatan.trim(),
+        isKetuaShift: isKetuaShift ?? false,
+        pinHash,
+        createdByAdminId: manager.sub,
+      })
+      .returning();
+    created = inserted;
+  }
 
-    return apiOk(created, 201);
+  return apiOk(created, 201);
   } catch (err) {
     if (err instanceof AppError) {
       return apiError(err.message, err.statusCode);

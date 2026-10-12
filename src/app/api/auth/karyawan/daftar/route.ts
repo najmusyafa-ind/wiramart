@@ -47,14 +47,11 @@ export async function POST(request: Request): Promise<Response> {
       // GUARD 1: Cek NIM sudah ada di DB atau belum
       // ──────────────────────────────────────────────────────────
       const existingEmployee = await tx.query.employees.findFirst({
-        where: and(
-          eq(employees.nim, nim),
-          isNull(employees.deletedAt),
-        ),
-        columns: { id: true, fullName: true, programStudi: true },
+        where: eq(employees.nim, nim),
+        columns: { id: true, fullName: true, programStudi: true, deletedAt: true },
       });
 
-      if (existingEmployee) {
+      if (existingEmployee && !existingEmployee.deletedAt) {
         // Cek apakah NIM ini sudah punya slot
         const existingSlot = await tx.query.shiftSchedules.findFirst({
           where: and(
@@ -125,27 +122,57 @@ export async function POST(request: Request): Promise<Response> {
       }
 
       // ──────────────────────────────────────────────────────────
-      // AKSI: Buat employee baru + klaim slot (dalam 1 transaksi)
+      // AKSI: Buat employee baru / re-aktivasi akun lama + klaim slot
       // ──────────────────────────────────────────────────────────
-      const [newEmployee] = await tx
-        .insert(employees)
-        .values({
-          fullName,
-          nim,
-          programStudi,
-          jabatan:          'Kasir',
-          isActive:         true,
-          isSelfRegistered: true,
-          createdByAdminId: null,
-        })
-        .returning({ id: employees.id, fullName: employees.fullName });
+      let targetEmployeeId: string;
+      let targetFullName: string;
 
-      if (!newEmployee) throw new AppError('Gagal membuat akun.', 'INSERT_FAILED', 500);
+      if (existingEmployee && existingEmployee.deletedAt) {
+        // Akun sebelumnya pernah dihapus (misal akun percobaan) -> Re-aktivasi
+        const [reconstituted] = await tx
+          .update(employees)
+          .set({
+            fullName,
+            programStudi,
+            jabatan:          'Kasir',
+            isActive:         true,
+            isSelfRegistered: true,
+            deletedAt:        null,
+            isKetuaShift:     false,
+            pinHash:          null,
+            pinFailedAttempts: 0,
+            pinLockedUntil:   null,
+            updatedAt:        new Date(),
+          })
+          .where(eq(employees.id, existingEmployee.id))
+          .returning({ id: employees.id, fullName: employees.fullName });
+
+        if (!reconstituted) throw new AppError('Gagal mengaktifkan kembali akun.', 'INSERT_FAILED', 500);
+        targetEmployeeId = reconstituted.id;
+        targetFullName = reconstituted.fullName;
+      } else {
+        const [newEmployee] = await tx
+          .insert(employees)
+          .values({
+            fullName,
+            nim,
+            programStudi,
+            jabatan:          'Kasir',
+            isActive:         true,
+            isSelfRegistered: true,
+            createdByAdminId: null,
+          })
+          .returning({ id: employees.id, fullName: employees.fullName });
+
+        if (!newEmployee) throw new AppError('Gagal membuat akun.', 'INSERT_FAILED', 500);
+        targetEmployeeId = newEmployee.id;
+        targetFullName = newEmployee.fullName;
+      }
 
       // Klaim slot — atomik dalam transaksi yang sama
       await tx
         .update(shiftSchedules)
-        .set({ employeeId: newEmployee.id, updatedAt: new Date() })
+        .set({ employeeId: targetEmployeeId, updatedAt: new Date() })
         .where(
           and(
             eq(shiftSchedules.id, slotId),
@@ -154,8 +181,8 @@ export async function POST(request: Request): Promise<Response> {
         );
 
       return {
-        employeeId: newEmployee.id,
-        fullName:   newEmployee.fullName,
+        employeeId: targetEmployeeId,
+        fullName:   targetFullName,
         slotDay:    slot.dayOfWeek,
         slotStart:  slot.slotStart,
         slotEnd:    slot.slotEnd,
@@ -174,6 +201,7 @@ export async function POST(request: Request): Promise<Response> {
     if (err instanceof AppError) {
       return apiError(err.message, err.code, err.statusCode);
     }
+    console.error('[DAFTAR_KARYAWAN_ERROR]', err);
     return apiError('Terjadi kesalahan server.', 'INTERNAL_ERROR', 500);
   }
 }
