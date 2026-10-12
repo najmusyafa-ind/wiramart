@@ -142,10 +142,16 @@ function BukaShiftOverlay({
   kasirName,
   otherActiveShifts,
   onSuccess,
+  canClose = false,
+  onClose,
+  onLogout,
 }: {
   kasirName: string;
   otherActiveShifts: SessionInfo['otherActiveShifts'];
   onSuccess: (modalAwal: number, shiftId?: string) => void;
+  canClose?: boolean;
+  onClose?: () => void;
+  onLogout?: () => void;
 }) {
   // Default modal awal paten dari owner: Rp 100.000
   const [modalInput, setModalInput] = useState('100000');
@@ -218,7 +224,32 @@ function BukaShiftOverlay({
           marginBottom: 'env(safe-area-inset-bottom, 0)',
         }}
       >
-        <div className="card-body" style={{ padding: 'clamp(var(--space-4), 5vw, var(--space-6))', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        <div className="card-body" style={{ position: 'relative', padding: 'clamp(var(--space-4), 5vw, var(--space-6))', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          {canClose && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                position: 'absolute',
+                top: 14,
+                right: 14,
+                background: 'var(--color-surface-elevated, #f1f5f9)',
+                border: 'none',
+                borderRadius: '50%',
+                width: 32,
+                height: 32,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: 'var(--color-text-muted)',
+                zIndex: 10,
+              }}
+              aria-label="Tutup modal buka shift"
+            >
+              <X size={18} />
+            </button>
+          )}
 
           {/* ── HANDOVER WARNING — tampil jika kasir lain masih aktif ── */}
           {showHandoverWarning ? (
@@ -312,6 +343,17 @@ function BukaShiftOverlay({
               <p style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textAlign: 'center', margin: 0 }}>
                 Shift aktif yang ada akan tetap terbuka sampai kasir tsb atau Admin menutupnya.
               </p>
+
+              {onLogout && (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="btn btn-secondary"
+                  style={{ width: '100%', minHeight: 40, fontSize: '0.8rem', gap: 6, marginTop: 'var(--space-2)' }}
+                >
+                  <LogOut size={14} /> Ganti Akun Kasir / Keluar
+                </button>
+              )}
             </>
           ) : (
             <>
@@ -483,14 +525,25 @@ function BukaShiftOverlay({
                   : <><CheckCircle size={16} /> Buka Shift &amp; Mulai Jaga</>}
               </button>
 
-              <div style={{ textAlign: 'center', marginTop: 'var(--space-2)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 'var(--space-2)' }}>
+                {onLogout && (
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    className="btn btn-secondary"
+                    style={{ width: '100%', minHeight: 40, fontSize: '0.8rem', gap: 6 }}
+                  >
+                    <LogOut size={14} /> Ganti Akun Kasir / Keluar
+                  </button>
+                )}
                 <a
                   href="/kasir/login"
                   style={{
-                    fontSize: '0.8rem',
+                    fontSize: '0.75rem',
                     color: 'var(--color-text-muted)',
                     textDecoration: 'none',
                     fontWeight: 600,
+                    textAlign: 'center',
                   }}
                 >
                   &larr; Lihat Jadwal Shift &amp; Presensi Kasir
@@ -1144,6 +1197,8 @@ export default function PosPage() {
 
   // State
   const [session, setSession] = useState<SessionInfo | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [forceShowBukaShift, setForceShowBukaShift] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1198,16 +1253,44 @@ export default function PosPage() {
   // Client-side mount flag — prevents hydration mismatch
   useEffect(() => { setMounted(true); }, []);
 
-  // Fetch session info
-  useEffect(() => {
-    fetch('/api/kasir/sesi')
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.success) setSession(json.data);
-        else router.push('/kasir/login');
-      })
-      .catch(() => router.push('/kasir/login'));
+  // Fetch session info dengan anti-cache & timestamp unik
+  const fetchSession = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/kasir/sesi?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        setSession(json.data);
+        return json.data as SessionInfo;
+      } else {
+        router.push('/kasir/login');
+        return null;
+      }
+    } catch {
+      router.push('/kasir/login');
+      return null;
+    } finally {
+      setSessionLoading(false);
+    }
   }, [router]);
+
+  useEffect(() => {
+    fetchSession();
+  }, [fetchSession]);
+
+  // Re-check shift saat window kembali fokus (mencegah desinkronisasi saat pergantian shift)
+  useEffect(() => {
+    const onFocus = () => {
+      fetchSession();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [fetchSession]);
 
   // Update shift duration setiap menit
   useEffect(() => {
@@ -1486,6 +1569,13 @@ export default function PosPage() {
       });
       const json = await res.json();
       if (!res.ok) {
+        if (res.status === 403 && (json.error?.toLowerCase().includes('shift') || json.error?.toLowerCase().includes('laci'))) {
+          alert(`${json.error}\n\nSistem akan membuka menu Buka Shift / Modal Laci (Rp 100.000).`);
+          setShowPayment(false);
+          setForceShowBukaShift(true);
+          await fetchSession();
+          return;
+        }
         const msg = typeof json.error === 'string'
           ? json.error
           : 'Transaksi gagal. Silakan coba lagi.';
@@ -1569,11 +1659,20 @@ export default function PosPage() {
   const kasirName = session?.employee?.fullName ?? '...';
   // True jika belum ada shift aktif ATAU modal awal belum diisi → tampilkan overlay Buka Shift
   const shiftPerluModal = session !== null && (session.shift === null || session.shift.modalAwal === null);
+  const isShiftModalOpen = forceShowBukaShift || shiftPerluModal;
+  const canCloseShiftModal = forceShowBukaShift && session?.shift !== null && session?.shift?.modalAwal !== null;
 
   // Handler: setelah kasir berhasil input modal awal, update local session state
   async function handleBukaShiftSuccess(modalAwal: number, shiftId?: string) {
+    setForceShowBukaShift(false);
     try {
-      const res = await fetch('/api/kasir/sesi');
+      const res = await fetch(`/api/kasir/sesi?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
+      });
       const json = await res.json();
       if (json.success && json.data) {
         setSession(json.data);
@@ -1595,15 +1694,30 @@ export default function PosPage() {
     );
   }
 
+  // Blocking loading screen saat pertama kali memuat sesi (mencegah interaksi prematur)
+  if (sessionLoading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-subtle, #f8fafc)' }}>
+        <Loader2 size={36} style={{ animation: 'spin 1s linear infinite', color: 'var(--color-primary, #2563eb)' }} />
+        <p style={{ marginTop: 16, fontWeight: 600, color: 'var(--color-text-muted, #64748b)', fontSize: '0.9rem' }}>
+          Menghubungkan Sesi &amp; Laci Kasir...
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="layout-pos">
 
       {/* ── Buka Shift Overlay — blocking jika modal awal belum diisi ── */}
-      {shiftPerluModal && (
+      {isShiftModalOpen && (
         <BukaShiftOverlay
           kasirName={kasirName}
           otherActiveShifts={session?.otherActiveShifts ?? []}
           onSuccess={handleBukaShiftSuccess}
+          canClose={canCloseShiftModal}
+          onClose={() => setForceShowBukaShift(false)}
+          onLogout={handleLogout}
         />
       )}
 
@@ -1985,7 +2099,29 @@ export default function PosPage() {
           </div>
 
           {/* Jam Shift & Kasir Info — Selalu tampil di desktop & mobile */}
-          {session?.shift && (
+          {!session?.shift ? (
+            <button
+              type="button"
+              onClick={() => setForceShowBukaShift(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                background: 'hsl(38 95% 50%)',
+                border: '1px solid hsl(38 95% 65%)',
+                borderRadius: 'var(--radius-full)',
+                padding: '4px 10px',
+                color: '#000',
+                fontSize: '11px',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+              title="Shift belum dibuka. Klik untuk buka laci Rp 100.000"
+            >
+              <AlertTriangle size={13} />
+              <span>Buka Shift (Rp 100rb)</span>
+            </button>
+          ) : (
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -2102,6 +2238,35 @@ export default function PosPage() {
 
       {/* ── Produk area ───────────────────────────────── */}
       <div className="pos-products">
+        {/* Banner Peringatan Laci Belum Dibuka */}
+        {!session?.shift && (
+          <div
+            style={{
+              margin: 'var(--space-2) var(--space-3)',
+              padding: '10px 14px',
+              background: 'hsl(38 95% 95%)',
+              border: '1.5px solid hsl(38 92% 50%)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'hsl(38 92% 25%)', fontWeight: 600 }}>
+              <AlertTriangle size={18} style={{ color: 'hsl(38 92% 45%)', flexShrink: 0 }} />
+              <span>Shift kasir belum aktif! Buka laci (Rp 100.000) sebelum transaksi pembayaran.</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setForceShowBukaShift(true)}
+              className="btn btn-primary"
+              style={{ padding: '6px 14px', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}
+            >
+              Buka Shift
+            </button>
+          </div>
+        )}
         {/* Search mobile */}
         <div className="pos-mobile-search">
           <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
@@ -2461,6 +2626,27 @@ export default function PosPage() {
 
             {/* Menu Items List */}
             <div className="pos-drawer-items">
+              {!session?.shift && (
+                <button
+                  type="button"
+                  className="pos-drawer-link"
+                  onClick={() => {
+                    setShowKasirMenu(false);
+                    setForceShowBukaShift(true);
+                  }}
+                  style={{ width: '100%', background: 'hsl(38 95% 95%)', border: '1px solid hsl(38 92% 70%)', borderRadius: 'var(--radius-md)', cursor: 'pointer', textAlign: 'left', padding: '12px', marginBottom: 6 }}
+                >
+                  <div className="pos-drawer-icon-box" style={{ background: 'hsl(38 95% 85%)', color: 'hsl(38 90% 30%)' }}>
+                    <Banknote size={20} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="pos-drawer-link-title" style={{ color: 'hsl(38 90% 25%)', fontWeight: 800 }}>Buka Shift &amp; Modal Laci</div>
+                    <div className="pos-drawer-link-sub">Input modal awal Rp 100.000 untuk transaksi</div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: 'hsl(38 90% 40%)' }} />
+                </button>
+              )}
+
               <a
                 href="/kasir/produk"
                 className="pos-drawer-link"

@@ -12,6 +12,8 @@ import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
@@ -21,10 +23,12 @@ export async function GET(req: NextRequest) {
 
   const employeeId = payload.sub as string;
 
-  // Cacat 1 Opsi A: Single Cash Drawer per Shift Roster
-  // Ambil data karyawan + shift aktif toko saat ini (<12 jam) + QRIS settings
+  // Single Cash Drawer per Shift Roster
+  // Shift reguler di UNPERBA berdurasi 4 jam (07:30-11:30, 11:00-15:00, 14:30-18:30).
+  // Ambang batas toleransi rekan 1 shift adalah 4.5 jam (4 jam 30 menit).
+  // Lewat 4.5 jam, shift dipastikan milik shift sebelumnya dan kasir baru wajib handover / Buka Shift Baru.
+  const FOUR_AND_HALF_HOURS = 4.5 * 60 * 60 * 1000;
   const TWELVE_HOURS = 12 * 60 * 60 * 1000;
-  const EIGHT_HOURS  = 8 * 60 * 60 * 1000;
 
   const [employee, storeActiveShift, qris] = await Promise.all([
     db.query.employees.findFirst({
@@ -53,8 +57,8 @@ export async function GET(req: NextRequest) {
         .update(shifts)
         .set({ clockOut: new Date(), status: 'CLOSED' })
         .where(eq(shifts.id, storeActiveShift.id));
-    } else if (storeActiveShift.employeeId === employeeId || shiftAge <= EIGHT_HOURS) {
-      // Shift aktif toko milik sendiri ATAU dibuka oleh rekan dalam 1 shift kerja (<8 jam)
+    } else if (storeActiveShift.employeeId === employeeId || shiftAge <= FOUR_AND_HALF_HOURS) {
+      // Shift aktif toko milik sendiri ATAU dibuka oleh rekan dalam 1 slot shift kerja (≤ 4.5 jam)
       // Seluruh kasir dalam shift yang sama menggunakan sesi laci kas yang sama
       currentShift = {
         id: storeActiveShift.id,
@@ -62,7 +66,7 @@ export async function GET(req: NextRequest) {
         modalAwal: storeActiveShift.modalAwal,
       };
     } else {
-      // Shift aktif dari kasir shift sebelumnya yang lupa ditutup (>8 jam dan beda kasir)
+      // Shift aktif dari kasir shift sebelumnya yang lupa ditutup (> 4.5 jam dan beda kasir)
       const prevKasir = await db.query.employees.findFirst({
         where: eq(employees.id, storeActiveShift.employeeId),
         columns: { fullName: true, nim: true },
@@ -82,7 +86,7 @@ export async function GET(req: NextRequest) {
     return apiError('Karyawan tidak ditemukan', 'NOT_FOUND', 404);
   }
 
-  return apiOk({
+  const response = apiOk({
     employee: {
       id: employee.id,
       fullName: employee.fullName,
@@ -109,4 +113,7 @@ export async function GET(req: NextRequest) {
       phone:   qris?.storePhone   ?? '',
     },
   });
+
+  response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  return response;
 }

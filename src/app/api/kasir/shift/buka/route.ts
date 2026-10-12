@@ -22,6 +22,8 @@ import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const bukaShiftSchema = z.object({
   modalAwal: z.number().min(0, 'Modal awal tidak boleh negatif').max(10_000_000, 'Nilai terlalu besar'),
@@ -58,7 +60,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
 
   const { modalAwal, breakdown } = parsed.data;
 
-  // 3. Periksa shift aktif toko (Single Cash Drawer per Shift — Cacat 1 Opsi A)
+  // 3. Periksa shift aktif toko (Single Cash Drawer per Shift Roster)
+  // Durasi shift UNPERBA adalah 4 jam. Batas overlap wajar adalah 4.5 jam.
+  const FOUR_AND_HALF_HOURS = 4.5 * 60 * 60 * 1000;
   const TWELVE_HOURS = 12 * 60 * 60 * 1000;
   const existingStoreShift = await db.query.shifts.findFirst({
     where: and(eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut)),
@@ -73,8 +77,15 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         .update(shifts)
         .set({ clockOut: new Date(), status: 'CLOSED' })
         .where(eq(shifts.id, existingStoreShift.id));
+    } else if (existingStoreShift.employeeId !== employeeId && shiftAge > FOUR_AND_HALF_HOURS) {
+      // Shift aktif dari kasir shift roster sebelumnya yang belum ditutup (>4.5 jam dan beda kasir)
+      // Auto-close shift lama tersebut saat kasir shift baru membuka laci kasir baru
+      await db
+        .update(shifts)
+        .set({ clockOut: new Date(), status: 'CLOSED' })
+        .where(eq(shifts.id, existingStoreShift.id));
     } else if (existingStoreShift.modalAwal !== null) {
-      // Modal awal laci toko sudah dibuka (oleh kasir ini atau rekan shift)
+      // Modal awal laci toko sudah dibuka (oleh kasir ini atau rekan dalam slot shift yang sama)
       return apiOk({
         message: 'Shift laci toko sudah aktif dengan modal awal.',
         shiftId: existingStoreShift.id,

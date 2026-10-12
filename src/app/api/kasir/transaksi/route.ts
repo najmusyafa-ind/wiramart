@@ -32,6 +32,8 @@ import { eq, and, isNull, inArray, gte, gt, lt, asc, desc, sql } from 'drizzle-o
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 // ─────────────────────────────────────────────────────────────
 // Validation Schema
@@ -244,7 +246,10 @@ export async function POST(req: NextRequest) {
 
     if (teamShift) {
       const shiftAge = Date.now() - new Date(teamShift.clockIn).getTime();
-      if (shiftAge <= 12 * 60 * 60 * 1000) {
+      // Ambang batas adopsi shift rekan: maks 4.5 jam (1 sesi roster UNPERBA)
+      // Mencegah kasir shift baru mewarisi shift shift sebelumnya yang belum ditutup
+      const FOUR_AND_HALF_HOURS = 4.5 * 60 * 60 * 1000;
+      if (shiftAge <= FOUR_AND_HALF_HOURS) {
         activeShiftId = teamShift.id;
       }
     }
