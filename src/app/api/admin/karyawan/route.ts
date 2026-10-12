@@ -111,7 +111,7 @@ const CreateSchema = z.object({
   programStudi: z.string().min(2).max(100),
   jabatan: z.string().max(100).default('Kasir'),
   isKetuaShift: z.boolean().optional(),
-  pin: z.string().length(6, 'PIN harus 6 digit angka').optional(),
+  pin: z.string().regex(/^\d{6,8}$/, 'PIN harus 6 hingga 8 digit angka').optional(),
 });
 
 export async function POST(req: NextRequest) {

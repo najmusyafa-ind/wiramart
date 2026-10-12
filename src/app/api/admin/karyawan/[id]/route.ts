@@ -21,7 +21,7 @@ const PatchSchema = z.object({
   jabatan: z.string().max(100).optional(),
   isActive: z.boolean().optional(),
   isKetuaShift: z.boolean().optional(),
-  pin: z.string().length(6, 'PIN harus 6 digit angka').optional(),
+  pin: z.string().regex(/^\d{6,8}$/, 'PIN harus 6 hingga 8 digit angka').optional(),
 });
 
 // ── PATCH: update karyawan (Manager Dosen Only — Cacat 6 Opsi A) ─────────────────
