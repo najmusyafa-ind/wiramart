@@ -145,7 +145,7 @@ function BukaShiftOverlay({
 }: {
   kasirName: string;
   otherActiveShifts: SessionInfo['otherActiveShifts'];
-  onSuccess: (modalAwal: number) => void;
+  onSuccess: (modalAwal: number, shiftId?: string) => void;
 }) {
   // Default modal awal paten dari owner: Rp 100.000
   const [modalInput, setModalInput] = useState('100000');
@@ -186,12 +186,12 @@ function BukaShiftOverlay({
           breakdown: Object.keys(breakdown).length > 0 ? breakdown : undefined,
         }),
       });
-      const json = await res.json() as { success: boolean; error?: string };
+      const json = await res.json() as { success: boolean; data?: { shiftId?: string }; error?: string };
       if (!res.ok) {
         setError(json.error ?? 'Gagal membuka shift.');
         return;
       }
-      onSuccess(nominal);
+      onSuccess(nominal, json.data?.shiftId);
     } catch {
       setError('Kesalahan jaringan. Coba lagi.');
     } finally {
@@ -1567,13 +1567,30 @@ export default function PosPage() {
   }
 
   const kasirName = session?.employee?.fullName ?? '...';
-  // True jika shift ada tapi modal awal belum diisi → tampilkan overlay
-  const shiftPerluModal = session !== null && session.shift !== null && session.shift.modalAwal === null;
+  // True jika belum ada shift aktif ATAU modal awal belum diisi → tampilkan overlay Buka Shift
+  const shiftPerluModal = session !== null && (session.shift === null || session.shift.modalAwal === null);
 
   // Handler: setelah kasir berhasil input modal awal, update local session state
-  function handleBukaShiftSuccess(modalAwal: number) {
-    setSession((prev) => prev && prev.shift
-      ? { ...prev, shift: { ...prev.shift, modalAwal: modalAwal.toString() } }
+  async function handleBukaShiftSuccess(modalAwal: number, shiftId?: string) {
+    try {
+      const res = await fetch('/api/kasir/sesi');
+      const json = await res.json();
+      if (json.success && json.data) {
+        setSession(json.data);
+        return;
+      }
+    } catch {
+      // Fallback update lokal jika fetch gagal
+    }
+    setSession((prev) => prev
+      ? {
+          ...prev,
+          shift: {
+            id: shiftId ?? prev.shift?.id ?? '',
+            clockIn: prev.shift?.clockIn ?? new Date().toISOString(),
+            modalAwal: modalAwal.toString(),
+          },
+        }
       : prev,
     );
   }
