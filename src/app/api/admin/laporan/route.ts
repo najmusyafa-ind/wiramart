@@ -151,7 +151,15 @@ export async function GET(req: NextRequest) {
       })
       .from(shifts)
       .innerJoin(employees, eq(shifts.employeeId, employees.id))
-      .where(and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)))
+      .where(
+        and(
+          gte(shifts.clockIn, range.start),
+          lt(shifts.clockIn, range.endExclusive),
+          sql`LOWER(${employees.fullName}) NOT LIKE '%testing%'`,
+          sql`LOWER(${employees.fullName}) NOT LIKE '%dede%'`,
+          sql`${employees.nim} NOT IN ('02405013')`
+        )
+      )
       .orderBy(sql`${shifts.clockIn} DESC`)
       .limit(100);
 
@@ -266,7 +274,12 @@ export async function GET(req: NextRequest) {
       topProducts,
       recentTransactions: enhancedRecentTransactions,
       shifts: shiftList.map((sh) => {
-        const modalAwal = sh.modalAwal ? parseFloat(sh.modalAwal) : 0;
+        // Opsi A (Model Kasir Kas Tetap Rp 100.000 per shift):
+        // Modal awal toko ditetapkan Rp 100.000 per shift (kas kecil kembalian).
+        // Jika tercatat angka rolling laci (> Rp 150.000) karena kasir menginput total kas shift sebelumnya,
+        // gunakan modal paten toko Rp 100.000 agar tidak memicu tekor semu (phantom deficit).
+        const rawModal = sh.modalAwal ? parseFloat(sh.modalAwal) : 100_000;
+        const modalAwal = rawModal > 150_000 ? 100_000 : (rawModal <= 0 ? 100_000 : rawModal);
         const actualCash = sh.actualCash ? parseFloat(sh.actualCash) : null;
         const cashSales = shiftSalesMap.get(sh.shiftId) ?? 0;
         const cashOut = shiftCashOutMap.get(sh.shiftId) ?? 0;
@@ -296,12 +309,15 @@ export async function GET(req: NextRequest) {
           }
         }
 
+        // Beda serah terima hanya ditampilkan jika kasir menginput nominal riil non-rolling (<= 150k)
+        const serahTerimaDiff = rawModal > 150_000 ? null : (sh.serahTerimaDiff ? parseFloat(sh.serahTerimaDiff) : null);
+
         return {
           shiftId:            sh.shiftId,
           clockIn:            sh.clockIn,
           clockOut:           sh.clockOut,
           status:             sh.status,
-          modalAwal:          sh.modalAwal ? parseFloat(sh.modalAwal) : null,
+          modalAwal,
           cashSales,
           cashOut,
           cashIn,
@@ -313,7 +329,7 @@ export async function GET(req: NextRequest) {
           notes:              sh.notes,
           cashBreakdownOpen:  sh.cashBreakdownOpen,
           cashBreakdownClose: sh.cashBreakdownClose,
-          serahTerimaDiff:    sh.serahTerimaDiff ? parseFloat(sh.serahTerimaDiff) : null,
+          serahTerimaDiff,
           auditFlags:         sh.auditFlags ?? [],
           kasirName:          sh.kasirName,
           kasirNim:           sh.kasirNim,

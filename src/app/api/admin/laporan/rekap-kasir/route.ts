@@ -288,7 +288,12 @@ export async function GET(req: NextRequest) {
     // ── 7. Assemble shift detail rows ───────────────────────────
     const shiftDetails = shiftList.map((s) => {
       const tx         = txByShift.get(s.id);
-      const modalAwal  = s.modalAwal  ? parseFloat(s.modalAwal)  : 0;
+      // Opsi A (Model Kasir Kas Tetap Rp 100.000 per shift):
+      // Modal awal paten toko adalah Rp 100.000 per shift.
+      // Jika tercatat angka rolling laci (> Rp 150.000) karena kasir menginput total uang laci shift sebelumnya,
+      // gunakan modal paten toko Rp 100.000 agar tidak memicu tekor semu (phantom deficit).
+      const rawModal   = s.modalAwal  ? parseFloat(s.modalAwal)  : 100_000;
+      const modalAwal  = rawModal > 150_000 ? 100_000 : (rawModal <= 0 ? 100_000 : rawModal);
       const actualCash = s.actualCash ? parseFloat(s.actualCash) : null;
       const omzet      = tx ? parseFloat(tx.totalOmzet) : 0;
       const hpp        = tx ? parseFloat(tx.totalHpp)   : 0;
@@ -317,6 +322,9 @@ export async function GET(req: NextRequest) {
         ? Math.round((new Date(s.clockOut).getTime() - new Date(s.clockIn).getTime()) / 60000)
         : null;
 
+      // Beda serah terima hanya relevan jika kasir menginput serah terima nominal riil (<= 150k)
+      const serahTerimaDiff = rawModal > 150_000 ? null : (s.serahTerimaDiff ? parseFloat(s.serahTerimaDiff) : null);
+
       return {
         shiftId:         s.id,
         employeeId:      s.employeeId,
@@ -340,7 +348,7 @@ export async function GET(req: NextRequest) {
         discrepancy,
         statusLaci,
         discrepancyTier,
-        serahTerimaDiff: s.serahTerimaDiff ? parseFloat(s.serahTerimaDiff) : null,
+        serahTerimaDiff,
         auditFlags:      s.auditFlags ?? '',
       };
     });
