@@ -33,8 +33,14 @@ type Product = {
   categoryName: string | null;
   photoUrl: string | null;
   isPerishable?: boolean | null;
+  // v3.0 Diskon Darurat FEFO
+  discountPolicyId?: string | null;
+  discountBarcode?: string | null;
+  discountPct?: number | null;
+  originalPrice?: string | null;
+  isDiscountOverride?: boolean;
 };
-type CartItem = Product & { qty: number };
+type CartItem = Product & { qty: number; cartKey?: string };
 type PaymentMethod = 'CASH' | 'QRIS' | 'SPLIT';
 type SplitPaymentDetail = {
   paymentMethod: 'CASH' | 'QRIS';
@@ -1263,16 +1269,32 @@ export default function PosPage() {
           'Pragma': 'no-cache',
         },
       });
+      // 401 Unauthorized: sesi habis atau memang belum login secara sah
+      if (res.status === 401) {
+        router.push('/kasir/login');
+        return null;
+      }
+
+      if (!res.ok) {
+        // HTTP 500 / 503 / Blip jaringan server: Jangan tendang kasir yang sedang aktif!
+        console.warn('[POS] Gagal menyinkronkan sesi (Server/Network blip):', res.status);
+        return null;
+      }
+
       const json = await res.json();
       if (json.success && json.data) {
         setSession(json.data);
         return json.data as SessionInfo;
       } else {
-        router.push('/kasir/login');
+        if (json.code === 'UNAUTHORIZED' || res.status === 401) {
+          router.push('/kasir/login');
+        }
         return null;
       }
-    } catch {
-      router.push('/kasir/login');
+    } catch (err) {
+      // Offline / Wi-Fi terputus di tengah jalan:
+      // JANGAN redirect ke login! Tetap di halaman POS agar transaksi & keranjang belanja tidak hilang!
+      console.warn('[POS] Koneksi jaringan terputus saat memeriksa sesi:', err);
       return null;
     } finally {
       setSessionLoading(false);
@@ -1325,11 +1347,17 @@ export default function PosPage() {
       });
       const res = await fetch(`/api/kasir/produk?${params}`);
       if (res.status === 401) { router.push('/kasir/login'); return; }
+      if (!res.ok) {
+        console.warn('[POS] Produk offline / gagal disinkronkan:', res.status);
+        return;
+      }
       const json = await res.json();
       if (json.success) {
         setProducts(json.data?.products ?? []);
         setCategories(json.data?.categories ?? []);
       }
+    } catch (err) {
+      console.warn('[POS] Gagal mengambil produk saat offline:', err);
     } finally {
       setLoading(false);
     }
@@ -1424,14 +1452,24 @@ export default function PosPage() {
     // 1. Cari di DB lokal dulu (produk yang sudah diinput admin)
     try {
       const res = await fetch(`/api/kasir/produk/barcode?code=${encodeURIComponent(cleanCode)}`);
-      const json = await res.json() as { success: boolean; data?: { found: boolean; product?: Product } };
+      const json = await res.json() as {
+        success: boolean;
+        data?: { found: boolean; isDiscounted?: boolean; product?: Product };
+        error?: string;
+      };
       if (json.success && json.data?.found && json.data.product) {
         // addToCart sudah menampilkan pesan sendiri jika stok habis / melebihi stok
         if (addToCart(json.data.product)) {
           playScanBeep();
-          setScanToast(`Ditambahkan: ${json.data.product.name}`);
+          const toastPrefix = json.data.isDiscounted ? '🏷️ Diskon Darurat: ' : 'Ditambahkan: ';
+          setScanToast(`${toastPrefix}${json.data.product.name}`);
           setTimeout(() => setScanToast(null), 2500);
         }
+        return;
+      }
+      if (!json.success && json.error) {
+        setScanToast(`⚠️ ${json.error}`);
+        setTimeout(() => setScanToast(null), 3500);
         return;
       }
     } catch { /* jaringan error */ }
@@ -1449,6 +1487,9 @@ export default function PosPage() {
     let lastTime = 0;
 
     const handleHardwareScan = (e: KeyboardEvent) => {
+      // Guard jika event atau key tidak valid (virtual key / autofill / IME)
+      if (!e || typeof e.key !== 'string') return;
+
       // Abaikan jika modal sedang terbuka
       if (showPayment || showSuccess || showTutupConfirm || showPosScanner) return;
 
@@ -1493,37 +1534,57 @@ export default function PosPage() {
     setTimeout(() => setScanToast(null), 3500);
   };
 
+  // Helper cart key: jika item memiliki discountPolicyId, gunakan key gabungan agar tidak bentrok dengan item reguler
+  const getCartKey = (item: { id: string; discountPolicyId?: string | null }) =>
+    item.discountPolicyId ? `${item.id}__disc__${item.discountPolicyId}` : item.id;
+
   /** @returns true jika item berhasil ditambahkan ke keranjang */
   const addToCart = (product: Product): boolean => {
     if (product.stockQty <= 0) {
       showCartToast(`"${product.name}" stok habis di sistem. Cek fisik barang / hubungi admin.`);
       return false;
     }
-    const existing = cartRef.current.find((i) => i.id === product.id);
+    const targetKey = getCartKey(product);
+    const existing = cartRef.current.find((i) => (i.cartKey || getCartKey(i)) === targetKey);
     if (existing && existing.qty >= product.stockQty) {
       showCartToast(`Stok "${product.name}" di sistem hanya ${product.stockQty}. Tidak bisa ditambah lagi.`);
       return false;
     }
     applyCart((prev) => {
-      const found = prev.find((i) => i.id === product.id);
-      if (found) return prev.map((i) => i.id === product.id ? { ...i, qty: i.qty + 1 } : i);
-      return [...prev, { ...product, qty: 1 }];
+      const found = prev.find((i) => (i.cartKey || getCartKey(i)) === targetKey);
+      if (found) {
+        return prev.map((i) =>
+          (i.cartKey || getCartKey(i)) === targetKey ? { ...i, qty: i.qty + 1 } : i,
+        );
+      }
+      return [...prev, { ...product, cartKey: targetKey, qty: 1 }];
     });
     return true;
   };
 
-  const updateQty = (id: string, delta: number) => {
+  const updateQty = (keyOrId: string, delta: number) => {
     applyCart((prev) =>
       prev
-        .map((i) => i.id === id ? { ...i, qty: Math.max(0, Math.min(i.qty + delta, i.stockQty)) } : i)
+        .map((i) => {
+          const k = i.cartKey || getCartKey(i);
+          if (k === keyOrId || i.id === keyOrId) {
+            return { ...i, qty: Math.max(0, Math.min(i.qty + delta, i.stockQty)) };
+          }
+          return i;
+        })
         .filter((i) => i.qty > 0),
     );
   };
 
-  const handleDirectQtyChange = (id: string, val: string, stockQty: number, name: string) => {
+  const handleDirectQtyChange = (keyOrId: string, val: string, stockQty: number, name: string) => {
     if (val === '') {
       // Biarkan 0 sementara saat kasir sedang mengetik/menghapus
-      applyCart((prev) => prev.map((i) => (i.id === id ? { ...i, qty: 0 } : i)));
+      applyCart((prev) =>
+        prev.map((i) => {
+          const k = i.cartKey || getCartKey(i);
+          return (k === keyOrId || i.id === keyOrId) ? { ...i, qty: 0 } : i;
+        }),
+      );
       return;
     }
     let num = parseInt(val, 10);
@@ -1538,13 +1599,23 @@ export default function PosPage() {
       num = stockQty;
     }
     if (num < 1) num = 1;
-    applyCart((prev) => prev.map((i) => (i.id === id ? { ...i, qty: num } : i)));
+    applyCart((prev) =>
+      prev.map((i) => {
+        const k = i.cartKey || getCartKey(i);
+        return (k === keyOrId || i.id === keyOrId) ? { ...i, qty: num } : i;
+      }),
+    );
   };
 
-  const handleDirectQtyBlur = (id: string, currentQty: number) => {
+  const handleDirectQtyBlur = (keyOrId: string, currentQty: number) => {
     if (currentQty <= 0) {
       // Kembalikan ke 1 jika ditinggal kosong / 0
-      applyCart((prev) => prev.map((i) => (i.id === id ? { ...i, qty: 1 } : i)));
+      applyCart((prev) =>
+        prev.map((i) => {
+          const k = i.cartKey || getCartKey(i);
+          return (k === keyOrId || i.id === keyOrId) ? { ...i, qty: 1 } : i;
+        }),
+      );
     }
   };
 
@@ -1561,7 +1632,12 @@ export default function PosPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          items: cart.map((i) => ({ productId: i.id, qty: i.qty })),
+          items: cart.map((i) => ({
+            productId: i.id,
+            qty: i.qty,
+            discountPolicyId: i.discountPolicyId || undefined,
+            discountBarcode: i.discountBarcode || undefined,
+          })),
           paymentMethod: payments && payments.length > 1 ? undefined : (paymentMethod === 'SPLIT' ? 'CASH' : paymentMethod),
           cashReceived,
           payments,
@@ -1600,7 +1676,7 @@ export default function PosPage() {
       clearCart();
       fetchProducts(search, activeCategory);
     } catch {
-      alert('Terjadi kesalahan jaringan.');
+      alert('Koneksi internet terputus (Network Error). Transaksi otomatis dibatalkan dan stok tidak berkurang. Silakan periksa jaringan Wi-Fi Anda.');
     } finally {
       setProcessingTx(false);
     }
@@ -2433,66 +2509,90 @@ export default function PosPage() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-              {cart.map((item) => (
-                <div key={item.id} className="pos-cart-item">
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      marginBottom: 2,
-                    }}>
-                      {item.name}
+              {cart.map((item) => {
+                const itemKey = item.cartKey || (item.discountPolicyId ? `${item.id}__disc__${item.discountPolicyId}` : item.id);
+                return (
+                  <div key={itemKey} className="pos-cart-item">
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        marginBottom: 2, display: 'flex', alignItems: 'center', gap: 6,
+                      }}>
+                        {item.isDiscountOverride && (
+                          <span style={{
+                            fontSize: '0.65rem',
+                            fontWeight: 700,
+                            padding: '1px 5px',
+                            borderRadius: 4,
+                            background: 'rgba(239, 68, 68, 0.15)',
+                            color: '#dc2626',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            flexShrink: 0,
+                          }}>
+                            🏷️ OBRAL {item.discountPct}%
+                          </span>
+                        )}
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-primary)', fontWeight: 'var(--weight-semibold)' }}>
+                          {rp(parseFloat(item.sellingPrice) * item.qty)}
+                        </span>
+                        {item.originalPrice && (
+                          <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textDecoration: 'line-through' }}>
+                            {rp(parseFloat(item.originalPrice) * item.qty)}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-primary)', fontWeight: 'var(--weight-semibold)' }}>
-                      {rp(parseFloat(item.sellingPrice) * item.qty)}
+                    {/* Qty controls: Ketik langsung + tombol - / + */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', flexShrink: 0 }}>
+                      <button
+                        onClick={() => updateQty(itemKey, -1)}
+                        aria-label={`Kurangi ${item.name}`}
+                        className="pos-qty-btn"
+                      >
+                        <Minus size={11} />
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={item.stockQty}
+                        value={item.qty === 0 ? '' : item.qty}
+                        onChange={(e) => handleDirectQtyChange(itemKey, e.target.value, item.stockQty, item.name)}
+                        onBlur={() => handleDirectQtyBlur(itemKey, item.qty)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            (e.target as HTMLInputElement).blur();
+                            searchRef.current?.focus();
+                          }
+                        }}
+                        onFocus={(e) => e.target.select()}
+                        aria-label={`Kuantitas ${item.name}`}
+                        className="pos-qty-input"
+                      />
+                      <button
+                        onClick={() => updateQty(itemKey, 1)}
+                        disabled={item.qty >= item.stockQty}
+                        aria-label={`Tambah ${item.name}`}
+                        className="pos-qty-btn"
+                        style={{ opacity: item.qty >= item.stockQty ? 0.35 : 1 }}
+                      >
+                        <Plus size={11} />
+                      </button>
                     </div>
-                  </div>
-                  {/* Qty controls: Ketik langsung + tombol - / + */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', flexShrink: 0 }}>
                     <button
-                      onClick={() => updateQty(item.id, -1)}
-                      aria-label={`Kurangi ${item.name}`}
-                      className="pos-qty-btn"
+                      onClick={() => applyCart((prev) => prev.filter((i) => (i.cartKey || (i.discountPolicyId ? `${i.id}__disc__${i.discountPolicyId}` : i.id)) !== itemKey))}
+                      aria-label={`Hapus ${item.name}`}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-error)', display: 'flex', opacity: 0.6, padding: 4, flexShrink: 0 }}
                     >
-                      <Minus size={11} />
-                    </button>
-                    <input
-                      type="number"
-                      min={1}
-                      max={item.stockQty}
-                      value={item.qty === 0 ? '' : item.qty}
-                      onChange={(e) => handleDirectQtyChange(item.id, e.target.value, item.stockQty, item.name)}
-                      onBlur={() => handleDirectQtyBlur(item.id, item.qty)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          (e.target as HTMLInputElement).blur();
-                          searchRef.current?.focus();
-                        }
-                      }}
-                      onFocus={(e) => e.target.select()}
-                      aria-label={`Kuantitas ${item.name}`}
-                      className="pos-qty-input"
-                    />
-                    <button
-                      onClick={() => updateQty(item.id, 1)}
-                      disabled={item.qty >= item.stockQty}
-                      aria-label={`Tambah ${item.name}`}
-                      className="pos-qty-btn"
-                      style={{ opacity: item.qty >= item.stockQty ? 0.35 : 1 }}
-                    >
-                      <Plus size={11} />
+                      <Trash2 size={13} />
                     </button>
                   </div>
-                  <button
-                    onClick={() => applyCart((prev) => prev.filter((i) => i.id !== item.id))}
-                    aria-label={`Hapus ${item.name}`}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-error)', display: 'flex', opacity: 0.6, padding: 4, flexShrink: 0 }}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -2718,6 +2818,26 @@ export default function PosPage() {
                   <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
                 </button>
               )}
+
+              {/* ── Riwayat Transaksi Saya ── */}
+              <button
+                type="button"
+                className="pos-drawer-link"
+                onClick={() => {
+                  setShowKasirMenu(false);
+                  router.push('/kasir/riwayat');
+                }}
+                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+              >
+                <div className="pos-drawer-icon-box" style={{ background: 'hsl(220 80% 55% / 0.15)', color: 'hsl(220 80% 55%)' }}>
+                  <Receipt size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="pos-drawer-link-title">Riwayat Transaksi Saya</div>
+                  <div className="pos-drawer-link-sub">Lihat struk, cash & QRIS shift hari ini</div>
+                </div>
+                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+              </button>
 
               <div className="pos-drawer-divider" />
 

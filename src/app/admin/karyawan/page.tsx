@@ -20,7 +20,9 @@ import {
   Briefcase,
   User,
   Filter,
+  ShieldCheck,
 } from 'lucide-react';
+import { useAdmin } from '../AdminLayoutClient';
 
 type Employee = {
   id: string;
@@ -57,10 +59,9 @@ type SlotOption = {
 
 const JABATAN_OPTIONS = [
   { value: 'Kasir', label: 'Kasir', desc: 'Melayani transaksi penjualan di meja POS kasir' },
-  { value: 'Kepala Kasir', label: 'Kepala Kasir (Ketua Shift)', desc: 'Koordinator shift, pemantauan laci, dan serah terima shift' },
-  { value: 'Kepala Gudang', label: 'Kepala Gudang', desc: 'Koordinator logistik, restock barcode, dan cek expired FEFO' },
-  { value: 'Gudang', label: 'Gudang', desc: 'Staf inventaris toko, penerimaan barang titipan & stok' },
-  { value: 'Pelayan', label: 'Pelayan (Pramuniaga)', desc: 'Layanan pelanggan toko, display etalase, dan cek makanan basi' },
+  { value: 'Gudang', label: 'Gudang', desc: 'Staf inventaris toko, penerimaan stok, dan cek expired FEFO' },
+  { value: 'CS Pelayan', label: 'CS Pelayan (Customer Service & Pramuniaga)', desc: 'Layanan pelanggan toko, display etalase, dan cek makanan basi' },
+  { value: 'Admin Shift', label: 'Admin Shift (Ketua Shift)', desc: 'Koordinator operasional shift toko, pemegang PIN otorisasi, dan serah terima shift' },
 ];
 
 const PRODI_OPTIONS: { fakultas: string; prodi: string[] }[] = [
@@ -163,11 +164,8 @@ function KaryawanModal({
     setSlotAssignError('');
 
     try {
-      // Otomatis tandai isKetuaShift jika jabatannya adalah Kepala Kasir atau Manager
-      const isKetuaShiftCalc =
-        form.jabatan === 'Kepala Kasir' ||
-        form.jabatan === 'Manager' ||
-        form.jabatan.toLowerCase().includes('kepala');
+      // Otomatis tandai isKetuaShift jika jabatannya adalah Admin Shift
+      const isKetuaShiftCalc = form.jabatan === 'Admin Shift';
 
       const res = await fetch(
         isEdit ? `/api/admin/karyawan/${editData!.id}` : '/api/admin/karyawan',
@@ -384,7 +382,7 @@ function KaryawanModal({
               </select>
             </div>
 
-            {/* Jabatan Resmi Toko (5 Peran) */}
+            {/* Jabatan Resmi Toko (4 Peran) */}
             <div className="form-group">
               <label htmlFor={`${uid}-jabatan`} className="form-label">
                 Jabatan / Tugas Toko *
@@ -476,6 +474,7 @@ function KaryawanModal({
 
 // ── Halaman utama manajemen karyawan ─────────────────────────
 export default function KaryawanPage() {
+  const { isManager } = useAdmin();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -562,36 +561,16 @@ export default function KaryawanPage() {
     if (activeRoleFilter === 'Semua') return true;
     const jab = emp.jabatan.toLowerCase();
     if (activeRoleFilter === 'Kasir') return jab === 'kasir';
-    if (activeRoleFilter === 'Kepala Kasir') return jab.includes('kepala kasir') || jab.includes('ketua') || jab.includes('admin');
     if (activeRoleFilter === 'Gudang') return jab.includes('gudang');
-    if (activeRoleFilter === 'Pelayan') return jab.includes('pelayan');
+    if (activeRoleFilter === 'CS Pelayan') return jab.includes('pelayan') || jab.includes('customer service') || jab.includes('cs');
+    if (activeRoleFilter === 'Admin Shift') return jab.includes('admin') || jab.includes('ketua') || jab.includes('kepala kasir');
     return true;
   });
 
-  // Helper untuk rendering badge jabatan yang elegan & semantik
+  // Helper untuk rendering badge jabatan yang elegan & semantik (4 Peran Resmi)
   function renderJabatanBadge(jabatan: string) {
     const j = (jabatan || '').toLowerCase();
-    if (j.includes('manager') || j.includes('koordinator')) {
-      return (
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            background: 'hsl(270 70% 50% / 0.12)',
-            color: 'hsl(270 70% 35%)',
-            border: '1px solid hsl(270 70% 50% / 0.25)',
-            padding: '3px 9px',
-            borderRadius: 6,
-            fontSize: '0.74rem',
-            fontWeight: 700,
-          }}
-        >
-          <Briefcase size={12} /> {jabatan}
-        </span>
-      );
-    }
-    if (j.includes('kepala kasir') || j.includes('ketua')) {
+    if (j.includes('admin') || j.includes('ketua') || j.includes('kepala kasir')) {
       return (
         <span
           style={{
@@ -607,7 +586,7 @@ export default function KaryawanPage() {
             fontWeight: 700,
           }}
         >
-          <Crown size={12} color="#ca8a04" /> {jabatan}
+          <Crown size={12} color="#ca8a04" /> Admin Shift
         </span>
       );
     }
@@ -627,11 +606,11 @@ export default function KaryawanPage() {
             fontWeight: 600,
           }}
         >
-          <Package size={12} /> {jabatan}
+          <Package size={12} /> Gudang
         </span>
       );
     }
-    if (j.includes('pelayan')) {
+    if (j.includes('pelayan') || j.includes('cs') || j.includes('customer')) {
       return (
         <span
           style={{
@@ -647,7 +626,7 @@ export default function KaryawanPage() {
             fontWeight: 600,
           }}
         >
-          <User size={12} /> {jabatan}
+          <User size={12} /> CS Pelayan
         </span>
       );
     }
@@ -667,7 +646,7 @@ export default function KaryawanPage() {
           fontWeight: 600,
         }}
       >
-        <ShoppingBag size={12} /> {jabatan}
+        <ShoppingBag size={12} /> Kasir
       </span>
     );
   }
@@ -787,21 +766,110 @@ export default function KaryawanPage() {
           <div>
             <h1 className="page-title">Manajemen Karyawan</h1>
             <p className="page-subtitle">
-              {employees.length} mahasiswa &amp; staf terdaftar di Wiramart UNPERBA
+              {isManager
+                ? `${employees.length} mahasiswa & staf terdaftar di Wiramart UNPERBA`
+                : 'Daftar rekan kerja & jadwal shift (Mode Pantau — Tambah/Edit Karyawan wewenang Manager Dosen)'}
             </p>
           </div>
-          <button
-            id="btn-tambah-karyawan"
-            onClick={() => {
-              setEditData(null);
-              setShowModal(true);
-            }}
-            className="btn btn-primary"
-          >
-            <Plus size={16} aria-hidden="true" />
-            Tambah Karyawan
-          </button>
+          {isManager ? (
+            <button
+              id="btn-tambah-karyawan"
+              onClick={() => {
+                setEditData(null);
+                setShowModal(true);
+              }}
+              className="btn btn-primary"
+            >
+              <Plus size={16} aria-hidden="true" />
+              Tambah Karyawan
+            </button>
+          ) : (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 14px',
+                borderRadius: 'var(--radius-md)',
+                background: 'hsl(215 25% 95%)',
+                border: '1px solid hsl(215 20% 85%)',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                color: 'hsl(215 25% 40%)',
+              }}
+              title="Akses Tambah/Edit Karyawan khusus untuk Manager (Dosen)"
+            >
+              <ShieldCheck size={15} color="#64748b" />
+              <span>Mode Pantau Operasional</span>
+            </div>
+          )}
         </div>
+
+        {/* ── BANNER: Admin Shift Belum Punya PIN (Manager Only) ── */}
+        {isManager && (() => {
+          const noPinAdmins = employees.filter(
+            (e) => e.isActive && e.isKetuaShift && !e.hasPin
+          );
+          if (noPinAdmins.length === 0) return null;
+          return (
+            <div
+              role="alert"
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 12,
+                padding: '12px 16px',
+                borderRadius: 'var(--radius-md)',
+                background: 'hsl(38 100% 95%)',
+                border: '1.5px solid hsl(38 90% 70%)',
+                marginBottom: 'var(--space-4)',
+              }}
+            >
+              <AlertTriangle size={18} color="#b45309" style={{ flexShrink: 0, marginTop: 1 }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#92400e', marginBottom: 4 }}>
+                  ⚠️ {noPinAdmins.length} Admin Shift Belum Punya PIN Login
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#78350f', lineHeight: 1.6 }}>
+                  Mereka tidak bisa akses halaman Admin Dashboard sampai PIN diset oleh Manager.
+                  Klik nama untuk edit &amp; set PIN.
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  {noPinAdmins.map((emp) => (
+                    <button
+                      key={emp.id}
+                      type="button"
+                      onClick={() => {
+                        setEditData(emp);
+                        setShowModal(true);
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '4px 10px',
+                        borderRadius: 20,
+                        background: '#fef3c7',
+                        border: '1px solid #f59e0b',
+                        color: '#92400e',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                      title={`Set PIN untuk ${emp.fullName} (NIM: ${emp.nim})`}
+                    >
+                      <Crown size={11} color="#ca8a04" />
+                      {emp.fullName}
+                      <span style={{ fontSize: '0.65rem', color: '#b45309', marginLeft: 2 }}>
+                        · {emp.nim}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Search & Role Filter Bar */}
         <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
@@ -835,7 +903,7 @@ export default function KaryawanPage() {
               <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginRight: 4 }}>
                 <Filter size={13} /> Filter:
               </span>
-              {['Semua', 'Kasir', 'Kepala Kasir', 'Gudang', 'Pelayan'].map((role) => {
+              {['Semua', 'Kasir', 'Gudang', 'CS Pelayan', 'Admin Shift'].map((role) => {
                 const isActive = activeRoleFilter === role;
                 return (
                   <button
@@ -1012,37 +1080,41 @@ export default function KaryawanPage() {
                         )}
                       </td>
                       <td>
-                        <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
-                          {/* Toggle aktif */}
-                          <button
-                            onClick={() => handleToggleActive(emp)}
-                            className="btn btn-ghost btn-sm"
-                            title={emp.isActive ? 'Nonaktifkan' : 'Aktifkan'}
-                            aria-label={`${emp.isActive ? 'Nonaktifkan' : 'Aktifkan'} ${emp.fullName}`}
-                            style={{ color: emp.isActive ? 'var(--color-warning)' : 'var(--color-success)' }}
-                          >
-                            {emp.isActive ? <UserX size={15} /> : <UserCheck size={15} />}
-                          </button>
+                        <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          {/* Toggle aktif — KHUSUS MANAGER */}
+                          {isManager && (
+                            <button
+                              onClick={() => handleToggleActive(emp)}
+                              className="btn btn-ghost btn-sm"
+                              title={emp.isActive ? 'Nonaktifkan' : 'Aktifkan'}
+                              aria-label={`${emp.isActive ? 'Nonaktifkan' : 'Aktifkan'} ${emp.fullName}`}
+                              style={{ color: emp.isActive ? 'var(--color-warning)' : 'var(--color-success)' }}
+                            >
+                              {emp.isActive ? <UserX size={15} /> : <UserCheck size={15} />}
+                            </button>
+                          )}
 
-                          {/* Edit */}
-                          <button
-                            onClick={() => {
-                              setEditData(emp);
-                              setShowModal(true);
-                            }}
-                            className="btn btn-ghost btn-sm"
-                            title="Edit karyawan"
-                            aria-label={`Edit ${emp.fullName}`}
-                          >
-                            <Edit2 size={15} />
-                          </button>
+                          {/* Edit — KHUSUS MANAGER */}
+                          {isManager && (
+                            <button
+                              onClick={() => {
+                                setEditData(emp);
+                                setShowModal(true);
+                              }}
+                              className="btn btn-ghost btn-sm"
+                              title="Edit karyawan"
+                              aria-label={`Edit ${emp.fullName}`}
+                            >
+                              <Edit2 size={15} />
+                            </button>
+                          )}
 
-                          {/* Force Logout — hanya muncul kalau kasir sedang online */}
+                          {/* Force Logout — Kasir Online (Bisa untuk Manager & Admin Shift untuk reset sesi kasir yang nyangkut) */}
                           {emp.activeShiftId && (
                             <button
                               onClick={() => handleResetSesi(emp)}
                               className="btn btn-ghost btn-sm"
-                              title="Force Logout — tutup sesi aktif kasir ini"
+                              title="Force Logout — tutup sesi aktif kasir ini (berguna saat pergantian shift)"
                               aria-label={`Force logout ${emp.fullName}`}
                               disabled={resettingId === emp.id}
                               style={{ color: 'hsl(25 95% 53%)' }}
@@ -1055,21 +1127,30 @@ export default function KaryawanPage() {
                             </button>
                           )}
 
-                          {/* Hapus */}
-                          <button
-                            onClick={() => handleDelete(emp.id, emp.fullName)}
-                            className="btn btn-ghost btn-sm"
-                            title="Hapus karyawan"
-                            aria-label={`Hapus ${emp.fullName}`}
-                            disabled={deletingId === emp.id}
-                            style={{ color: 'var(--color-error)' }}
-                          >
-                            {deletingId === emp.id ? (
-                              <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
-                            ) : (
-                              <Trash2 size={15} />
-                            )}
-                          </button>
+                          {/* Hapus — KHUSUS MANAGER */}
+                          {isManager && (
+                            <button
+                              onClick={() => handleDelete(emp.id, emp.fullName)}
+                              className="btn btn-ghost btn-sm"
+                              title="Hapus karyawan"
+                              aria-label={`Hapus ${emp.fullName}`}
+                              disabled={deletingId === emp.id}
+                              style={{ color: 'var(--color-error)' }}
+                            >
+                              {deletingId === emp.id ? (
+                                <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
+                              ) : (
+                                <Trash2 size={15} />
+                              )}
+                            </button>
+                          )}
+
+                          {/* Jika bukan manager dan kasir tidak online, tampilkan tanda strip read-only */}
+                          {!isManager && !emp.activeShiftId && (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontStyle: 'italic', padding: '0 6px' }}>
+                              —
+                            </span>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1081,7 +1162,7 @@ export default function KaryawanPage() {
         </div>
 
         {/* Modal Tambah / Edit */}
-        {showModal && (
+        {showModal && isManager && (
           <KaryawanModal
             editData={editData}
             onClose={() => setShowModal(false)}

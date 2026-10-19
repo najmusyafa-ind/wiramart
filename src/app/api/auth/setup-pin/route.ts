@@ -1,7 +1,7 @@
 // =============================================================
 // POST /api/auth/setup-pin — Setup PIN Baru untuk Admin Kasir / Admin Shift
 // Body: { nim: string, pin: string }
-// Digunakan saat Admin Shift / Kepala Admin pertama kali membuat PIN 6-digit
+// Digunakan saat Admin Shift / Kepala Admin pertama kali membuat PIN 8-digit
 // =============================================================
 
 import { z } from 'zod';
@@ -136,7 +136,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const response = NextResponse.json({
     success: true,
-    message: `PIN 6-digit berhasil dibuat untuk ${employee.fullName}. Selamat bertugas!`,
+    message: `PIN berhasil dibuat untuk ${employee.fullName}. Selamat bertugas!`,
     data: {
       role: 'admin',
       adminRole,

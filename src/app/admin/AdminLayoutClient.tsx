@@ -3,8 +3,24 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, createContext, useContext } from 'react';
 import MobileBottomNav from './MobileBottomNav';
+
+export interface AdminContextValue {
+  adminName: string;
+  adminRole: 'MANAGER' | 'ADMIN_SHIFT';
+  isManager: boolean;
+}
+
+export const AdminContext = createContext<AdminContextValue>({
+  adminName: 'Admin',
+  adminRole: 'ADMIN_SHIFT',
+  isManager: false,
+});
+
+export function useAdmin() {
+  return useContext(AdminContext);
+}
 import {
   LayoutDashboard,
   Package,
@@ -23,6 +39,10 @@ import {
   ArrowLeftRight,
   QrCode,
   Boxes,
+  ShieldCheck,
+  UserCheck,
+  Clock,
+  Sparkles,
 } from 'lucide-react';
 
 type NavItem = {
@@ -51,6 +71,13 @@ const NAV_ITEMS: NavItem[] = [
     href: '/kasir/gudang',
     icon: <Boxes size={18} aria-hidden="true" />,
     section: 'Menu Utama',
+  },
+  {
+    label: 'Persetujuan Barang Masuk',
+    href: '/admin/gudang-approval',
+    icon: <ShieldCheck size={18} aria-hidden="true" />,
+    section: 'Menu Utama',
+    managerOnly: true,
   },
   {
     label: 'Restock Barcode',
@@ -356,7 +383,61 @@ export default function AdminLayoutClient({
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => { setMounted(true); }, []);
+  // ── State Manager on Duty (MOD — Wiramart v3.0) ─────────────
+  const [modStatus, setModStatus] = useState<{
+    isCheckedIn: boolean;
+    isCheckedOut: boolean;
+    managerId: string | null;
+    managerName: string | null;
+    checkedInAt: string | null;
+    notes: string | null;
+  } | null>(null);
+  const [isModModalOpen, setIsModModalOpen] = useState(false);
+  const [modNotesInput, setModNotesInput] = useState('');
+  const [isSubmittingMod, setIsSubmittingMod] = useState(false);
+
+  async function fetchModStatus() {
+    try {
+      const res = await fetch('/api/admin/duty');
+      const json = await res.json();
+      if (res.ok && json.success && json.data?.today) {
+        setModStatus(json.data.today);
+      }
+    } catch {
+      // silent
+    }
+  }
+
+  useEffect(() => {
+    setMounted(true);
+    fetchModStatus();
+  }, []);
+
+  async function handleToggleMod(action: 'CHECK_IN' | 'CHECK_OUT') {
+    setIsSubmittingMod(true);
+    try {
+      const res = await fetch('/api/admin/duty', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          notes: modNotesInput.trim() || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setIsModModalOpen(false);
+        setModNotesInput('');
+        fetchModStatus();
+      } else {
+        alert(json.error ?? 'Gagal memproses sesi Manager on Duty.');
+      }
+    } catch {
+      alert('Terjadi kesalahan jaringan.');
+    } finally {
+      setIsSubmittingMod(false);
+    }
+  }
 
   // ── Idle session timeout (30 menit) ──────────────────────
   // Tidak ada JSX baru — zero impact ke SSR tree
@@ -441,8 +522,18 @@ export default function AdminLayoutClient({
     return () => document.removeEventListener('keydown', handler);
   }, []);
 
+  const adminContextValue = useMemo<AdminContextValue>(
+    () => ({
+      adminName,
+      adminRole,
+      isManager: adminRole === 'MANAGER',
+    }),
+    [adminName, adminRole]
+  );
+
   return (
-    <div className="layout-admin">
+    <AdminContext.Provider value={adminContextValue}>
+      <div className="layout-admin">
 
 
       {/* Backdrop overlay — mobile only, saat sidebar terbuka */}
@@ -519,6 +610,67 @@ export default function AdminLayoutClient({
                 <Wrench size={16} aria-hidden="true" />
               </a>
             )}
+            {/* ── MANAGER ON DUTY (MOD) BADGE & QUICK TRIGGER ── */}
+            {modStatus?.isCheckedIn ? (
+              <button
+                id="btn-mod-header"
+                type="button"
+                onClick={() => setIsModModalOpen(true)}
+                title="Klik untuk detail Manager on Duty hari ini"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '3px 10px',
+                  borderRadius: 999,
+                  background: '#f0fdf4',
+                  border: '1px solid #86efac',
+                  color: '#15803d',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e' }} />
+                <span>Aktif: {modStatus.managerName}</span>
+              </button>
+            ) : adminRole === 'MANAGER' ? (
+              <button
+                id="btn-mod-header"
+                type="button"
+                onClick={() => setIsModModalOpen(true)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '3px 10px',
+                  borderRadius: 999,
+                  background: '#fef3c7',
+                  border: '1px solid #f59e0b',
+                  color: '#b45309',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                <Sparkles size={12} color="#d97706" />
+                <span>Mulai Sesi Kerja</span>
+              </button>
+            ) : (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: '#94a3b8',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                }}
+              >
+                Sesi Kerja: Belum Mulai
+              </span>
+            )}
+
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span
                 style={{
@@ -546,6 +698,180 @@ export default function AdminLayoutClient({
           </div>
         </header>
 
+        {/* ── MODAL SESI MANAGER ON DUTY (MOD) ── */}
+        {isModModalOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(15, 23, 42, 0.7)',
+              backdropFilter: 'blur(4px)',
+              zIndex: 2000,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 16,
+            }}
+            onClick={() => !isSubmittingMod && setIsModModalOpen(false)}
+          >
+            <div
+              style={{
+                backgroundColor: '#ffffff',
+                borderRadius: 16,
+                maxWidth: 440,
+                width: '100%',
+                padding: '22px 20px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 16,
+                boxShadow: '0 25px 30px -5px rgba(0,0,0,0.25)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: 10,
+                      background: '#fef3c7',
+                      color: '#d97706',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <UserCheck size={22} />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>
+                      Sesi Kerja Hari Ini
+                    </h3>
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b' }}>
+                      Penanggung jawab operasional harian Wiramart.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsModModalOpen(false)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {modStatus?.isCheckedIn ? (
+                <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: 10, fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div>
+                    <span style={{ color: '#64748b' }}>Manager Bertugas: </span>
+                    <strong style={{ color: '#0f172a' }}>{modStatus.managerName}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b' }}>Jam Mulai Tugas: </span>
+                    <strong style={{ color: '#0f172a' }}>
+                      {modStatus.checkedInAt ? new Date(modStatus.checkedInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'} WIB
+                    </strong>
+                  </div>
+                  {modStatus.notes && (
+                    <div>
+                      <span style={{ color: '#64748b' }}>Catatan Tugas: </span>
+                      <span style={{ color: '#334155' }}>&quot;{modStatus.notes}&quot;</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ background: '#fffbeb', border: '1px solid #fef3c7', padding: '12px 14px', borderRadius: 10, fontSize: '0.8rem', color: '#92400e' }}>
+                  Belum ada Manager yang memulai sesi kerja hari ini. Klik tombol di bawah untuk memulai sesi agar bisa menyetujui barang masuk dan diskon FEFO.
+                </div>
+              )}
+
+              {adminRole === 'MANAGER' && !modStatus?.isCheckedIn && (
+                <div>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: 4 }}>
+                    Catatan Sesi Hari Ini (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    value={modNotesInput}
+                    onChange={(e) => setModNotesInput(e.target.value)}
+                    placeholder="Contoh: Piket pagi s/d sore, fokus audit stok snack."
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      fontSize: '0.8rem',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => setIsModModalOpen(false)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 8,
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Tutup
+                </button>
+
+                {adminRole === 'MANAGER' && (
+                  modStatus?.isCheckedIn ? (
+                    <button
+                      type="button"
+                      disabled={isSubmittingMod}
+                      onClick={() => handleToggleMod('CHECK_OUT')}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: 8,
+                        border: '1px solid #fecaca',
+                        background: '#fef2f2',
+                        color: '#dc2626',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {isSubmittingMod ? 'Memproses...' : 'Akhiri Sesi Kerja Hari Ini'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isSubmittingMod}
+                      onClick={() => handleToggleMod('CHECK_IN')}
+                      style={{
+                        padding: '8px 18px',
+                        borderRadius: 8,
+                        border: 'none',
+                        background: '#d97706',
+                        color: '#ffffff',
+                        fontSize: '0.8rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {isSubmittingMod ? 'Memproses...' : 'Mulai Sesi Kerja Sekarang'}
+                    </button>
+                  )
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <main className="layout-content" id="main-content">
           {children}
         </main>
@@ -555,5 +881,6 @@ export default function AdminLayoutClient({
           Dibungkus mounted guard agar tidak ada hydration mismatch. */}
       {mounted && <MobileBottomNav adminRole={adminRole} />}
     </div>
+    </AdminContext.Provider>
   );
 }

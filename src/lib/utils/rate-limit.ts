@@ -195,3 +195,24 @@ export const swapRequestLimiter = createRateLimiter(
   3,
   7 * 24 * 60 * 60 * 1000, // 7 hari
 );
+
+/**
+ * Submit Draft Penerimaan Barang: 10 submit / 24 jam / per employee
+ * Mencegah spam pembuatan draft barang masuk yang belum siap atau flood attack.
+ */
+export const stockSubmitLimiter = createRateLimiter(
+  'stock:submit',
+  10,
+  24 * 60 * 60 * 1000, // 24 jam
+);
+
+/**
+ * Submit Laporan Kondisi FEFO: 50 submit / 24 jam / per employee
+ * Cukup fleksibel untuk pelaporan banyak batch sekaligus namun mencegah automated abuse.
+ */
+export const conditionReportLimiter = createRateLimiter(
+  'condition:report',
+  50,
+  24 * 60 * 60 * 1000, // 24 jam
+);
+
