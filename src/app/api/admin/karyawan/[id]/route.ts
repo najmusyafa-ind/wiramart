@@ -22,6 +22,7 @@ const PatchSchema = z.object({
   isActive: z.boolean().optional(),
   isKetuaShift: z.boolean().optional(),
   pin: z.string().regex(/^\d{6,8}$/, 'PIN harus 6 hingga 8 digit angka').optional(),
+  deletePin: z.boolean().optional(),
 });
 
 // ── PATCH: update karyawan (Manager Dosen Only — Cacat 6 Opsi A) ─────────────────
@@ -38,7 +39,7 @@ export async function PATCH(req: NextRequest, ctx: Context) {
 
     // Pastikan karyawan exist & belum dihapus
     const [existing] = await db
-      .select({ id: employees.id })
+      .select({ id: employees.id, pinHash: employees.pinHash })
       .from(employees)
       .where(and(eq(employees.id, id), isNull(employees.deletedAt)))
       .limit(1);
@@ -79,7 +80,14 @@ export async function PATCH(req: NextRequest, ctx: Context) {
       }
     }
 
-    // Jika manager menyetel/mereset PIN 6 digit
+    // Jika manager meminta menghapus PIN
+    if (parsed.data.deletePin === true) {
+      updateData.pinHash = null;
+      updateData.pinFailedAttempts = 0;
+      updateData.pinLockedUntil = null;
+    }
+
+    // Jika manager menyetel/mereset PIN 6-8 digit
     if (parsed.data.pin) {
       const hashedPin = await bcrypt.hash(parsed.data.pin, 10);
       updateData.pinHash = hashedPin;
@@ -100,9 +108,32 @@ export async function PATCH(req: NextRequest, ctx: Context) {
         jabatan: employees.jabatan,
         isKetuaShift: employees.isKetuaShift,
         isActive: employees.isActive,
+        pinHash: employees.pinHash,
       });
 
-    return apiOk(updated);
+    // CISO Guard: Catat audit logs jika ada manipulasi PIN
+    if (parsed.data.pin || parsed.data.deletePin) {
+      await db.insert(auditLogs).values({
+        tableName: 'employees',
+        recordId: id,
+        action: 'UPDATE',
+        oldValues: JSON.stringify({ action: 'PIN_OPERATION', hadPin: !!existing.pinHash }),
+        newValues: JSON.stringify({ action: parsed.data.deletePin ? 'PIN_DELETED' : 'PIN_UPDATED' }),
+        actorType: 'ADMIN',
+        actorId: manager.sub,
+      });
+    }
+
+    return apiOk({
+      id: updated.id,
+      fullName: updated.fullName,
+      nim: updated.nim,
+      programStudi: updated.programStudi,
+      jabatan: updated.jabatan,
+      isKetuaShift: updated.isKetuaShift,
+      isActive: updated.isActive,
+      hasPin: !!updated.pinHash,
+    });
   } catch (err) {
     if (err instanceof AppError) {
       return apiError(err.message, err.statusCode);

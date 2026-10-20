@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useId, useCallback } from 'react';
+import { useState, useEffect, useId, useCallback, useRef } from 'react';
 import {
   Plus,
   Search,
@@ -21,6 +21,9 @@ import {
   User,
   Filter,
   ShieldCheck,
+  Key,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useAdmin } from '../AdminLayoutClient';
 
@@ -80,16 +83,22 @@ function KaryawanModal({
   onClose,
   onSuccess,
   editData,
+  initialFocusPin = false,
 }: {
   onClose: () => void;
   onSuccess: () => void;
   editData?: Employee | null;
+  initialFocusPin?: boolean;
 }) {
   const uid = useId();
   const isEdit = !!editData;
+  const pinInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [slotAssignError, setSlotAssignError] = useState('');
+  const [pin, setPin] = useState('');
+  const [showPin, setShowPin] = useState(false);
+  const [deletePin, setDeletePin] = useState(false);
   const [form, setForm] = useState({
     fullName: editData?.fullName ?? '',
     nim: editData?.nim ?? '',
@@ -97,6 +106,15 @@ function KaryawanModal({
     jabatan: editData?.jabatan ?? 'Kasir',
     isActive: editData?.isActive ?? true,
   });
+
+  useEffect(() => {
+    if (initialFocusPin) {
+      const t = setTimeout(() => {
+        pinInputRef.current?.focus();
+      }, 150);
+      return () => clearTimeout(t);
+    }
+  }, [initialFocusPin]);
 
   // Slot picker — aktif untuk Tambah MAUPUN Edit
   const [slots, setSlots] = useState<SlotOption[]>([]);
@@ -164,22 +182,44 @@ function KaryawanModal({
     setSlotAssignError('');
 
     try {
-      // Otomatis tandai isKetuaShift jika jabatannya adalah Admin Shift
-      const isKetuaShiftCalc = form.jabatan === 'Admin Shift';
+      const trimmedPin = pin.trim();
+      if (trimmedPin) {
+        if (!/^\d{6,8}$/.test(trimmedPin)) {
+          setError('PIN harus berupa 6 hingga 8 digit angka murni.');
+          setLoading(false);
+          return;
+        }
+      } else if (!isEdit && form.jabatan === 'Admin Shift') {
+        setError('Karyawan dengan jabatan Admin Shift wajib diberikan PIN login 6–8 digit.');
+        setLoading(false);
+        return;
+      }
+
+      // Otomatis tandai isKetuaShift jika jabatannya adalah Admin Shift atau jika PIN diset
+      const isKetuaShiftCalc =
+        form.jabatan === 'Admin Shift' || (deletePin ? false : !!trimmedPin || !!editData?.isKetuaShift);
+
+      const payload: Record<string, unknown> = {
+        fullName: form.fullName.trim(),
+        nim: form.nim.trim().toUpperCase(),
+        programStudi: form.programStudi,
+        jabatan: form.jabatan,
+        isActive: form.isActive,
+        isKetuaShift: isKetuaShiftCalc,
+      };
+
+      if (deletePin) {
+        payload.deletePin = true;
+      } else if (trimmedPin) {
+        payload.pin = trimmedPin;
+      }
 
       const res = await fetch(
         isEdit ? `/api/admin/karyawan/${editData!.id}` : '/api/admin/karyawan',
         {
           method: isEdit ? 'PATCH' : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fullName: form.fullName.trim(),
-            nim: form.nim.trim().toUpperCase(),
-            programStudi: form.programStudi,
-            jabatan: form.jabatan,
-            isActive: form.isActive,
-            isKetuaShift: isKetuaShiftCalc,
-          }),
+          body: JSON.stringify(payload),
         },
       );
 
@@ -448,6 +488,196 @@ function KaryawanModal({
               )}
             </div>
 
+            {/* ── Kelola PIN Otorisasi Shift & Admin ── */}
+            <div
+              style={{
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+                padding: 'var(--space-3) var(--space-4)',
+                background: 'hsl(215 25% 98%)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-3)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Key size={15} color="var(--color-primary)" />
+                  <label htmlFor={`${uid}-pin`} className="form-label" style={{ marginBottom: 0, fontWeight: 700 }}>
+                    PIN Otorisasi Shift (6–8 Digit)
+                  </label>
+                </div>
+
+                {isEdit && (
+                  <div>
+                    {deletePin ? (
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          background: 'hsl(0 75% 93%)',
+                          color: 'hsl(0 70% 35%)',
+                          border: '1px solid hsl(0 75% 80%)',
+                          padding: '2px 8px',
+                          borderRadius: '999px',
+                          fontWeight: 700,
+                        }}
+                      >
+                        Akan Dihapus
+                      </span>
+                    ) : editData?.hasPin ? (
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          background: 'hsl(142 60% 92%)',
+                          color: 'hsl(142 60% 28%)',
+                          border: '1px solid hsl(142 60% 75%)',
+                          padding: '2px 8px',
+                          borderRadius: '999px',
+                          fontWeight: 700,
+                        }}
+                      >
+                        🔑 PIN Terpasang
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          background: 'hsl(38 95% 92%)',
+                          color: 'hsl(38 90% 30%)',
+                          border: '1px solid hsl(38 90% 75%)',
+                          padding: '2px 8px',
+                          borderRadius: '999px',
+                          fontWeight: 700,
+                        }}
+                      >
+                        ⚠️ Belum Ada PIN
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {deletePin ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    background: 'hsl(0 75% 96%)',
+                    border: '1px dashed hsl(0 70% 75%)',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                >
+                  <span style={{ fontSize: '0.78rem', color: 'hsl(0 70% 35%)', fontWeight: 600 }}>
+                    🗑️ PIN karyawan ini akan dicabut saat disimpan.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setDeletePin(false)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--color-primary)',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    Batalkan
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <input
+                        ref={pinInputRef}
+                        id={`${uid}-pin`}
+                        type={showPin ? 'text' : 'password'}
+                        className="form-input"
+                        placeholder={
+                          isEdit && editData?.hasPin
+                            ? 'Ketik di sini jika ingin mengganti PIN...'
+                            : 'Ketik 6–8 digit angka baru...'
+                        }
+                        value={pin}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, '').slice(0, 8);
+                          setPin(val);
+                        }}
+                        maxLength={8}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        disabled={loading}
+                        style={{
+                          fontFamily: pin ? 'var(--font-mono)' : 'inherit',
+                          letterSpacing: pin && !showPin ? '0.25em' : 'normal',
+                          paddingRight: 40,
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPin(!showPin)}
+                        aria-label={showPin ? 'Sembunyikan PIN' : 'Lihat PIN'}
+                        style={{
+                          position: 'absolute',
+                          right: 8,
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: 'var(--color-text-muted)',
+                          padding: 4,
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+
+                    {isEdit && editData?.hasPin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeletePin(true);
+                          setPin('');
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '8px 12px',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid hsl(0 75% 80%)',
+                          background: 'hsl(0 75% 96%)',
+                          color: 'hsl(0 70% 35%)',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                          transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+                        }}
+                        title="Hapus / cabut PIN dari karyawan ini"
+                      >
+                        <Trash2 size={13} />
+                        Hapus PIN
+                      </button>
+                    )}
+                  </div>
+
+                  <p style={{ fontSize: '0.73rem', color: 'var(--color-text-muted)', margin: 0 }}>
+                    {form.jabatan === 'Admin Shift'
+                      ? '⚠️ Admin Shift wajib memiliki PIN 6–8 digit angka untuk login ke Dashboard Manajemen.'
+                      : 'ℹ️ Digunakan untuk otorisasi shift kasir dan void. Biarkan kosong jika tidak ingin mengubah.'}
+                  </p>
+                </>
+              )}
+            </div>
+
             {/* Tombol Aksi */}
             <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', paddingTop: 'var(--space-2)' }}>
               <button type="button" onClick={onClose} className="btn btn-secondary" disabled={loading}>
@@ -480,6 +710,7 @@ export default function KaryawanPage() {
   const [search, setSearch] = useState('');
   const [activeRoleFilter, setActiveRoleFilter] = useState<string>('Semua');
   const [showModal, setShowModal] = useState(false);
+  const [focusPin, setFocusPin] = useState(false);
   const [editData, setEditData] = useState<Employee | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -776,6 +1007,7 @@ export default function KaryawanPage() {
               id="btn-tambah-karyawan"
               onClick={() => {
                 setEditData(null);
+                setFocusPin(false);
                 setShowModal(true);
               }}
               className="btn btn-primary"
@@ -841,6 +1073,7 @@ export default function KaryawanPage() {
                       type="button"
                       onClick={() => {
                         setEditData(emp);
+                        setFocusPin(true);
                         setShowModal(true);
                       }}
                       style={{
@@ -957,6 +1190,7 @@ export default function KaryawanPage() {
                     <th scope="col">NIM</th>
                     <th scope="col">Program Studi</th>
                     <th scope="col">Jabatan</th>
+                    <th scope="col">PIN Shift</th>
                     <th scope="col">Jadwal Shift</th>
                     <th scope="col">Status</th>
                     <th scope="col">Sesi Kasir</th>
@@ -974,6 +1208,48 @@ export default function KaryawanPage() {
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{emp.nim}</td>
                       <td className="allow-wrap">{emp.programStudi}</td>
                       <td>{renderJabatanBadge(emp.jabatan)}</td>
+                      {/* PIN Shift Status */}
+                      <td>
+                        {emp.hasPin ? (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              background: 'hsl(142 70% 45% / 0.12)',
+                              color: 'hsl(142 60% 32%)',
+                              padding: '2px 8px',
+                              borderRadius: '999px',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            <Key size={11} /> Aktif
+                          </span>
+                        ) : emp.jabatan.toLowerCase().includes('admin') || emp.isKetuaShift ? (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              background: 'hsl(38 95% 50% / 0.15)',
+                              color: 'hsl(38 90% 30%)',
+                              padding: '2px 8px',
+                              borderRadius: '999px',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            <AlertTriangle size={11} /> Belum Ada
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                            —
+                          </span>
+                        )}
+                      </td>
                       <td>
                         {emp.allShifts && emp.allShifts.length > 0 ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1094,11 +1370,29 @@ export default function KaryawanPage() {
                             </button>
                           )}
 
+                          {/* Kelola PIN — KHUSUS MANAGER */}
+                          {isManager && (
+                            <button
+                              onClick={() => {
+                                setEditData(emp);
+                                setFocusPin(true);
+                                setShowModal(true);
+                              }}
+                              className="btn btn-ghost btn-sm"
+                              title={emp.hasPin ? 'Ganti / Hapus PIN Shift' : 'Pasang PIN Shift Baru'}
+                              aria-label={`Kelola PIN untuk ${emp.fullName}`}
+                              style={{ color: emp.hasPin ? 'var(--color-primary)' : 'hsl(38 95% 45%)' }}
+                            >
+                              <Key size={15} />
+                            </button>
+                          )}
+
                           {/* Edit — KHUSUS MANAGER */}
                           {isManager && (
                             <button
                               onClick={() => {
                                 setEditData(emp);
+                                setFocusPin(false);
                                 setShowModal(true);
                               }}
                               className="btn btn-ghost btn-sm"
@@ -1165,7 +1459,11 @@ export default function KaryawanPage() {
         {showModal && isManager && (
           <KaryawanModal
             editData={editData}
-            onClose={() => setShowModal(false)}
+            initialFocusPin={focusPin}
+            onClose={() => {
+              setShowModal(false);
+              setFocusPin(false);
+            }}
             onSuccess={() => fetchEmployees(search)}
           />
         )}
