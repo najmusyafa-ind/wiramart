@@ -10,9 +10,20 @@ import { and, gte, lte, inArray, desc, eq, lt, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { attendances, transactions, shifts } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { z } from 'zod';
 import { resolveReportRange, getFinancialReport, type PeriodKey } from '@/lib/finance/report';
 
 export const runtime = 'nodejs';
+
+const BagiHasilQuerySchema = z.object({
+  period: z.enum(['daily', 'weekly', 'monthly', 'all']).optional(),
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal YYYY-MM-DD').optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal YYYY-MM-DD').optional(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal YYYY-MM-DD').optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal YYYY-MM-DD').optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal YYYY-MM-DD').optional(),
+  month: z.string().regex(/^\d{4}-\d{2}$/, 'Format bulan YYYY-MM').optional(),
+});
 
 export async function GET(req: NextRequest): Promise<Response> {
   const session = await verifyJwt(req);
@@ -24,10 +35,24 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   const { searchParams } = new URL(req.url);
-  const periodParam = searchParams.get('period') as PeriodKey | null;
-  const dateFromParam = searchParams.get('dateFrom') || searchParams.get('startDate') || searchParams.get('date');
-  const dateToParam = searchParams.get('dateTo') || searchParams.get('endDate') || searchParams.get('date');
-  const monthParam = searchParams.get('month'); // 'YYYY-MM'
+  const rawParams: Record<string, string> = {};
+  searchParams.forEach((val, key) => {
+    if (val) rawParams[key] = val;
+  });
+
+  const parsed = BagiHasilQuerySchema.safeParse(rawParams);
+  if (!parsed.success) {
+    return apiError(
+      `Parameter tidak valid: ${parsed.error.issues.map((i) => i.message).join(', ')}`,
+      400
+    );
+  }
+
+  const { period, dateFrom, dateTo, startDate, endDate, date, month } = parsed.data;
+  const periodParam = (period as PeriodKey) || null;
+  const dateFromParam = dateFrom || startDate || date;
+  const dateToParam = dateTo || endDate || date;
+  const monthParam = month; // 'YYYY-MM'
 
   try {
     let effectiveDateFrom = dateFromParam;

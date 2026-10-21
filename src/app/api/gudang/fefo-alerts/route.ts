@@ -12,7 +12,18 @@ import {
 } from '@/lib/services/fefoAlertService';
 import { AppError } from '@/lib/utils/helpers';
 
+import { z } from 'zod';
+
 export const runtime = 'nodejs';
+
+const FefoAlertsQuerySchema = z.object({
+  scan: z.enum(['true', 'false']).optional(),
+  status: z.string().max(50).optional(),
+  alertLevel: z.string().max(20).optional(),
+  search: z.string().max(100).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
 
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
@@ -21,12 +32,21 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const triggerScan = searchParams.get('scan') === 'true';
-  const status = searchParams.get('status') || undefined;
-  const alertLevel = searchParams.get('alertLevel') || undefined;
-  const search = searchParams.get('search') || undefined;
-  const page = parseInt(searchParams.get('page') || '1', 10);
-  const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
+  const rawParams: Record<string, string> = {};
+  searchParams.forEach((val, key) => {
+    if (val) rawParams[key] = val;
+  });
+
+  const parsed = FefoAlertsQuerySchema.safeParse(rawParams);
+  if (!parsed.success) {
+    return apiError(
+      `Parameter tidak valid: ${parsed.error.issues.map((i) => i.message).join(', ')}`,
+      400
+    );
+  }
+
+  const { scan, status, alertLevel, search, page, limit } = parsed.data;
+  const triggerScan = scan === 'true';
 
   try {
     let scanMeta = undefined;

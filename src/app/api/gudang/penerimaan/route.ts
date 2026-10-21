@@ -9,11 +9,18 @@ import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import {
   createStockReceiveDraft,
   getStockReceiveDrafts,
+  CreateStockReceiveDraftSchema,
 } from '@/lib/services/stockReceiveService';
 import { AppError } from '@/lib/utils/helpers';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 
 export const runtime = 'nodejs';
+
+const GetPenerimaanQuerySchema = z.object({
+  status: z.string().max(50).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
 
 // ── GET: Ambil Daftar Penerimaan Barang ─────────────────────────
 export async function GET(req: NextRequest) {
@@ -23,9 +30,20 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const status = searchParams.get('status') || undefined;
-  const page = parseInt(searchParams.get('page') || '1', 10);
-  const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 100);
+  const rawParams: Record<string, string> = {};
+  searchParams.forEach((val, key) => {
+    if (val) rawParams[key] = val;
+  });
+
+  const parsed = GetPenerimaanQuerySchema.safeParse(rawParams);
+  if (!parsed.success) {
+    return apiError(
+      `Parameter tidak valid: ${parsed.error.issues.map((i) => i.message).join(', ')}`,
+      400
+    );
+  }
+
+  const { status, page, limit } = parsed.data;
 
   // Zero-Trust IDOR Protection:
   // Karyawan hanya bisa melihat draft milik sendiri. Admin/Manager bisa melihat semua antrian.
@@ -55,7 +73,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const result = await createStockReceiveDraft(payload.sub, body);
+    const validatedBody = CreateStockReceiveDraftSchema.parse(body);
+    const result = await createStockReceiveDraft(payload.sub, validatedBody);
     return apiOk(result, 201);
   } catch (error) {
     if (error instanceof ZodError) {
