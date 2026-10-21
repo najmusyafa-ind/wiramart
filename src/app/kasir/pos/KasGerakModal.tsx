@@ -30,6 +30,7 @@ interface KasGerakModalProps {
 }
 
 const CATEGORIES_OUT = [
+  { value: 'TITIPAN_MAKANAN', label: '🍱 Titipan Makanan / Beli Lepas', desc: 'Bayar titipan kue/snack supplier' },
   { value: 'KONSUMSI_GALON', label: '🚰 Galon / Konsumsi', desc: 'Beli air galon toko' },
   { value: 'BENSIN',         label: '🛵 Bensin & Transport', desc: 'Bensin motor / kurir toko' },
   { value: 'ATK_KRESEK',     label: '📦 Kresek & ATK',      desc: 'Plastik kresek, lakban, kertas' },

@@ -19,12 +19,17 @@ import {
   Receipt,
   Wallet,
   Users,
+  Users2,
   ArrowLeftRight,
   Lock,
+  Boxes,
 } from 'lucide-react';
 import RekapHarian from './RekapHarian';
 import BiayaOperasionalPanel from './BiayaOperasionalPanel';
 import TutupBukuModal from './TutupBukuModal';
+import LaporanMutasiStokSection from './LaporanMutasiStokSection';
+import RekapKasir from './RekapKasir';
+import RekapShift from './RekapShift';
 import {
   EXPENSE_CATEGORY_LABEL,
   formatRupiah,
@@ -321,6 +326,7 @@ function VoidModal({ transaction, onClose, onSuccess }: VoidModalProps) {
 // ─────────────────────────────────────────────────────────────
 export default function LaporanPage() {
   const uid = useId();
+  const [mainTab, setMainTab] = useState<'finansial' | 'mutasi_stok' | 'rekap_kasir' | 'rekap_shift'>('finansial');
   const [period, setPeriod] = useState<PeriodKey>('daily');
   const [data, setData] = useState<LaporanData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -329,6 +335,17 @@ export default function LaporanPage() {
   const [exportHarianLoading, setExportHarianLoading] = useState(false);
   const [voidTarget, setVoidTarget] = useState<RecentTransaction | null>(null);
   const [showTutupBuku, setShowTutupBuku] = useState(false);
+
+  // Sync tab jika dibuka via query parameter ?tab=mutasi_stok
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const tabParam = urlParams.get('tab');
+      if (tabParam === 'mutasi' || tabParam === 'mutasi_stok') {
+        setMainTab('mutasi_stok');
+      }
+    }
+  }, []);
 
   const fetchData = useCallback(async (p: PeriodKey, silent = false) => {
     if (!silent) setLoading(true);
@@ -787,8 +804,122 @@ export default function LaporanPage() {
           </div>
         </div>
 
-        {/* Period selector */}
-        <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
+        {/* ─── TAB SWITCHER: Laporan Finansial vs Mutasi Stok Gudang ─── */}
+        <div
+          role="tablist"
+          aria-label="Pilih Jenis Laporan"
+          style={{
+            display: 'flex',
+            gap: 8,
+            marginBottom: 'var(--space-5)',
+            borderBottom: '2px solid var(--color-border)',
+            paddingBottom: 2,
+          }}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mainTab === 'finansial'}
+            onClick={() => setMainTab('finansial')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 20px',
+              borderRadius: '8px 8px 0 0',
+              border: 'none',
+              borderBottom: mainTab === 'finansial' ? '3px solid #166534' : '3px solid transparent',
+              background: mainTab === 'finansial' ? '#f0fdf4' : 'transparent',
+              color: mainTab === 'finansial' ? '#166534' : 'var(--color-text-muted)',
+              fontWeight: mainTab === 'finansial' ? 700 : 500,
+              fontSize: '0.88rem',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <BarChart3 size={16} /> Laporan Finansial &amp; Kasir
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mainTab === 'mutasi_stok'}
+            onClick={() => setMainTab('mutasi_stok')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 20px',
+              borderRadius: '8px 8px 0 0',
+              border: 'none',
+              borderBottom: mainTab === 'mutasi_stok' ? '3px solid #0284c7' : '3px solid transparent',
+              background: mainTab === 'mutasi_stok' ? '#e0f2fe' : 'transparent',
+              color: mainTab === 'mutasi_stok' ? '#0369a1' : 'var(--color-text-muted)',
+              fontWeight: mainTab === 'mutasi_stok' ? 700 : 500,
+              fontSize: '0.88rem',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Boxes size={16} /> Mutasi Stok Gudang (Buku Stok)
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mainTab === 'rekap_kasir'}
+            onClick={() => setMainTab('rekap_kasir')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 20px',
+              borderRadius: '8px 8px 0 0',
+              border: 'none',
+              borderBottom: mainTab === 'rekap_kasir' ? '3px solid #7c3aed' : '3px solid transparent',
+              background: mainTab === 'rekap_kasir' ? '#f5f3ff' : 'transparent',
+              color: mainTab === 'rekap_kasir' ? '#6d28d9' : 'var(--color-text-muted)',
+              fontWeight: mainTab === 'rekap_kasir' ? 700 : 500,
+              fontSize: '0.88rem',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Users2 size={16} /> Rekap Kasir
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mainTab === 'rekap_shift'}
+            onClick={() => setMainTab('rekap_shift')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 20px',
+              borderRadius: '8px 8px 0 0',
+              border: 'none',
+              borderBottom: mainTab === 'rekap_shift' ? '3px solid #6366f1' : '3px solid transparent',
+              background: mainTab === 'rekap_shift' ? '#eef2ff' : 'transparent',
+              color: mainTab === 'rekap_shift' ? '#4338ca' : 'var(--color-text-muted)',
+              fontWeight: mainTab === 'rekap_shift' ? 700 : 500,
+              fontSize: '0.88rem',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <TrendingUp size={16} /> Rekap Per Shift
+          </button>
+        </div>
+
+        {mainTab === 'rekap_kasir' ? (
+          <RekapKasir />
+        ) : mainTab === 'mutasi_stok' ? (
+          <LaporanMutasiStokSection />
+        ) : mainTab === 'rekap_shift' ? (
+          <RekapShift />
+        ) : (
+          <>
+            {/* Period selector */}
+            <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
           <div className="card-body" style={{ padding: 'var(--space-3) var(--space-4)' }}>
             <div
               role="group"
@@ -1541,6 +1672,8 @@ export default function LaporanPage() {
             </div>
           </>
         ) : null}
+          </>
+        )}
       </div>
     </>
   );

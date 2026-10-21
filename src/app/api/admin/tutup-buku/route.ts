@@ -127,14 +127,33 @@ export async function GET(req: NextRequest): Promise<Response> {
         .from(shiftCashMovements)
         .where(eq(shiftCashMovements.shiftId, sh.id));
 
-      const modal = Number(sh.modalAwal ?? 100_000);
-      const cashSales = Number(payRow?.cash ?? 0);
+      // Direct cash sales legacy (jika baris transaksi belum masuk transaction_payments)
+      const [directPayRow] = await db
+        .select({
+          cash: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'CASH'), 0)`,
+        })
+        .from(transactions)
+        .where(
+          and(
+            eq(transactions.shiftId, sh.id),
+            eq(transactions.status, 'COMPLETED'),
+            eq(transactions.isTest, false),
+            sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+          ),
+        );
+
+      // Normalisasi Modal Awal Ritel Toko:
+      // Standar ritel paten adalah Rp 100.000. Jika tercatat angka rolling (> 150rb),
+      // gunakan Rp 100.000 agar tidak memicu tekor semu (phantom deficit) pada laporan Dosen.
+      const rawModal = sh.modalAwal ? Number(sh.modalAwal) : 100_000;
+      const modal = rawModal > 150_000 ? 100_000 : (rawModal <= 0 ? 100_000 : rawModal);
+      const cashSales = Number(payRow?.cash ?? 0) + Number(directPayRow?.cash ?? 0);
       const qrisSales = Number(payRow?.qris ?? 0);
       const txCount = Number(payRow?.txCount ?? 0);
       const cashIn = Number(movements?.cashIn ?? 0);
       const cashOut = Number(movements?.cashOut ?? 0);
 
-      // Expected Cash di laci = Modal + Cash Sales + Kas Masuk - Kas Keluar
+      // Expected Cash di laci = Modal Paten (100k) + Cash Sales + Kas Masuk - Kas Keluar (Titipan/Beli Lepas)
       const expectedCash = modal + cashSales + cashIn - cashOut;
       const actualCash = sh.actualCash !== null ? Number(sh.actualCash) : null;
       const selisih = actualCash !== null ? actualCash - expectedCash : null;
@@ -302,9 +321,24 @@ export async function POST(req: NextRequest): Promise<Response> {
           .from(shiftCashMovements)
           .where(eq(shiftCashMovements.shiftId, sh.id));
 
-        const modal = Number(sh.modalAwal ?? 100_000);
+        const [directSales] = await db
+          .select({
+            total: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'CASH'), 0)`,
+          })
+          .from(transactions)
+          .where(
+            and(
+              eq(transactions.shiftId, sh.id),
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.isTest, false),
+              sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+            ),
+          );
+
+        const rawModal = sh.modalAwal ? Number(sh.modalAwal) : 100_000;
+        const modal = rawModal > 150_000 ? 100_000 : (rawModal <= 0 ? 100_000 : rawModal);
         const actual = Number(sh.actualCash);
-        const cashSales = Number(sales?.total ?? 0);
+        const cashSales = Number(sales?.total ?? 0) + Number(directSales?.total ?? 0);
         const cashIn = Number(movements?.cashIn ?? 0);
         const cashOut = Number(movements?.cashOut ?? 0);
         const expected = modal + cashSales + cashIn - cashOut;

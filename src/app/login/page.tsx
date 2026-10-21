@@ -150,8 +150,8 @@ export default function LoginPage() {
     e.preventDefault();
     if (!setupPinData) return;
 
-    if (newPin.length < 6 || newPin.length > 8) {
-      setSetupPinError('PIN harus berupa 6 hingga 8 digit angka.');
+    if (newPin.length !== 8) {
+      setSetupPinError('PIN harus berupa tepat 8 digit angka.');
       return;
     }
     if (newPin !== confirmPin) {
@@ -336,16 +336,20 @@ export default function LoginPage() {
                   <Hash size={15} style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
                   <input
                     id={`${uid}-admin-nim`}
+                    name="admin_shift_identity_no_autofill"
                     type="text"
                     inputMode="text"
                     className="form-input"
                     placeholder="ID atau NIM terdaftar"
                     value={adminShiftNim}
                     onChange={(e) => setAdminShiftNim(e.target.value)}
-                    autoComplete="username"
+                    autoComplete="off"
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     required
                     disabled={isLoading}
                     style={{ paddingLeft: 'calc(var(--space-3) + 15px + var(--space-2))', fontFamily: 'var(--font-mono)' }}
@@ -363,6 +367,7 @@ export default function LoginPage() {
                   <KeyRound size={15} style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
                   <input
                     id={`${uid}-admin-pin`}
+                    name="admin_shift_pin_no_autofill"
                     type={showAdminShiftPin ? 'text' : 'password'}
                     inputMode="numeric"
                     maxLength={8}
@@ -370,7 +375,10 @@ export default function LoginPage() {
                     placeholder="Masukkan 8-digit PIN (contoh: 02405013)"
                     value={adminShiftPin}
                     onChange={(e) => setAdminShiftPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                    autoComplete="current-password"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     disabled={isLoading}
                     style={{
                       paddingLeft: 'calc(var(--space-3) + 15px + var(--space-2))',
@@ -410,14 +418,19 @@ export default function LoginPage() {
                   <Building2 size={15} style={{ position: 'absolute', left: 'var(--space-3)', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
                   <input
                     id={`${uid}-manager-nidn`}
+                    name="manager_nidn_no_autofill"
                     type="text"
                     className="form-input"
                     placeholder="Contoh: 0612345678"
                     value={managerNidn}
                     onChange={(e) => setManagerNidn(e.target.value)}
-                    autoComplete="username"
+                    autoComplete="off"
                     autoCapitalize="none"
+                    autoCorrect="off"
                     spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     required
                     disabled={isLoading}
                     style={{ paddingLeft: 'calc(var(--space-3) + 15px + var(--space-2))' }}
@@ -432,12 +445,16 @@ export default function LoginPage() {
                 <div style={{ position: 'relative' }}>
                   <input
                     id={`${uid}-manager-password`}
+                    name="manager_password_no_autofill"
                     type={showManagerPassword ? 'text' : 'password'}
                     className="form-input"
                     placeholder="Password Akun Dosen"
                     value={managerPassword}
                     onChange={(e) => setManagerPassword(e.target.value)}
-                    autoComplete="current-password"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     required
                     disabled={isLoading}
                     style={{ paddingRight: 'var(--space-10)' }}

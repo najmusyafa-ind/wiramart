@@ -33,6 +33,9 @@ export const stockActionEnum       = pgEnum('stock_action',       ['INSERT', 'UP
 export const actorTypeEnum         = pgEnum('actor_type',         ['ADMIN', 'EMPLOYEE', 'SYSTEM']);
 export const periodTypeEnum        = pgEnum('period_type',        ['DAILY', 'WEEKLY', 'MONTHLY', 'SEMI_ANNUAL']);
 
+// Status hasil akhir percobaan transaksi database (untuk audit trail)
+export const txOutcomeEnum = pgEnum('tx_outcome', ['COMMITTED', 'ROLLED_BACK']);
+
 // Status pengajuan pindah shift oleh mahasiswa
 export const swapStatusEnum = pgEnum('swap_status', [
   'PENDING',    // Baru diajukan, menunggu review dosen
@@ -48,6 +51,40 @@ export const attendanceStatusEnum = pgEnum('attendance_status', [
   'IJIN',         // Ijin resmi disetujui dosen
   'TIDAK_HADIR',  // Tidak masuk tanpa keterangan (bolos)
   'PENGGANTI',    // Masuk sebagai pengganti slot swap yang disetujui
+]);
+
+// ── V3.0 ENUMS (Gudang & Logistik) ────────────────────────────
+export const stockReceiveStatusEnum = pgEnum('stock_receive_status', [
+  'DRAFT',      // Petugas gudang sedang menyusun draft input
+  'SUBMITTED',  // Diserahkan ke Manager, menunggu approval
+  'APPROVED',   // Disetujui Manager, stok masuk atomik
+  'REJECTED',   // Ditolak Manager
+  'REVISED',    // Diminta revisi oleh Manager
+]);
+
+export const alertLevelEnum = pgEnum('alert_level', [
+  'H1_KRITIS',  // <= 1 hari menuju kadaluarsa
+  'H3_URGENT',  // 2-3 hari menuju kadaluarsa
+  'H5_WARNING', // 4-5 hari menuju kadaluarsa
+  'H7_WATCH',   // 6-7 hari menuju kadaluarsa
+]);
+
+export const conditionReportStatusEnum = pgEnum('condition_report_status', [
+  'ALERT_ONLY',     // Terdeteksi otomatis oleh FEFO engine
+  'SUBMITTED',      // Dilaporkan petugas gudang dengan saran
+  'MANAGER_REVIEW', // Sedang ditinjau Manager
+  'APPROVED',       // Keputusan Manager disetujui
+  'REJECTED',       // Pengajuan ditolak
+  'EXECUTED',       // Tindakan dieksekusi di lapangan
+  'CLOSED',         // Selesai
+]);
+
+export const managerDecisionEnum = pgEnum('manager_decision', [
+  'DISCOUNT',       // Diskon darurat (program obral FEFO)
+  'DISPLAY_FRONT',  // Pindahkan display ke rak kasir utama
+  'DESTROY',        // Musnahkan dari gudang & catat kerugian
+  'RETURN_SUPPLIER',// Retur ke supplier
+  'HOLD',           // Tahan & monitor
 ]);
 
 // =============================================================
@@ -353,6 +390,8 @@ export const transactionItems = pgTable(
     // Subtotals computed in app layer (qty × snapshot price)
     subtotalCost: decimal('subtotal_cost', { precision: 15, scale: 2 }).notNull(),
     subtotalSell: decimal('subtotal_sell', { precision: 15, scale: 2 }).notNull(),
+    // V3.0: Kolom audit tracking diskon darurat di kasir (nullable)
+    discountPolicyId: uuid('discount_policy_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -791,6 +830,14 @@ export const transactionsRelations = relations(transactions, ({ one, many }) => 
     references: [admins.id],
   }),
   items: many(transactionItems),
+  payments: many(transactionPayments),
+}));
+
+export const transactionPaymentsRelations = relations(transactionPayments, ({ one }) => ({
+  transaction: one(transactions, {
+    fields: [transactionPayments.transactionId],
+    references: [transactions.id],
+  }),
 }));
 
 export const transactionItemsRelations = relations(transactionItems, ({ one }) => ({
@@ -962,6 +1009,11 @@ export const dailyClosings = pgTable(
     status: varchar('status', { length: 20 }).notNull().default('LOCKED'), // 'OPEN' | 'LOCKED' | 'AUDITED'
     notes: text('notes'),
     closedByAdminId: uuid('closed_by_admin_id').references(() => admins.id),
+    // V3.0: Kolom pengesahan Manager on Duty (MOD) pada Daily Closing
+    modSignedBy: uuid('mod_signed_by').references(() => admins.id),
+    modSignedAt: timestamp('mod_signed_at', { withTimezone: true }),
+    modSignNote: text('mod_sign_note'),
+    stockMutationSummary: jsonb('stock_mutation_summary'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -973,4 +1025,455 @@ export const dailyClosings = pgTable(
 
 export type DailyClosing = typeof dailyClosings.$inferSelect;
 export type NewDailyClosing = typeof dailyClosings.$inferInsert;
+
+export const stockAdjustmentsRelations = relations(stockAdjustments, ({ one }) => ({
+  product: one(products, {
+    fields: [stockAdjustments.productId],
+    references: [products.id],
+  }),
+  adjustedByAdmin: one(admins, {
+    fields: [stockAdjustments.adjustedByAdminId],
+    references: [admins.id],
+  }),
+}));
+
+export const shiftSchedulesRelations = relations(shiftSchedules, ({ one, many }) => ({
+  employee: one(employees, {
+    fields: [shiftSchedules.employeeId],
+    references: [employees.id],
+  }),
+  attendances: many(attendances),
+  swapRequestsFrom: many(shiftSwapRequests, { relationName: 'fromSchedule' }),
+  swapRequestsTo: many(shiftSwapRequests, { relationName: 'toSchedule' }),
+}));
+
+export const operatingExpensesRelations = relations(operatingExpenses, ({ one }) => ({
+  createdByAdmin: one(admins, {
+    fields: [operatingExpenses.createdByAdminId],
+    references: [admins.id],
+  }),
+  deletedByAdmin: one(admins, {
+    fields: [operatingExpenses.deletedByAdminId],
+    references: [admins.id],
+  }),
+}));
+
+export const qrisReconciliationsRelations = relations(qrisReconciliations, ({ one }) => ({
+  createdByAdmin: one(admins, {
+    fields: [qrisReconciliations.createdByAdminId],
+    references: [admins.id],
+  }),
+  updatedByAdmin: one(admins, {
+    fields: [qrisReconciliations.updatedByAdminId],
+    references: [admins.id],
+  }),
+}));
+
+export const dailyClosingsRelations = relations(dailyClosings, ({ one }) => ({
+  closedByAdmin: one(admins, {
+    fields: [dailyClosings.closedByAdminId],
+    references: [admins.id],
+  }),
+}));
+
+// =============================================================
+// TRANSACTION_LOGS — Audit Trail COMMIT & ROLLBACK
+// Tabel ini mencatat SETIAP percobaan transaksi kasir:
+//   • Jika berhasil  → outcome = 'COMMITTED', transaction_id diisi
+//   • Jika gagal     → outcome = 'ROLLED_BACK', rollback_reason diisi
+// Sengaja ditulis DI LUAR db.transaction() agar log tetap tersimpan
+// bahkan ketika transaksi utama di-rollback oleh PostgreSQL.
+// =============================================================
+
+export const transactionLogs = pgTable(
+  'transaction_logs',
+  {
+    id:               uuid('id').primaryKey().defaultRandom(),
+
+    // Siapa yang mencoba transaksi
+    employeeId:       uuid('employee_id').notNull(),
+    shiftId:          uuid('shift_id'),
+
+    // Detail percobaan
+    invoiceAttempt:   varchar('invoice_attempt', { length: 30 }).notNull(),
+    attemptNumber:    integer('attempt_number').notNull().default(1),
+    itemCount:        integer('item_count').notNull(),
+    grossAmount:      decimal('gross_amount', { precision: 12, scale: 2 }).notNull(),
+    paymentMethod:    paymentMethodEnum('payment_method').notNull(),
+
+    // Hasil akhir
+    outcome:          txOutcomeEnum('outcome').notNull(), // 'COMMITTED' | 'ROLLED_BACK'
+
+    // Jika COMMITTED: ID transaksi yang berhasil masuk DB
+    transactionId:    uuid('transaction_id'),
+
+    // Jika ROLLED_BACK: alasan kegagalan
+    rollbackReason:   text('rollback_reason'),
+
+    // Metadata waktu (WIB server time)
+    createdAt:        timestamp('created_at', { withTimezone: true })
+                        .notNull()
+                        .defaultNow(),
+  },
+  (t) => ({
+    // Index untuk query cepat per karyawan & per shift
+    idxEmployee: index('transaction_logs_employee_idx').on(t.employeeId),
+    idxShift:    index('transaction_logs_shift_idx').on(t.shiftId),
+    idxOutcome:  index('transaction_logs_outcome_idx').on(t.outcome),
+    idxCreated:  index('transaction_logs_created_idx').on(t.createdAt),
+  }),
+);
+
+export type TransactionLog = typeof transactionLogs.$inferSelect;
+export type NewTransactionLog = typeof transactionLogs.$inferInsert;
+
+// =============================================================
+// 21. STOCK_RECEIVE_DRAFTS (Penerimaan Barang Masuk Gudang)
+// =============================================================
+
+export const stockReceiveDrafts = pgTable(
+  'stock_receive_drafts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    receiveNumber: varchar('receive_number', { length: 35 }).notNull().unique(),
+    createdByEmployeeId: uuid('created_by_employee_id')
+      .notNull()
+      .references(() => employees.id),
+    supplierId: uuid('supplier_id').references(() => suppliers.id),
+    supplierName: varchar('supplier_name', { length: 200 }),
+    deliveryNote: text('delivery_note'),
+    status: stockReceiveStatusEnum('status').notNull().default('DRAFT'),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    rejectedAt: timestamp('rejected_at', { withTimezone: true }),
+    approvedByAdminId: uuid('approved_by_admin_id').references(() => admins.id),
+    rejectedByAdminId: uuid('rejected_by_admin_id').references(() => admins.id),
+    managerNote: text('manager_note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_stock_receive_drafts_status').on(table.status, table.createdAt.desc()),
+    index('idx_stock_receive_drafts_emp').on(table.createdByEmployeeId),
+    index('idx_stock_receive_drafts_supplier').on(table.supplierId),
+  ],
+);
+
+export type StockReceiveDraft = typeof stockReceiveDrafts.$inferSelect;
+export type NewStockReceiveDraft = typeof stockReceiveDrafts.$inferInsert;
+
+// =============================================================
+// 22. STOCK_RECEIVE_ITEMS (Detail Barang Masuk)
+// =============================================================
+
+export const stockReceiveItems = pgTable(
+  'stock_receive_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    draftId: uuid('draft_id')
+      .notNull()
+      .references(() => stockReceiveDrafts.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id),
+    productName: varchar('product_name', { length: 200 }).notNull(),
+    batchCode: varchar('batch_code', { length: 50 }).notNull(),
+    qty: integer('qty').notNull(),
+    costPrice: decimal('cost_price', { precision: 15, scale: 2 }).notNull(),
+    expiryDate: date('expiry_date'),
+    conditionNote: text('condition_note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_stock_receive_items_draft').on(table.draftId),
+    index('idx_stock_receive_items_prod').on(table.productId),
+  ],
+);
+
+export type StockReceiveItem = typeof stockReceiveItems.$inferSelect;
+export type NewStockReceiveItem = typeof stockReceiveItems.$inferInsert;
+
+// =============================================================
+// 23. PRODUCT_CONDITION_REPORTS (FEFO Action Radar)
+// =============================================================
+
+export const productConditionReports = pgTable(
+  'product_condition_reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    batchId: uuid('batch_id')
+      .notNull()
+      .references(() => stockBatches.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id),
+    alertLevel: alertLevelEnum('alert_level').notNull(),
+    qtyAtAlert: integer('qty_at_alert').notNull(),
+    expiryDate: date('expiry_date'),
+    daysRemainingAtAlert: integer('days_remaining_at_alert'),
+    status: conditionReportStatusEnum('status').notNull().default('ALERT_ONLY'),
+
+    physicalCondition: text('physical_condition'),
+    gudangSuggestion: text('gudang_suggestion'),
+    suggestedDiscountPct: decimal('suggested_discount_pct', { precision: 5, scale: 2 }),
+    submittedByEmployeeId: uuid('submitted_by_employee_id').references(() => employees.id),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+
+    managerDecision: managerDecisionEnum('manager_decision'),
+    approvedDiscountPct: decimal('approved_discount_pct', { precision: 5, scale: 2 }),
+    managerNote: text('manager_note'),
+    decidedByAdminId: uuid('decided_by_admin_id').references(() => admins.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+
+    executedByEmployeeId: uuid('executed_by_employee_id').references(() => employees.id),
+    executedAt: timestamp('executed_at', { withTimezone: true }),
+    executionNote: text('execution_note'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('uq_condition_report_batch').on(table.batchId),
+    index('idx_cond_reports_status_alert').on(table.status, table.alertLevel, table.expiryDate),
+    index('idx_cond_reports_prod').on(table.productId, table.status),
+  ],
+);
+
+export type ProductConditionReport = typeof productConditionReports.$inferSelect;
+export type NewProductConditionReport = typeof productConditionReports.$inferInsert;
+
+// =============================================================
+// 24. DISCOUNT_POLICIES (Kebijakan Diskon Darurat FEFO)
+// =============================================================
+
+export const discountPolicies = pgTable(
+  'discount_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conditionReportId: uuid('condition_report_id')
+      .notNull()
+      .references(() => productConditionReports.id),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id),
+    batchId: uuid('batch_id')
+      .notNull()
+      .references(() => stockBatches.id),
+    discountPct: decimal('discount_pct', { precision: 5, scale: 2 }).notNull(),
+    originalPrice: integer('original_price').notNull(),
+    discountedPrice: integer('discounted_price').notNull(),
+    allowedQty: integer('allowed_qty').notNull(),
+    soldQty: integer('sold_qty').notNull().default(0),
+    validFrom: date('valid_from').notNull().defaultNow(),
+    validUntil: date('valid_until').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdByAdminId: uuid('created_by_admin_id')
+      .notNull()
+      .references(() => admins.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_discount_policies_prod').on(table.productId, table.isActive),
+    index('idx_discount_policies_batch').on(table.batchId),
+  ],
+);
+
+export type DiscountPolicy = typeof discountPolicies.$inferSelect;
+export type NewDiscountPolicy = typeof discountPolicies.$inferInsert;
+
+// =============================================================
+// 25. DISCOUNT_BARCODES (Barcode Override Khusus Diskon)
+// =============================================================
+
+export const discountBarcodes = pgTable(
+  'discount_barcodes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    policyId: uuid('policy_id')
+      .notNull()
+      .references(() => discountPolicies.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id),
+    barcode: varchar('barcode', { length: 40 }).notNull().unique(),
+    discountedPrice: integer('discounted_price').notNull(),
+    discountPct: decimal('discount_pct', { precision: 5, scale: 2 }).notNull(),
+    remainingQty: integer('remaining_qty').notNull(),
+    validUntil: date('valid_until').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_discount_barcodes_lookup').on(table.barcode),
+  ],
+);
+
+export type DiscountBarcode = typeof discountBarcodes.$inferSelect;
+export type NewDiscountBarcode = typeof discountBarcodes.$inferInsert;
+
+// =============================================================
+// 26. MANAGER_DUTY_LOG (Manager on Duty Check-in)
+// =============================================================
+
+export const managerDutyLog = pgTable(
+  'manager_duty_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    dutyDate: date('duty_date').notNull().unique(),
+    adminId: uuid('admin_id')
+      .notNull()
+      .references(() => admins.id),
+    checkedInAt: timestamp('checked_in_at', { withTimezone: true }).notNull().defaultNow(),
+    checkedOutAt: timestamp('checked_out_at', { withTimezone: true }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_manager_duty_date').on(table.dutyDate.desc()),
+  ],
+);
+
+export type ManagerDutyLog = typeof managerDutyLog.$inferSelect;
+export type NewManagerDutyLog = typeof managerDutyLog.$inferInsert;
+
+// =============================================================
+// RELATIONS: MODUL GUDANG V3.0
+// =============================================================
+
+export const stockReceiveDraftsRelations = relations(stockReceiveDrafts, ({ one, many }) => ({
+  createdByEmployee: one(employees, {
+    fields: [stockReceiveDrafts.createdByEmployeeId],
+    references: [employees.id],
+  }),
+  approvedByAdmin: one(admins, {
+    fields: [stockReceiveDrafts.approvedByAdminId],
+    references: [admins.id],
+    relationName: 'approvedDrafts',
+  }),
+  rejectedByAdmin: one(admins, {
+    fields: [stockReceiveDrafts.rejectedByAdminId],
+    references: [admins.id],
+    relationName: 'rejectedDrafts',
+  }),
+  supplier: one(suppliers, {
+    fields: [stockReceiveDrafts.supplierId],
+    references: [suppliers.id],
+  }),
+  items: many(stockReceiveItems),
+}));
+
+export const stockReceiveItemsRelations = relations(stockReceiveItems, ({ one }) => ({
+  draft: one(stockReceiveDrafts, {
+    fields: [stockReceiveItems.draftId],
+    references: [stockReceiveDrafts.id],
+  }),
+  product: one(products, {
+    fields: [stockReceiveItems.productId],
+    references: [products.id],
+  }),
+}));
+
+export const productConditionReportsRelations = relations(productConditionReports, ({ one, many }) => ({
+  batch: one(stockBatches, {
+    fields: [productConditionReports.batchId],
+    references: [stockBatches.id],
+  }),
+  product: one(products, {
+    fields: [productConditionReports.productId],
+    references: [products.id],
+  }),
+  submittedByEmployee: one(employees, {
+    fields: [productConditionReports.submittedByEmployeeId],
+    references: [employees.id],
+    relationName: 'submittedConditionReports',
+  }),
+  decidedByAdmin: one(admins, {
+    fields: [productConditionReports.decidedByAdminId],
+    references: [admins.id],
+    relationName: 'decidedConditionReports',
+  }),
+  executedByEmployee: one(employees, {
+    fields: [productConditionReports.executedByEmployeeId],
+    references: [employees.id],
+    relationName: 'executedConditionReports',
+  }),
+  discountPolicies: many(discountPolicies),
+}));
+
+export const discountPoliciesRelations = relations(discountPolicies, ({ one, many }) => ({
+  conditionReport: one(productConditionReports, {
+    fields: [discountPolicies.conditionReportId],
+    references: [productConditionReports.id],
+  }),
+  product: one(products, {
+    fields: [discountPolicies.productId],
+    references: [products.id],
+  }),
+  batch: one(stockBatches, {
+    fields: [discountPolicies.batchId],
+    references: [stockBatches.id],
+  }),
+  createdByAdmin: one(admins, {
+    fields: [discountPolicies.createdByAdminId],
+    references: [admins.id],
+  }),
+  barcodes: many(discountBarcodes),
+}));
+
+export const discountBarcodesRelations = relations(discountBarcodes, ({ one }) => ({
+  policy: one(discountPolicies, {
+    fields: [discountBarcodes.policyId],
+    references: [discountPolicies.id],
+  }),
+  product: one(products, {
+    fields: [discountBarcodes.productId],
+    references: [products.id],
+  }),
+}));
+
+export const managerDutyLogRelations = relations(managerDutyLog, ({ one }) => ({
+  admin: one(admins, {
+    fields: [managerDutyLog.adminId],
+    references: [admins.id],
+  }),
+}));
+
+// =============================================================
+// 27. SUPPLIERS (Manajemen Data Pemasok / Distributor Gudang)
+// PRD Wiramart v3.0 — Fase 5.2 & 5.4
+// =============================================================
+
+export const suppliers = pgTable(
+  'suppliers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: varchar('name', { length: 200 }).notNull(),
+    contactPerson: varchar('contact_person', { length: 200 }),
+    phone: varchar('phone', { length: 30 }),
+    address: text('address'),
+    notes: text('notes'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdByAdminId: uuid('created_by_admin_id').references(() => admins.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_suppliers_name').on(table.name),
+    index('idx_suppliers_active').on(table.isActive),
+  ],
+);
+
+export type Supplier = typeof suppliers.$inferSelect;
+export type NewSupplier = typeof suppliers.$inferInsert;
+
+export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
+  createdByAdmin: one(admins, {
+    fields: [suppliers.createdByAdminId],
+    references: [admins.id],
+  }),
+  receiveDrafts: many(stockReceiveDrafts),
+}));
 

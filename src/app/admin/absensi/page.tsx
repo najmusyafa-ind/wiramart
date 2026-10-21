@@ -7,6 +7,7 @@ import {
   Download, Award,
 } from 'lucide-react';
 import BagiHasilTab from './BagiHasilTab';
+import { useAdmin } from '../AdminLayoutClient';
 
 // ─── Types ────────────────────────────────────────────────────
 type AttendanceStatus = 'HADIR' | 'TELAT' | 'IJIN' | 'TIDAK_HADIR' | 'PENGGANTI';
@@ -231,6 +232,7 @@ function ManualInputModal({
 
 // ─── Main Page ────────────────────────────────────────────────
 export default function AbsensiPage() {
+  const { isManager } = useAdmin();
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
   const [activeTab, setActiveTab] = useState<'absensi' | 'bagi_hasil'>('absensi');
   const [selectedDate, setSelectedDate] = useState(today);
@@ -549,30 +551,32 @@ export default function AbsensiPage() {
           <span>📋 Presensi Shift (4 Orang)</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('bagi_hasil')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '8px 16px',
-            border: 'none',
-            borderRadius: 'var(--radius-md)',
-            cursor: 'pointer',
-            fontWeight: 700,
-            fontSize: 'var(--text-sm)',
-            backgroundColor: activeTab === 'bagi_hasil' ? 'hsl(142 71% 35%)' : 'transparent',
-            color: activeTab === 'bagi_hasil' ? 'white' : 'var(--color-text-secondary)',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          <Award size={16} />
-          <span>💰 Alokasi Bagi Hasil (50% Paten)</span>
-        </button>
+        {isManager && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('bagi_hasil')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '8px 16px',
+              border: 'none',
+              borderRadius: 'var(--radius-md)',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: 'var(--text-sm)',
+              backgroundColor: activeTab === 'bagi_hasil' ? 'hsl(142 71% 35%)' : 'transparent',
+              color: activeTab === 'bagi_hasil' ? 'white' : 'var(--color-text-secondary)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Award size={16} />
+            <span>💰 Alokasi Bagi Hasil (50% Paten)</span>
+          </button>
+        )}
       </div>
 
-      {activeTab === 'bagi_hasil' ? (
+      {activeTab === 'bagi_hasil' && isManager ? (
         <BagiHasilTab />
       ) : (
         <>

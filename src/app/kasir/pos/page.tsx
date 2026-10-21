@@ -173,7 +173,6 @@ function BukaShiftOverlay({
   const showHandoverWarning = hasOtherShift && !handoverConfirmed;
 
   const rp = (n: number) => 'Rp ' + n.toLocaleString('id-ID');
-  const quickAmounts = [0, 50000, 100000, 200000, 500000];
   const modalNominal = modalInput ? parseFloat(modalInput.replace(/\D/g, '')) : NaN;
 
   const handleCalculatorChange = useCallback((total: number, counts: DenominasiMap) => {
@@ -449,46 +448,23 @@ function BukaShiftOverlay({
 
               {inputMode === 'QUICK' ? (
                 <>
-                  {/* Input nominal cepat */}
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label htmlFor="modal-awal-input" className="form-label">Modal Awal (Rp) *</label>
-                    <input
-                      id="modal-awal-input"
-                      type="number"
-                      inputMode="numeric"
-                      className="form-input"
-                      placeholder="0"
-                      value={modalInput}
-                      onChange={(e) => setModalInput(e.target.value)}
-                      min={0}
-                      step={1000}
-                      style={{
-                        fontSize: 'clamp(1.25rem, 6vw, var(--text-2xl))',
-                        textAlign: 'center',
-                        fontWeight: 'var(--weight-bold)',
-                        minHeight: 52,
-                      }}
-                    />
-                  </div>
-
-                  {/* Quick amount buttons */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)' }}>
-                    {quickAmounts.map((a) => (
-                      <button
-                        key={a}
-                        type="button"
-                        onClick={() => setModalInput(a.toString())}
-                        className="btn btn-secondary"
-                        style={{
-                          minHeight: 44,
-                          padding: 'var(--space-2) var(--space-1)',
-                          fontSize: '0.72rem',
-                          fontWeight: 'var(--weight-semibold)',
-                        }}
-                      >
-                        {a === 0 ? 'Kosong (Rp 0)' : rp(a)}
-                      </button>
-                    ))}
+                  {/* Modal Paten Toko Rp 100.000 Sesuai SOP Ritel */}
+                  <div style={{
+                    padding: 'var(--space-4) var(--space-3)',
+                    background: 'var(--color-surface-elevated)',
+                    border: '1px solid var(--color-primary)',
+                    borderRadius: 'var(--radius-md)',
+                    textAlign: 'center',
+                  }}>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                      Modal Kas Laci (Paten SOP Ritel)
+                    </div>
+                    <div style={{ fontSize: 'clamp(1.5rem, 6vw, 2rem)', fontWeight: 900, color: 'var(--color-text)' }}>
+                      Rp 100.000
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: 6, lineHeight: 1.4 }}>
+                      Uang receh pecahan wajib untuk kembalian pembeli. Terkunci flat Rp 100.000 per shift.
+                    </div>
                   </div>
                 </>
               ) : (
@@ -2835,6 +2811,46 @@ export default function PosPage() {
                 <div style={{ flex: 1 }}>
                   <div className="pos-drawer-link-title">Riwayat Transaksi Saya</div>
                   <div className="pos-drawer-link-sub">Lihat struk, cash & QRIS shift hari ini</div>
+                </div>
+                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+              </button>
+
+              {/* ── Rekap Harian Kasir (PRD 4.0) ── */}
+              <button
+                type="button"
+                className="pos-drawer-link"
+                onClick={() => {
+                  setShowKasirMenu(false);
+                  router.push('/kasir/rekap');
+                }}
+                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+              >
+                <div className="pos-drawer-icon-box" style={{ background: 'hsl(150 80% 45% / 0.15)', color: 'hsl(150 80% 35%)' }}>
+                  <Calculator size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="pos-drawer-link-title">Rekap Harian Kasir</div>
+                  <div className="pos-drawer-link-sub">Balancing fisik uang laci & cetak slip rekap</div>
+                </div>
+                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+              </button>
+
+              {/* ── Penerimaan & Radar Gudang (PRD 3.0) ── */}
+              <button
+                type="button"
+                className="pos-drawer-link"
+                onClick={() => {
+                  setShowKasirMenu(false);
+                  router.push('/kasir/gudang');
+                }}
+                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+              >
+                <div className="pos-drawer-icon-box" style={{ background: 'hsl(35 90% 50% / 0.15)', color: 'hsl(35 90% 40%)' }}>
+                  <Package size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="pos-drawer-link-title">Operasional Gudang</div>
+                  <div className="pos-drawer-link-sub">Penerimaan barang & radar FEFO fisik</div>
                 </div>
                 <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
               </button>

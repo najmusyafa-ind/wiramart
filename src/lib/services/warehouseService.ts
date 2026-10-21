@@ -12,8 +12,10 @@ import {
   stockAdjustments,
   admins,
   employees,
+  shifts,
+  shiftSchedules,
 } from '@/lib/db/schema';
-import { eq, and, isNull, or, ilike, desc, asc, lte, gt, inArray, sql } from 'drizzle-orm';
+import { eq, and, isNull, or, ilike, desc, asc, lte, gt, inArray, sql, type SQL } from 'drizzle-orm';
 
 // ── Tipe Data DTO (Clean Architecture) ─────────────────────────
 
@@ -23,6 +25,7 @@ export interface WarehouseSummaryDto {
   lowStockSku: number;
   expiringSoonSku: number;
   todayRestockCount: number;
+  perishableSku: number;
 }
 
 export interface WarehouseProductDto {
@@ -65,9 +68,18 @@ export interface WarehouseActivityDto {
   id: string;
   productId: string;
   productName: string;
+  categoryName?: string;
   qtyDiff: number;
   reason: string;
   createdAt: string;
+  actorName?: string;
+  actorNim?: string;
+  shiftInfo?: string;
+  batchCode?: string;
+  expiryDate?: string | null;
+  notes?: string | null;
+  formattedDate?: string;
+  formattedTime?: string;
 }
 
 // Batas minimum stok dianggap kritis (bisa disesuaikan per kategori di masa depan)
@@ -87,14 +99,20 @@ export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
     .select({
       id: products.id,
       stockQty: products.stockQty,
+      isPerishable: products.isPerishable,
+      barcode: products.barcode,
     })
     .from(products)
     .where(and(eq(products.isActive, true), isNull(products.deletedAt)));
 
   let outOfStockSku = 0;
   let lowStockSku = 0;
+  let perishableSku = 0;
 
   for (const p of activeProducts) {
+    if (p.isPerishable || !p.barcode) {
+      perishableSku++;
+    }
     if (p.stockQty <= 0) {
       outOfStockSku++;
     } else if (p.stockQty <= LOW_STOCK_THRESHOLD) {
@@ -134,6 +152,7 @@ export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
     lowStockSku,
     expiringSoonSku: uniqueExpiringProductIds.size,
     todayRestockCount: todayAdjustments.length,
+    perishableSku,
   };
 }
 
@@ -142,7 +161,7 @@ export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
 // =============================================================
 export async function getWarehouseProducts(options: {
   search?: string;
-  filter?: 'semua' | 'kritis' | 'habis' | 'fefo';
+  filter?: 'semua' | 'kritis' | 'habis' | 'fefo' | 'perishable';
   limit?: number;
   offset?: number;
 }): Promise<{ items: WarehouseProductDto[]; total: number }> {
@@ -155,8 +174,36 @@ export async function getWarehouseProducts(options: {
   const in30DaysStr = new Date(nowWib.getTime() + 30 * 24 * 60 * 60 * 1000)
     .toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
 
-  // Base query: Produk aktif, ZERO costPrice leak
-  let query = db
+  const conditions: SQL[] = [
+    eq(products.isActive, true),
+    isNull(products.deletedAt),
+  ];
+
+  // Search filter (nama / barcode)
+  if (search && search.trim()) {
+    const q = `%${search.trim()}%`;
+    conditions.push(
+      or(
+        ilike(products.name, q),
+        eq(products.barcode, search.trim()),
+        ilike(products.barcode, q),
+      )!,
+    );
+  }
+
+  // Filter kondisi stok
+  if (filter === 'habis') {
+    conditions.push(lte(products.stockQty, 0));
+  } else if (filter === 'kritis') {
+    conditions.push(
+      gt(products.stockQty, 0),
+      lte(products.stockQty, LOW_STOCK_THRESHOLD),
+    );
+  } else if (filter === 'perishable') {
+    conditions.push(or(eq(products.isPerishable, true), isNull(products.barcode), eq(products.barcode, ''))!);
+  }
+
+  const rows = await db
     .select({
       id: products.id,
       name: products.name,
@@ -170,31 +217,10 @@ export async function getWarehouseProducts(options: {
     })
     .from(products)
     .leftJoin(categories, eq(products.categoryId, categories.id))
-    .where(and(eq(products.isActive, true), isNull(products.deletedAt)))
-    .$dynamic();
-
-  // Search filter (nama / barcode)
-  if (search && search.trim()) {
-    const q = `%${search.trim()}%`;
-    query = query.where(
-      or(
-        ilike(products.name, q),
-        eq(products.barcode, search.trim()),
-        ilike(products.barcode, q),
-      ),
-    );
-  }
-
-  // Filter kondisi stok
-  if (filter === 'habis') {
-    query = query.where(lte(products.stockQty, 0));
-  } else if (filter === 'kritis') {
-    query = query.where(
-      and(gt(products.stockQty, 0), lte(products.stockQty, LOW_STOCK_THRESHOLD)),
-    );
-  }
-
-  const rows = await query.orderBy(asc(products.name)).limit(limit).offset(offset);
+    .where(and(...conditions))
+    .orderBy(asc(products.name))
+    .limit(limit)
+    .offset(offset);
 
   // Ambil data batch aktif untuk produk-produk ini (FEFO radar)
   const productIds = rows.map((r) => r.id);
@@ -391,10 +417,64 @@ export async function restockProductByWarehouse(
 
     createdBatchId = batchRecord?.id;
 
+    // 3b. Deteksi Sesi Shift yang sedang aktif atau jadwal piket saat restock
+    let shiftLabel = '';
+    try {
+      const activeShift = await db.query.shifts.findFirst({
+        where: and(eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut)),
+        orderBy: [desc(shifts.clockIn)],
+        with: {
+          employee: {
+            columns: { fullName: true, nim: true },
+          },
+        },
+      });
+
+      if (activeShift?.employee) {
+        shiftLabel = `Shift Kasir Aktif: ${activeShift.employee.fullName} (NIM ${activeShift.employee.nim})`;
+      } else {
+        const dayNames = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU'] as const;
+        const currentDay = dayNames[nowWib.getDay()];
+        const hour = String(nowWib.getHours()).padStart(2, '0');
+        const min = String(nowWib.getMinutes()).padStart(2, '0');
+        const timeHm = `${hour}:${min}`;
+
+        const sched = await db.query.shiftSchedules.findFirst({
+          where: and(
+            eq(shiftSchedules.dayOfWeek, currentDay),
+            eq(shiftSchedules.isActive, true),
+            lte(shiftSchedules.slotStart, timeHm),
+            gt(shiftSchedules.slotEnd, timeHm),
+          ),
+        });
+
+        if (sched) {
+          let assignedEmployeeName = '';
+          if (sched.employeeId) {
+            const emp = await db.query.employees.findFirst({
+              where: eq(employees.id, sched.employeeId),
+              columns: { fullName: true, nim: true },
+            });
+            if (emp) {
+              assignedEmployeeName = ` (${emp.fullName})`;
+            }
+          }
+          const koord = sched.coordinatorName ? ` • Koordinator: ${sched.coordinatorName}` : '';
+          shiftLabel = `Jadwal ${currentDay} (${sched.slotStart}–${sched.slotEnd} WIB)${assignedEmployeeName}${koord}`;
+        } else {
+          shiftLabel = `Shift ${currentDay} (${timeHm} WIB)`;
+        }
+      }
+    } catch (err) {
+      console.warn('[warehouseService] Gagal mendeteksi shift:', err);
+    }
+
+    const shiftInfoText = shiftLabel ? ` • ${shiftLabel}` : '';
+
     // C. Insert ke Audit Log Stock Adjustments
     const expInfo = expiryDate ? ` Exp: ${expiryDate}` : '';
     const noteInfo = notes ? ` Catatan: ${notes}` : '';
-    const reasonText = `[RESTOCK GUDANG oleh ${actorName} (${actorNim}) ${timeStr}] Masuk +${qtyAdd} ${prod.unit} (Batch: ${autoBatchCode}${expInfo}).${noteInfo}`.trim();
+    const reasonText = `[RESTOCK GUDANG${shiftInfoText} • Petugas: ${actorName} (${actorNim}) • ${timeStr} WIB] Masuk +${qtyAdd} ${prod.unit} (Batch: ${autoBatchCode}${expInfo}).${noteInfo}`.trim();
 
     const [adjRecord] = await tx
       .insert(stockAdjustments)
@@ -427,28 +507,93 @@ export async function restockProductByWarehouse(
 // =============================================================
 // 4. Log Aktivitas Restock Gudang Hari Ini
 // =============================================================
-export async function getWarehouseActivityLogs(limit = 20): Promise<WarehouseActivityDto[]> {
+export async function getWarehouseActivityLogs(limit = 30): Promise<WarehouseActivityDto[]> {
   const rows = await db
     .select({
       id: stockAdjustments.id,
       productId: stockAdjustments.productId,
       productName: products.name,
+      categoryName: categories.name,
       qtyDiff: stockAdjustments.qtyDiff,
       reason: stockAdjustments.reason,
       createdAt: stockAdjustments.createdAt,
     })
     .from(stockAdjustments)
     .leftJoin(products, eq(stockAdjustments.productId, products.id))
+    .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(ilike(stockAdjustments.reason, '%RESTOCK GUDANG%'))
     .orderBy(desc(stockAdjustments.createdAt))
     .limit(limit);
 
-  return rows.map((r) => ({
-    id: r.id,
-    productId: r.productId,
-    productName: r.productName ?? 'Produk',
-    qtyDiff: r.qtyDiff,
-    reason: r.reason,
-    createdAt: r.createdAt.toISOString(),
-  }));
+  return rows.map((r) => {
+    const dateObj = new Date(r.createdAt);
+
+    const formattedDate = dateObj.toLocaleDateString('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    const formattedTime = `${dateObj.toLocaleTimeString('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      hour: '2-digit',
+      minute: '2-digit',
+    })} WIB`;
+
+    const reasonStr = r.reason || '';
+
+    let actorName: string | undefined;
+    let actorNim: string | undefined;
+    const actorMatch =
+      reasonStr.match(/oleh\s+([^(]+)\s*\(([^)]+)\)/i) ||
+      reasonStr.match(/Petugas:\s+([^(]+)\s*\(([^)]+)\)/i);
+    if (actorMatch) {
+      actorName = actorMatch[1].trim();
+      actorNim = actorMatch[2].trim();
+    }
+
+    let shiftInfo: string | undefined;
+    const shiftMatch = reasonStr.match(/(?:Shift[^\•\•\]]+|Jadwal[^\•\•\]]+)/i);
+    if (shiftMatch) {
+      shiftInfo = shiftMatch[0].trim();
+    }
+
+    let batchCode: string | undefined;
+    const batchMatch = reasonStr.match(/Batch:\s*([A-Za-z0-9\-]+)/i);
+    if (batchMatch) {
+      batchCode = batchMatch[1].trim();
+    }
+
+    let expiryDate: string | undefined;
+    const expMatch = reasonStr.match(/Exp:\s*([0-9\-]+)/i);
+    if (expMatch) {
+      expiryDate = expMatch[1].trim();
+    }
+
+    let notes: string | undefined;
+    const noteMatch = reasonStr.match(/Catatan:\s*([^.]+)/i);
+    if (noteMatch) {
+      notes = noteMatch[1].trim();
+    }
+
+    return {
+      id: r.id,
+      productId: r.productId,
+      productName: r.productName ?? 'Produk',
+      categoryName: r.categoryName ?? 'Umum',
+      qtyDiff: r.qtyDiff,
+      reason: r.reason,
+      createdAt: r.createdAt.toISOString(),
+      actorName,
+      actorNim,
+      shiftInfo,
+      batchCode,
+      expiryDate,
+      notes,
+      formattedDate,
+      formattedTime,
+    };
+  });
 }

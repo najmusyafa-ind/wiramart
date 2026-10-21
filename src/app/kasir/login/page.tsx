@@ -45,7 +45,7 @@ type PresensiData = {
   shifts: ShiftGroup[];
 };
 
-type RoleOption = 'Admin Shift' | 'Kepala Gudang' | 'Kasir' | 'Customer Service' | 'Ketua Admin' | 'Pelayan' | 'Gudang' | 'Admin Kasir';
+type RoleOption = 'Kasir' | 'Gudang' | 'CS Pelayan' | 'Admin Shift';
 
 export default function KasirLoginPage() {
   const router = useRouter();
@@ -151,7 +151,7 @@ export default function KasirLoginPage() {
       setPresensiSuccessMsg(json.message ?? `Presensi berhasil! Selamat bertugas sebagai ${selectedRole}.`);
       
       // Khusus Petugas Gudang: Auto-login & langsung arahkan ke Portal Gudang
-      if (selectedRole === 'Kepala Gudang' || selectedRole === 'Gudang') {
+      if (selectedRole === 'Gudang') {
         try {
           const authRes = await fetch('/api/auth/kasir', {
             method: 'POST',
@@ -173,7 +173,7 @@ export default function KasirLoginPage() {
       }
 
       // Auto-fill login POS jika orang ini bertugas sebagai Kasir atau Admin Shift
-      if (selectedRole === 'Kasir' || selectedRole === 'Admin Shift' || selectedRole === 'Ketua Admin') {
+      if (selectedRole === 'Kasir' || selectedRole === 'Admin Shift') {
         setForm({
           fullName:     selectedPerson.fullName ?? '',
           nim:          selectedPerson.nim ?? '',
@@ -266,7 +266,7 @@ export default function KasirLoginPage() {
   }
 
   return (
-    <div className="auth-wrapper" style={{ padding: 'var(--space-4)' }}>
+    <div className="auth-wrapper">
       <main
         className="auth-card"
         role="main"
@@ -638,11 +638,19 @@ export default function KasirLoginPage() {
                         ? 'Sesi opname & restock akhir pekan telah selesai (Sabtu tutup 21:00 WIB, Minggu tutup 22:00 WIB). Presensi shift perkuliahan reguler akan otomatis aktif kembali besok hari Senin pukul 05:00 Subuh WIB.'
                         : 'Sesi opname akhir pekan ditutup pukul 21:00 WIB. Operasional gudang akan dibuka kembali besok hari Minggu pukul 06:00 WIB.'}
                     </p>
-                    <div style={{ maxWidth: 280, margin: '0 auto' }}>
+                    <div style={{ maxWidth: 300, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('pos')}
+                        className="btn btn-primary"
+                        style={{ fontSize: 'var(--text-xs)', padding: '8px 12px' }}
+                      >
+                        Buka Form Login Petugas (Kasir &amp; Gudang)
+                      </button>
                       <button
                         type="button"
                         onClick={() => router.push('/login')}
-                        className="btn btn-secondary btn-full"
+                        className="btn btn-secondary"
                         style={{ fontSize: 'var(--text-xs)', padding: '8px 12px' }}
                       >
                         Login Pengelola (Admin Shift &amp; Manager)
@@ -826,13 +834,13 @@ export default function KasirLoginPage() {
                                     setSelectedPerson(p);
                                     let initialRole: RoleOption = 'Kasir';
                                     const jab = (p.defaultJabatan ?? '').toLowerCase();
-                                    if (p.orderInSlot === 1 || jab.includes('admin')) {
+                                    if (p.orderInSlot === 1 || jab.includes('admin') || jab.includes('ketua')) {
                                       initialRole = 'Admin Shift';
                                     } else if (p.orderInSlot === 3 || jab.includes('gudang')) {
-                                      initialRole = 'Kepala Gudang';
-                                    } else if (p.orderInSlot === 4 || jab.includes('pelayan') || jab.includes('service')) {
-                                      initialRole = 'Customer Service';
-                                    } else if (p.orderInSlot === 2 || jab.includes('kasir')) {
+                                      initialRole = 'Gudang';
+                                    } else if (p.orderInSlot === 4 || jab.includes('pelayan') || jab.includes('service') || jab.includes('cs')) {
+                                      initialRole = 'CS Pelayan';
+                                    } else {
                                       initialRole = 'Kasir';
                                     }
                                     setSelectedRole(initialRole);
@@ -941,10 +949,10 @@ export default function KasirLoginPage() {
                 </label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {[
-                    { role: 'Admin Shift', desc: 'Koordinator shift, monitoring tim & otorisasi operasional', icon: <ShieldCheck size={16} /> },
-                    { role: 'Kepala Gudang', desc: 'Logistik, terima barang supplier, cek batch & expired', icon: <Package size={16} /> },
                     { role: 'Kasir', desc: 'Melayani transaksi belanja, laci uang & scanning POS', icon: <ShoppingBag size={16} /> },
-                    { role: 'Customer Service', desc: 'Layanan pelanggan, cek harga rak, display etalase', icon: <HeartHandshake size={16} /> },
+                    { role: 'Gudang', desc: 'Logistik, terima barang supplier, cek batch & expired FEFO', icon: <Package size={16} /> },
+                    { role: 'CS Pelayan', desc: 'Layanan pelanggan toko, display etalase, dan cek makanan basi', icon: <HeartHandshake size={16} /> },
+                    { role: 'Admin Shift', desc: 'Koordinator shift, monitoring tim & otorisasi operasional', icon: <ShieldCheck size={16} /> },
                   ].map((item) => (
                     <button
                       key={item.role}
@@ -1124,12 +1132,19 @@ export default function KasirLoginPage() {
                   />
                   <input
                     id={nameId}
+                    name="kasir_fullname_no_autofill"
                     type="text"
                     className="form-input"
                     placeholder="Nama lengkap sesuai jadwal"
                     value={form.fullName}
                     onChange={handleFormChange('fullName')}
-                    autoComplete="name"
+                    autoComplete="off"
+                    autoCapitalize="words"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     required
                     disabled={isLoading}
                     style={{ paddingLeft: 'calc(var(--space-3) + 16px + var(--space-2))' }}

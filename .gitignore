@@ -50,7 +50,28 @@ next-env.d.ts
 /backups/
 scripts/*.json
 
+# temporary historical audit scripts & test scratch files
+scripts/check-*.ts
+scripts/import-history-*.ts
+scripts/inspect-*.ts
+scripts/match-*.ts
+scripts/sum-*.ts
+scripts/compare-*.ts
+scripts/calc-*.ts
+scripts/test-math-*.ts
+scripts/verify-*.ts
+scripts/analyze-*.ts
+scripts/cek-*.ts
+scripts/get-*.ts
+scripts/list-*.ts
+scripts/print-*.ts
+scripts/reconcile-*.ts
+scripts/find-*.ts
+scripts/fix-*.ts
+scripts/restore-*.ts
+scripts/update-*.ts
+scripts/test-live-db.ts
+scripts/demo-*.ts
+scripts/verify-non-interference.ts
 
-.vercel
-.env*
 .vscode/

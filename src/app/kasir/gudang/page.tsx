@@ -31,7 +31,10 @@ import {
   FileText,
   AlertCircle,
   Sparkles,
+  Truck,
 } from 'lucide-react';
+import PenerimaanBarangSection from './components/PenerimaanBarangSection';
+import FEFOActionSection from './components/FEFOActionSection';
 
 // ── Tipe Data Frontend ─────────────────────────────────────────
 
@@ -48,6 +51,7 @@ type WarehouseSummary = {
   lowStockSku: number;
   expiringSoonSku: number;
   todayRestockCount: number;
+  perishableSku?: number;
 };
 
 type WarehouseProduct = {
@@ -70,9 +74,18 @@ type ActivityLog = {
   id: string;
   productId: string;
   productName: string;
+  categoryName?: string;
   qtyDiff: number;
   reason: string;
   createdAt: string;
+  actorName?: string;
+  actorNim?: string;
+  shiftInfo?: string;
+  batchCode?: string;
+  expiryDate?: string | null;
+  notes?: string | null;
+  formattedDate?: string;
+  formattedTime?: string;
 };
 
 // BarcodeDetector Interface untuk Kamera HP
@@ -96,7 +109,7 @@ export default function GudangPortalPage() {
 
   // State Filter & Pencarian
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'semua' | 'kritis' | 'fefo' | 'habis' | 'aktivitas'>('semua');
+  const [activeTab, setActiveTab] = useState<'semua' | 'kritis' | 'fefo' | 'perishable' | 'habis' | 'aktivitas' | 'penerimaan'>('semua');
 
   // State Modal Restock
   const [selectedProduct, setSelectedProduct] = useState<WarehouseProduct | null>(null);
@@ -118,7 +131,7 @@ export default function GudangPortalPage() {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const filterParam = targetFilter === 'aktivitas' ? 'semua' : targetFilter;
+      const filterParam = targetFilter === 'aktivitas' || targetFilter === 'penerimaan' ? 'semua' : targetFilter;
       const res = await fetch(
         `/api/kasir/gudang?filter=${filterParam}&search=${encodeURIComponent(targetSearch)}`,
       );
@@ -156,14 +169,14 @@ export default function GudangPortalPage() {
   }
 
   useEffect(() => {
-    loadData();
+    loadData(activeTab, search);
   }, [activeTab]);
 
   // Debounced Search
   useEffect(() => {
     const handler = setTimeout(() => {
       loadData(activeTab, search);
-    }, 350);
+    }, 300);
     return () => clearTimeout(handler);
   }, [search]);
 
@@ -635,11 +648,13 @@ export default function GudangPortalPage() {
           }}
         >
           {[
-            { id: 'semua', label: 'Semua Produk' },
-            { id: 'kritis', label: '⚠️ Stok Kritis (<5)' },
-            { id: 'fefo', label: '⏰ Radar FEFO (Expired)' },
-            { id: 'habis', label: '🔴 Stok Habis (0)' },
-            { id: 'aktivitas', label: '📋 Riwayat Restock' },
+            { id: 'semua', label: summary ? `Semua Produk (${summary.totalSku})` : 'Semua Produk' },
+            { id: 'penerimaan', label: '🚚 Barang Masuk (ACC)' },
+            { id: 'fefo', label: summary ? `🚨 To-Do FEFO & Diskon (${summary.expiringSoonSku})` : '🚨 To-Do FEFO & Diskon' },
+            { id: 'kritis', label: summary ? `⚠️ Stok Kritis (${summary.lowStockSku})` : '⚠️ Stok Kritis' },
+            { id: 'perishable', label: summary?.perishableSku !== undefined ? `🥪 Makanan Basah (${summary.perishableSku})` : '🥪 Makanan Basah' },
+            { id: 'habis', label: summary ? `🔴 Stok Habis (${summary.outOfStockSku})` : '🔴 Stok Habis' },
+            { id: 'aktivitas', label: summary ? `📋 Riwayat Restock (${summary.todayRestockCount})` : '📋 Riwayat Restock' },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -687,7 +702,7 @@ export default function GudangPortalPage() {
           </div>
         )}
 
-        {/* ── TAB KONTEN 1: RIWAYAT AKTIVITAS RESTOCK ── */}
+        {/* ── TAB KONTEN: RIWAYAT / PENERIMAAN / PRODUK ── */}
         {activeTab === 'aktivitas' ? (
           <section>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -717,66 +732,228 @@ export default function GudangPortalPage() {
                 </div>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {activities.map((act) => (
-                  <div
-                    key={act.id}
-                    style={{
-                      padding: '12px 14px',
-                      backgroundColor: '#ffffff',
-                      borderRadius: 10,
-                      border: '1px solid #e2e8f0',
-                      boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.03)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a' }}>
-                        {act.productName}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {activities.map((act) => {
+                  const dateStr = act.formattedDate || new Date(act.createdAt).toLocaleDateString('id-ID', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    timeZone: 'Asia/Jakarta',
+                  });
+                  const timeStr = act.formattedTime || `${new Date(act.createdAt).toLocaleTimeString('id-ID', {
+                    timeZone: 'Asia/Jakarta',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })} WIB`;
+
+                  return (
+                    <div
+                      key={act.id}
+                      style={{
+                        padding: '14px 16px',
+                        backgroundColor: '#ffffff',
+                        borderRadius: 12,
+                        border: '1px solid #e2e8f0',
+                        boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.04)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8,
+                      }}
+                    >
+                      {/* Baris 1: Nama Produk & Badge Qty */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                        <div>
+                          <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#0f172a' }}>
+                            {act.productName}
+                          </div>
+                          {act.categoryName && (
+                            <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>
+                              Kategori: {act.categoryName}
+                            </div>
+                          )}
+                        </div>
+                        <span
+                          style={{
+                            fontSize: '0.82rem',
+                            fontWeight: 900,
+                            padding: '4px 10px',
+                            borderRadius: 8,
+                            backgroundColor: '#dcfce7',
+                            color: '#15803d',
+                            border: '1px solid #bbf7d0',
+                            flexShrink: 0,
+                          }}
+                        >
+                          +{act.qtyDiff} Pcs
+                        </span>
                       </div>
-                      <span
+
+                      {/* Baris 2: Waktu Lengkap & Shift */}
+                      <div
                         style={{
-                          fontSize: '0.75rem',
-                          fontWeight: 800,
-                          padding: '2px 8px',
-                          borderRadius: 6,
-                          backgroundColor: '#dcfce7',
-                          color: '#15803d',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: '0.73rem',
+                          color: '#334155',
+                          backgroundColor: '#f8fafc',
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          border: '1px solid #f1f5f9',
                         }}
                       >
-                        +{act.qtyDiff} Pcs
-                      </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <Calendar size={13} style={{ color: '#0284c7' }} />
+                          <span><strong>{dateStr}</strong></span>
+                        </div>
+                        <span style={{ color: '#cbd5e1' }}>•</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <Clock size={13} style={{ color: '#f59e0b' }} />
+                          <span>{timeStr}</span>
+                        </div>
+                        <span style={{ color: '#cbd5e1' }}>•</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#475569' }}>
+                          <Layers size={13} style={{ color: '#8b5cf6' }} />
+                          <span>{act.shiftInfo || 'Shift Reguler Toko'}</span>
+                        </div>
+                      </div>
+
+                      {/* Baris 3: Petugas & Batch Info */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, fontSize: '0.72rem', color: '#64748b' }}>
+                        <div>
+                          👤 <strong>Petugas:</strong> {act.actorName ? `${act.actorName} (${act.actorNim || 'Gudang'})` : 'Petugas Toko'}
+                        </div>
+                        {act.batchCode && (
+                          <div>
+                            📦 <strong>Batch:</strong> <code style={{ backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: 4, color: '#0f172a' }}>{act.batchCode}</code>
+                          </div>
+                        )}
+                        {act.expiryDate && (
+                          <div style={{ color: '#c2410c' }}>
+                            ⏰ <strong>Exp:</strong> {act.expiryDate}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Catatan jika ada */}
+                      {act.notes && (
+                        <div style={{ fontSize: '0.72rem', color: '#475569', fontStyle: 'italic', borderLeft: '2px solid #cbd5e1', paddingLeft: 8 }}>
+                          &ldquo;{act.notes}&rdquo;
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontSize: '0.73rem', color: '#475569', marginTop: 4 }}>
-                      {act.reason}
-                    </div>
-                    <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginTop: 4 }}>
-                      {new Date(act.createdAt).toLocaleTimeString('id-ID', {
-                        timeZone: 'Asia/Jakarta',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}{' '}
-                      WIB
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
+        ) : activeTab === 'penerimaan' ? (
+          <PenerimaanBarangSection
+            productsList={products.map((p) => ({
+              id: p.id,
+              name: p.name,
+              barcode: p.barcode,
+              categoryName: p.categoryName,
+              stockQty: p.stockQty,
+              unit: p.unit,
+              isPerishable: p.isPerishable,
+            }))}
+            onDraftApproved={() => loadData(activeTab, search)}
+          />
+        ) : activeTab === 'fefo' ? (
+          <FEFOActionSection onBadgeUpdate={() => loadData(activeTab, search)} />
         ) : (
           /* ── TAB KONTEN 2: LIST PRODUK GUDANG & RADAR FEFO ── */
           <section>
+            {/* ── CARD EDUKASI Makanan Basah (PERISHABLE) ── */}
+            {activeTab === 'perishable' && (
+              <div
+                style={{
+                  backgroundColor: '#ffffff',
+                  borderRadius: 12,
+                  border: '1px solid #fed7aa',
+                  padding: '14px 16px',
+                  marginBottom: 16,
+                  boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.04)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <Sparkles size={18} style={{ color: '#ea580c' }} />
+                  <h3 style={{ fontSize: '0.88rem', fontWeight: 800, color: '#9a3412', margin: 0 }}>
+                    Sistem Pemantauan Kedaluwarsa Wiramart (2 Tipe Produk)
+                  </h3>
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                    gap: 10,
+                    fontSize: '0.74rem',
+                    color: '#475569',
+                  }}
+                >
+                  {/* Tipe 1: Produk Pabrik Ber-Barcode */}
+                  <div
+                    style={{
+                      backgroundColor: '#f8fafc',
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: '1px solid #e2e8f0',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => setActiveTab('fefo')}
+                  >
+                    <div style={{ fontWeight: 800, color: '#c2410c', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span>🥫 Tipe 1: Produk Kemasan Ber-Barcode (FEFO)</span>
+                    </div>
+                    <p style={{ margin: 0, lineHeight: 1.45 }}>
+                      <strong>Sistem FEFO:</strong> Minuman botol (Ades, Sprite), susu, biskuit, snack pabrik. Tanggal expired dicatat per batch dus masuk dan dipantau 7 s/d 30 hari sebelum basi. Produk expired terdekat wajib ditaruh paling depan rak.
+                    </p>
+                    <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#ea580c', fontWeight: 700 }}>
+                      &bull; {summary ? `${summary.expiringSoonSku} batch mendekati expired` : 'Dipantau otomatis'}
+                    </div>
+                  </div>
+
+                  {/* Tipe 2: Makanan Basah Non-Barcode */}
+                  <div
+                    style={{
+                      backgroundColor: activeTab === 'perishable' ? '#f0fdf4' : '#f8fafc',
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: activeTab === 'perishable' ? '1.5px solid #22c55e' : '1px solid #e2e8f0',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => setActiveTab('perishable')}
+                  >
+                    <div style={{ fontWeight: 800, color: '#15803d', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span>🥪 Tipe 2: Makanan Basah Non-Barcode (Harian)</span>
+                    </div>
+                    <p style={{ margin: 0, lineHeight: 1.45 }}>
+                      <strong>Kadaluarsa 1 Hari (Cut-off Jam 15:00 WIB):</strong> Risol, lemper, ricebowl, donat, jajanan pasar konsinyasi/titipan mitra. <em>Wajib habis hari ini juga</em>. Jam 15:00 sore wajib cut-off sisa (retur/obral), dilarang menginap di rak!
+                    </p>
+                    <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#16a34a', fontWeight: 700 }}>
+                      &bull; {summary ? `${summary.perishableSku ?? 0} item makanan basah terdaftar` : 'Wajib Cut-Off Jam 15:00'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <h2 style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1e293b' }}>
-                {activeTab === 'fefo'
-                  ? 'Radar Kedaluwarsa (FEFO Terdekat)'
+                {activeTab === 'perishable'
+                  ? 'Daftar Makanan Basah Harian (Kadaluarsa 1 Hari / Cut-off 15:00)'
                   : activeTab === 'kritis'
-                  ? 'Daftar Stok Kritis (Segera Restock)'
+                  ? 'Daftar Stok Kritis (≤ 5 Pcs)'
                   : activeTab === 'habis'
                   ? 'Daftar Stok Habis (0 Pcs)'
                   : 'Daftar Inventaris Produk'}
               </h2>
               <span style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                {products.length} produk ditemukan
+                {search.trim() ? `${products.length} hasil untuk "${search.trim()}"` : `${products.length} produk ditemukan`}
               </span>
             </div>
 
@@ -797,10 +974,35 @@ export default function GudangPortalPage() {
                 }}
               >
                 <Package size={32} style={{ margin: '0 auto 8px', color: '#94a3b8' }} />
-                <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Tidak ada produk yang cocok</div>
-                <div style={{ fontSize: '0.75rem', marginTop: 4 }}>
-                  Coba ubah kata kunci pencarian atau ganti filter.
+                <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                  {search.trim()
+                    ? `Tidak ada produk "${search.trim()}" pada filter ${activeTab === 'habis' ? 'Stok Habis' : activeTab === 'kritis' ? 'Stok Kritis' : 'ini'}`
+                    : 'Tidak ada produk yang cocok'}
                 </div>
+                <div style={{ fontSize: '0.75rem', marginTop: 4 }}>
+                  {search.trim() && activeTab !== 'semua'
+                    ? 'Produk mungkin masih memiliki stok aman. Coba cari di Semua Produk.'
+                    : 'Coba ubah kata kunci pencarian atau ganti filter.'}
+                </div>
+                {search.trim() && activeTab !== 'semua' && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('semua')}
+                    style={{
+                      marginTop: 10,
+                      padding: '6px 14px',
+                      borderRadius: 8,
+                      backgroundColor: 'hsl(217 91% 60%)',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontWeight: 700,
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Cari &ldquo;{search.trim()}&rdquo; di Semua Produk
+                  </button>
+                )}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

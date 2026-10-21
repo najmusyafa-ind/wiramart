@@ -18,6 +18,9 @@ import {
   Sunset,
   User,
   Clock,
+  PackageCheck,
+  Trash2,
+  Stamp,
 } from 'lucide-react';
 
 type ShiftReportItem = {
@@ -57,6 +60,14 @@ type ClosingPreview = {
   txCount: number;
 };
 
+export type StockMutationSummary = {
+  date: string;
+  itemsReceived: { totalQty: number; totalHpp: number; draftCount: number };
+  itemsSold: { totalQty: number; totalGrossAmount: number; discountedItemsQty: number };
+  fefoActions: { activeDiscountsCount: number; destroyedQty: number; returnedQty: number };
+  generatedAt: string;
+};
+
 type ClosingData = {
   id: string;
   closingDate: string;
@@ -71,6 +82,10 @@ type ClosingData = {
   status: string;
   notes: string | null;
   createdAt: string;
+  modSignedBy?: string | null;
+  modSignedAt?: string | null;
+  modSignNote?: string | null;
+  stockMutationSummary?: StockMutationSummary | null;
 };
 
 interface TutupBukuModalProps {
@@ -121,6 +136,13 @@ export default function TutupBukuModal({
   const [shiftsData, setShiftsData] = useState<ShiftReportItem[]>([]);
   const [notes, setNotes] = useState('');
 
+  // MOD Sign-off & Stock Mutation State (Fase 4)
+  const [stockMutation, setStockMutation] = useState<StockMutationSummary | null>(null);
+  const [loadingMutation, setLoadingMutation] = useState(false);
+  const [modSignNote, setModSignNote] = useState('');
+  const [signingOff, setSigningOff] = useState(false);
+  const [signOffSuccess, setSignOffSuccess] = useState<string | null>(null);
+
   const fetchStatus = useCallback(async (date: string) => {
     setLoading(true);
     setError(null);
@@ -133,6 +155,12 @@ export default function TutupBukuModal({
         setPreview(json.data.preview);
         setShiftsData(json.data.shifts || []);
         setNotes(json.data.closing?.notes || '');
+        if (json.data.closing?.modSignNote) {
+          setModSignNote(json.data.closing.modSignNote);
+        }
+        if (json.data.closing?.stockMutationSummary) {
+          setStockMutation(json.data.closing.stockMutationSummary);
+        }
       } else {
         setError(json.error || 'Gagal memuat status tutup buku.');
       }
@@ -141,7 +169,49 @@ export default function TutupBukuModal({
     } finally {
       setLoading(false);
     }
+
+    // Ambil mutasi stok terkini jika belum tersimpan di closing
+    setLoadingMutation(true);
+    try {
+      const mutRes = await fetch(`/api/admin/tutup-buku/sign-off?date=${date}`);
+      const mutJson = await mutRes.json();
+      if (mutRes.ok && mutJson.success && mutJson.data?.summary) {
+        setStockMutation((prev) => prev || mutJson.data.summary);
+      }
+    } catch {
+      // silent
+    } finally {
+      setLoadingMutation(false);
+    }
   }, []);
+
+  async function handleSignOffMOD() {
+    setSigningOff(true);
+    setError(null);
+    setSignOffSuccess(null);
+    try {
+      const res = await fetch('/api/admin/tutup-buku/sign-off', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          closingDate: selectedDate,
+          notes: modSignNote.trim() || undefined,
+        }),
+      });
+
+      const json = await res.json();
+      if (res.ok && json.success) {
+        setSignOffSuccess(json.message || 'Daily Closing berhasil disahkan oleh Manager on Duty!');
+        fetchStatus(selectedDate);
+      } else {
+        setError(json.error || 'Gagal mengesahkan Daily Closing.');
+      }
+    } catch {
+      setError('Terjadi kesalahan jaringan.');
+    } finally {
+      setSigningOff(false);
+    }
+  }
 
   useEffect(() => {
     if (isOpen) {
@@ -473,22 +543,30 @@ export default function TutupBukuModal({
                             ) : null}
                             {sh.cashOut === 0 && sh.cashIn === 0 ? <span>Rp 0</span> : null}
                           </div>
-                          <div>
-                            <span style={{ color: 'var(--color-text-muted)' }}>Fisik Laci: </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ color: 'var(--color-text-muted)' }}>
+                              Seharusnya: <strong>{fmtRp(sh.expectedCash)}</strong> | Fisik:
+                            </span>
                             <strong style={{ color: 'var(--color-text)' }}>
                               {sh.actualCash !== null ? fmtRp(sh.actualCash) : 'Belum dihitung'}
                             </strong>
                             {sh.selisih !== null && (
                               <span style={{
-                                marginLeft: 6,
                                 fontWeight: 800,
+                                padding: '1px 6px',
+                                borderRadius: 'var(--radius-sm)',
+                                background: sh.selisih === 0
+                                  ? 'hsl(142, 60%, 92%)'
+                                  : sh.selisih > 0
+                                  ? 'hsl(200, 80%, 92%)'
+                                  : 'hsl(0, 90%, 92%)',
                                 color: sh.selisih === 0
                                   ? 'hsl(142, 70%, 35%)'
                                   : sh.selisih > 0
-                                  ? 'hsl(200, 80%, 40%)'
+                                  ? 'hsl(200, 80%, 35%)'
                                   : 'var(--color-error)',
                               }}>
-                                ({sh.selisih === 0 ? 'Pas' : (sh.selisih > 0 ? `+${fmtRp(sh.selisih)}` : fmtRp(sh.selisih))})
+                                {sh.selisih === 0 ? '✓ Pas' : (sh.selisih > 0 ? `+${fmtRp(sh.selisih)} (Lebih)` : `${fmtRp(sh.selisih)} (Tekor)`)}
                               </span>
                             )}
                           </div>
@@ -602,6 +680,160 @@ export default function TutupBukuModal({
                   </span>
                 </div>
               )}
+
+              {/* ── BAGIAN 3: Rekonsiliasi Mutasi Stok & Pengesahan MOD (Fase 4) ── */}
+              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-text)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 10 }}>
+                3. Rekonsiliasi Mutasi Stok &amp; Pengesahan MOD (Fase 4)
+              </div>
+
+              {/* Kartu Ringkasan Mutasi Stok */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-md)', padding: 10 }}>
+                  <div style={{ fontSize: '0.7rem', color: '#166534', textTransform: 'uppercase', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <PackageCheck size={13} /> Barang Masuk ACC
+                  </div>
+                  <div style={{ fontSize: '1rem', fontWeight: 900, color: '#15803d', marginTop: 3 }}>
+                    {stockMutation?.itemsReceived.totalQty ?? 0} pcs
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: '#4b5563', marginTop: 2 }}>
+                    Nilai HPP: {fmtRp(stockMutation?.itemsReceived.totalHpp ?? 0)} ({stockMutation?.itemsReceived.draftCount ?? 0} kiriman)
+                  </div>
+                </div>
+
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 'var(--radius-md)', padding: 10 }}>
+                  <div style={{ fontSize: '0.7rem', color: '#1e40af', textTransform: 'uppercase', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <TrendingUp size={13} /> Terjual di Kasir
+                  </div>
+                  <div style={{ fontSize: '1rem', fontWeight: 900, color: '#1d4ed8', marginTop: 3 }}>
+                    {stockMutation?.itemsSold.totalQty ?? 0} pcs
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: '#4b5563', marginTop: 2 }}>
+                    Termasuk {stockMutation?.itemsSold.discountedItemsQty ?? 0} pcs Obral Diskon
+                  </div>
+                </div>
+
+                <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 'var(--radius-md)', padding: 10 }}>
+                  <div style={{ fontSize: '0.7rem', color: '#9a3412', textTransform: 'uppercase', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Trash2 size={13} /> FEFO Write-Off/Retur
+                  </div>
+                  <div style={{ fontSize: '1rem', fontWeight: 900, color: '#c2410c', marginTop: 3 }}>
+                    {(stockMutation?.fefoActions.destroyedQty ?? 0) + (stockMutation?.fefoActions.returnedQty ?? 0)} pcs
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: '#4b5563', marginTop: 2 }}>
+                    Musnah: {stockMutation?.fefoActions.destroyedQty ?? 0} | Retur: {stockMutation?.fefoActions.returnedQty ?? 0}
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Pengesahan Stempel MOD */}
+              {closing?.status === 'AUDITED' || closing?.modSignedAt ? (
+                <div style={{
+                  padding: '12px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'hsl(142, 70%, 94%)',
+                  border: '1.5px solid hsl(142, 65%, 70%)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <ShieldCheck size={18} color="#15803d" />
+                    <span style={{ fontSize: '0.82rem', fontWeight: 900, color: '#14532d', textTransform: 'uppercase' }}>
+                      Status: AUDITED (Telah Disahkan Manager on Duty)
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#166534', marginTop: 2 }}>
+                    Disahkan pada: {closing.modSignedAt ? new Date(closing.modSignedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) : '-'}
+                  </div>
+                  {closing.modSignNote && (
+                    <div style={{ fontSize: '0.75rem', color: '#14532d', background: '#dcfce7', padding: '6px 10px', borderRadius: 6, marginTop: 4 }}>
+                      <strong>Catatan MOD:</strong> &quot;{closing.modSignNote}&quot;
+                    </div>
+                  )}
+                </div>
+              ) : isLocked ? (
+                <div style={{
+                  padding: '14px',
+                  borderRadius: 'var(--radius-md)',
+                  background: '#fefce8',
+                  border: '1.5px solid #fef08a',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Stamp size={18} color="#ca8a04" />
+                    <div>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 900, color: '#854d0e' }}>
+                        Wewenang Pengesahan Akhir: Manager on Duty (MOD)
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: '#a16207' }}>
+                        Periksa kecocokan uang kas dan ringkasan mutasi stok di atas sebelum mengesahkan closing harian.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '0.72rem', fontWeight: 700, color: '#713f12', display: 'block', marginBottom: 4 }}>
+                      Catatan Pengesahan MOD (Opsional):
+                    </label>
+                    <input
+                      type="text"
+                      value={modSignNote}
+                      onChange={(e) => setModSignNote(e.target.value)}
+                      placeholder="Contoh: Stok fisik dan uang kas sesuai, disahkan oleh Dosen MOD."
+                      style={{
+                        width: '100%',
+                        padding: '7px 10px',
+                        borderRadius: 6,
+                        border: '1px solid #fde047',
+                        fontSize: '0.78rem',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+
+                  {signOffSuccess && (
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#15803d', background: '#dcfce7', padding: '6px 10px', borderRadius: 6 }}>
+                      {signOffSuccess}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      disabled={signingOff}
+                      onClick={handleSignOffMOD}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: 8,
+                        border: 'none',
+                        background: '#ca8a04',
+                        color: '#ffffff',
+                        fontSize: '0.8rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        boxShadow: '0 2px 6px rgba(202, 138, 4, 0.25)',
+                      }}
+                    >
+                      {signingOff ? (
+                        <>
+                          <Loader2 size={14} className="spin-icon" />
+                          Mengesahkan...
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck size={15} />
+                          Sahkan Laporan Hari Ini (Stempel MOD)
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               {/* Form Catatan Manager */}
               <div>

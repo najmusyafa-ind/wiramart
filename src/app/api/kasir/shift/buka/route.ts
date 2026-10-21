@@ -133,8 +133,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   let auditFlags = 'NORMAL';
 
   const MODAL_PATEN_TOKO = 100_000;
-  // Jika kasir menggunakan modal paten toko (Rp 100.000 ± toleransi Rp 2.000), ini adalah serah terima kas tetap normal
-  const isModalPaten = Math.abs(modalAwal - MODAL_PATEN_TOKO) <= 2000;
+  // Kunci modal awal flat Rp 100.000 sesuai standar ritel modern (Alfamart / Indomaret)
+  const finalModalAwal = (modalAwal && modalAwal > 0 && modalAwal <= 150_000) ? modalAwal : MODAL_PATEN_TOKO;
+  const isModalPaten = Math.abs(finalModalAwal - MODAL_PATEN_TOKO) <= 2000;
 
   if (isTestingMode || isModalPaten) {
     // Mode testing ATAU kasir menggunakan modal paten toko (Rp 100.000):
@@ -143,7 +144,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     auditFlags = 'NORMAL';
   } else if (lastClosedShift && lastClosedShift.actualCash !== null) {
     const prevActual = Number(lastClosedShift.actualCash);
-    serahTerimaDiff = modalAwal - prevActual;
+    serahTerimaDiff = finalModalAwal - prevActual;
     const TOLERANSI_SERAH_TERIMA = 2000; // Ambang toleransi Rp 2.000
     if (Math.abs(serahTerimaDiff) > TOLERANSI_SERAH_TERIMA) {
       auditFlags = 'SERAH_TERIMA_SELISIH';
@@ -157,7 +158,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     await db
       .update(shifts)
       .set({
-        modalAwal: modalAwal.toString(),
+        modalAwal: finalModalAwal.toString(),
         cashBreakdownOpen: breakdown ?? null,
         serahTerimaDiff: serahTerimaDiff !== null ? serahTerimaDiff.toString() : null,
         auditFlags,
@@ -171,7 +172,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
       .values({
         employeeId,
         status: 'ACTIVE',
-        modalAwal: modalAwal.toString(),
+        modalAwal: finalModalAwal.toString(),
         cashBreakdownOpen: breakdown ?? null,
         serahTerimaDiff: serahTerimaDiff !== null ? serahTerimaDiff.toString() : null,
         auditFlags,

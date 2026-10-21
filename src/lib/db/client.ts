@@ -25,7 +25,7 @@ const connection =
   postgres(process.env.DATABASE_URL, {
     max: 10,           // connection pool max — sesuai Supabase free tier
     idle_timeout: 20,  // tutup koneksi idle setelah 20 detik
-    connect_timeout: 10,
+    connect_timeout: 30, // 30 detik untuk toleransi latensi jaringan cloud Supabase
     prepare: false,    // wajib false untuk Supabase transaction pooler
   });
 

@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const search = searchParams.get('search') || undefined;
   const filterParam = searchParams.get('filter');
-  const validFilters = ['semua', 'kritis', 'habis', 'fefo'] as const;
+  const validFilters = ['semua', 'kritis', 'habis', 'fefo', 'perishable'] as const;
   const filter = validFilters.includes(filterParam as (typeof validFilters)[number])
     ? (filterParam as (typeof validFilters)[number])
     : 'semua';
@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
   try {
     const [summary, productsResult, activities] = await Promise.all([
       getWarehouseSummary(),
-      getWarehouseProducts({ search, filter, limit: 120 }),
+      getWarehouseProducts({ search, filter, limit: 500 }),
       getWarehouseActivityLogs(10),
     ]);
 

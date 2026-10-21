@@ -76,7 +76,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     // Ambil shifts dalam rentang waktu ini untuk memetakan jam shift
     const shiftList = await db.query.shifts.findMany({
       where: and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)),
-      columns: { id: true, clockIn: true, clockOut: true },
+      columns: { id: true, employeeId: true, clockIn: true, clockOut: true },
     });
 
     // 2. Ambil absensi yang hadir (HADIR, TELAT, PENGGANTI) pada rentang ini
@@ -172,22 +172,78 @@ export async function GET(req: NextRequest): Promise<Response> {
           shiftPoolMap.set(s.id, { pool, attendees: [] });
         }
 
-        // Kelompokkan attendee ke shift terdekat
+        // Multi-tier matching:
+        // Tier 1: Direct att.shiftId
+        // Tier 2: att.employeeId === s.employeeId
+        // Tier 3: Time interval matching via clockInActual
+        // Tier 4: Schedule slot heuristic (Morning 07:30-11:30 vs Afternoon 11:00-15:00)
+        // Tier 5: Fallback to shiftsOnDate[0]
         for (const att of attendees) {
-          const slotHour = att.schedule?.slotStart ? parseInt(att.schedule.slotStart.split(':')[0] ?? '8', 10) : 8;
-          let matchedShift = shiftsOnDate[0];
-          for (const s of shiftsOnDate) {
-            const shiftHourWib = new Date(s.clockIn.getTime() + 7 * 3600 * 1000).getUTCHours();
-            if (slotHour >= 11 && shiftHourWib >= 11) {
-              matchedShift = s;
-              break;
-            } else if (slotHour < 11 && shiftHourWib < 11) {
-              matchedShift = s;
-              break;
+          let matchedShift: typeof shiftsOnDate[0] | undefined;
+
+          // Tier 1: Direct shift_id foreign key
+          if (att.shiftId) {
+            matchedShift = shiftsOnDate.find((s) => s.id === att.shiftId);
+          }
+
+          // Tier 2: Employee who owns the shift session
+          if (!matchedShift) {
+            matchedShift = shiftsOnDate.find((s) => s.employeeId === att.employeeId);
+          }
+
+          // Tier 3: Actual login clock-in timestamp match (with 30m window)
+          if (!matchedShift && att.clockInActual) {
+            const attTime = new Date(att.clockInActual).getTime();
+            matchedShift = shiftsOnDate.find((s) => {
+              const sIn = s.clockIn.getTime();
+              const sOut = s.clockOut ? s.clockOut.getTime() : sIn + 4 * 3600 * 1000;
+              return attTime >= sIn - 30 * 60 * 1000 && attTime <= sOut + 30 * 60 * 1000;
+            });
+          }
+
+          // Tier 4: Schedule slotStart heuristic
+          if (!matchedShift) {
+            const slotHour = att.schedule?.slotStart ? parseInt(att.schedule.slotStart.split(':')[0] ?? '8', 10) : 8;
+            for (const s of shiftsOnDate) {
+              const shiftHourWib = new Date(s.clockIn.getTime() + 7 * 3600 * 1000).getUTCHours();
+              if (slotHour >= 11 && shiftHourWib >= 11) {
+                matchedShift = s;
+                break;
+              } else if (slotHour < 11 && shiftHourWib < 11) {
+                matchedShift = s;
+                break;
+              }
             }
           }
+
+          // Tier 5: Safe fallback
+          if (!matchedShift && shiftsOnDate.length > 0) {
+            matchedShift = shiftsOnDate[0];
+          }
+
           if (matchedShift && shiftPoolMap.has(matchedShift.id)) {
             shiftPoolMap.get(matchedShift.id)!.attendees.push(att);
+          }
+        }
+
+        // Zero-Leakage Guard: jika ada shift yang menghasilkan laba tapi tidak ada hadirin yang terpetakan,
+        // alihkan sisa pool tersebut secara proporsional ke hadirin shift lain pada tanggal yang sama.
+        let unallocatedShiftPool = 0;
+        let activeAttendeesCount = 0;
+        for (const [, group] of shiftPoolMap.entries()) {
+          if (group.attendees.length === 0) {
+            unallocatedShiftPool += group.pool;
+            group.pool = 0;
+          } else {
+            activeAttendeesCount += group.attendees.length;
+          }
+        }
+        if (unallocatedShiftPool > 0 && activeAttendeesCount > 0) {
+          const bonusPerAttendee = Math.floor(unallocatedShiftPool / activeAttendeesCount);
+          for (const [, group] of shiftPoolMap.entries()) {
+            if (group.attendees.length > 0) {
+              group.pool += bonusPerAttendee * group.attendees.length;
+            }
           }
         }
       }
