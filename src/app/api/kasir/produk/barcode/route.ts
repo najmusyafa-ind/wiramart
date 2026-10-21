@@ -17,7 +17,13 @@ import { products, categories, discountBarcodes, discountPolicies } from '@/lib/
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
 
+import { z } from 'zod';
+
 export const runtime = 'nodejs';
+
+const BarcodeQuerySchema = z.object({
+  code: z.string().trim().min(1, 'Parameter code wajib diisi').max(100),
+});
 
 function getTodayWIB(): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -37,8 +43,13 @@ export async function GET(req: NextRequest): Promise<Response> {
   const payload = await verifyJwt(req);
   if (!payload) return apiError('Unauthorized', 'UNAUTHORIZED', 401);
 
-  const code = new URL(req.url).searchParams.get('code')?.trim();
-  if (!code) return apiError('Parameter code wajib diisi.', 'MISSING_CODE', 400);
+  const rawCode = new URL(req.url).searchParams.get('code') || '';
+  const parsed = BarcodeQuerySchema.safeParse({ code: rawCode });
+  if (!parsed.success) {
+    return apiError(parsed.error.issues[0]?.message || 'Parameter code wajib diisi.', 'MISSING_CODE', 400);
+  }
+
+  const { code } = parsed.data;
 
   const todayWIB = getTodayWIB();
 
