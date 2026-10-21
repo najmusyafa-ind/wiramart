@@ -96,10 +96,13 @@ export type PerShiftData = {
   grandTotal: {
     omzet: number;
     labaKotor: number;
+    biayaOperasional?: number;
+    labaOperasionalBersih?: number;
     poolGaji: number;
     txCount: number;
     totalDistributed?: number;
     sisaPool?: number;
+    labaBersihToko?: number;
   };
   shifts: ShiftRow[];
   summaryPerEmployee: EmpSummary[];
@@ -665,10 +668,13 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
   const grandTotal = data?.grandTotal ?? {
     omzet: 0,
     labaKotor: 0,
+    biayaOperasional: 0,
+    labaOperasionalBersih: 0,
     poolGaji: 0,
     txCount: 0,
     totalDistributed: 0,
     sisaPool: 0,
+    labaBersihToko: 0,
   };
 
   const margin = grandTotal.omzet > 0 ? Math.round((grandTotal.labaKotor / grandTotal.omzet) * 100) : 0;
@@ -990,21 +996,21 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
             label: 'Pool Bagi Hasil (50%)',
             value: formatRupiah(grandTotal.poolGaji),
             color: '#d97706',
-            sub: 'Hak seluruh mahasiswa hadir',
+            sub: '50% Laba Bersih Operasional',
           },
           {
             icon: <Award size={18} />,
             label: 'Sudah Didistribusikan',
             value: formatRupiah(grandTotal.totalDistributed || 0),
             color: '#16a34a',
-            sub: `${data?.summaryPerEmployee.length ?? 0} mahasiswa menerima`,
+            sub: `${data?.summaryPerEmployee.length ?? 0} mahasiswa penerima`,
           },
           {
             icon: <Wallet size={18} />,
             label: 'Laba Bersih Toko',
-            value: formatRupiah(Math.max(0, grandTotal.labaKotor - (grandTotal.totalDistributed || 0))),
+            value: formatRupiah(grandTotal.labaBersihToko ?? Math.max(0, grandTotal.labaKotor - (grandTotal.totalDistributed || 0))),
             color: '#6366f1',
-            sub: 'Kas toko (termasuk selisih)',
+            sub: 'Kas toko (hak toko + sisa shift)',
           },
         ].map((c) => (
           <div
@@ -1050,6 +1056,34 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
             </div>
           </div>
         ))}
+      </div>
+
+      {/* ─────────────────────────────────────────────────────────────
+          TRANSPARENCY BANNER: SINKRONISASI FINANSIAL & BAGI HASIL (OPSI A)
+          ───────────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '12px',
+          padding: '12px 16px',
+          marginBottom: 'var(--space-5, 20px)',
+          borderRadius: 'var(--radius-lg, 10px)',
+          backgroundColor: '#eff6ff',
+          border: '1px solid #bfdbfe',
+          color: '#1e40af',
+          fontSize: '12px',
+          lineHeight: '1.5',
+        }}
+      >
+        <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px', color: '#2563eb' }} />
+        <div>
+          <span style={{ fontWeight: 700 }}>Integrasi Penuh Finansial & Bagi Hasil: </span>
+          Laba Kotor ({formatRupiah(grandTotal.labaKotor)}) dikurangi Beban Operasional ({formatRupiah(grandTotal.biayaOperasional || 0)}) menghasilkan Laba Bersih Operasional ({formatRupiah(grandTotal.labaOperasionalBersih || 0)}). 
+          Alokasi hak mahasiswa 50% adalah <strong>{formatRupiah(grandTotal.poolGaji)}</strong>. 
+          Sebesar <strong>{formatRupiah(grandTotal.totalDistributed || 0)}</strong> terdistribusi kepada {data?.summaryPerEmployee.length ?? 0} mahasiswa yang bertugas dan hadir pada periode ini. 
+          Sisa alokasi <strong>{formatRupiah(grandTotal.sisaPool || 0)}</strong> (dari shift akun testing) otomatis disimpan di Kas Toko, sehingga total Laba Bersih Toko menjadi <strong>{formatRupiah(grandTotal.labaBersihToko || 0)}</strong>.
+        </div>
       </div>
 
       {/* ─────────────────────────────────────────────────────────────

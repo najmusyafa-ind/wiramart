@@ -22,7 +22,7 @@ import {
 } from '@/lib/db/schema';
 import { and, eq, gte, lte, lt, inArray, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
-import { resolveReportRange, type PeriodKey } from '@/lib/finance/report';
+import { resolveReportRange, getFinancialReport, type PeriodKey } from '@/lib/finance/report';
 
 export const runtime = 'nodejs';
 
@@ -57,7 +57,7 @@ export async function GET(req: NextRequest): Promise<Response> {
   let range;
   try {
     range = resolveReportRange({
-      period: period || (!dateFrom ? 'monthly' : null),
+      period: period || (monthParam ? 'monthly' : (!dateFrom ? 'monthly' : null)),
       dateFrom,
       dateTo,
     });
@@ -67,6 +67,8 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   try {
+    const financial = await getFinancialReport(range);
+
     // ─────────────────────────────────────────────────────────────
     // Query daftar bulan yang tersedia (untuk navigasi filter di UI)
     // ─────────────────────────────────────────────────────────────
@@ -86,13 +88,15 @@ export async function GET(req: NextRequest): Promise<Response> {
     // ─────────────────────────────────────────────────────────────
     const shiftRows = await db
       .select({
-        id:         shifts.id,
-        clockIn:    shifts.clockIn,
-        clockOut:   shifts.clockOut,
-        status:     shifts.status,
-        employeeId: shifts.employeeId,
-        kasirName:  employees.fullName,
-        kasirNim:   employees.nim,
+        id:           shifts.id,
+        clockIn:      shifts.clockIn,
+        clockOut:     shifts.clockOut,
+        status:       shifts.status,
+        employeeId:   shifts.employeeId,
+        kasirName:    employees.fullName,
+        kasirNim:     employees.nim,
+        kasirProdi:   employees.programStudi,
+        kasirJabatan: employees.jabatan,
       })
       .from(shifts)
       .innerJoin(employees, eq(shifts.employeeId, employees.id))
@@ -110,7 +114,17 @@ export async function GET(req: NextRequest): Promise<Response> {
         shifts: [],
         summaryPerEmployee: [],
         availableMonths,
-        grandTotal: { omzet: 0, labaKotor: 0, poolGaji: 0, txCount: 0, totalDistributed: 0, sisaPool: 0 },
+        grandTotal: {
+          omzet: financial.summary.omzet,
+          labaKotor: financial.summary.labaKotor,
+          biayaOperasional: financial.summary.biayaOperasional,
+          labaOperasionalBersih: Math.max(0, financial.summary.labaKotor - financial.summary.biayaOperasional),
+          poolGaji: financial.summary.alokasiGajiKaryawan,
+          txCount: financial.summary.txCount,
+          totalDistributed: 0,
+          sisaPool: financial.summary.alokasiGajiKaryawan,
+          labaBersihToko: financial.summary.labaBersih,
+        },
       });
     }
 
@@ -234,6 +248,43 @@ export async function GET(req: NextRequest): Promise<Response> {
         const list = attByShift.get(matched.id) ?? [];
         list.push(att);
         attByShift.set(matched.id, list);
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 4b. Integrasi Kasir Shift (Auto-Include Kasir jika belum di list)
+    //     Kasir yang membuka sesi laci & melayani transaksi jelas bertugas di shift itu.
+    //     Ini memastikan shift sebelum aktivasi kiosk (Agustus, September, awal Oktober)
+    //     serta shift di mana kasir tidak sempat tap kiosk tetap mendapatkan hak bagi hasil.
+    // ─────────────────────────────────────────────────────────────
+    for (const s of shiftRows) {
+      if (s.kasirName.toLowerCase().includes('testing') || s.kasirNim === '02405013') continue;
+
+      const list = attByShift.get(s.id) ?? [];
+      if (!list.some((att) => att.employee.id === s.employeeId)) {
+        list.push({
+          id: `shift-kasir-${s.id}`,
+          employeeId: s.employeeId,
+          scheduleId: null,
+          shiftId: s.id,
+          attendanceDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(s.clockIn),
+          clockInActual: s.clockIn,
+          clockOutActual: s.clockOut,
+          status: 'HADIR',
+          lateMinutes: 0,
+          notes: 'Auto-integrated shift cashier',
+          createdAt: s.clockIn,
+          updatedAt: s.clockIn,
+          employee: {
+            id: s.employeeId,
+            fullName: s.kasirName,
+            nim: s.kasirNim,
+            programStudi: s.kasirProdi,
+            jabatan: s.kasirJabatan || 'Kasir',
+          },
+          schedule: null,
+        } as any);
+        attByShift.set(s.id, list);
       }
     }
 
@@ -367,8 +418,14 @@ export async function GET(req: NextRequest): Promise<Response> {
     const summaryPerEmployee = Array.from(empAgg.values())
       .sort((a, b) => b.totalNominal - a.totalNominal);
 
-    const totalDistributed = summaryPerEmployee.reduce((sum, e) => sum + e.totalNominal, 0);
-    const sisaPool = Math.max(0, grandPool - totalDistributed);
+    const totalDistributed = summaryPerEmployee.reduce((acc, curr) => acc + curr.totalNominal, 0);
+
+    const grandLabaRounded = Math.round(grandLaba);
+    const biayaOperasional = financial.summary.biayaOperasional;
+    const labaOperasionalBersih = Math.max(0, grandLabaRounded - biayaOperasional);
+    const poolHakMahasiswa = financial.summary.alokasiGajiKaryawan;
+    const sisaPool = Math.max(0, poolHakMahasiswa - totalDistributed);
+    const labaBersihToko = Math.max(0, grandLabaRounded - totalDistributed - biayaOperasional);
 
     return apiOk({
       range: {
@@ -378,12 +435,15 @@ export async function GET(req: NextRequest): Promise<Response> {
         period:    period ?? 'custom',
       },
       grandTotal: {
-        omzet:            Math.round(grandOmzet),
-        labaKotor:        Math.round(grandLaba),
-        poolGaji:         grandPool,
-        txCount:          grandTx,
+        omzet:                 Math.round(grandOmzet),
+        labaKotor:             grandLabaRounded,
+        biayaOperasional,
+        labaOperasionalBersih,
+        poolGaji:              poolHakMahasiswa,
+        txCount:               grandTx,
         totalDistributed,
         sisaPool,
+        labaBersihToko,
       },
       shifts: builtShifts,
       summaryPerEmployee,
