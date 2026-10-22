@@ -5,7 +5,7 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ne, inArray, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { shiftSchedules, employees, attendances, qrisSettings } from '@/lib/db/schema';
 import { apiOk, apiError } from '@/lib/utils/helpers';
@@ -19,6 +19,7 @@ const presensiSchema = z.object({
   roleTask:   z.enum([
     'Admin Shift', 'Kepala Gudang', 'Kasir', 'Customer Service',
     'Ketua Admin', 'Pelayan', 'Gudang', 'Admin Kasir', 'Kepala Kasir',
+    'CS Pelayan', 'CS',
   ]).optional(),
   notes:      z.string().max(255).optional(),
 });
@@ -163,6 +164,50 @@ export async function POST(request: Request): Promise<Response> {
     const isTelat     = selisihMenit > toleransiMenit;
     const lateMinutes = isTelat ? selisihMenit : 0;
     const status      = isTelat ? 'TELAT' : 'HADIR';
+
+    // ── ATURAN KUOTA PERAN SHIFT ──
+    // Admin Kasir & Kasir: Maksimal 1 orang per shift (laci & otorisasi tunggal).
+    // Gudang & CS Pelayan: Fleksibel / Boleh > 1 orang (bantuan logistik & display toko).
+    if (roleTask === 'Kasir' || roleTask === 'Admin Shift') {
+      const siblingSchedules = await db.query.shiftSchedules.findMany({
+        where: and(
+          eq(shiftSchedules.dayOfWeek, schedule.dayOfWeek),
+          eq(shiftSchedules.slotStart, schedule.slotStart),
+          eq(shiftSchedules.slotEnd, schedule.slotEnd),
+          eq(shiftSchedules.isActive, true),
+        ),
+        columns: { id: true },
+      });
+      const siblingScheduleIds = siblingSchedules.map((s) => s.id);
+
+      if (siblingScheduleIds.length > 0) {
+        const existingRoleAtt = await db
+          .select({
+            id: attendances.id,
+            employeeName: employees.fullName,
+          })
+          .from(attendances)
+          .innerJoin(employees, eq(attendances.employeeId, employees.id))
+          .where(
+            and(
+              eq(attendances.attendanceDate, tanggalHari),
+              inArray(attendances.scheduleId, siblingScheduleIds),
+              ne(attendances.employeeId, employeeId),
+              sql`${attendances.notes} ILIKE ${`%Peran: ${roleTask}%`}`,
+            )
+          )
+          .limit(1);
+
+        if (existingRoleAtt.length > 0) {
+          const occName = existingRoleAtt[0]?.employeeName ?? 'rekan shift lain';
+          return apiError(
+            `Peran ${roleTask} pada shift ini sudah diisi oleh ${occName}. Sesuai SOP, peran ${roleTask} dibatasi 1 orang per shift. Silakan pilih tugas Gudang atau CS Pelayan.`,
+            'ROLE_LIMIT_REACHED',
+            422,
+          );
+        }
+      }
+    }
 
     const fullNotes = `Peran: ${roleTask}${notes ? ` | ${notes.trim()}` : ''}`;
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useId, useEffect } from 'react';
+import { useState, useId, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
@@ -69,8 +69,31 @@ export default function KasirLoginPage() {
 
   // Selected employee for presensi modal / inline action
   const [selectedPerson, setSelectedPerson] = useState<ShiftPersonnel | null>(null);
+  const [selectedShiftGroup, setSelectedShiftGroup] = useState<ShiftGroup | null>(null);
   const [selectedRole, setSelectedRole] = useState<RoleOption>('Kasir');
   const [submittingPresensi, setSubmittingPresensi] = useState(false);
+
+  // Deteksi kuota peran di shift yang sedang dipilih:
+  // Admin Kasir & Kasir: Maksimal 1 orang per shift (laci/otorisasi tunggal).
+  // Gudang & CS Pelayan: Fleksibel / Boleh > 1 orang (unlimited).
+  const takenRolesInCurrentShift = useMemo(() => {
+    if (!selectedShiftGroup) return { kasirOccupant: null, adminOccupant: null };
+    let kasirOccupant: string | null = null;
+    let adminOccupant: string | null = null;
+
+    for (const person of selectedShiftGroup.personnel) {
+      if (person.attendance.isAttended && person.employeeId !== selectedPerson?.employeeId) {
+        const notes = person.attendance.notes ?? '';
+        if (notes.includes('Peran: Kasir')) {
+          kasirOccupant = person.fullName ?? 'Rekan Kasir';
+        }
+        if (notes.includes('Peran: Admin Shift') || notes.includes('Peran: Ketua Admin')) {
+          adminOccupant = person.fullName ?? 'Rekan Admin Shift';
+        }
+      }
+    }
+    return { kasirOccupant, adminOccupant };
+  }, [selectedShiftGroup, selectedPerson]);
 
   // Fetch presensi hari ini
   async function loadPresensi() {
@@ -182,6 +205,7 @@ export default function KasirLoginPage() {
       }
 
       setSelectedPerson(null);
+      setSelectedShiftGroup(null);
       await loadPresensi(); // Refresh daftar agar badge langsung hijau
     } catch {
       setPresensiError('Gagal menghubungi server.');
@@ -832,17 +856,36 @@ export default function KasirLoginPage() {
                                   type="button"
                                   onClick={() => {
                                     setSelectedPerson(p);
-                                    let initialRole: RoleOption = 'Kasir';
+                                    setSelectedShiftGroup(s);
+
+                                    // Deteksi kuota terisi di shift ini
+                                    let isKasirTaken = false;
+                                    let isAdminTaken = false;
+                                    for (const other of s.personnel) {
+                                      if (other.attendance.isAttended && other.employeeId !== p.employeeId) {
+                                        const n = other.attendance.notes ?? '';
+                                        if (n.includes('Peran: Kasir')) isKasirTaken = true;
+                                        if (n.includes('Peran: Admin Shift') || n.includes('Peran: Ketua Admin')) isAdminTaken = true;
+                                      }
+                                    }
+
+                                    let initialRole: RoleOption = 'CS Pelayan';
                                     const jab = (p.defaultJabatan ?? '').toLowerCase();
+
                                     if (p.orderInSlot === 1 || jab.includes('admin') || jab.includes('ketua')) {
-                                      initialRole = 'Admin Shift';
+                                      initialRole = isAdminTaken ? 'CS Pelayan' : 'Admin Shift';
                                     } else if (p.orderInSlot === 3 || jab.includes('gudang')) {
                                       initialRole = 'Gudang';
                                     } else if (p.orderInSlot === 4 || jab.includes('pelayan') || jab.includes('service') || jab.includes('cs')) {
                                       initialRole = 'CS Pelayan';
+                                    } else if (p.orderInSlot >= 5) {
+                                      // Personel ke-5 ke atas (misal shift siang 5 orang):
+                                      // Prioritaskan CS Pelayan / Gudang (bebas multi-orang)
+                                      initialRole = jab.includes('gudang') ? 'Gudang' : 'CS Pelayan';
                                     } else {
-                                      initialRole = 'Kasir';
+                                      initialRole = isKasirTaken ? 'CS Pelayan' : 'Kasir';
                                     }
+
                                     setSelectedRole(initialRole);
                                     setPresensiError(null);
                                   }}
@@ -943,51 +986,133 @@ export default function KasirLoginPage() {
                 {selectedPerson.fullName} (NIM: {selectedPerson.nim})
               </p>
 
+              {presensiError && (
+                <div
+                  style={{
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    color: '#dc2626',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    fontSize: 'var(--text-xs)',
+                    marginBottom: 'var(--space-3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <AlertCircle size={14} style={{ flexShrink: 0 }} />
+                  <span>{presensiError}</span>
+                </div>
+              )}
+
               <div style={{ marginBottom: 'var(--space-4)' }}>
                 <label style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', display: 'block', marginBottom: 8 }}>
                   Pilih Tugas Shift Anda Hari Ini:
                 </label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {[
-                    { role: 'Kasir', desc: 'Melayani transaksi belanja, laci uang & scanning POS', icon: <ShoppingBag size={16} /> },
-                    { role: 'Gudang', desc: 'Logistik, terima barang supplier, cek batch & expired FEFO', icon: <Package size={16} /> },
-                    { role: 'CS Pelayan', desc: 'Layanan pelanggan toko, display etalase, dan cek makanan basi', icon: <HeartHandshake size={16} /> },
-                    { role: 'Admin Shift', desc: 'Koordinator shift, monitoring tim & otorisasi operasional', icon: <ShieldCheck size={16} /> },
-                  ].map((item) => (
-                    <button
-                      key={item.role}
-                      type="button"
-                      onClick={() => setSelectedRole(item.role as RoleOption)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        padding: '10px 12px',
-                        borderRadius: 'var(--radius-md)',
-                        border: selectedRole === item.role ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
-                        backgroundColor: selectedRole === item.role ? 'var(--color-primary-light)' : 'white',
-                        color: selectedRole === item.role ? 'var(--color-primary)' : 'var(--color-text)',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      <div style={{ color: selectedRole === item.role ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>
-                        {item.icon}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-bold)' }}>{item.role}</div>
-                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>{item.desc}</div>
-                      </div>
-                    </button>
-                  ))}
+                    {
+                      role: 'Kasir' as const,
+                      desc: 'Melayani transaksi belanja, laci uang & scanning POS',
+                      icon: <ShoppingBag size={16} />,
+                      isRestricted: Boolean(takenRolesInCurrentShift.kasirOccupant),
+                      restrictedMsg: `Sudah terisi oleh ${takenRolesInCurrentShift.kasirOccupant} (Maks. 1 orang per shift)`,
+                      badge: takenRolesInCurrentShift.kasirOccupant ? 'SUDAH TERISI' : 'MAKS. 1 ORANG',
+                      badgeColor: takenRolesInCurrentShift.kasirOccupant ? '#dc2626' : 'var(--color-primary)',
+                    },
+                    {
+                      role: 'Admin Shift' as const,
+                      desc: 'Koordinator shift, monitoring tim & otorisasi operasional',
+                      icon: <ShieldCheck size={16} />,
+                      isRestricted: Boolean(takenRolesInCurrentShift.adminOccupant),
+                      restrictedMsg: `Sudah terisi oleh ${takenRolesInCurrentShift.adminOccupant} (Maks. 1 orang per shift)`,
+                      badge: takenRolesInCurrentShift.adminOccupant ? 'SUDAH TERISI' : 'MAKS. 1 ORANG',
+                      badgeColor: takenRolesInCurrentShift.adminOccupant ? '#dc2626' : 'var(--color-primary)',
+                    },
+                    {
+                      role: 'Gudang' as const,
+                      desc: 'Logistik, terima barang supplier, cek batch & expired FEFO',
+                      icon: <Package size={16} />,
+                      isRestricted: false,
+                      badge: 'BISA > 1 ORANG',
+                      badgeColor: 'var(--color-success)',
+                    },
+                    {
+                      role: 'CS Pelayan' as const,
+                      desc: 'Layanan pelanggan toko, display etalase, dan cek makanan basi',
+                      icon: <HeartHandshake size={16} />,
+                      isRestricted: false,
+                      badge: 'BISA > 1 ORANG',
+                      badgeColor: 'var(--color-success)',
+                    },
+                  ].map((item) => {
+                    const isSelected = selectedRole === item.role;
+                    const isDisabled = item.isRestricted;
+
+                    return (
+                      <button
+                        key={item.role}
+                        type="button"
+                        disabled={isDisabled}
+                        onClick={() => !isDisabled && setSelectedRole(item.role)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          padding: '10px 12px',
+                          borderRadius: 'var(--radius-md)',
+                          border: isSelected ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
+                          backgroundColor: isDisabled
+                            ? '#f8fafc'
+                            : isSelected
+                            ? 'var(--color-primary-light)'
+                            : 'white',
+                          color: isDisabled
+                            ? 'var(--color-text-muted)'
+                            : isSelected
+                            ? 'var(--color-primary)'
+                            : 'var(--color-text)',
+                          cursor: isDisabled ? 'not-allowed' : 'pointer',
+                          opacity: isDisabled ? 0.65 : 1,
+                          textAlign: 'left',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        <div style={{ color: isDisabled ? 'var(--color-text-muted)' : isSelected ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>
+                          {item.icon}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                            <span style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-bold)' }}>{item.role}</span>
+                            <span style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              padding: '1px 6px',
+                              borderRadius: 999,
+                              backgroundColor: isDisabled ? '#fee2e2' : item.badgeColor === 'var(--color-success)' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(59, 130, 246, 0.1)',
+                              color: item.badgeColor,
+                            }}>
+                              {item.badge}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 10, color: isDisabled ? '#dc2626' : 'var(--color-text-muted)' }}>
+                            {isDisabled ? item.restrictedMsg : item.desc}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
                   type="button"
-                  onClick={() => setSelectedPerson(null)}
+                  onClick={() => {
+                    setSelectedPerson(null);
+                    setSelectedShiftGroup(null);
+                  }}
                   className="btn btn-secondary"
                   style={{ flex: 1, padding: 8, fontSize: 'var(--text-xs)' }}
                   disabled={submittingPresensi}
