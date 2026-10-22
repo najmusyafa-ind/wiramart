@@ -180,6 +180,278 @@ export default function GudangApprovalPage() {
   const [submittingFefoDecision, setSubmittingFefoDecision] = useState(false);
   const [fefoDecisionError, setFefoDecisionError] = useState<string | null>(null);
   const [createdBarcodeToast, setCreatedBarcodeToast] = useState<string | null>(null);
+  const [exportingFefoExcel, setExportingFefoExcel] = useState(false);
+
+  // ── Ekspor Rekap Laporan FEFO ke Excel (.xlsx) Tabel Hitam Putih Clean ──
+  async function handleExportFefoExcel() {
+    if (!fefoReports || fefoReports.length === 0) {
+      alert('Tidak ada data laporan FEFO untuk diekspor pada filter ini.');
+      return;
+    }
+    setExportingFefoExcel(true);
+    try {
+      const ExcelJS = (await import('exceljs')).default;
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'Wiramart UNPERBA';
+      wb.lastModifiedBy = 'Manager Gudang';
+      wb.created = new Date();
+
+      const ws = wb.addWorksheet('Rekap Laporan FEFO', {
+        views: [{ showGridLines: true }],
+      });
+
+      // ── BARIS 1: Header Utama Perusahaan (Hitam #18181B) ──
+      ws.mergeCells('A1:N1');
+      const r1 = ws.getCell('A1');
+      r1.value = 'WIRAMART — UKM KEWIRAUSAHAAN UNPERBA';
+      r1.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+      r1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF18181B' } };
+      r1.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(1).height = 30;
+
+      // ── BARIS 2: Judul Dokumen (Charcoal #27272A) ──
+      ws.mergeCells('A2:N2');
+      const r2 = ws.getCell('A2');
+      r2.value = 'REKAP LAPORAN AUDIT FEFO, KEDALUWARSA & DISKON DARURAT';
+      r2.font = { name: 'Segoe UI', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      r2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF27272A' } };
+      r2.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(2).height = 24;
+
+      // ── BARIS 3: Metadata ──
+      ws.mergeCells('A3:N3');
+      const r3 = ws.getCell('A3');
+      const nowWib = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+      const filterLabel =
+        fefoStatusFilter === 'SUBMITTED'
+          ? 'Menunggu Keputusan'
+          : fefoStatusFilter === 'APPROVED'
+            ? 'Telah Disetujui / Diskon Aktif'
+            : 'Semua Laporan FEFO';
+      r3.value = `Filter Status: ${filterLabel}   |   Dicetak: ${nowWib} WIB   |   Total Data: ${fefoReports.length} Laporan FEFO`;
+      r3.font = { name: 'Segoe UI', size: 9, italic: true, color: { argb: 'FF52525B' } };
+      r3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F4F5' } };
+      r3.border = { bottom: { style: 'thin', color: { argb: 'FFD4D4D8' } } };
+      r3.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(3).height = 20;
+
+      // Spacer row
+      ws.getRow(4).height = 10;
+
+      // ── BARIS 5: Headers ──
+      const headers = [
+        'No',
+        'Nama Produk',
+        'Kode Batch',
+        'Tingkat Alert',
+        'Tgl Expired (ED)',
+        'Sisa di Rak',
+        'Harga Normal (Rp)',
+        'Catatan Fisik Gudang',
+        'Usulan Gudang',
+        'Status Laporan',
+        'Keputusan Manager',
+        'Diskon (%)',
+        'Harga Diskon (Rp)',
+        'Barcode Diskon / Catatan',
+      ];
+
+      ws.columns = [
+        { key: 'no', width: 6 },
+        { key: 'productName', width: 32 },
+        { key: 'batchCode', width: 16 },
+        { key: 'alertLevel', width: 16 },
+        { key: 'expiryDate', width: 16 },
+        { key: 'qty', width: 12 },
+        { key: 'sellingPrice', width: 18 },
+        { key: 'physicalCondition', width: 28 },
+        { key: 'gudangSuggestion', width: 24 },
+        { key: 'status', width: 22 },
+        { key: 'managerDecision', width: 22 },
+        { key: 'discountPct', width: 12 },
+        { key: 'discountedPrice', width: 18 },
+        { key: 'barcodeNote', width: 26 },
+      ];
+
+      const hRow = ws.getRow(5);
+      hRow.values = headers;
+      hRow.height = 26;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hRow.eachCell((cell: any) => {
+        cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF18181B' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF000000' } },
+          bottom: { style: 'medium', color: { argb: 'FF000000' } },
+          left: { style: 'thin', color: { argb: 'FF3F3F46' } },
+          right: { style: 'thin', color: { argb: 'FF3F3F46' } },
+        };
+      });
+
+      // ── BARIS DATA ──
+      fefoReports.forEach((rep, idx) => {
+        const alertDesc =
+          rep.alertLevel === 'H1'
+            ? '🚨 H-1 Kritis (Besok ED)'
+            : rep.alertLevel === 'H3'
+              ? '⚠️ H-3 Urgent'
+              : rep.alertLevel === 'H5'
+                ? '⚡ H-5 Warning'
+                : '👀 H-7 Watch';
+
+        const statusDesc =
+          rep.status === 'SUBMITTED'
+            ? 'Menunggu Keputusan'
+            : rep.status === 'APPROVED'
+              ? 'Disetujui'
+              : rep.status === 'REJECTED'
+                ? 'Ditolak'
+                : rep.status === 'EXECUTED'
+                  ? 'Selesai / Terlaksana'
+                  : 'Menunggu Cek';
+
+        const decisionDesc =
+          rep.managerDecision === 'DISCOUNT'
+            ? 'Diskon Obral'
+            : rep.managerDecision === 'DISPLAY_FRONT'
+              ? 'Pajang Depan'
+              : rep.managerDecision === 'DESTROY'
+                ? 'Dimusnahkan (Basi)'
+                : rep.managerDecision === 'RETURN_SUPPLIER'
+                  ? 'Retur Pemasok'
+                  : rep.managerDecision === 'HOLD'
+                    ? 'Tahan'
+                    : '—';
+
+        const barcodeOrNote = rep.discountBarcode
+          ? `Barcode: ${rep.discountBarcode}`
+          : rep.managerNote || '—';
+
+        const discPrice =
+          rep.discountedPrice ||
+          (rep.approvedDiscountPct
+            ? Math.round(Number(rep.sellingPrice) * (1 - Number(rep.approvedDiscountPct) / 100))
+            : 0);
+
+        const row = ws.addRow({
+          no: idx + 1,
+          productName: rep.productName,
+          batchCode: rep.batchCode,
+          alertLevel: alertDesc,
+          expiryDate: rep.expiryDate ? rep.expiryDate.slice(0, 10) : '—',
+          qty: rep.currentBatchQty,
+          sellingPrice: Number(rep.sellingPrice) || 0,
+          physicalCondition: rep.physicalCondition || '—',
+          gudangSuggestion: rep.gudangSuggestion || '—',
+          status: statusDesc,
+          managerDecision: decisionDesc,
+          discountPct: rep.approvedDiscountPct ? `${Number(rep.approvedDiscountPct)}%` : '—',
+          discountedPrice: discPrice > 0 ? discPrice : 0,
+          barcodeNote: barcodeOrNote,
+        });
+
+        row.height = 20;
+        const isZebra = idx % 2 === 1;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        row.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
+          cell.font = { name: 'Segoe UI', size: 9.5, color: { argb: 'FF18181B' } };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: isZebra ? 'FFF9FAFB' : 'FFFFFFFF' },
+          };
+
+          if (
+            colNumber === 1 ||
+            colNumber === 3 ||
+            colNumber === 4 ||
+            colNumber === 5 ||
+            colNumber === 10 ||
+            colNumber === 11 ||
+            colNumber === 12
+          ) {
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          } else if (colNumber === 2 || colNumber === 8 || colNumber === 9 || colNumber === 14) {
+            cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+          } else if (colNumber === 6) {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            cell.numFmt = '#,##0';
+          } else if (colNumber === 7 || colNumber === 13) {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            cell.numFmt = '"Rp "#,##0';
+          }
+        });
+      });
+
+      // ── BARIS SUMMARY TOTAL ──
+      const totalQtyAll = fefoReports.reduce((s, r) => s + (Number(r.currentBatchQty) || 0), 0);
+      const totalRow = ws.addRow({
+        no: '',
+        productName: `TOTAL BATCH KEDALUWARSA (${fefoReports.length} Laporan)`,
+        batchCode: '',
+        alertLevel: '',
+        expiryDate: '',
+        qty: totalQtyAll,
+        sellingPrice: 0,
+        physicalCondition: '',
+        gudangSuggestion: '',
+        status: '',
+        managerDecision: '',
+        discountPct: '',
+        discountedPrice: 0,
+        barcodeNote: '',
+      });
+
+      totalRow.height = 24;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      totalRow.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
+        cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF000000' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4E4E7' } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF000000' } },
+          bottom: { style: 'double', color: { argb: 'FF000000' } },
+          left: { style: 'thin', color: { argb: 'FFD4D4D8' } },
+          right: { style: 'thin', color: { argb: 'FFD4D4D8' } },
+        };
+
+        if (colNumber === 2) {
+          cell.alignment = { horizontal: 'left', vertical: 'middle' };
+        } else if (colNumber === 6) {
+          cell.alignment = { horizontal: 'right', vertical: 'middle' };
+          cell.numFmt = '#,##0';
+        } else {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        }
+      });
+
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+      a.download = `Rekap_Laporan_FEFO_Wiramart_${todayStr}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert('Gagal mengekspor laporan FEFO ke Excel.');
+    } finally {
+      setExportingFefoExcel(false);
+    }
+  }
 
   // ── Ambil Status MOD Hari Ini ────────────────────────────────
   async function fetchModStatus() {
@@ -1336,19 +1608,55 @@ export default function GudangApprovalPage() {
               })}
             </div>
 
-            {/* Search Input */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 10, padding: '6px 12px', minWidth: 240 }}>
-              <Search size={15} color="#64748b" />
-              <input
-                type="text"
-                placeholder="Cari produk / batch..."
-                value={fefoSearch}
-                onChange={(e) => setFefoSearch(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') fetchFefoReports(fefoStatusFilter);
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {/* Tombol Export Excel Rekap FEFO */}
+              <button
+                type="button"
+                onClick={handleExportFefoExcel}
+                disabled={loadingFefo || exportingFefoExcel || fefoReports.length === 0}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background: '#18181b',
+                  color: '#ffffff',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  cursor: (loadingFefo || exportingFefoExcel || fefoReports.length === 0) ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                  whiteSpace: 'nowrap',
                 }}
-                style={{ border: 'none', outline: 'none', fontSize: '0.82rem', width: '100%', background: 'transparent' }}
-              />
+              >
+                {exportingFefoExcel ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>Mengekspor...</span>
+                  </>
+                ) : (
+                  <>
+                    <FileSpreadsheet size={15} color="#38bdf8" />
+                    <span>Unduh Rekap FEFO (.xlsx)</span>
+                  </>
+                )}
+              </button>
+
+              {/* Search Input */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 10, padding: '6px 12px', minWidth: 220 }}>
+                <Search size={15} color="#64748b" />
+                <input
+                  type="text"
+                  placeholder="Cari produk / batch..."
+                  value={fefoSearch}
+                  onChange={(e) => setFefoSearch(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') fetchFefoReports(fefoStatusFilter);
+                  }}
+                  style={{ border: 'none', outline: 'none', fontSize: '0.82rem', width: '100%', background: 'transparent' }}
+                />
+              </div>
             </div>
           </div>
 
