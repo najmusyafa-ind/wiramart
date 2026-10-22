@@ -35,9 +35,11 @@ import {
   MapPin,
   Edit,
   Trash2,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 import { formatRupiah } from '@/lib/utils/helpers';
+import LaporanMutasiStokSection from '@/app/admin/laporan/LaporanMutasiStokSection';
 
 type DraftStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'REVISED';
 
@@ -107,7 +109,7 @@ export type ConditionReportItem = {
 
 export default function GudangApprovalPage() {
   // Top Level Section Switch
-  const [mainSection, setMainSection] = useState<'PENERIMAAN' | 'FEFO' | 'SUPPLIERS'>('PENERIMAAN');
+  const [mainSection, setMainSection] = useState<'PENERIMAAN' | 'FEFO' | 'SUPPLIERS' | 'MUTASI'>('PENERIMAAN');
 
   // ── State MOD (Manager on Duty) ──────────────────────────────
   const [modStatus, setModStatus] = useState<{
@@ -868,6 +870,29 @@ export default function GudangApprovalPage() {
             </span>
           )}
         </button>
+
+        <button
+          type="button"
+          onClick={() => setMainSection('MUTASI')}
+          style={{
+            padding: '10px 18px',
+            fontSize: '0.88rem',
+            fontWeight: 800,
+            borderRadius: '10px 10px 0 0',
+            border: 'none',
+            background: mainSection === 'MUTASI' ? '#0f172a' : 'transparent',
+            color: mainSection === 'MUTASI' ? '#ffffff' : '#64748b',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            whiteSpace: 'nowrap',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <FileSpreadsheet size={17} />
+          <span>Laporan Mutasi Stok (Excel)</span>
+        </button>
       </div>
 
 
@@ -1480,7 +1505,7 @@ export default function GudangApprovalPage() {
             </div>
           )}
         </div>
-      ) : (
+      ) : mainSection === 'SUPPLIERS' ? (
         /* ── KONTEN DATABASE SUPPLIER (FASE 5.2 & 5.4) ── */
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Top Bar Filter & Tambah Supplier */}
@@ -1796,6 +1821,9 @@ export default function GudangApprovalPage() {
             </div>
           )}
         </div>
+      ) : (
+        /* ── KONTEN LAPORAN MUTASI STOK (EXCEL SPREADSHEET HITAM PUTIH CLEAN) ── */
+        <LaporanMutasiStokSection />
       )}
 
       {/* ── MODAL KONFIRMASI AKSI MANAGER ── */}

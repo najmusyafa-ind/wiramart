@@ -18,6 +18,7 @@ import {
   Boxes,
   Tag,
   ArrowUpDown,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { formatRupiah } from '@/lib/utils/helpers';
 import type {
@@ -94,7 +95,227 @@ export default function LaporanMutasiStokSection() {
     fetchReport(startDate, endDate);
   }, []);
 
-  // Ekspor ke CSV
+  const [exportingExcel, setExportingExcel] = useState(false);
+
+  // ── Ekspor ke Excel (.xlsx) Tabel Hitam Putih Clean (Fase 5.3) ──
+  async function handleExportExcel() {
+    if (!reportData || reportData.items.length === 0) return;
+    setExportingExcel(true);
+    try {
+      const ExcelJS = (await import('exceljs')).default;
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'Wiramart UNPERBA';
+      wb.lastModifiedBy = 'Manager Gudang';
+      wb.created = new Date();
+
+      const ws = wb.addWorksheet('Mutasi Stok Gudang', {
+        views: [{ showGridLines: true }],
+      });
+
+      // ── BARIS 1: Header Utama Perusahaan (Hitam Elegan #18181B) ──
+      ws.mergeCells('A1:N1');
+      const r1 = ws.getCell('A1');
+      r1.value = 'WIRAMART — UKM KEWIRAUSAHAAN UNPERBA';
+      r1.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+      r1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF18181B' } };
+      r1.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(1).height = 30;
+
+      // ── BARIS 2: Judul Laporan (Charcoal #27272A) ──
+      ws.mergeCells('A2:N2');
+      const r2 = ws.getCell('A2');
+      r2.value = 'LAPORAN REKONSILIASI MUTASI STOK GUDANG & KASIR';
+      r2.font = { name: 'Segoe UI', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      r2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF27272A' } };
+      r2.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(2).height = 24;
+
+      // ── BARIS 3: Metadata Periode & Tanggal Cetak ──
+      ws.mergeCells('A3:N3');
+      const r3 = ws.getCell('A3');
+      const nowWib = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+      r3.value = `Periode: ${startDate} s/d ${endDate}   |   Dicetak: ${nowWib} WIB   |   Persamaan: Stok Akhir = Stok Awal + Masuk - Keluar - Musnah - Retur`;
+      r3.font = { name: 'Segoe UI', size: 9, italic: true, color: { argb: 'FF52525B' } };
+      r3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F4F5' } };
+      r3.border = { bottom: { style: 'thin', color: { argb: 'FFD4D4D8' } } };
+      r3.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(3).height = 20;
+
+      // Spacer row
+      ws.getRow(4).height = 10;
+
+      // ── BARIS 5: Tabel Header Hitam Putih Clean ──
+      const headers = [
+        'No',
+        'Nama Produk',
+        'Kategori',
+        'Satuan',
+        'Stok Awal',
+        'Masuk (Supplier)',
+        'Nilai HPP Masuk (Rp)',
+        'Keluar (Kasir)',
+        'Total Bruto Keluar (Rp)',
+        'Promo FEFO',
+        'Musnah / Basi',
+        'Kerugian Musnah (Rp)',
+        'Retur Supplier',
+        'Stok Akhir',
+      ];
+
+      ws.columns = [
+        { key: 'no', width: 6 },
+        { key: 'productName', width: 36 },
+        { key: 'categoryName', width: 16 },
+        { key: 'unit', width: 10 },
+        { key: 'initialStock', width: 13 },
+        { key: 'qtyIn', width: 16 },
+        { key: 'totalHppIn', width: 22 },
+        { key: 'qtyOut', width: 15 },
+        { key: 'totalGrossOut', width: 22 },
+        { key: 'discountedQtyOut', width: 13 },
+        { key: 'qtyDestroyed', width: 14 },
+        { key: 'lossAmountDestroyed', width: 22 },
+        { key: 'qtyReturned', width: 14 },
+        { key: 'finalStock', width: 14 },
+      ];
+
+      const hRow = ws.getRow(5);
+      hRow.values = headers;
+      hRow.height = 26;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hRow.eachCell((cell: any) => {
+        cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF18181B' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF000000' } },
+          bottom: { style: 'medium', color: { argb: 'FF000000' } },
+          left: { style: 'thin', color: { argb: 'FF3F3F46' } },
+          right: { style: 'thin', color: { argb: 'FF3F3F46' } },
+        };
+      });
+
+      // ── BARIS DATA (Hitam Putih Clean dengan Border Tipis) ──
+      reportData.items.forEach((it, idx) => {
+        const row = ws.addRow({
+          no: idx + 1,
+          productName: it.productName,
+          categoryName: it.categoryName,
+          unit: it.unit,
+          initialStock: it.initialStock,
+          qtyIn: it.qtyIn,
+          totalHppIn: it.totalHppIn,
+          qtyOut: it.qtyOut,
+          totalGrossOut: it.totalGrossOut,
+          discountedQtyOut: it.discountedQtyOut,
+          qtyDestroyed: it.qtyDestroyed,
+          lossAmountDestroyed: it.lossAmountDestroyed,
+          qtyReturned: it.qtyReturned,
+          finalStock: it.finalStock,
+        });
+
+        row.height = 20;
+        const isZebra = idx % 2 === 1;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        row.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
+          cell.font = { name: 'Segoe UI', size: 9.5, color: { argb: 'FF18181B' } };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+            right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          };
+          if (isZebra) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9FAFB' } };
+          } else {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+          }
+
+          // Alignment & Number format
+          if (colNumber === 1 || colNumber === 3 || colNumber === 4) {
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          } else if (colNumber === 2) {
+            cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+          } else if (colNumber === 7 || colNumber === 9 || colNumber === 12) {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            cell.numFmt = '"Rp "#,##0';
+          } else {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            cell.numFmt = '#,##0';
+          }
+        });
+
+        // Highlight kolom Stok Akhir
+        const finalCell = row.getCell(14);
+        finalCell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF18181B' } };
+      });
+
+      // ── BARIS SUMMARY TOTAL (Standar Akuntansi Double Line) ──
+      const s = reportData.summary;
+      const totalRow = ws.addRow({
+        no: '',
+        productName: 'TOTAL MUTASI INVENTARIS',
+        categoryName: '',
+        unit: '',
+        initialStock: s.totalInitialStock,
+        qtyIn: s.totalQtyIn,
+        totalHppIn: s.totalHppIn,
+        qtyOut: s.totalQtyOut,
+        totalGrossOut: s.totalGrossOut,
+        discountedQtyOut: s.totalDiscountedQtyOut,
+        qtyDestroyed: s.totalDestroyedQty,
+        lossAmountDestroyed: s.totalLossAmount,
+        qtyReturned: s.totalReturnedQty,
+        finalStock: s.totalFinalStock,
+      });
+
+      totalRow.height = 25;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      totalRow.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
+        cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FF000000' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4E4E7' } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF000000' } },
+          bottom: { style: 'double', color: { argb: 'FF000000' } },
+          left: { style: 'thin', color: { argb: 'FFD4D4D8' } },
+          right: { style: 'thin', color: { argb: 'FFD4D4D8' } },
+        };
+
+        if (colNumber === 2) {
+          cell.alignment = { horizontal: 'left', vertical: 'middle' };
+        } else if (colNumber === 7 || colNumber === 9 || colNumber === 12) {
+          cell.alignment = { horizontal: 'right', vertical: 'middle' };
+          cell.numFmt = '"Rp "#,##0';
+        } else if (colNumber >= 5) {
+          cell.alignment = { horizontal: 'right', vertical: 'middle' };
+          cell.numFmt = '#,##0';
+        } else {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        }
+      });
+
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Laporan_Mutasi_Stok_Wiramart_${startDate}_sd_${endDate}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert('Gagal mengekspor file Excel mutasi stok.');
+    } finally {
+      setExportingExcel(false);
+    }
+  }
+
+  // Ekspor ke CSV Cadangan
   function handleExportCsv() {
     if (!reportData || reportData.items.length === 0) return;
 
@@ -165,7 +386,7 @@ export default function LaporanMutasiStokSection() {
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Boxes size={22} color="#0284c7" />
+              <Boxes size={22} color="#0f172a" />
               Laporan Mutasi Stok Terintegrasi (Gudang &amp; Kasir)
             </h2>
             <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
@@ -173,26 +394,59 @@ export default function LaporanMutasiStokSection() {
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              disabled={!reportData || reportData.items.length === 0 || exportingExcel}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 8,
+                border: 'none',
+                background: '#0f172a',
+                color: '#ffffff',
+                fontSize: '0.8rem',
+                fontWeight: 800,
+                cursor: exportingExcel || !reportData || reportData.items.length === 0 ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: '0 2px 6px rgba(15,23,42,0.25)',
+              }}
+            >
+              {exportingExcel ? (
+                <>
+                  <RefreshCw size={14} className="animate-spin" />
+                  <span>Membuat Excel...</span>
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet size={15} color="#38bdf8" />
+                  <span>Unduh Excel (.xlsx)</span>
+                </>
+              )}
+            </button>
+
             <button
               type="button"
               onClick={handleExportCsv}
               disabled={!reportData || reportData.items.length === 0}
+              title="Unduh format teks CSV cadangan"
               style={{
-                padding: '8px 14px',
+                padding: '8px 12px',
                 borderRadius: 8,
                 border: '1px solid #cbd5e1',
                 background: '#ffffff',
-                color: '#334155',
-                fontSize: '0.8rem',
-                fontWeight: 700,
+                color: '#475569',
+                fontSize: '0.78rem',
+                fontWeight: 600,
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
+                gap: 5,
               }}
             >
-              <Download size={14} /> Unduh CSV
+              <Download size={13} /> CSV
             </button>
 
             <button
@@ -201,9 +455,9 @@ export default function LaporanMutasiStokSection() {
               style={{
                 padding: '8px 14px',
                 borderRadius: 8,
-                border: 'none',
-                background: '#0284c7',
-                color: '#ffffff',
+                border: '1px solid #cbd5e1',
+                background: '#f8fafc',
+                color: '#0f172a',
                 fontSize: '0.8rem',
                 fontWeight: 700,
                 cursor: 'pointer',
@@ -427,17 +681,17 @@ export default function LaporanMutasiStokSection() {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
               <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', textAlign: 'left' }}>
-                  <th style={{ padding: '10px 12px', width: 40, textAlign: 'center' }}>No</th>
-                  <th style={{ padding: '10px 12px', minWidth: 160 }}>Produk</th>
-                  <th style={{ padding: '10px 12px' }}>Kategori</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'center', background: '#f1f5f9' }}>Stok Awal</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'center', color: '#15803d' }}>Masuk (+)</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'center', color: '#1d4ed8' }}>Keluar Kasir (-)</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'center', color: '#d97706' }}>Obral FEFO</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'center', color: '#dc2626' }}>Musnah (-)</th>
-                  <th style={{ padding: '10px 10px', textAlign: 'center', color: '#ea580c' }}>Retur (-)</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 800, background: '#f0fdf4', color: '#166534' }}>
+                <tr style={{ background: '#18181b', color: '#ffffff', textAlign: 'left', borderBottom: '2px solid #000000' }}>
+                  <th style={{ padding: '11px 12px', width: 42, textAlign: 'center', color: '#ffffff', fontWeight: 800 }}>No</th>
+                  <th style={{ padding: '11px 12px', minWidth: 170, color: '#ffffff', fontWeight: 800 }}>Produk</th>
+                  <th style={{ padding: '11px 12px', color: '#ffffff', fontWeight: 800 }}>Kategori</th>
+                  <th style={{ padding: '11px 10px', textAlign: 'center', background: '#27272a', color: '#ffffff', fontWeight: 800 }}>Stok Awal</th>
+                  <th style={{ padding: '11px 10px', textAlign: 'center', color: '#86efac', fontWeight: 800 }}>Masuk (+)</th>
+                  <th style={{ padding: '11px 10px', textAlign: 'center', color: '#93c5fd', fontWeight: 800 }}>Keluar Kasir (-)</th>
+                  <th style={{ padding: '11px 10px', textAlign: 'center', color: '#fcd34d', fontWeight: 800 }}>Obral FEFO</th>
+                  <th style={{ padding: '11px 10px', textAlign: 'center', color: '#fca5a5', fontWeight: 800 }}>Musnah (-)</th>
+                  <th style={{ padding: '11px 10px', textAlign: 'center', color: '#fdba74', fontWeight: 800 }}>Retur (-)</th>
+                  <th style={{ padding: '11px 12px', textAlign: 'center', fontWeight: 900, background: '#27272a', color: '#4ade80' }}>
                     Stok Akhir (=)
                   </th>
                 </tr>
@@ -454,11 +708,11 @@ export default function LaporanMutasiStokSection() {
                     <tr
                       key={row.productId}
                       style={{
-                        borderBottom: '1px solid #f1f5f9',
-                        background: hasActivity ? '#ffffff' : '#fafafa',
+                        borderBottom: '1px solid #e2e8f0',
+                        background: idx % 2 === 1 ? '#f8fafc' : '#ffffff',
                       }}
                     >
-                      <td style={{ padding: '10px 12px', textAlign: 'center', color: '#94a3b8' }}>
+                      <td style={{ padding: '10px 12px', textAlign: 'center', color: '#64748b', fontWeight: 600 }}>
                         {idx + 1}
                       </td>
                       <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0f172a' }}>
@@ -467,7 +721,7 @@ export default function LaporanMutasiStokSection() {
                       <td style={{ padding: '10px 12px', color: '#64748b' }}>
                         {row.categoryName}
                       </td>
-                      <td style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 700, background: '#f8fafc', color: '#334155' }}>
+                      <td style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 700, background: '#f1f5f9', color: '#334155' }}>
                         {row.initialStock} {row.unit}
                       </td>
                       <td style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 700, color: row.qtyIn > 0 ? '#15803d' : '#94a3b8' }}>
@@ -504,6 +758,36 @@ export default function LaporanMutasiStokSection() {
                   );
                 })}
               </tbody>
+              {summary && (
+                <tfoot>
+                  <tr style={{ background: '#e4e4e7', borderTop: '2px solid #18181b', borderBottom: '3px double #18181b', fontWeight: 800 }}>
+                    <td colSpan={3} style={{ padding: '12px 14px', textAlign: 'left', color: '#09090b', fontSize: '0.82rem' }}>
+                      TOTAL SELURUH PRODUK ({summary.totalProducts} Item)
+                    </td>
+                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#09090b', fontSize: '0.82rem' }}>
+                      {summary.totalInitialStock}
+                    </td>
+                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#15803d', fontSize: '0.82rem' }}>
+                      +{summary.totalQtyIn}
+                    </td>
+                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#1d4ed8', fontSize: '0.82rem' }}>
+                      -{summary.totalQtyOut}
+                    </td>
+                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#b45309', fontSize: '0.82rem' }}>
+                      {summary.totalDiscountedQtyOut} pcs
+                    </td>
+                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#dc2626', fontSize: '0.82rem' }}>
+                      -{summary.totalDestroyedQty}
+                    </td>
+                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#ea580c', fontSize: '0.82rem' }}>
+                      -{summary.totalReturnedQty}
+                    </td>
+                    <td style={{ padding: '12px 12px', textAlign: 'center', background: '#dcfce7', color: '#14532d', fontSize: '0.85rem' }}>
+                      {summary.totalFinalStock}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         )}
