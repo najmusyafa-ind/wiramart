@@ -758,14 +758,16 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
             borderTop: '1px solid var(--color-border-light, #f1f5f9)',
           }}
         >
-          {/* Mode Tabs: Bulan / Tanggal / Range / Semua */}
+          {/* Mode Tabs: Bulan / Tanggal / Range / Semua — scrollable pills (mobile-first) */}
           <div
             style={{
-              display: 'inline-flex',
-              backgroundColor: 'var(--color-surface-alt, #f1f5f9)',
-              padding: '3px',
-              borderRadius: '8px',
-              border: '1px solid var(--color-border)',
+              display: 'flex',
+              gap: 6,
+              overflowX: 'auto',
+              flexWrap: 'nowrap',
+              scrollbarWidth: 'none',
+              WebkitOverflowScrolling: 'touch',
+              paddingBottom: 2,
             }}
           >
             {[
@@ -773,26 +775,32 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
               { id: 'daily', label: '📆 Per Tanggal' },
               { id: 'range', label: '🗓️ Rentang Bebas' },
               { id: 'all', label: '🌐 Semua Waktu' },
-            ].map((m) => (
+            ].map((m) => {
+              const isActive = filterMode === m.id;
+              return (
               <button
                 key={m.id}
                 type="button"
                 onClick={() => setFilterMode(m.id as typeof filterMode)}
                 style={{
-                  padding: '6px 14px',
-                  borderRadius: '6px',
-                  border: 'none',
+                  padding: '8px 14px',
+                  borderRadius: 100,
+                  border: isActive ? '1.5px solid var(--color-primary, #166534)' : '1.5px solid #e2e8f0',
+                  background: isActive ? 'var(--color-primary, #166534)' : '#f8fafc',
+                  color: isActive ? '#ffffff' : 'var(--color-text-muted, #475569)',
                   fontSize: '0.8rem',
-                  fontWeight: filterMode === m.id ? 700 : 500,
-                  backgroundColor: filterMode === m.id ? 'var(--color-primary, #166534)' : 'transparent',
-                  color: filterMode === m.id ? '#ffffff' : 'var(--color-text-muted, #475569)',
+                  fontWeight: isActive ? 700 : 500,
                   cursor: 'pointer',
-                  transition: 'all 0.15s ease',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                  boxShadow: isActive ? '0 0 0 3px #16653422' : 'none',
                 }}
               >
                 {m.label}
               </button>
-            ))}
+              );
+            })}
           </div>
 
           {/* Controls Khusus Berdasarkan Mode Filter */}

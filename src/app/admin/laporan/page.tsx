@@ -751,163 +751,258 @@ export default function LaporanPage() {
       />
 
       <div>
-        {/* Header */}
-        <div className="page-header">
+        {/* ── HEADER MOBILE-FIRST ── */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 12,
+            marginBottom: 12,
+          }}
+        >
+          {/* Judul + Tanggal */}
           <div>
-            <h1 className="page-title">Laporan Keuangan</h1>
-            <p className="page-subtitle">{data?.label ?? '—'}</p>
+            <h1
+              className="page-title"
+              style={{ margin: 0, fontSize: 'clamp(1.15rem, 4vw, 1.55rem)', fontWeight: 800 }}
+            >
+              Laporan Keuangan
+            </h1>
+            <p
+              className="page-subtitle"
+              style={{ margin: '2px 0 0', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}
+            >
+              {data?.label ?? '—'}
+            </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+
+          {/* Export Dropdown — tampil ikonis di HP, teks di desktop */}
+          <div style={{ position: 'relative', flexShrink: 0 }} id={`${uid}-export-wrapper`}>
             <button
-              id={`${uid}-tutup-buku`}
-              onClick={() => setShowTutupBuku(true)}
-              className="btn btn-primary"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
-                background: 'hsl(217 91% 60%)', borderColor: 'hsl(217 91% 50%)',
-                fontWeight: 700,
+              id={`${uid}-export-toggle`}
+              type="button"
+              onClick={() => {
+                const el = document.getElementById(`${uid}-export-menu`);
+                if (el) el.style.display = el.style.display === 'none' ? 'flex' : 'none';
               }}
-              aria-label="Tutup Buku Finansial Harian (Locking Period)"
-            >
-              <Lock size={14} aria-hidden="true" /> 🔒 Tutup Buku Hari Ini
-            </button>
-            <button
-              id={`${uid}-export-harian`}
-              onClick={handleDownloadSkemaHarian}
-              className="btn btn-primary"
-              disabled={!data || exportHarianLoading}
               style={{
-                display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
-                background: 'hsl(142 71% 35%)', borderColor: 'hsl(142 71% 30%)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '8px 12px',
+                borderRadius: 10,
+                border: '1.5px solid #16a34a',
+                background: '#f0fdf4',
+                color: '#15803d',
+                fontSize: '0.8rem',
                 fontWeight: 700,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
               }}
-              aria-label="Unduh 1-Sheet Skema Harian Excel"
+              aria-label="Pilih format ekspor Excel"
             >
-              {exportHarianLoading
-                ? <><Loader2 size={14} className="spin-icon" aria-hidden="true" /> Mengunduh...</>
-                : <><Download size={14} aria-hidden="true" /> 📊 1-Sheet Skema Harian (.xlsx)</>
-              }
+              <Download size={14} aria-hidden="true" />
+              <span>Export ▾</span>
             </button>
-            <button
-              id={`${uid}-export`}
-              onClick={handleExport}
-              className="btn btn-secondary"
-              disabled={!data || exportLoading}
-              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
-              aria-label="Export multi-sheet ke Excel"
+
+            {/* Dropdown panel — hidden by default */}
+            <div
+              id={`${uid}-export-menu`}
+              style={{
+                display: 'none',
+                flexDirection: 'column',
+                gap: 4,
+                position: 'absolute',
+                right: 0,
+                top: 'calc(100% + 6px)',
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: 12,
+                padding: 8,
+                minWidth: 210,
+                boxShadow: '0 8px 30px -4px rgba(0,0,0,0.12)',
+                zIndex: 100,
+              }}
             >
-              {exportLoading
-                ? <><Loader2 size={14} className="spin-icon" aria-hidden="true" /> Exporting...</>
-                : <><Download size={14} aria-hidden="true" /> 📑 Multi-Sheet</>
-              }
-            </button>
+              <button
+                id={`${uid}-export-harian`}
+                type="button"
+                onClick={() => {
+                  const el = document.getElementById(`${uid}-export-menu`);
+                  if (el) el.style.display = 'none';
+                  handleDownloadSkemaHarian();
+                }}
+                disabled={!data || exportHarianLoading}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: !data || exportHarianLoading ? '#f1f5f9' : '#f0fdf4',
+                  color: !data || exportHarianLoading ? '#94a3b8' : '#15803d',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: !data || exportHarianLoading ? 'not-allowed' : 'pointer',
+                  textAlign: 'left',
+                  width: '100%',
+                }}
+                aria-label="Unduh 1-Sheet Skema Harian Excel"
+              >
+                {exportHarianLoading
+                  ? <><Loader2 size={13} className="spin-icon" /> Mengunduh...</>
+                  : <><span>📊</span> 1-Sheet Harian (.xlsx)</>
+                }
+              </button>
+              <button
+                id={`${uid}-export`}
+                type="button"
+                onClick={() => {
+                  const el = document.getElementById(`${uid}-export-menu`);
+                  if (el) el.style.display = 'none';
+                  handleExport();
+                }}
+                disabled={!data || exportLoading}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: !data || exportLoading ? '#f1f5f9' : '#f8fafc',
+                  color: !data || exportLoading ? '#94a3b8' : '#334155',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: !data || exportLoading ? 'not-allowed' : 'pointer',
+                  textAlign: 'left',
+                  width: '100%',
+                }}
+                aria-label="Export multi-sheet ke Excel"
+              >
+                {exportLoading
+                  ? <><Loader2 size={13} className="spin-icon" /> Exporting...</>
+                  : <><span>📑</span> Multi-Sheet Lengkap</>
+                }
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* ─── TAB SWITCHER: Laporan Finansial vs Mutasi Stok Gudang ─── */}
+        {/* ── TUTUP BUKU — Hero Action Card ── */}
+        <button
+          id={`${uid}-tutup-buku`}
+          type="button"
+          onClick={() => setShowTutupBuku(true)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            padding: '13px 20px',
+            borderRadius: 12,
+            border: '1.5px solid hsl(217 91% 50%)',
+            background: 'linear-gradient(135deg, hsl(217 91% 60%), hsl(230 85% 58%))',
+            color: '#ffffff',
+            fontSize: '0.9rem',
+            fontWeight: 800,
+            cursor: 'pointer',
+            marginBottom: 14,
+            boxShadow: '0 4px 14px -2px hsl(217 91% 60% / 0.4)',
+            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+            letterSpacing: '0.01em',
+          }}
+          aria-label="Tutup Buku Finansial Harian (Locking Period)"
+        >
+          <Lock size={15} aria-hidden="true" />
+          <span>🔒 Tutup Buku Hari Ini</span>
+        </button>
+
+        {/* ─── MOBILE SCROLLABLE PILL TAB BAR ─── */}
         <div
           role="tablist"
           aria-label="Pilih Jenis Laporan"
           style={{
             display: 'flex',
-            gap: 8,
+            gap: 6,
             marginBottom: 'var(--space-5)',
-            borderBottom: '2px solid var(--color-border)',
-            paddingBottom: 2,
+            overflowX: 'auto',
+            flexWrap: 'nowrap',
+            scrollbarWidth: 'none',
+            paddingBottom: 4,
+            /* Fade hints at the trailing edge so user knows it's scrollable */
+            WebkitOverflowScrolling: 'touch',
           }}
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mainTab === 'finansial'}
-            onClick={() => setMainTab('finansial')}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 20px',
-              borderRadius: '8px 8px 0 0',
-              border: 'none',
-              borderBottom: mainTab === 'finansial' ? '3px solid #166534' : '3px solid transparent',
-              background: mainTab === 'finansial' ? '#f0fdf4' : 'transparent',
-              color: mainTab === 'finansial' ? '#166534' : 'var(--color-text-muted)',
-              fontWeight: mainTab === 'finansial' ? 700 : 500,
-              fontSize: '0.88rem',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <BarChart3 size={16} /> Laporan Finansial &amp; Kasir
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mainTab === 'mutasi_stok'}
-            onClick={() => setMainTab('mutasi_stok')}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 20px',
-              borderRadius: '8px 8px 0 0',
-              border: 'none',
-              borderBottom: mainTab === 'mutasi_stok' ? '3px solid #0284c7' : '3px solid transparent',
-              background: mainTab === 'mutasi_stok' ? '#e0f2fe' : 'transparent',
-              color: mainTab === 'mutasi_stok' ? '#0369a1' : 'var(--color-text-muted)',
-              fontWeight: mainTab === 'mutasi_stok' ? 700 : 500,
-              fontSize: '0.88rem',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <Boxes size={16} /> Mutasi Stok Gudang (Buku Stok)
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mainTab === 'rekap_kasir'}
-            onClick={() => setMainTab('rekap_kasir')}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 20px',
-              borderRadius: '8px 8px 0 0',
-              border: 'none',
-              borderBottom: mainTab === 'rekap_kasir' ? '3px solid #7c3aed' : '3px solid transparent',
-              background: mainTab === 'rekap_kasir' ? '#f5f3ff' : 'transparent',
-              color: mainTab === 'rekap_kasir' ? '#6d28d9' : 'var(--color-text-muted)',
-              fontWeight: mainTab === 'rekap_kasir' ? 700 : 500,
-              fontSize: '0.88rem',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <Users2 size={16} /> Rekap Kasir
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mainTab === 'rekap_shift'}
-            onClick={() => setMainTab('rekap_shift')}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 20px',
-              borderRadius: '8px 8px 0 0',
-              border: 'none',
-              borderBottom: mainTab === 'rekap_shift' ? '3px solid #6366f1' : '3px solid transparent',
-              background: mainTab === 'rekap_shift' ? '#eef2ff' : 'transparent',
-              color: mainTab === 'rekap_shift' ? '#4338ca' : 'var(--color-text-muted)',
-              fontWeight: mainTab === 'rekap_shift' ? 700 : 500,
-              fontSize: '0.88rem',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <TrendingUp size={16} /> Rekap Per Shift
-          </button>
+          {([
+            {
+              id: 'finansial',
+              icon: <BarChart3 size={14} />,
+              label: 'Finansial & Kasir',
+              activeColor: '#166534',
+              activeBg: '#f0fdf4',
+              activeBorder: '#16a34a',
+            },
+            {
+              id: 'mutasi_stok',
+              icon: <Boxes size={14} />,
+              label: 'Stok Gudang',
+              activeColor: '#0369a1',
+              activeBg: '#e0f2fe',
+              activeBorder: '#0284c7',
+            },
+            {
+              id: 'rekap_kasir',
+              icon: <Users2 size={14} />,
+              label: 'Rekap Kasir',
+              activeColor: '#6d28d9',
+              activeBg: '#f5f3ff',
+              activeBorder: '#7c3aed',
+            },
+            {
+              id: 'rekap_shift',
+              icon: <TrendingUp size={14} />,
+              label: 'Rekap Shift',
+              activeColor: '#4338ca',
+              activeBg: '#eef2ff',
+              activeBorder: '#6366f1',
+            },
+          ] as const).map((tab) => {
+            const isActive = mainTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setMainTab(tab.id)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '9px 16px',
+                  borderRadius: 100,
+                  border: isActive ? `1.5px solid ${tab.activeBorder}` : '1.5px solid #e2e8f0',
+                  background: isActive ? tab.activeBg : '#f8fafc',
+                  color: isActive ? tab.activeColor : '#64748b',
+                  fontWeight: isActive ? 700 : 500,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                  boxShadow: isActive ? `0 0 0 3px ${tab.activeBorder}22` : 'none',
+                }}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {mainTab === 'rekap_kasir' ? (

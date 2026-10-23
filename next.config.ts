@@ -31,6 +31,8 @@ const ContentSecurityPolicy = `
 `.replace(/\n/g, ' ').replace(/\s{2,}/g, ' ').trim();
 
 const nextConfig: NextConfig = {
+  // Sembunyikan floating badge "N" Next.js dev indicator agar tidak menutupi mobile bottom nav saat testing localhost
+  devIndicators: false,
   // Cegah error Cross-Origin dev resources saat diakses dari 127.0.0.1 atau localhost
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
   images: {

@@ -453,7 +453,7 @@ export default function GudangPortalPage() {
         <section
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
+            gridTemplateColumns: 'repeat(2, 1fr)',
             gap: 8,
             marginBottom: 16,
           }}
@@ -464,8 +464,9 @@ export default function GudangPortalPage() {
             onClick={() => setActiveTab('habis')}
             style={{
               textAlign: 'left',
-              padding: '10px 8px',
+              padding: '12px 10px',
               borderRadius: 12,
+              minHeight: 80,
               backgroundColor: activeTab === 'habis' ? '#fee2e2' : '#ffffff',
               border: activeTab === 'habis' ? '1.5px solid #ef4444' : '1px solid #e2e8f0',
               boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
@@ -488,8 +489,9 @@ export default function GudangPortalPage() {
             onClick={() => setActiveTab('kritis')}
             style={{
               textAlign: 'left',
-              padding: '10px 8px',
+              padding: '12px 10px',
               borderRadius: 12,
+              minHeight: 80,
               backgroundColor: activeTab === 'kritis' ? '#fef3c7' : '#ffffff',
               border: activeTab === 'kritis' ? '1.5px solid #f59e0b' : '1px solid #e2e8f0',
               boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
@@ -512,8 +514,9 @@ export default function GudangPortalPage() {
             onClick={() => setActiveTab('fefo')}
             style={{
               textAlign: 'left',
-              padding: '10px 8px',
+              padding: '12px 10px',
               borderRadius: 12,
+              minHeight: 80,
               backgroundColor: activeTab === 'fefo' ? '#ffedd5' : '#ffffff',
               border: activeTab === 'fefo' ? '1.5px solid #f97316' : '1px solid #e2e8f0',
               boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
@@ -536,8 +539,9 @@ export default function GudangPortalPage() {
             onClick={() => setActiveTab('aktivitas')}
             style={{
               textAlign: 'left',
-              padding: '10px 8px',
+              padding: '12px 10px',
               borderRadius: 12,
+              minHeight: 80,
               backgroundColor: activeTab === 'aktivitas' ? '#dcfce7' : '#ffffff',
               border: activeTab === 'aktivitas' ? '1.5px solid #22c55e' : '1px solid #e2e8f0',
               boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
