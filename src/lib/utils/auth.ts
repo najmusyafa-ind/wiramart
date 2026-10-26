@@ -1,9 +1,10 @@
 // =============================================================
 // Smartkasir Perwira — Auth Library
-// DUAL SESSION SUPPORT:
+// TRIPLE SESSION SUPPORT:
 //   Admin  → cookie: sk_admin  (path: /)
 //   Kasir  → cookie: sk_kasir  (path: /)
-// Dua role bisa login bersamaan di browser yang sama (tab berbeda).
+//   Buyer  → cookie: sk_buyer  (path: /order, 7 hari)
+// Semua sesi bisa berjalan bersamaan di browser yang sama.
 // =============================================================
 
 import bcrypt from 'bcryptjs';
@@ -26,6 +27,7 @@ const ADMIN_ACCESS_COOKIE   = 'sk_admin';
 const ADMIN_REFRESH_COOKIE  = 'sk_admin_r';
 const KASIR_ACCESS_COOKIE   = 'sk_kasir';
 const KASIR_REFRESH_COOKIE  = 'sk_kasir_r';
+const BUYER_ACCESS_COOKIE   = 'sk_buyer'; // path=/order, 7 hari
 
 // --- JWT Secret ---
 function getJwtSecret(): Uint8Array {
@@ -58,7 +60,15 @@ export type EmployeeTokenPayload = {
   name: string;
 };
 
-export type TokenPayload = AdminTokenPayload | EmployeeTokenPayload;
+/** Buyer session — login via NIM + Nama (tanpa password) */
+export type BuyerTokenPayload = {
+  sub: string;  // buyer.id (UUID)
+  role: 'buyer';
+  nim: string;
+  name: string;
+};
+
+export type TokenPayload = AdminTokenPayload | EmployeeTokenPayload | BuyerTokenPayload;
 
 // --- Password Hashing ---
 export async function hashPassword(password: string): Promise<string> {
@@ -267,4 +277,76 @@ export function apiOk(data: unknown, status = 200): NextResponse {
 
 export function apiError(message: unknown, status = 400): NextResponse {
   return NextResponse.json({ success: false, error: message }, { status });
+}
+
+// =============================================================
+// BUYER AUTH — Cookie sk_buyer (path=/order, 7 hari)
+// TIDAK ada password. Login = NIM + Nama Lengkap match di DB.
+// =============================================================
+
+const BUYER_ACCESS_TOKEN_EXPIRY     = '7d';
+const BUYER_ACCESS_MAX_AGE_SECONDS  = 60 * 60 * 24 * 7; // 7 hari
+
+/** Sign JWT untuk buyer (7 hari, path=/order) */
+export async function signBuyerToken(payload: BuyerTokenPayload): Promise<string> {
+  return new SignJWT({ ...payload })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(BUYER_ACCESS_TOKEN_EXPIRY)
+    .setIssuer('smartkasir-perwira')
+    .sign(getJwtSecret());
+}
+
+/** Set cookie sk_buyer — HttpOnly, path=/order, 7 hari */
+export async function setBuyerCookie(accessToken: string): Promise<void> {
+  const cookieStore = await cookies();
+  const isProduction = process.env.NODE_ENV === 'production';
+  cookieStore.set(BUYER_ACCESS_COOKIE, accessToken, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    // path '/' (bukan '/order'): API ada di /api/order/*, cookie ber-path '/order' TIDAK akan terkirim ke sana.
+    // Aman: nama cookie unik + role 'buyer' dicek; guard admin/kasir tidak membaca sk_buyer.
+    path: '/',
+    maxAge: BUYER_ACCESS_MAX_AGE_SECONDS,
+  });
+}
+
+/** Hapus cookie sk_buyer */
+export async function clearBuyerCookie(): Promise<void> {
+  const cookieStore = await cookies();
+  cookieStore.delete({ name: BUYER_ACCESS_COOKIE, path: '/' });
+  cookieStore.delete({ name: BUYER_ACCESS_COOKIE, path: '/order' }); // legacy
+}
+
+/** Baca buyer session dari cookie sk_buyer (Server Component / Server Action) */
+export async function getBuyerSession(): Promise<BuyerTokenPayload | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(BUYER_ACCESS_COOKIE)?.value;
+  if (!token) return null;
+  const payload = await verifyToken(token);
+  if (!payload || payload.role !== 'buyer') return null;
+  return payload as BuyerTokenPayload;
+}
+
+/** Guard buyer session — lempar 401 jika tidak ada */
+export async function requireBuyer(): Promise<BuyerTokenPayload> {
+  const session = await getBuyerSession();
+  if (!session) {
+    throw new AppError('UNAUTHORIZED', 'Sesi tidak ditemukan. Silakan login kembali.', 401);
+  }
+  return session;
+}
+
+/**
+ * Baca buyer session dari NextRequest (API route).
+ * Dipakai di /api/order/* route handlers.
+ */
+export function getBuyerSessionFromRequest(req: NextRequest): Promise<BuyerTokenPayload | null> {
+  const token = req.cookies.get(BUYER_ACCESS_COOKIE)?.value;
+  if (!token) return Promise.resolve(null);
+  return verifyToken(token).then((payload) => {
+    if (!payload || payload.role !== 'buyer') return null;
+    return payload as BuyerTokenPayload;
+  });
 }

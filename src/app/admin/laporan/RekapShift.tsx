@@ -1090,7 +1090,7 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
           Laba Kotor ({formatRupiah(grandTotal.labaKotor)}) dikurangi Beban Operasional ({formatRupiah(grandTotal.biayaOperasional || 0)}) menghasilkan Laba Bersih Operasional ({formatRupiah(grandTotal.labaOperasionalBersih || 0)}). 
           Alokasi hak mahasiswa 50% adalah <strong>{formatRupiah(grandTotal.poolGaji)}</strong>. 
           Sebesar <strong>{formatRupiah(grandTotal.totalDistributed || 0)}</strong> terdistribusi kepada {data?.summaryPerEmployee.length ?? 0} mahasiswa yang bertugas dan hadir pada periode ini. 
-          Sisa alokasi <strong>{formatRupiah(grandTotal.sisaPool || 0)}</strong> (dari shift akun testing) otomatis disimpan di Kas Toko, sehingga total Laba Bersih Toko menjadi <strong>{formatRupiah(grandTotal.labaBersihToko || 0)}</strong>.
+          Sisa alokasi <strong>{formatRupiah(grandTotal.sisaPool || 0)}</strong> (pembulatan / shift tanpa petugas terdata) otomatis disimpan di Kas Toko, sehingga total Laba Bersih Toko menjadi <strong>{formatRupiah(grandTotal.labaBersihToko || 0)}</strong>.
         </div>
       </div>
 

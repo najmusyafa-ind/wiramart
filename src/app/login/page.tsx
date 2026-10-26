@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useId, useEffect } from 'react';
+import { useState, useId, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import {
   Eye, EyeOff, LogIn, AlertCircle, CheckCircle2,
@@ -47,8 +47,30 @@ export default function LoginPage() {
   const [setupPinLoading, setSetupPinLoading] = useState(false);
   const [setupPinError, setSetupPinError] = useState<string | null>(null);
 
-  // Reset form + error saat ganti role
+  // Deteksi logout otomatis akibat idle / close timeout
+  const isFirstMount = useRef(true);
   useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      if (typeof window !== 'undefined') {
+        const sp = new URLSearchParams(window.location.search);
+        const reason = sp.get('reason');
+        const timeout = sp.get('timeout');
+        const timedOutRole = sp.get('role');
+
+        if (reason === 'idle') {
+          if (timedOutRole === 'MANAGER') {
+            setRole('manager');
+          } else if (timedOutRole === 'ADMIN_SHIFT') {
+            setRole('admin_shift');
+          }
+          setError(
+            `Sesi Anda berakhir demi keamanan (tidak aktif / browser ditutup lebih dari ${timeout ?? 'beberapa menit'}). Silakan login kembali.`
+          );
+        }
+      }
+      return;
+    }
     setError(null);
     setSuccessMsg(null);
   }, [role]);

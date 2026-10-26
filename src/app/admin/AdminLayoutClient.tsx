@@ -43,6 +43,7 @@ import {
   UserCheck,
   Clock,
   Sparkles,
+  ShoppingBag,
 } from 'lucide-react';
 
 type NavItem = {
@@ -64,6 +65,12 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Produk',
     href: '/admin/produk',
     icon: <Package size={18} aria-hidden="true" />,
+    section: 'Menu Utama',
+  },
+  {
+    label: 'Pesanan Online',
+    href: '/admin/pesanan-online',
+    icon: <ShoppingBag size={18} aria-hidden="true" />,
     section: 'Menu Utama',
   },
   {
@@ -439,77 +446,170 @@ export default function AdminLayoutClient({
     }
   }
 
-  // ── Idle session timeout (30 menit) ──────────────────────
-  // Tidak ada JSX baru — zero impact ke SSR tree
+  // ── Role-based Idle & Tab Close / Off Timeout ──────────────────────────────
+  // Manager: 5 menit (300 dtk) — Warning pada 4 menit (sisa 60 dtk)
+  // Admin Shift: 2.5 menit (150 dtk) — Warning pada 2 menit (sisa 30 dtk)
+  // Menggunakan localStorage wall-clock agar tetap terdeteksi meski tab ditutup/minimize.
   useEffect(() => {
-    const WARN_MS   = 29 * 60 * 1000;
-    const LOGOUT_MS = 30 * 60 * 1000;
-    const EVENTS    = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'] as const;
-    let warnTimer: ReturnType<typeof setTimeout>;
-    let logoutTimer: ReturnType<typeof setTimeout>;
+    const isManager = adminRole === 'MANAGER';
+    const LOGOUT_MS = isManager ? 5 * 60 * 1000 : 2.5 * 60 * 1000;
+    const WARN_MS   = isManager ? 4 * 60 * 1000 : 2 * 60 * 1000;
+    const TIMEOUT_LABEL = isManager ? '5 menit' : '2.5 menit';
+    const STORAGE_KEY = 'sk_admin_last_active';
+    const LOGOUT_SYNC_KEY = 'sk_admin_logout_sync';
+    const EVENTS = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'] as const;
+
     let banner: HTMLDivElement | null = null;
+    let isLoggingOut = false;
 
     function removeBanner() {
-      if (banner && document.body.contains(banner)) document.body.removeChild(banner);
+      if (banner && document.body.contains(banner)) {
+        document.body.removeChild(banner);
+      }
       banner = null;
     }
 
     async function doLogout() {
+      if (isLoggingOut) return;
+      isLoggingOut = true;
       removeBanner();
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: 'admin' }),
-      }).catch(() => {});
-      window.location.href = '/login?reason=idle';
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.setItem(LOGOUT_SYNC_KEY, Date.now().toString());
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'admin' }),
+        });
+      } catch {
+        // Abaikan kegagalan jaringan saat logout
+      }
+      window.location.href = `/login?reason=idle&timeout=${encodeURIComponent(TIMEOUT_LABEL)}&role=${encodeURIComponent(adminRole)}`;
     }
 
-    function showWarning() {
-      removeBanner();
-      banner = document.createElement('div');
-      banner.id = 'idle-warn-banner';
-      Object.assign(banner.style, {
-        position: 'fixed', bottom: '24px', right: '24px', zIndex: '9999',
-        background: 'var(--color-surface, #fff)', borderRadius: '12px',
-        padding: '16px 20px', boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-        display: 'flex', alignItems: 'center', gap: '12px',
-        fontSize: '14px', fontFamily: 'inherit',
-        border: '1px solid var(--color-border, #e5e7eb)',
-        animation: 'slideIn .3s ease',
-        maxWidth: '320px',
-      });
+    function showWarning(remainingSeconds: number) {
+      if (isLoggingOut) return;
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'idle-warn-banner';
+        Object.assign(banner.style, {
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          zIndex: '99999',
+          background: 'var(--color-surface, #fff)',
+          borderRadius: '12px',
+          padding: '16px 20px',
+          boxShadow: '0 10px 36px rgba(0,0,0,0.22)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          fontSize: '13.5px',
+          fontFamily: 'inherit',
+          border: '1.5px solid var(--color-warning, #f59e0b)',
+          animation: 'slideIn .25s cubic-bezier(0.16, 1, 0.3, 1)',
+          maxWidth: '340px',
+        });
+        document.body.appendChild(banner);
+      }
+
       banner.innerHTML = `
-        <span style="font-size:20px">&#9200;</span>
-        <div style="flex:1">
-          <div style="font-weight:600;color:var(--color-text,#111);margin-bottom:2px">Sesi hampir berakhir</div>
-          <div style="color:var(--color-text-muted,#6b7280);font-size:12px">Anda tidak aktif. Logout otomatis dalam 1 menit.</div>
+        <span style="font-size:22px; flex-shrink:0;">⏳</span>
+        <div style="flex:1;">
+          <div style="font-weight:700; color:var(--color-text, #111); margin-bottom:2px;">Sesi Hampir Berakhir</div>
+          <div style="color:var(--color-text-muted, #6b7280); font-size:12px; line-height:1.35;">
+            Tidak aktif. Logout otomatis dalam <strong style="color:var(--color-error, #dc2626);">${remainingSeconds}s</strong>.
+          </div>
         </div>
-        <button id="idle-stay-btn" style="background:var(--color-primary,#16a34a);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600;flex-shrink:0">
-          Tetap Login
+        <button id="idle-stay-btn" style="background:var(--color-primary, #16a34a); color:#fff; border:none; border-radius:8px; padding:7px 12px; cursor:pointer; font-size:12.5px; font-weight:700; flex-shrink:0;">
+          Lanjut
         </button>
       `;
-      document.body.appendChild(banner);
-      banner.querySelector('#idle-stay-btn')?.addEventListener('click', reset);
+
+      banner.querySelector('#idle-stay-btn')?.addEventListener('click', () => {
+        updateActivity();
+        removeBanner();
+      });
     }
 
-    function reset() {
+    function updateActivity() {
+      const now = Date.now();
+      localStorage.setItem(STORAGE_KEY, now.toString());
       removeBanner();
-      clearTimeout(warnTimer);
-      clearTimeout(logoutTimer);
-      warnTimer   = setTimeout(showWarning, WARN_MS);
-      logoutTimer = setTimeout(doLogout, LOGOUT_MS);
     }
 
-    EVENTS.forEach((ev) => window.addEventListener(ev, reset, { passive: true }));
-    reset(); // mulai timer
+    // Periksa selisih waktu dari localStorage
+    function checkTimeout() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      const lastActive = saved ? parseInt(saved, 10) : Date.now();
+      const elapsed = Date.now() - lastActive;
+
+      if (elapsed >= LOGOUT_MS) {
+        doLogout();
+      } else if (elapsed >= WARN_MS) {
+        const remainingSec = Math.max(1, Math.ceil((LOGOUT_MS - elapsed) / 1000));
+        showWarning(remainingSec);
+      } else {
+        removeBanner();
+      }
+    }
+
+    // 1. Initial check saat mount (misal tab baru dibuka setelah ditutup lama)
+    const initialSaved = localStorage.getItem(STORAGE_KEY);
+    if (initialSaved) {
+      const elapsed = Date.now() - parseInt(initialSaved, 10);
+      if (elapsed >= LOGOUT_MS) {
+        doLogout();
+        return;
+      }
+    }
+    updateActivity();
+
+    // 2. Throttled activity listener (setiap 2 detik agar hemat operasi I/O)
+    let lastThrottled = 0;
+    function onUserInteraction() {
+      const now = Date.now();
+      if (now - lastThrottled > 2000) {
+        lastThrottled = now;
+        updateActivity();
+      }
+    }
+    EVENTS.forEach((ev) => window.addEventListener(ev, onUserInteraction, { passive: true }));
+
+    // 3. Heartbeat interval setiap 1 detik
+    const timerInterval = setInterval(checkTimeout, 1000);
+
+    // 4. Deteksi perpindahan tab / browser aktif kembali (Visibility API & Window Focus)
+    function onTabFocus() {
+      checkTimeout();
+    }
+    document.addEventListener('visibilitychange', onTabFocus);
+    window.addEventListener('focus', onTabFocus);
+
+    // 5. Simpan timestamp saat tab akan ditutup (beforeunload)
+    function onUnload() {
+      localStorage.setItem(STORAGE_KEY, Date.now().toString());
+    }
+    window.addEventListener('beforeunload', onUnload);
+
+    // 6. Sinkronisasi antar-tab admin via storage event
+    function onStorageChange(e: StorageEvent) {
+      if (e.key === LOGOUT_SYNC_KEY) {
+        window.location.href = `/login?reason=idle&timeout=${encodeURIComponent(TIMEOUT_LABEL)}&role=${encodeURIComponent(adminRole)}`;
+      }
+    }
+    window.addEventListener('storage', onStorageChange);
 
     return () => {
       removeBanner();
-      clearTimeout(warnTimer);
-      clearTimeout(logoutTimer);
-      EVENTS.forEach((ev) => window.removeEventListener(ev, reset));
+      clearInterval(timerInterval);
+      EVENTS.forEach((ev) => window.removeEventListener(ev, onUserInteraction));
+      document.removeEventListener('visibilitychange', onTabFocus);
+      window.removeEventListener('focus', onTabFocus);
+      window.removeEventListener('beforeunload', onUnload);
+      window.removeEventListener('storage', onStorageChange);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [adminRole]);
   useEffect(() => {
     document.body.style.overflow = isMobileOpen ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };

@@ -216,3 +216,51 @@ export const conditionReportLimiter = createRateLimiter(
   24 * 60 * 60 * 1000, // 24 jam
 );
 
+// =============================================================
+// WIRAMART BUYER RATE LIMITERS
+// Ditambahkan v2.0 — tidak mengubah limiter existing di atas
+// =============================================================
+
+/**
+ * Buyer registrasi: 3 akun baru / 1 jam / per IP
+ * Mencegah pembuatan akun massal (spam, bot).
+ * 3x cukup untuk kondisi normal (salah ketik NIM/WA → coba ulang).
+ */
+export const buyerRegisterLimiter = createRateLimiter(
+  'buyer:register',
+  3,
+  60 * 60 * 1000, // 1 jam
+);
+
+/**
+ * Buyer login: 10 percobaan / 15 menit / per NIM
+ * Agak lebih longgar dari admin karena tidak ada password.
+ * Proteksi dari enumeration attack (coba-coba NIM orang lain).
+ */
+export const buyerLoginLimiter = createRateLimiter(
+  'buyer:login',
+  10,
+  15 * 60 * 1000, // 15 menit
+);
+
+/**
+ * Buyer buat pesanan: 5 order / 24 jam / per buyer_id
+ * Mencegah spam order. 5x sehari sangat cukup untuk buyer kampus.
+ * Admin bisa reset manual jika ada kondisi luar biasa.
+ */
+export const buyerOrderLimiter = createRateLimiter(
+  'buyer:order',
+  5,
+  24 * 60 * 60 * 1000, // 24 jam
+);
+
+/**
+ * Upload bukti transfer: 3 upload / 1 jam / per buyer_id
+ * Mencegah flood upload storage. Buyer yang salah upload punya 3 kesempatan.
+ * Jika habis: hubungi admin langsung via WA.
+ */
+export const buyerUploadLimiter = createRateLimiter(
+  'buyer:upload',
+  3,
+  60 * 60 * 1000, // 1 jam
+);

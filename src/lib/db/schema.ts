@@ -1477,3 +1477,200 @@ export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
   receiveDrafts: many(stockReceiveDrafts),
 }));
 
+// =============================================================
+// ██╗   ██╗██████╗      ██████╗      ██████╗
+// ██║   ██║╚════██╗    ██╔═████╗    ██╔═████╗
+// ██║   ██║ █████╔╝    ██║██╔██║    ██║██╔██║
+// ╚██╗ ██╔╝██╔═══╝     ████╔╝██║    ████╔╝██║
+//  ╚████╔╝ ███████╗    ╚██████╔╝    ╚██████╔╝
+//   ╚═══╝  ╚══════╝     ╚═════╝      ╚═════╝
+//
+// WIRAMART DELIVERY v2.0 — ADDITIVE EXTENSION
+// Tabel baru: buyers, online_orders, online_order_items, notification_logs
+// Tidak menyentuh satu pun tabel existing di atas.
+// =============================================================
+
+// ── Import tambahan (smallint belum dipakai di schema existing) ──
+import { smallint } from 'drizzle-orm/pg-core';
+
+// =============================================================
+// WIRAMART ENUMS
+// =============================================================
+
+export const onlineOrderStatusEnum = pgEnum('online_order_status', [
+  'WAITING_PAYMENT_VERIFICATION',
+  'WAITING_CONFIRMATION',
+  'CONFIRMED',
+  'PREPARING',
+  'OUT_FOR_DELIVERY',
+  'COMPLETED',
+  'CANCELLED',
+  'REJECTED',
+  'EXPIRED',
+]);
+
+export const onlineDeliveryTypeEnum = pgEnum('online_delivery_type', [
+  'PICKUP',
+  'DELIVERY',
+]);
+
+export const onlinePaymentMethodEnum = pgEnum('online_payment_method', [
+  'QRIS',
+  'TRANSFER',
+]);
+
+// =============================================================
+// 28. BUYERS (Pembeli Online — Mahasiswa / Dosen)
+// =============================================================
+
+export const buyers = pgTable(
+  'buyers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    fullName: varchar('full_name', { length: 200 }).notNull(),
+    nim: varchar('nim', { length: 20 }).notNull(),
+    // Format internasional: 628xxxxxxxxxx
+    whatsapp: varchar('whatsapp', { length: 20 }).notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    isFlagged: boolean('is_flagged').notNull().default(false),
+    flaggedReason: text('flagged_reason'),
+    flaggedBy: uuid('flagged_by').references(() => admins.id),
+    flaggedAt: timestamp('flagged_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('idx_buyers_nim_active').on(table.nim).where(sql`${table.deletedAt} IS NULL`),
+    index('idx_buyers_whatsapp').on(table.whatsapp).where(sql`${table.deletedAt} IS NULL`),
+  ],
+);
+
+export type Buyer = typeof buyers.$inferSelect;
+export type NewBuyer = typeof buyers.$inferInsert;
+
+// =============================================================
+// 29. ONLINE_ORDERS (Pesanan Online)
+// =============================================================
+
+export const onlineOrders = pgTable(
+  'online_orders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orderNumber: varchar('order_number', { length: 25 }).notNull().unique(),
+    buyerId: uuid('buyer_id').notNull().references(() => buyers.id),
+
+    deliveryType: onlineDeliveryTypeEnum('delivery_type').notNull(),
+    // 1=Lt1, 2=Lt2, 3=Lt3, 4=Lt4, 99=Auditorium, NULL jika PICKUP
+    deliveryFloor: smallint('delivery_floor'),
+    // IDR — server-side only. L1/PICKUP=0, L2=1000, L3/L4/Aud=2000
+    deliveryFee: integer('delivery_fee').notNull().default(0),
+    deliveryNote: varchar('delivery_note', { length: 200 }),
+    // Wajib diisi untuk DELIVERY (misal: "R.301", "Lab Komputer B")
+    roomDetail: varchar('room_detail', { length: 100 }),
+
+    assignedCsId: uuid('assigned_cs_id').references(() => employees.id),
+    assignedAt: timestamp('assigned_at', { withTimezone: true }),
+    assignedBy: uuid('assigned_by').references(() => admins.id),
+
+    // PIN 6-digit anti-fraud, di-generate saat CONFIRMED
+    handoverPin: varchar('handover_pin', { length: 6 }),
+    handoverConfirmedAt: timestamp('handover_confirmed_at', { withTimezone: true }),
+    // Counter no-show buyer. Jika >= 2: admin dinotif untuk cancel
+    noShowCount: smallint('no_show_count').notNull().default(0),
+
+    paymentMethod: onlinePaymentMethodEnum('payment_method').notNull(),
+    paymentReference: varchar('payment_reference', { length: 25 }),
+    paymentProofUrl: text('payment_proof_url'),
+    paymentVerifiedAt: timestamp('payment_verified_at', { withTimezone: true }),
+    paymentVerifiedBy: uuid('payment_verified_by').references(() => admins.id),
+
+    status: onlineOrderStatusEnum('status').notNull().default('WAITING_CONFIRMATION'),
+    cancelledReason: text('cancelled_reason'),
+    rejectedReason: text('rejected_reason'),
+    cancelledBy: uuid('cancelled_by').references(() => admins.id),
+    confirmedBy: uuid('confirmed_by').references(() => admins.id),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    expiredAt: timestamp('expired_at', { withTimezone: true }),
+
+    // IDR integer (tidak decimal — hindari floating point)
+    subtotal: integer('subtotal').notNull(),
+    totalAmount: integer('total_amount').notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_online_orders_status').on(table.status, table.createdAt).where(sql`${table.deletedAt} IS NULL`),
+    index('idx_online_orders_pending').on(table.createdAt).where(
+      sql`${table.status} IN ('WAITING_PAYMENT_VERIFICATION', 'WAITING_CONFIRMATION') AND ${table.deletedAt} IS NULL`,
+    ),
+    index('idx_online_orders_cs').on(table.assignedCsId, table.status).where(
+      sql`${table.assignedCsId} IS NOT NULL AND ${table.deletedAt} IS NULL`,
+    ),
+    index('idx_online_orders_expire').on(table.expiredAt).where(
+      sql`${table.status} IN ('WAITING_PAYMENT_VERIFICATION', 'WAITING_CONFIRMATION') AND ${table.deletedAt} IS NULL`,
+    ),
+  ],
+);
+
+export type OnlineOrder = typeof onlineOrders.$inferSelect;
+export type NewOnlineOrder = typeof onlineOrders.$inferInsert;
+
+// =============================================================
+// 30. ONLINE_ORDER_ITEMS (Item dalam Pesanan Online)
+// SNAPSHOT harga saat order — tidak berubah meski produk diedit
+// =============================================================
+
+export const onlineOrderItems = pgTable(
+  'online_order_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orderId: uuid('order_id').notNull().references(() => onlineOrders.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id').notNull().references(() => products.id),
+    productName: varchar('product_name', { length: 200 }).notNull(), // snapshot
+    sellingPrice: integer('selling_price').notNull(),                 // snapshot IDR
+    quantity: integer('quantity').notNull(),
+    subtotal: integer('subtotal').notNull(),                          // sellingPrice × quantity
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_online_order_items_order').on(table.orderId),
+    index('idx_online_order_items_product').on(table.productId),
+  ],
+);
+
+export type OnlineOrderItem = typeof onlineOrderItems.$inferSelect;
+export type NewOnlineOrderItem = typeof onlineOrderItems.$inferInsert;
+
+// =============================================================
+// 31. NOTIFICATION_LOGS (Audit Trail WA via Fonnte)
+// Fire-and-forget — tidak blocking alur order utama
+// =============================================================
+
+export const notificationLogs = pgTable(
+  'notification_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    eventType: varchar('event_type', { length: 50 }).notNull(),
+    recipientWa: varchar('recipient_wa', { length: 20 }).notNull(),
+    recipientName: varchar('recipient_name', { length: 200 }),
+    message: text('message').notNull(),
+    // PENDING | SENT | FAILED
+    status: varchar('status', { length: 20 }).notNull().default('PENDING'),
+    providerResponse: jsonb('provider_response'),
+    errorMessage: text('error_message'),
+    orderId: uuid('order_id').references(() => onlineOrders.id),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_notification_logs_order').on(table.orderId).where(sql`${table.orderId} IS NOT NULL`),
+    index('idx_notification_logs_status').on(table.status, table.createdAt),
+  ],
+);
+
+export type NotificationLog = typeof notificationLogs.$inferSelect;
+export type NewNotificationLog = typeof notificationLogs.$inferInsert;

@@ -11,7 +11,12 @@ import { db } from '@/lib/db/client';
 import { attendances, transactions, shifts } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import { z } from 'zod';
-import { resolveReportRange, getFinancialReport, type PeriodKey } from '@/lib/finance/report';
+import {
+  resolveReportRange,
+  getFinancialReport,
+  allocateProportional,
+  type PeriodKey,
+} from '@/lib/finance/report';
 
 export const runtime = 'nodejs';
 
@@ -191,11 +196,14 @@ export async function GET(req: NextRequest): Promise<Response> {
       const shiftPoolMap = new Map<string, { pool: number; attendees: typeof attendees }>();
 
       if (hasMultiShift) {
-        for (const s of shiftsOnDate) {
-          const profit = profitByShiftId.get(s.id) ?? 0;
-          const pool = Math.floor(profit * 0.5);
-          shiftPoolMap.set(s.id, { pool, attendees: [] });
-        }
+        // Pool harian resmi (sudah dipotong biaya) dibagi proporsional laba tiap shift
+        const shares = allocateProportional(
+          poolHariIni,
+          shiftsOnDate.map((s) => profitByShiftId.get(s.id) ?? 0),
+        );
+        shiftsOnDate.forEach((s, i) => {
+          shiftPoolMap.set(s.id, { pool: shares[i] ?? 0, attendees: [] });
+        });
 
         // Multi-tier matching:
         // Tier 1: Direct att.shiftId

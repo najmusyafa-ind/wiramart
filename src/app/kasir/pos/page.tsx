@@ -6,7 +6,7 @@ import {
   ShoppingCart, Search, Plus, Minus, Trash2, Banknote,
   CheckCircle, X, Loader2, Package, LogOut, ArrowLeftRight,
   User, Clock, AlertTriangle, ScanLine, MoreVertical, ChevronRight,
-  Receipt, Calculator, Coins, Utensils, KeyRound, Zap,
+  Receipt, Calculator, Coins, Utensils, KeyRound, Zap, Send,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import KalkulatorPecahan, { type DenominasiMap } from './KalkulatorPecahan';
@@ -2749,6 +2749,21 @@ export default function PosPage() {
                 <div style={{ flex: 1 }}>
                   <div className="pos-drawer-link-title">Ajukan Tukar Shift</div>
                   <div className="pos-drawer-link-sub">Permohonan pergantian jadwal tugas kasir</div>
+                </div>
+                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+              </a>
+
+              <a
+                href="/kasir/pengiriman"
+                className="pos-drawer-link"
+                onClick={() => setShowKasirMenu(false)}
+              >
+                <div className="pos-drawer-icon-box">
+                  <Send size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="pos-drawer-link-title">Pengiriman Saya (Runner)</div>
+                  <div className="pos-drawer-link-sub">Daftar tugas pengantaran & verifikasi PIN</div>
                 </div>
                 <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
               </a>

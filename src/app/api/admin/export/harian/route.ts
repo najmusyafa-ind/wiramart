@@ -200,9 +200,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ['Total HPP (Harga Pokok Penjualan)', s.hppTerjual, 'Biaya modal barang terjual'],
       ['LABA KOTOR (Omzet - HPP)', s.labaKotor, 'Margin kotor penjualan'],
       ['Total Biaya Operasional', s.biayaOperasional, 'ATK, Bensin & Kas Toko'],
-      ['LABA BERSIH OPERASIONAL', s.labaBersih, 'Laba kotor dikurangi biaya operasional'],
-      ['HAK BAGI HASIL MAHASISWA (50%)', Math.round(s.labaBersih * 0.5), 'Alokasi kompensasi mahasiswa pengelola'],
-      ['HAK KAS WIRAMART UNPERBA (50%)', s.labaBersih - Math.round(s.labaBersih * 0.5), 'Kas modal pengembangan Wiramart'],
+      ['LABA BERSIH OPERASIONAL', Math.max(0, s.labaKotor - s.biayaOperasional), 'Laba kotor dikurangi biaya operasional'],
+      ['HAK BAGI HASIL MAHASISWA (50%)', s.alokasiGajiKaryawan, 'Alokasi kompensasi mahasiswa pengelola'],
+      ['HAK KAS WIRAMART UNPERBA (50%)', s.labaBersih, 'Kas modal pengembangan Wiramart'],
     ];
 
     let curRow = 6;
@@ -275,8 +275,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       row.getCell(8).value = d.hppTerjual;
       row.getCell(9).value = d.labaKotor;
       row.getCell(10).value = d.biayaOperasional;
-      row.getCell(11).value = Math.round(d.labaBersih * 0.5);
-      row.getCell(12).value = d.labaBersih - Math.round(d.labaBersih * 0.5);
+      row.getCell(11).value = d.alokasiGajiKaryawan;
+      row.getCell(12).value = d.labaBersih;
 
       for (let c = 5; c <= 12; c++) {
         row.getCell(c).numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0';

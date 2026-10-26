@@ -1,0 +1,1034 @@
+/* =============================================================
+   WIRAMART v2.0 — Campus Delivery PWA Design System
+   Spatial UI / Clean Mobile-First / HSL Color Math 60-30-10
+   ============================================================= */
+
+:root {
+  --pwa-primary: hsl(145, 63%, 32%);
+  --pwa-primary-hover: hsl(145, 63%, 26%);
+  --pwa-primary-light: hsl(145, 45%, 94%);
+  --pwa-primary-subtle: hsl(145, 30%, 97%);
+  --pwa-accent: hsl(40, 96%, 48%);
+  --pwa-accent-light: hsl(40, 96%, 94%);
+  --pwa-accent-text: hsl(32, 90%, 28%);
+  
+  --pwa-bg: hsl(150, 18%, 97%);
+  --pwa-surface: hsl(0, 0%, 100%);
+  --pwa-surface-muted: hsl(145, 12%, 95%);
+  --pwa-border: hsl(145, 18%, 88%);
+  --pwa-border-strong: hsl(145, 20%, 78%);
+
+  --pwa-text-main: hsl(145, 20%, 12%);
+  --pwa-text-muted: hsl(145, 8%, 46%);
+  --pwa-text-light: hsl(145, 6%, 64%);
+
+  --pwa-radius-sm: 8px;
+  --pwa-radius-md: 12px;
+  --pwa-radius-lg: 18px;
+  --pwa-radius-full: 9999px;
+
+  --pwa-shadow-sm: 0 1px 3px rgba(15, 45, 25, 0.06);
+  --pwa-shadow-md: 0 4px 14px rgba(15, 45, 25, 0.08);
+  --pwa-shadow-lg: 0 10px 28px rgba(15, 45, 25, 0.12);
+  --pwa-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── App Shell & Responsive Container ─────────────────────── */
+
+.wiramart-pwa-root {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: hsl(150, 12%, 92%);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--pwa-text-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+.wiramart-pwa-container {
+  width: 100%;
+  max-width: 480px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: var(--pwa-bg);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.08);
+  padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ── Top Header ───────────────────────────────────────────── */
+
+.pwa-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background-color: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--pwa-border);
+  padding: 12px 16px;
+  padding-top: max(12px, env(safe-area-inset-top, 12px));
+}
+
+.pwa-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.pwa-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.pwa-brand-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--pwa-radius-md);
+  background: linear-gradient(135deg, var(--pwa-primary), hsl(145, 60%, 24%));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: 0 2px 8px rgba(27, 122, 66, 0.3);
+  overflow: hidden;
+}
+
+.pwa-brand-text h1 {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--pwa-primary);
+  margin: 0;
+  line-height: 1.1;
+}
+
+.pwa-brand-text span {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--pwa-text-muted);
+}
+
+.pwa-user-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--pwa-radius-full);
+  background-color: var(--pwa-primary-light);
+  color: var(--pwa-primary);
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(27, 122, 66, 0.15);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.pwa-user-badge:hover {
+  background-color: hsl(145, 45%, 88%);
+}
+
+.pwa-login-btn {
+  padding: 6px 14px;
+  border-radius: var(--pwa-radius-full);
+  background-color: var(--pwa-primary);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 0.15s var(--pwa-ease), background-color 0.15s ease;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pwa-login-btn:active {
+  transform: scale(0.96);
+}
+
+/* ── Campus Delivery Notice Banner ────────────────────────── */
+
+.pwa-campus-banner {
+  background: linear-gradient(135deg, hsl(145, 55%, 16%), hsl(145, 65%, 26%));
+  color: white;
+  padding: 10px 14px;
+  border-radius: var(--pwa-radius-md);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 4px 12px rgba(10, 45, 20, 0.15);
+}
+
+.pwa-campus-banner-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--pwa-accent);
+}
+
+.pwa-campus-banner-content {
+  flex: 1;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.pwa-campus-banner-content strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+/* ── Search Bar ───────────────────────────────────────────── */
+
+.pwa-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pwa-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--pwa-text-muted);
+  pointer-events: none;
+}
+
+.pwa-search-input {
+  width: 100%;
+  height: 40px;
+  background-color: var(--pwa-surface-muted);
+  border: 1px solid var(--pwa-border);
+  border-radius: var(--pwa-radius-full);
+  padding: 0 36px 0 38px;
+  font-size: 13.5px;
+  color: var(--pwa-text-main);
+  outline: none;
+  transition: all 0.2s var(--pwa-ease);
+}
+
+.pwa-search-input:focus {
+  background-color: var(--pwa-surface);
+  border-color: var(--pwa-primary);
+  box-shadow: 0 0 0 3px rgba(27, 122, 66, 0.12);
+}
+
+.pwa-search-clear {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: var(--pwa-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+}
+
+/* ── Category Pill Bar ────────────────────────────────────── */
+
+.pwa-category-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 12px 16px;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.pwa-category-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.pwa-category-pill {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border-radius: var(--pwa-radius-full);
+  font-size: 12.5px;
+  font-weight: 600;
+  border: 1px solid var(--pwa-border);
+  background-color: var(--pwa-surface);
+  color: var(--pwa-text-muted);
+  cursor: pointer;
+  transition: all 0.18s var(--pwa-ease);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pwa-category-pill.active {
+  background-color: var(--pwa-primary);
+  color: white;
+  border-color: var(--pwa-primary);
+  box-shadow: 0 2px 8px rgba(27, 122, 66, 0.25);
+}
+
+.pwa-category-pill:active {
+  transform: scale(0.96);
+}
+
+/* ── Product Grid ─────────────────────────────────────────── */
+
+.pwa-product-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  padding: 0 16px 20px 16px;
+}
+
+.pwa-card {
+  background-color: var(--pwa-surface);
+  border-radius: var(--pwa-radius-lg);
+  border: 1px solid var(--pwa-border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s var(--pwa-ease), box-shadow 0.2s var(--pwa-ease);
+  position: relative;
+}
+
+.pwa-card:hover {
+  box-shadow: var(--pwa-shadow-md);
+}
+
+.pwa-card-image-wrap {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: linear-gradient(135deg, hsl(145, 20%, 96%), hsl(145, 15%, 92%));
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pwa-card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s var(--pwa-ease);
+}
+
+.pwa-card:hover .pwa-card-image {
+  transform: scale(1.05);
+}
+
+.pwa-card-fallback-icon {
+  color: hsl(145, 25%, 70%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.pwa-card-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 3px 8px;
+  border-radius: var(--pwa-radius-full);
+  font-size: 10.5px;
+  font-weight: 700;
+  backdrop-filter: blur(6px);
+}
+
+.pwa-badge-available {
+  background-color: rgba(255, 255, 255, 0.9);
+  color: var(--pwa-primary);
+  border: 1px solid rgba(27, 122, 66, 0.2);
+}
+
+.pwa-badge-low {
+  background-color: rgba(254, 243, 199, 0.95);
+  color: hsl(30, 90%, 32%);
+  border: 1px solid rgba(217, 119, 6, 0.3);
+}
+
+.pwa-badge-out {
+  background-color: rgba(254, 226, 226, 0.95);
+  color: hsl(0, 72%, 40%);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+}
+
+.pwa-card-body {
+  padding: 10px 12px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.pwa-card-category {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--pwa-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 2px;
+}
+
+.pwa-card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--pwa-text-main);
+  line-height: 1.3;
+  margin: 0 0 6px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 35px;
+}
+
+.pwa-card-price-row {
+  margin-top: auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.pwa-card-price {
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--pwa-primary);
+  letter-spacing: -0.01em;
+}
+
+.pwa-card-unit {
+  font-size: 10.5px;
+  color: var(--pwa-text-muted);
+}
+
+/* ── Add / Stepper Button ─────────────────────────────────── */
+
+.pwa-btn-add {
+  width: 100%;
+  height: 36px;
+  background-color: var(--pwa-primary-light);
+  color: var(--pwa-primary);
+  border: 1px solid rgba(27, 122, 66, 0.2);
+  border-radius: var(--pwa-radius-md);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.15s var(--pwa-ease);
+}
+
+.pwa-btn-add:hover {
+  background-color: var(--pwa-primary);
+  color: white;
+}
+
+.pwa-btn-add:active {
+  transform: scale(0.97);
+}
+
+.pwa-btn-add:disabled {
+  background-color: var(--pwa-surface-muted);
+  color: var(--pwa-text-light);
+  border-color: var(--pwa-border);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.pwa-stepper {
+  width: 100%;
+  height: 36px;
+  background-color: var(--pwa-primary);
+  border-radius: var(--pwa-radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  color: white;
+  box-shadow: 0 2px 8px rgba(27, 122, 66, 0.25);
+}
+
+.pwa-stepper-btn {
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.18);
+  border: none;
+  border-radius: var(--pwa-radius-sm);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.pwa-stepper-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.pwa-stepper-btn:active {
+  transform: scale(0.92);
+}
+
+.pwa-stepper-qty {
+  font-size: 13.5px;
+  font-weight: 700;
+  min-width: 24px;
+  text-align: center;
+}
+
+/* ── Floating Bottom Cart Bar ─────────────────────────────── */
+
+.pwa-floating-bar {
+  position: fixed;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32px);
+  max-width: 448px;
+  z-index: 50;
+  animation: pwaSlideUp 0.3s var(--pwa-ease);
+}
+
+@keyframes pwaSlideUp {
+  from {
+    transform: translate(-50%, 40px);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+.pwa-floating-bar-inner {
+  background: linear-gradient(135deg, hsl(145, 65%, 26%), hsl(145, 70%, 18%));
+  color: white;
+  border-radius: var(--pwa-radius-lg);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 10px 30px rgba(10, 45, 20, 0.35), 0 2px 6px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: transform 0.15s var(--pwa-ease);
+}
+
+.pwa-floating-bar-inner:active {
+  transform: scale(0.98);
+}
+
+.pwa-floating-bar-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pwa-floating-cart-count {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--pwa-radius-md);
+  background: rgba(255, 255, 255, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.pwa-floating-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background-color: var(--pwa-accent);
+  color: hsl(30, 95%, 15%);
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 2px 5px;
+  border-radius: var(--pwa-radius-full);
+  min-width: 16px;
+  text-align: center;
+}
+
+.pwa-floating-price-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.pwa-floating-items-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.pwa-floating-total {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.pwa-floating-cta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--pwa-accent);
+  color: hsl(30, 95%, 15%);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: var(--pwa-radius-md);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* ── Cart Drawer / Sheet ──────────────────────────────────── */
+
+.pwa-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  animation: pwaFadeIn 0.2s ease;
+}
+
+@keyframes pwaFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pwa-drawer-panel {
+  width: 100%;
+  max-width: 480px;
+  max-height: 85vh;
+  max-height: 85dvh;
+  background-color: var(--pwa-surface);
+  border-radius: 24px 24px 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.15);
+  animation: pwaDrawerSlide 0.25s var(--pwa-ease);
+}
+
+@keyframes pwaDrawerSlide {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.pwa-drawer-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background-color: var(--pwa-border);
+  margin: 10px auto 4px auto;
+}
+
+.pwa-drawer-header {
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--pwa-border);
+}
+
+.pwa-drawer-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--pwa-text-main);
+  margin: 0;
+}
+
+.pwa-drawer-close {
+  background: none;
+  border: none;
+  color: var(--pwa-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pwa-drawer-body {
+  padding: 14px 18px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pwa-drawer-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--pwa-border);
+}
+
+.pwa-drawer-item-info {
+  flex: 1;
+}
+
+.pwa-drawer-item-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--pwa-text-main);
+  margin-bottom: 2px;
+}
+
+.pwa-drawer-item-sub {
+  font-size: 12px;
+  color: var(--pwa-primary);
+  font-weight: 700;
+}
+
+.pwa-drawer-footer {
+  padding: 14px 18px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom, 14px));
+  background-color: var(--pwa-surface);
+  border-top: 1px solid var(--pwa-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pwa-drawer-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.pwa-drawer-summary-total {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--pwa-primary);
+}
+
+.pwa-btn-checkout {
+  width: 100%;
+  height: 46px;
+  background: linear-gradient(135deg, var(--pwa-primary), hsl(145, 65%, 26%));
+  color: white;
+  border-radius: var(--pwa-radius-md);
+  font-size: 14px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 14px rgba(27, 122, 66, 0.3);
+  transition: transform 0.15s var(--pwa-ease);
+  text-decoration: none;
+}
+
+.pwa-btn-checkout:active {
+  transform: scale(0.98);
+}
+
+/* ── Empty State ──────────────────────────────────────────── */
+
+.pwa-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--pwa-text-muted);
+}
+
+.pwa-empty-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background-color: var(--pwa-surface-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pwa-text-light);
+  margin-bottom: 14px;
+}
+
+.pwa-empty-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--pwa-text-main);
+  margin: 0 0 4px 0;
+}
+
+.pwa-empty-desc {
+  font-size: 12.5px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* ── Utility Keyframes ────────────────────────────────────── */
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Sub-page shell (login / checkout / status) ───────────── */
+
+.pwa-page-bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  padding-top: max(12px, env(safe-area-inset-top, 12px));
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--pwa-border);
+}
+
+.pwa-page-bar h1 { font-size: 16px; font-weight: 700; margin: 0; }
+
+.pwa-back-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--pwa-radius-full);
+  border: 1px solid var(--pwa-border);
+  background: var(--pwa-surface);
+  color: var(--pwa-text-main);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s var(--pwa-ease), transform 0.15s var(--pwa-ease);
+}
+.pwa-back-btn:hover { background: var(--pwa-surface-muted); }
+.pwa-back-btn:active { transform: scale(0.94); }
+
+.pwa-page-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pwa-section {
+  background: var(--pwa-surface);
+  border: 1px solid var(--pwa-border);
+  border-radius: var(--pwa-radius-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pwa-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pwa-text-muted);
+  margin: 0;
+}
+
+.pwa-field { display: flex; flex-direction: column; gap: 5px; }
+.pwa-label { font-size: 12.5px; font-weight: 600; color: var(--pwa-text-main); }
+.pwa-hint  { font-size: 11.5px; color: var(--pwa-text-muted); }
+
+.pwa-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  font-size: 16px; /* >=16px cegah auto-zoom iOS */
+  font-family: inherit;
+  color: var(--pwa-text-main);
+  background: var(--pwa-surface);
+  border: 1px solid var(--pwa-border-strong);
+  border-radius: var(--pwa-radius-md);
+  outline: none;
+  transition: border-color 0.18s var(--pwa-ease), box-shadow 0.18s var(--pwa-ease);
+}
+textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
+.pwa-input:focus-visible {
+  border-color: var(--pwa-primary);
+  box-shadow: 0 0 0 3px rgba(27, 122, 66, 0.15);
+}
+.pwa-input[aria-invalid="true"] { border-color: hsl(0, 72%, 50%); }
+
+.pwa-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  background: var(--pwa-surface-muted);
+  border-radius: var(--pwa-radius-md);
+}
+.pwa-tab {
+  min-height: 40px;
+  border: none;
+  border-radius: var(--pwa-radius-sm);
+  background: transparent;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--pwa-text-muted);
+  cursor: pointer;
+  transition: background-color 0.18s var(--pwa-ease), color 0.18s var(--pwa-ease);
+}
+.pwa-tab[aria-selected="true"] {
+  background: var(--pwa-surface);
+  color: var(--pwa-primary);
+  box-shadow: var(--pwa-shadow-sm);
+}
+
+.pwa-alert {
+  padding: 10px 12px;
+  border-radius: var(--pwa-radius-md);
+  font-size: 12.5px;
+  line-height: 1.4;
+  background: hsl(0, 85%, 96%);
+  color: hsl(0, 65%, 35%);
+  border: 1px solid hsl(0, 70%, 88%);
+}
+.pwa-alert-info {
+  background: var(--pwa-primary-subtle);
+  color: var(--pwa-text-main);
+  border-color: var(--pwa-border);
+}
+
+.pwa-btn-primary {
+  width: 100%;
+  min-height: 48px;
+  border: none;
+  border-radius: var(--pwa-radius-md);
+  background: linear-gradient(135deg, var(--pwa-primary), hsl(145, 65%, 26%));
+  color: #fff;
+  font-size: 14.5px;
+  font-weight: 700;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  box-shadow: 0 4px 14px rgba(27, 122, 66, 0.3);
+  transition: transform 0.15s var(--pwa-ease), opacity 0.15s var(--pwa-ease);
+}
+.pwa-btn-primary:active { transform: scale(0.98); }
+.pwa-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+.pwa-btn-primary:focus-visible,
+.pwa-btn-add:focus-visible,
+.pwa-stepper-btn:focus-visible,
+.pwa-tab:focus-visible,
+.pwa-back-btn:focus-visible,
+.pwa-choice:focus-within {
+  outline: 3px solid rgba(27, 122, 66, 0.4);
+  outline-offset: 2px;
+}
+
+/* Radio card (delivery type / floor / payment) */
+.pwa-choice-grid { display: grid; gap: 8px; }
+.pwa-choice-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.pwa-choice-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+
+.pwa-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--pwa-border);
+  border-radius: var(--pwa-radius-md);
+  background: var(--pwa-surface);
+  cursor: pointer;
+  transition: border-color 0.18s var(--pwa-ease), background-color 0.18s var(--pwa-ease);
+}
+.pwa-choice input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.pwa-choice:has(input:checked) {
+  border-color: var(--pwa-primary);
+  background: var(--pwa-primary-light);
+}
+.pwa-choice-title { font-size: 13.5px; font-weight: 700; }
+.pwa-choice-sub { font-size: 11.5px; color: var(--pwa-text-muted); }
+
+.pwa-sum-row { display: flex; justify-content: space-between; font-size: 13px; gap: 12px; }
+.pwa-sum-row.total {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--pwa-primary);
+  padding-top: 8px;
+  border-top: 1px dashed var(--pwa-border-strong);
+}
+
+.pwa-sticky-cta {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 16px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--pwa-border);
+}
+
+.pwa-pin-box {
+  text-align: center;
+  padding: 16px;
+  border-radius: var(--pwa-radius-lg);
+  background: linear-gradient(135deg, hsl(145, 55%, 16%), hsl(145, 65%, 26%));
+  color: #fff;
+}
+.pwa-pin-code {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  padding-left: 0.3em;
+  font-variant-numeric: tabular-nums;
+}
+
+.pwa-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--pwa-radius-full);
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--pwa-accent-light);
+  color: var(--pwa-accent-text);
+}
+.pwa-status-chip.ok  { background: var(--pwa-primary-light); color: var(--pwa-primary); }
+.pwa-status-chip.bad { background: hsl(0, 85%, 96%); color: hsl(0, 65%, 35%); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pwa-floating-bar, .pwa-drawer-panel, .pwa-drawer-backdrop { animation: none; }
+  .pwa-card, .pwa-card-image, .pwa-btn-primary, .pwa-choice { transition: none; }
+}
+

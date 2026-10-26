@@ -11,7 +11,13 @@
 //                    Item dengan HPP ≤ 0 ("HPP belum diisi") TIDAK dihitung laba;
 //                    nilainya dilaporkan terpisah sebagai omzetTanpaHpp → "laba tidak lengkap".
 //   Biaya Operasional = Σ operating_expenses (belum dihapus) pada tanggal bisnis WIB periode
-//   Laba Bersih    = Laba Kotor − Biaya Operasional
+//                    + Biaya Paten Rp 50.000 per BULAN OPERASIONAL (bulan yg ada transaksi),
+//                      dibagi rata ke hari operasional bulan tsb → berlaku di semua mode filter
+//                      (1 bulan = 50rb, 2 bulan = 100rb, 1 hari = porsi harian).
+//   Pool Mahasiswa = 50% × max(0, Laba Kotor − Biaya Operasional)   (agregat periode)
+//   Laba Bersih    = Laba Kotor − Pool Mahasiswa − Biaya Operasional (hak toko)
+//   Pool harian/shift = pool periode dibagi proporsional (metode sisa terbesar) →
+//                    Σ porsi = pool persis, tidak pernah melebihi pool.
 //
 // Semua batas hari memakai Asia/Jakarta (server Vercel berjalan di UTC).
 // Rentang waktu = [start, endExclusive) agar tidak ada transaksi yang jatuh di celah.
@@ -221,6 +227,42 @@ const num = (v: string | number | null | undefined): number => Number(v ?? 0);
 const money = (v: number): number => Math.round(v * 100) / 100;
 const approx = (a: number, b: number): boolean => Math.abs(a - b) < 0.01;
 
+// Biaya Paten Bulanan Wiramart: ATK Rp 20.000 + Bensin Rp 30.000 = Rp 50.000 (Opsi W1)
+export const BIAYA_PATEN_ATK     = 20_000;
+export const BIAYA_PATEN_BENSIN  = 30_000;
+export const BIAYA_PATEN_BULANAN = BIAYA_PATEN_ATK + BIAYA_PATEN_BENSIN;
+export const PERSEN_BAGI_HASIL   = 50;
+
+/**
+ * Bagi `total` rupiah bulat ke porsi proporsional terhadap bobot (bobot ≤ 0 → 0).
+ * Metode sisa terbesar (Hamilton): Σ hasil = total persis, nol kebocoran pembulatan.
+ */
+export function allocateProportional(total: number, weights: readonly number[]): number[] {
+  const t = Math.max(0, Math.round(total));
+  const w = weights.map((x) => (x > 0 ? x : 0));
+  const sumW = w.reduce((s, x) => s + x, 0);
+  if (t === 0 || sumW <= 0) return w.map(() => 0);
+
+  const raw = w.map((x) => (t * x) / sumW);
+  const out = raw.map((r) => Math.floor(r));
+  let rest = t - out.reduce((s, x) => s + x, 0);
+  const order = raw
+    .map((r, i) => ({ i, frac: r - Math.floor(r) }))
+    .filter((o) => (w[o.i] ?? 0) > 0)
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (const o of order) {
+    if (rest <= 0) break;
+    out[o.i] = (out[o.i] ?? 0) + 1;
+    rest -= 1;
+  }
+  return out;
+}
+
+function firstDayOfNextMonth(dateStr: string): string {
+  const [y, m] = dateStr.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Query
 // ─────────────────────────────────────────────────────────────
@@ -338,21 +380,50 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     .where(expenseWhere)
     .groupBy(operatingExpenses.expenseDate);
 
+  // 5) Hari operasional pada BULAN PENUH yang disentuh rentang.
+  //    Dipakai membagi biaya paten 50rb/bulan secara rata ke hari operasional,
+  //    sehingga rentang apa pun (harian/mingguan/bulanan/semester/bebas) konsisten.
+  const monthsStart = new Date(`${range.startDate.slice(0, 7)}-01T00:00:00+07:00`);
+  const monthsEnd   = new Date(`${firstDayOfNextMonth(range.endDate)}T00:00:00+07:00`);
+  const opDays = await db
+    .select({ day: WIB_DAY_TX })
+    .from(transactions)
+    .where(and(
+      eq(transactions.isTest, false),
+      COMPLETED,
+      gte(transactions.createdAt, monthsStart),
+      lt(transactions.createdAt, monthsEnd),
+    ))
+    .groupBy(WIB_DAY_TX);
+
+  // ── Biaya paten per hari operasional ────────────────────
+  const opDaysByMonth = new Map<string, string[]>();
+  for (const { day } of opDays) {
+    const key = day.slice(0, 7);
+    const list = opDaysByMonth.get(key) ?? [];
+    list.push(day);
+    opDaysByMonth.set(key, list);
+  }
+  const patenPerHari = new Map<string, number>();
+  for (const monthDays of opDaysByMonth.values()) {
+    monthDays.sort();
+    const shares = allocateProportional(BIAYA_PATEN_BULANAN, monthDays.map(() => 1));
+    monthDays.forEach((d, i) => {
+      if (d >= range.startDate && d <= range.endDate) patenPerHari.set(d, shares[i] ?? 0);
+    });
+  }
+  const patenTotal  = [...patenPerHari.values()].reduce((s, v) => s + v, 0);
+  const patenAtk    = Math.round((patenTotal * BIAYA_PATEN_ATK) / BIAYA_PATEN_BULANAN);
+  const patenBensin = patenTotal - patenAtk;
+
   // ── Susun ringkasan ─────────────────────────────────────
-  const isMonthly = range.period === 'monthly';
-
-  // Biaya Paten Bulanan Wiramart: ATK Rp 20.000 + Bensin Rp 30.000 = Rp 50.000 (Opsi W1)
-  const BIAYA_PATEN_ATK    = 20_000;
-  const BIAYA_PATEN_BENSIN = 30_000;
-  const BIAYA_PATEN_TOTAL  = BIAYA_PATEN_ATK + BIAYA_PATEN_BENSIN; // 50.000
-
   const expenseCatMap = new Map<ExpenseCategory, number>();
   for (const r of expenseByCat) {
     expenseCatMap.set(r.category, num(r.total));
   }
-  if (isMonthly) {
-    expenseCatMap.set('TRANSPORT', (expenseCatMap.get('TRANSPORT') ?? 0) + BIAYA_PATEN_BENSIN);
-    expenseCatMap.set('LAINNYA',   (expenseCatMap.get('LAINNYA') ?? 0) + BIAYA_PATEN_ATK);
+  if (patenTotal > 0) {
+    expenseCatMap.set('TRANSPORT', (expenseCatMap.get('TRANSPORT') ?? 0) + patenBensin);
+    expenseCatMap.set('LAINNYA',   (expenseCatMap.get('LAINNYA') ?? 0) + patenAtk);
   }
 
   const biayaPerKategori: ExpenseByCategory[] = [...expenseCatMap.entries()]
@@ -360,19 +431,16 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     .sort((a, b) => b.total - a.total);
 
   const biayaDb = expenseByCat.reduce((s, r) => s + num(r.total), 0);
-  const biaya   = money(biayaDb + (isMonthly ? BIAYA_PATEN_TOTAL : 0));
+  const biaya   = money(biayaDb + patenTotal);
 
   const omzet      = money(num(tx?.omzet));
   const hpp        = money(num(it?.hppVerified));
   const labaKotor  = money(num(it?.salesVerified) - hpp);
   const salesNoHpp = money(num(it?.salesNoHpp));
 
-  // Sistem Paten Wiramart:
-  // Laba Bersih Operasional = Laba Kotor − Biaya Operasional (termasuk paten 50k pada bulanan)
-  // Alokasi Gaji Karyawan   = 50% dari Laba Bersih Operasional
-  // Laba Bersih Wiramart    = Laba Kotor − Alokasi Gaji − Biaya Operasional
+  // Sistem Paten Wiramart (agregat periode, SATU-SATUNYA sumber pool):
   const labaOperasionalBersih = Math.max(0, labaKotor - biaya);
-  const alokasiGajiKaryawan   = money(Math.round(labaOperasionalBersih * 0.5));
+  const alokasiGajiKaryawan   = Math.round((labaOperasionalBersih * PERSEN_BAGI_HASIL) / 100);
   const labaBersih            = money(labaKotor - alokasiGajiKaryawan - biaya);
 
   const hasPayments = (num(paySummary?.omzetCash) + num(paySummary?.omzetQris)) > 0;
@@ -391,7 +459,7 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     hppTerjual:  hpp,
     labaKotor,
     alokasiGajiKaryawan,
-    persenBagiHasil: 50,
+    persenBagiHasil: PERSEN_BAGI_HASIL,
     omzetTanpaHpp: salesNoHpp,
     unitTanpaHpp:  num(it?.unitNoHpp),
     labaLengkap:   salesNoHpp === 0,
@@ -430,44 +498,39 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     const r = row(i.day);
     r.hppTerjual = money(num(i.hppVerified));
     r.labaKotor = money(num(i.salesVerified) - num(i.hppVerified));
-    const labaOpsHari = Math.max(0, r.labaKotor - r.biayaOperasional);
-    r.alokasiGajiKaryawan = money(Math.round(labaOpsHari * 0.5));
     r.omzetTanpaHpp = money(num(i.salesNoHpp));
   }
   for (const e of expenseDaily) {
-    const r = row(e.day);
-    r.biayaOperasional = money(num(e.total));
-    const labaOpsHari = Math.max(0, r.labaKotor - r.biayaOperasional);
-    r.alokasiGajiKaryawan = money(Math.round(labaOpsHari * 0.5));
+    row(e.day).biayaOperasional = money(num(e.total));
   }
-  const daily = [...days.values()]
-    .map((r) => {
-      const labaOpsHari = Math.max(0, r.labaKotor - r.biayaOperasional);
-      const gaji = money(Math.round(labaOpsHari * 0.5));
-      return {
-        ...r,
-        alokasiGajiKaryawan: gaji,
-        labaBersih: money(r.labaKotor - gaji - r.biayaOperasional),
-      };
-    })
+  for (const [day, share] of patenPerHari) {
+    const r = row(day);
+    r.biayaOperasional = money(r.biayaOperasional + share);
+  }
+
+  // Pool periode dibagi ke hari secara proporsional laba operasional hari itu.
+  const sorted = [...days.values()]
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const poolHarian = allocateProportional(
+    alokasiGajiKaryawan,
+    sorted.map((r) => r.labaKotor - r.biayaOperasional),
+  );
+  const daily: DailyRow[] = sorted.map((r, i) => {
+    const gaji = poolHarian[i] ?? 0;
+    return { ...r, alokasiGajiKaryawan: gaji, labaBersih: money(r.labaKotor - gaji - r.biayaOperasional) };
+  });
 
   // ── Invarian & Konsistensi Matematis ─────────────────────
   const sum = (f: (r: DailyRow) => number) => daily.reduce((s, r) => s + f(r), 0);
 
-  // Jika bukan periode bulanan dengan paten agregat, sinkronkan ringkasan dengan harian
-  if (!isMonthly && daily.length > 0) {
-    summary.alokasiGajiKaryawan = money(sum((r) => r.alokasiGajiKaryawan));
-    summary.labaBersih          = money(summary.labaKotor - summary.alokasiGajiKaryawan - summary.biayaOperasional);
-  }
-
   const checks: IntegrityChecks = {
     methodSplitMatches: approx(summary.omzetCash + summary.omzetQris, summary.omzet),
     itemsMatchOmzet:    approx(num(it?.salesVerified) + num(it?.salesNoHpp), summary.omzet),
-    dailyMatchesSummary: isMonthly
-      ? approx(sum((r) => r.omzet), summary.omzet)
-      : approx(sum((r) => r.omzet), summary.omzet) &&
-        approx(sum((r) => r.labaBersih), summary.labaBersih),
+    dailyMatchesSummary:
+      approx(sum((r) => r.omzet), summary.omzet) &&
+      approx(sum((r) => r.biayaOperasional), summary.biayaOperasional) &&
+      approx(sum((r) => r.alokasiGajiKaryawan), summary.alokasiGajiKaryawan) &&
+      approx(sum((r) => r.labaBersih), summary.labaBersih),
   };
 
   return { summary, daily, checks };

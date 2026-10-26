@@ -22,7 +22,12 @@ import {
 } from '@/lib/db/schema';
 import { and, eq, gte, lte, lt, inArray, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
-import { resolveReportRange, getFinancialReport, type PeriodKey } from '@/lib/finance/report';
+import {
+  resolveReportRange,
+  getFinancialReport,
+  allocateProportional,
+  type PeriodKey,
+} from '@/lib/finance/report';
 
 export const runtime = 'nodejs';
 
@@ -162,6 +167,27 @@ export async function GET(req: NextRequest): Promise<Response> {
           txCount:   f.txCount,
         });
       }
+    }
+
+    // 2b. Pool per shift = porsi dari POOL HARIAN RESMI (sudah dipotong biaya operasional),
+    //     dibagi proporsional laba kotor shift pada tanggal itu. Σ pool shift ≤ pool periode.
+    const wibDateOf = (d: Date): string =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
+    const dayPool = new Map(financial.daily.map((d) => [d.date, d.alokasiGajiKaryawan]));
+    const shiftIdsByDate = new Map<string, string[]>();
+    for (const s of shiftRows) {
+      const key = wibDateOf(s.clockIn);
+      const list = shiftIdsByDate.get(key) ?? [];
+      list.push(s.id);
+      shiftIdsByDate.set(key, list);
+    }
+    const poolByShift = new Map<string, number>();
+    for (const [date, ids] of shiftIdsByDate) {
+      const shares = allocateProportional(
+        dayPool.get(date) ?? 0,
+        ids.map((id) => finByShift.get(id)?.labaKotor ?? 0),
+      );
+      ids.forEach((id, i) => poolByShift.set(id, shares[i] ?? 0));
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -315,7 +341,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       txCount: number;
       omzet: number;
       labaKotor: number;
-      poolGaji: number;      // 50% dari labaKotor
+      poolGaji: number;      // porsi pool harian resmi (50% laba setelah biaya)
       personnelCount: number;
       nominalPerOrang: number;
       personnel: AttendeeRow[];
@@ -334,10 +360,9 @@ export async function GET(req: NextRequest): Promise<Response> {
     }>();
 
     const builtShifts: ShiftRow[] = [];
-    let grandOmzet = 0, grandLaba = 0, grandPool = 0, grandTx = 0;
 
     for (const s of shiftRows) {
-      const wibDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(s.clockIn);
+      const wibDate = wibDateOf(s.clockIn);
       const wibHour = parseInt(
         new Intl.DateTimeFormat('en-US', {
           timeZone: 'Asia/Jakarta', hour: 'numeric', hour12: false,
@@ -349,13 +374,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       const slotLabel = isSiang ? '11:30-15:00' : '07:00-11:30';
 
       const fin = finByShift.get(s.id) ?? { omzet: 0, labaKotor: 0, txCount: 0 };
-      // Pool hanya dihitung jika laba positif (laba minus = tidak ada pool)
-      const poolGaji = fin.labaKotor > 0 ? Math.floor(fin.labaKotor * 0.5) : 0;
-
-      grandOmzet += fin.omzet;
-      grandLaba  += fin.labaKotor;
-      grandPool  += poolGaji;
-      grandTx    += fin.txCount;
+      const poolGaji = poolByShift.get(s.id) ?? 0;
 
       const attendeesRaw = attByShift.get(s.id) ?? [];
       const count = attendeesRaw.length;
@@ -420,12 +439,13 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     const totalDistributed = summaryPerEmployee.reduce((acc, curr) => acc + curr.totalNominal, 0);
 
-    const grandLabaRounded = Math.round(grandLaba);
-    const biayaOperasional = financial.summary.biayaOperasional;
-    const labaOperasionalBersih = Math.max(0, grandLabaRounded - biayaOperasional);
-    const poolHakMahasiswa = financial.summary.alokasiGajiKaryawan;
+    // Angka kartu = service keuangan yang sama dengan laporan utama (satu sumber kebenaran)
+    const fs = financial.summary;
+    const labaOperasionalBersih = Math.max(0, fs.labaKotor - fs.biayaOperasional);
+    const poolHakMahasiswa = fs.alokasiGajiKaryawan;
     const sisaPool = Math.max(0, poolHakMahasiswa - totalDistributed);
-    const labaBersihToko = Math.max(0, grandLabaRounded - totalDistributed - biayaOperasional);
+    // Kas toko = hak toko 50% + sisa pool yang tidak terbagi (pembulatan / shift tanpa petugas)
+    const labaBersihToko = Math.round(fs.labaKotor - fs.biayaOperasional - totalDistributed);
 
     return apiOk({
       range: {
@@ -435,12 +455,12 @@ export async function GET(req: NextRequest): Promise<Response> {
         period:    period ?? 'custom',
       },
       grandTotal: {
-        omzet:                 Math.round(grandOmzet),
-        labaKotor:             grandLabaRounded,
-        biayaOperasional,
+        omzet:                 fs.omzet,
+        labaKotor:             fs.labaKotor,
+        biayaOperasional:      fs.biayaOperasional,
         labaOperasionalBersih,
         poolGaji:              poolHakMahasiswa,
-        txCount:               grandTx,
+        txCount:               fs.txCount,
         totalDistributed,
         sisaPool,
         labaBersihToko,
