@@ -87,9 +87,9 @@ new v2.0: buyers, online_orders, online_order_items, notification_logs
 |---|---|---|
 | Lantai 1 / Pickup | Rp 0 | Rp 0 |
 | Lantai 2 | Rp 1.000 | Rp 1.000 |
-| Lantai 3 | Rp 2.000 | Rp 2.000 |
-| Lantai 4 | Rp 2.000 | Rp 2.000 |
-| Auditorium | Rp 2.000 | Rp 2.000 |
+| Lantai 3 | Rp 1.500 | Rp 1.500 |
+| Lantai 4 atau auditorium| Rp 1.500 | Rp 1.500 |
+
 
 ---
 

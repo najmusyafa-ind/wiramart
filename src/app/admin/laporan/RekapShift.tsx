@@ -1,21 +1,19 @@
 'use client';
 
 /**
- * RekapShift — Laporan Keuangan & Bagi Hasil Per Shift (Khusus Manager / Dosen)
+ * RekapShift — Laporan Gaji Per Shift Wiramart (Model A — Kelompok Shift)
  *
- * Fitur:
- * 1. Filter Fleksibel: Per Bulan, Per Tanggal (Harian), Rentang Kustom, Semua Data
- * 2. TABEL GAJI BAGI HASIL — SEMUA MAHASISWA (Data Produksi Real-Time)
- *    - Peringkat perolehan, search NIM/Nama, status audit, export Excel (.xlsx)
- * 3. DATA GAJI PER SHIFT (Pagi 07:00-11:30 & Siang 11:30-15:00)
- *    - Expandable detail daftar hadir mahasiswa dan hak bagi hasil per shift
- * 4. Executive Metric Cards: Omzet, Laba Kotor, Pool 50%, Terdistribusi, Sisa Toko
- *
- * Formula Laba:
- * SUM(subtotal_sell - subtotal_cost) dari snapshot item (audit-proof)
+ * Kolom Utama Tabel (Padat):
+ * 1. Waktu (Pagi 07:00–11:30 | Siang 11:30–15:00)
+ * 2. Shift Tgl (Hari & daftar tanggal shift berjalan sesuai filter waktu)
+ * 3. Anggota Shift (Daftar personel tim shift)
+ * 4. Total Personel (Jumlah anggota tim)
+ * 5. Berapa Kali Shift Total (Frekuensi shift pada periode terpilih)
+ * 6. Upah Bersih (Total akumulasi bagi hasil 50% tim shift)
+ * 7. Panah Detail (▼) -> Menyembunyikan rincian spesifik: Berapa Transaksi, Omzet, Laba Kotor, & rincian per tanggal.
  */
 
-import { useState, useEffect, useCallback, useId, useMemo } from 'react';
+import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Sun,
   Sunset,
@@ -30,17 +28,13 @@ import {
   Loader2,
   RefreshCw,
   Clock,
-  Star,
-  BadgeCheck,
-  Calendar,
   Download,
   Search,
   Wallet,
   Award,
-  Layers,
-  Sparkles,
+  Receipt,
 } from 'lucide-react';
-import { formatRupiah, formatTanggalWib } from './shared';
+import { formatRupiah } from './shared';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -54,13 +48,17 @@ export type AttendeeRow = {
   jabatan: string;
   status: string;
   lateMinutes: number;
+  penaltyPercent?: number;
+  roleWeight?: number;
+  sessionWeight?: number;
+  totalWeight?: number;
   nominalBagiHasil: number;
 };
 
 export type ShiftRow = {
   shiftId: string;
   tanggal: string; // 'YYYY-MM-DD' WIB
-  hari: string; // 'Senin', 'Selasa', ...
+  hari: string;    // 'Senin', 'Selasa', ...
   sesi: 'Pagi' | 'Siang';
   slotLabel: string;
   clockIn: string;
@@ -76,6 +74,14 @@ export type ShiftRow = {
   personnel: AttendeeRow[];
 };
 
+export type ScheduleTeamMember = {
+  employeeId: string;
+  fullName: string;
+  nim: string;
+  programStudi: string;
+  jabatan: string;
+};
+
 export type EmpSummary = {
   employeeId: string;
   fullName: string;
@@ -83,6 +89,8 @@ export type EmpSummary = {
   programStudi: string;
   jabatan: string;
   totalHadir: number;
+  nominalShift?: number;
+  tunjanganKetua?: number;
   totalNominal: number;
 };
 
@@ -99,6 +107,8 @@ export type PerShiftData = {
     biayaOperasional?: number;
     labaOperasionalBersih?: number;
     poolGaji: number;
+    tunjanganKetua?: number;
+    poolShiftMahasiswa?: number;
     txCount: number;
     totalDistributed?: number;
     sisaPool?: number;
@@ -106,6 +116,7 @@ export type PerShiftData = {
   };
   shifts: ShiftRow[];
   summaryPerEmployee: EmpSummary[];
+  scheduleTeams?: Record<string, ScheduleTeamMember[]>;
   availableMonths?: string[];
 };
 
@@ -115,7 +126,55 @@ export type RekapShiftProps = {
   dateTo?: string;
 };
 
+type DailyShiftSession = {
+  sessionKey: string;
+  tanggal: string;
+  hari: string;
+  sesi: 'Pagi' | 'Siang';
+  slotLabel: string;
+  clockIn: string;
+  clockOut: string | null;
+  kasirName: string;
+  txCount: number;
+  omzet: number;
+  labaKotor: number;
+  upahBersih: number;
+  personnel: AttendeeRow[];
+};
+
+type ShiftTeamGroup = {
+  groupKey: string; // e.g. 'Senin-Pagi'
+  hari: string;
+  dayOrder: number;
+  sesi: 'Pagi' | 'Siang';
+  waktuLabel: string; // '07:00–11:30' | '11:30–15:00'
+  shiftTglSummary: string;
+  anggotaShift: { employeeId: string; fullName: string; nim: string; jabatan: string }[];
+  totalPersonel: number;
+  totalShiftCount: number;
+  upahBersih: number;
+  totalTx: number;
+  totalOmzet: number;
+  totalLabaKotor: number;
+  sessions: DailyShiftSession[];
+};
+
 // ─── Helper Functions ────────────────────────────────────────────────────────
+
+const HARI_ORDER: Record<string, number> = {
+  Senin: 1,
+  Selasa: 2,
+  Rabu: 3,
+  Kamis: 4,
+  Jumat: 5,
+  Sabtu: 6,
+  Minggu: 7,
+};
+
+const BULAN_SHORT = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+  'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des',
+];
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('id-ID', {
@@ -126,338 +185,39 @@ function formatTime(iso: string): string {
   });
 }
 
+function formatShortDate(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return `${d} ${BULAN_SHORT[(m ?? 1) - 1] ?? ''} ${y}`;
+}
+
+function formatGroupedDates(dates: string[]): string {
+  if (dates.length === 0) return '—';
+  const sorted = [...dates].sort();
+  if (sorted.length === 1) {
+    return formatShortDate(sorted[0]!);
+  }
+  const byMonth = new Map<string, number[]>();
+  for (const dt of sorted) {
+    const [y, m, d] = dt.split('-').map(Number);
+    const key = `${BULAN_SHORT[(m ?? 1) - 1] ?? ''} ${y}`;
+    const list = byMonth.get(key) ?? [];
+    if (d && !list.includes(d)) list.push(d);
+    byMonth.set(key, list);
+  }
+  const parts: string[] = [];
+  for (const [mLabel, days] of byMonth.entries()) {
+    parts.push(`${days.join(', ')} ${mLabel}`);
+  }
+  return parts.join(' · ');
+}
+
 function getTodayWib(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
 }
 
-function MarginBadge({ laba, omzet }: { laba: number; omzet: number }) {
-  const pct = omzet > 0 ? Math.round((laba / omzet) * 100) : 0;
-  const color = pct >= 20 ? '#10b981' : pct >= 10 ? '#f59e0b' : '#ef4444';
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '2px 8px',
-        borderRadius: '99px',
-        fontSize: '11px',
-        fontWeight: 700,
-        backgroundColor: color + '20',
-        color,
-        letterSpacing: '0.02em',
-      }}
-    >
-      Margin {pct}%
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; color: string; bg: string }> = {
-    HADIR: { label: 'Hadir', color: '#16a34a', bg: '#dcfce7' },
-    TELAT: { label: 'Telat', color: '#d97706', bg: '#fef3c7' },
-    PENGGANTI: { label: 'Ganti', color: '#6366f1', bg: '#e0e7ff' },
-    TIDAK_HADIR: { label: 'Alpha', color: '#dc2626', bg: '#fee2e2' },
-    IJIN: { label: 'Izin', color: '#8b5cf6', bg: '#ede9fe' },
-  };
-  const s = map[status] ?? { label: status, color: '#6b7280', bg: '#f3f4f6' };
-  return (
-    <span
-      style={{
-        padding: '2px 8px',
-        borderRadius: '99px',
-        fontSize: '11px',
-        fontWeight: 700,
-        backgroundColor: s.bg,
-        color: s.color,
-      }}
-    >
-      {s.label}
-    </span>
-  );
-}
-
-// ─── Shift Card Sub-component ────────────────────────────────────────────────
-
-function ShiftCard({ shift }: { shift: ShiftRow }) {
-  const [expanded, setExpanded] = useState(false);
-  const isPagi = shift.sesi === 'Pagi';
-  const accentColor = isPagi ? '#d97706' : '#4f46e5';
-  const hasProfit = shift.labaKotor > 0;
-
-  return (
-    <div
-      style={{
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-lg, 10px)',
-        overflow: 'hidden',
-        backgroundColor: 'var(--color-surface, #ffffff)',
-        boxShadow: expanded
-          ? '0 6px 20px -4px rgba(0,0,0,0.08)'
-          : '0 1px 3px rgba(0,0,0,0.04)',
-        transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-      }}
-    >
-      {/* Header Shift Card */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--space-3, 12px)',
-          padding: '12px 16px',
-          backgroundColor: expanded ? `${accentColor}0a` : 'transparent',
-          borderBottom: expanded ? '1px solid var(--color-border)' : 'none',
-          cursor: 'pointer',
-          userSelect: 'none',
-          flexWrap: 'wrap',
-        }}
-        onClick={() => setExpanded((p) => !p)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setExpanded((p) => !p);
-          }
-        }}
-        aria-expanded={expanded}
-      >
-        {/* Sesi badge */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            backgroundColor: isPagi ? '#fef3c7' : '#e0e7ff',
-            color: accentColor,
-            padding: '4px 12px',
-            borderRadius: '99px',
-            fontSize: '12px',
-            fontWeight: 800,
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-          }}
-        >
-          {isPagi ? <Sun size={13} /> : <Sunset size={13} />}
-          <span>
-            {shift.sesi} · {shift.slotLabel}
-          </span>
-        </div>
-
-        {/* Tanggal & Hari */}
-        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-          <div
-            style={{
-              fontWeight: 700,
-              fontSize: '0.92rem',
-              color: 'var(--color-text, #111827)',
-            }}
-          >
-            {shift.hari}, {formatTanggalWib(shift.tanggal).replace(/^[A-Za-z]+, /, '')}
-          </div>
-          <div
-            style={{
-              fontSize: '12px',
-              color: 'var(--color-text-muted, #6b7280)',
-              marginTop: '2px',
-            }}
-          >
-            Kasir: <strong>{shift.kasirName}</strong> ({shift.kasirNim}) &nbsp;· Buka:{' '}
-            {formatTime(shift.clockIn)}
-            {shift.clockOut ? ` · Tutup: ${formatTime(shift.clockOut)}` : ' · (Aktif)'}
-          </div>
-        </div>
-
-        {/* Ringkasan Finansial Shift */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--space-4, 16px)',
-            alignItems: 'center',
-            flexShrink: 0,
-            marginLeft: 'auto',
-          }}
-        >
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '11px', color: 'var(--color-text-muted, #6b7280)' }}>
-              {shift.txCount} tx
-            </div>
-            <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--color-text)' }}>
-              {formatRupiah(shift.omzet)}
-            </div>
-          </div>
-
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '11px', color: 'var(--color-text-muted, #6b7280)' }}>
-              Laba Bersih
-            </div>
-            <div
-              style={{
-                fontWeight: 800,
-                fontSize: '0.9rem',
-                color: hasProfit ? '#16a34a' : '#dc2626',
-              }}
-            >
-              {formatRupiah(shift.labaKotor)}
-            </div>
-          </div>
-
-          <MarginBadge laba={shift.labaKotor} omzet={shift.omzet} />
-
-          {/* Badge Personel Hadir */}
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '3px 10px',
-              borderRadius: '99px',
-              fontSize: '12px',
-              fontWeight: 700,
-              backgroundColor: shift.personnelCount > 0 ? '#dcfce7' : '#f3f4f6',
-              color: shift.personnelCount > 0 ? '#15803d' : '#6b7280',
-            }}
-          >
-            <Users size={12} />
-            {shift.personnelCount} orang
-          </div>
-
-          <div style={{ color: 'var(--color-text-muted)', marginLeft: 4 }}>
-            {expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-          </div>
-        </div>
-      </div>
-
-      {/* Expanded Content: Detail Personel Hadir */}
-      {expanded && (
-        <div style={{ padding: '16px 20px', backgroundColor: 'var(--color-surface-alt, #fafafa)' }}>
-          {/* Card Alokasi Bagi Hasil */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: '12px',
-              marginBottom: '14px',
-              padding: '12px 16px',
-              backgroundColor: '#ffffff',
-              borderRadius: '8px',
-              border: '1px solid var(--color-border)',
-            }}
-          >
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                Pool Bagi Hasil (50% Paten)
-              </div>
-              <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#16a34a' }}>
-                {formatRupiah(shift.poolGaji)}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                Mahasiswa Hadir Presensi
-              </div>
-              <div style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--color-text)' }}>
-                {shift.personnelCount} Orang
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                Hak Gaji Per Orang
-              </div>
-              <div style={{ fontWeight: 800, fontSize: '1.05rem', color: accentColor }}>
-                {formatRupiah(shift.nominalPerOrang)}
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                Kas Laba Toko (50%)
-              </div>
-              <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#4f46e5' }}>
-                {formatRupiah(Math.max(0, shift.labaKotor - shift.poolGaji))}
-              </div>
-            </div>
-          </div>
-
-          {/* Tabel Mahasiswa Hadir di Shift Ini */}
-          {shift.personnel.length > 0 ? (
-            <div style={{ overflowX: 'auto', borderRadius: '6px', border: '1px solid var(--color-border)' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', backgroundColor: '#ffffff' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid var(--color-border)' }}>
-                    {['#', 'Nama Mahasiswa', 'NIM', 'Program Studi', 'Jabatan', 'Status', 'Telat', 'Hak Bagi Hasil'].map((h, i) => (
-                      <th
-                        key={h}
-                        style={{
-                          textAlign: i >= 5 ? 'center' : i === 7 ? 'right' : 'left',
-                          padding: '8px 12px',
-                          color: '#475569',
-                          fontWeight: 700,
-                          fontSize: '11px',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.04em',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {shift.personnel.map((p, idx) => (
-                    <tr
-                      key={p.employeeId + shift.shiftId + idx}
-                      style={{
-                        borderBottom: idx < shift.personnel.length - 1 ? '1px solid #f1f5f9' : 'none',
-                      }}
-                    >
-                      <td style={{ padding: '9px 12px', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
-                      <td style={{ padding: '9px 12px', fontWeight: 700, color: 'var(--color-text)' }}>
-                        {p.fullName}
-                      </td>
-                      <td style={{ padding: '9px 12px', fontFamily: 'monospace', color: '#64748b' }}>
-                        {p.nim}
-                      </td>
-                      <td style={{ padding: '9px 12px', color: '#64748b' }}>{p.programStudi}</td>
-                      <td style={{ padding: '9px 12px', color: '#475569', fontWeight: 500 }}>{p.jabatan}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'center' }}>
-                        <StatusBadge status={p.status} />
-                      </td>
-                      <td style={{ padding: '9px 12px', textAlign: 'center', color: p.lateMinutes > 0 ? '#d97706' : '#94a3b8' }}>
-                        {p.lateMinutes > 0 ? `+${p.lateMinutes}m` : '—'}
-                      </td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 800, color: '#16a34a', fontSize: '13px' }}>
-                        {formatRupiah(p.nominalBagiHasil)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div
-              style={{
-                textAlign: 'center',
-                padding: '16px',
-                color: 'var(--color-text-muted)',
-                fontSize: '13px',
-                backgroundColor: '#ffffff',
-                borderRadius: '6px',
-                border: '1px dashed var(--color-border)',
-              }}
-            >
-              ⚠ Tidak ada catatan absensi mahasiswa yang terhubung untuk shift ini. Pool bagi hasil disimpan di kas toko.
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function RekapShift({ period: initialPeriod, dateFrom: propDateFrom, dateTo: propDateTo }: RekapShiftProps) {
-  const uid = useId();
+export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo }: RekapShiftProps) {
   const todayWib = useMemo(() => getTodayWib(), []);
   const currentMonthWib = useMemo(() => todayWib.slice(0, 7), [todayWib]);
 
@@ -470,11 +230,10 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
   const [rangeStart, setRangeStart] = useState<string>(propDateFrom || `${currentMonthWib}-01`);
   const [rangeEnd, setRangeEnd] = useState<string>(propDateTo || todayWib);
 
-  // Tab utama RekapShift: 'mahasiswa' | 'shift'
-  const [mainTab, setMainTab] = useState<'mahasiswa' | 'shift'>('mahasiswa');
+  // Filter tabel shift
   const [filterSesi, setFilterSesi] = useState<'Semua' | 'Pagi' | 'Siang'>('Semua');
-  const [searchMahasiswa, setSearchMahasiswa] = useState('');
-  const [searchKasir, setSearchKasir] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   // Data fetching states
   const [data, setData] = useState<PerShiftData | null>(null);
@@ -482,7 +241,6 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
   const [error, setError] = useState('');
   const [exportLoading, setExportLoading] = useState(false);
 
-  // Fetch data
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -522,7 +280,6 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
     fetchData();
   }, [fetchData]);
 
-  // Shortcut geser tanggal harian
   const shiftDay = (days: number) => {
     const d = new Date(selectedDate + 'T00:00:00+07:00');
     d.setDate(d.getDate() + days);
@@ -530,9 +287,196 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
     setSelectedDate(nextStr);
   };
 
-  // Export Excel Slip Gaji Mahasiswa
+  const toggleGroup = (groupKey: string) => {
+    setExpandedGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+  };
+
+  // ─── Bangun Kelompok Shift (Model A) ──────────────────────────────────────
+  const allGroups = useMemo<ShiftTeamGroup[]>(() => {
+    if (!data) return [];
+
+    // 1. Konsolidasi shift pada tanggal & sesi yang sama (jika kasir buka-tutup >1x di sesi yang sama)
+    const sessionMap = new Map<string, DailyShiftSession>();
+    for (const s of data.shifts) {
+      // Abaikan shift akun testing murni yang tidak memiliki personel mahasiswa
+      if (s.personnelCount === 0 && s.kasirName.toLowerCase().includes('testing')) {
+        continue;
+      }
+      const sKey = `${s.tanggal}-${s.sesi}`;
+      const gaji = s.personnelCount > 0 ? s.poolGaji : 0;
+      const existing = sessionMap.get(sKey);
+      if (!existing) {
+        sessionMap.set(sKey, {
+          sessionKey: sKey,
+          tanggal: s.tanggal,
+          hari: s.hari,
+          sesi: s.sesi,
+          slotLabel: s.slotLabel,
+          clockIn: s.clockIn,
+          clockOut: s.clockOut,
+          kasirName: s.kasirName,
+          txCount: s.txCount,
+          omzet: s.omzet,
+          labaKotor: s.labaKotor,
+          upahBersih: gaji,
+          personnel: [...s.personnel],
+        });
+      } else {
+        existing.txCount += s.txCount;
+        existing.omzet += s.omzet;
+        existing.labaKotor += s.labaKotor;
+        existing.upahBersih += gaji;
+        if (s.clockOut) existing.clockOut = s.clockOut;
+        for (const p of s.personnel) {
+          if (!existing.personnel.some((x) => x.employeeId === p.employeeId)) {
+            existing.personnel.push(p);
+          }
+        }
+      }
+    }
+
+    // 2. Kelompokkan per (Hari, Sesi) -> misal Senin-Pagi, Senin-Siang, Selasa-Pagi, dst.
+    const groupMap = new Map<string, {
+      hari: string;
+      sesi: 'Pagi' | 'Siang';
+      sessions: DailyShiftSession[];
+    }>();
+
+    for (const sess of sessionMap.values()) {
+      const gKey = `${sess.hari}-${sess.sesi}`;
+      const g = groupMap.get(gKey) ?? {
+        hari: sess.hari,
+        sesi: sess.sesi,
+        sessions: [],
+      };
+      g.sessions.push(sess);
+      groupMap.set(gKey, g);
+    }
+
+    const scheduleTeams = data.scheduleTeams ?? {};
+    const builtGroups: ShiftTeamGroup[] = [];
+
+    for (const [gKey, g] of groupMap.entries()) {
+      g.sessions.sort((a, b) => (a.tanggal < b.tanggal ? -1 : a.tanggal > b.tanggal ? 1 : 0));
+
+      // Anggota Shift: utamakan dari Master Jadwal Shift resmi (4 orang per slot),
+      // jika tidak ada di jadwal (misal shift Sabtu), ambil gabungan personel yang hadir di sesi tersebut.
+      const scheduled = scheduleTeams[gKey] ?? [];
+      const memberMap = new Map<string, { employeeId: string; fullName: string; nim: string; jabatan: string }>();
+
+      for (const m of scheduled) {
+        memberMap.set(m.employeeId, {
+          employeeId: m.employeeId,
+          fullName: m.fullName,
+          nim: m.nim,
+          jabatan: m.jabatan,
+        });
+      }
+
+      if (memberMap.size === 0) {
+        for (const sess of g.sessions) {
+          for (const p of sess.personnel) {
+            if (!memberMap.has(p.employeeId)) {
+              memberMap.set(p.employeeId, {
+                employeeId: p.employeeId,
+                fullName: p.fullName,
+                nim: p.nim,
+                jabatan: p.jabatan,
+              });
+            }
+          }
+        }
+      }
+
+      const anggotaShift = Array.from(memberMap.values());
+      const dates = g.sessions.map((x) => x.tanggal);
+
+      builtGroups.push({
+        groupKey: gKey,
+        hari: g.hari,
+        dayOrder: HARI_ORDER[g.hari] ?? 9,
+        sesi: g.sesi,
+        waktuLabel: g.sesi === 'Pagi' ? '07:00–11:30' : '11:30–15:00',
+        shiftTglSummary: formatGroupedDates(dates),
+        anggotaShift,
+        totalPersonel: anggotaShift.length,
+        totalShiftCount: g.sessions.length,
+        upahBersih: g.sessions.reduce((s, x) => s + x.upahBersih, 0),
+        totalTx: g.sessions.reduce((s, x) => s + x.txCount, 0),
+        totalOmzet: g.sessions.reduce((s, x) => s + x.omzet, 0),
+        totalLabaKotor: g.sessions.reduce((s, x) => s + x.labaKotor, 0),
+        sessions: g.sessions,
+      });
+    }
+
+    builtGroups.sort((a, b) => {
+      if (a.dayOrder !== b.dayOrder) return a.dayOrder - b.dayOrder;
+      return a.sesi === 'Pagi' ? -1 : 1;
+    });
+
+    return builtGroups;
+  }, [data]);
+
+  // Filter kelompok shift berdasarkan Sesi & Search
+  const filteredGroups = useMemo(() => {
+    let list = allGroups;
+    if (filterSesi !== 'Semua') {
+      list = list.filter((g) => g.sesi === filterSesi);
+    }
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (g) =>
+          g.hari.toLowerCase().includes(q) ||
+          g.sesi.toLowerCase().includes(q) ||
+          g.shiftTglSummary.toLowerCase().includes(q) ||
+          g.anggotaShift.some(
+            (m) => m.fullName.toLowerCase().includes(q) || m.nim.toLowerCase().includes(q)
+          ) ||
+          g.sessions.some(
+            (s) =>
+              s.tanggal.includes(q) ||
+              s.kasirName.toLowerCase().includes(q) ||
+              s.personnel.some((p) => p.fullName.toLowerCase().includes(q))
+          )
+      );
+    }
+    return list;
+  }, [allGroups, filterSesi, searchQuery]);
+
+  const sesiCounts = useMemo(() => {
+    return {
+      semua: allGroups.length,
+      pagi: allGroups.filter((g) => g.sesi === 'Pagi').length,
+      siang: allGroups.filter((g) => g.sesi === 'Siang').length,
+    };
+  }, [allGroups]);
+
+  const tableTotals = useMemo(() => {
+    return filteredGroups.reduce(
+      (acc, g) => {
+        acc.totalPersonel += g.totalPersonel;
+        acc.totalShiftCount += g.totalShiftCount;
+        acc.upahBersih += g.upahBersih;
+        acc.totalTx += g.totalTx;
+        acc.totalOmzet += g.totalOmzet;
+        acc.totalLabaKotor += g.totalLabaKotor;
+        return acc;
+      },
+      {
+        totalPersonel: 0,
+        totalShiftCount: 0,
+        upahBersih: 0,
+        totalTx: 0,
+        totalOmzet: 0,
+        totalLabaKotor: 0,
+      }
+    );
+  }, [filteredGroups]);
+
+  // Export Excel sesuai 6 Kolom Tabel Kelompok Shift + Detail Transaksi
   async function handleExportExcel() {
-    if (!data || data.summaryPerEmployee.length === 0) return;
+    if (!data || filteredGroups.length === 0) return;
     setExportLoading(true);
     try {
       const ExcelJS = (await import('exceljs')).default;
@@ -540,56 +484,66 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
       wb.creator = 'Smartkasir Perwira — Wiramart UNPERBA';
       wb.created = new Date();
 
-      const ws = wb.addWorksheet('Gaji Bagi Hasil Mahasiswa');
+      const ws = wb.addWorksheet('Laporan Gaji Per Shift');
 
-      // Title header
-      ws.mergeCells('A1:G1');
+      ws.mergeCells('A1:H1');
       const title = ws.getCell('A1');
-      title.value = 'TABEL GAJI BAGI HASIL — SEMUA MAHASISWA (WIRAMART UNPERBA)';
-      title.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+      title.value = 'LAPORAN GAJI BAGI HASIL PER SHIFT — WIRAMART UNPERBA';
+      title.font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } };
       title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
       title.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(1).height = 30;
+      ws.getRow(1).height = 28;
 
-      ws.mergeCells('A2:G2');
+      ws.mergeCells('A2:H2');
       const sub = ws.getCell('A2');
-      sub.value = `Periode: ${data.range.label} | Total Pool Gaji 50%: ${formatRupiah(data.grandTotal.poolGaji)} | Terdistribusi: ${formatRupiah(data.grandTotal.totalDistributed || 0)}`;
+      sub.value = `Periode: ${data.range.label} | Total Upah Bersih Shift (50%): ${formatRupiah(tableTotals.upahBersih)} | Total Transaksi: ${tableTotals.totalTx} tx`;
       sub.font = { italic: true, size: 10, color: { argb: 'FF334155' } };
       sub.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(2).height = 22;
+      ws.getRow(2).height = 20;
 
-      // Columns
       ws.columns = [
-        { key: 'no', width: 6 },
-        { key: 'nama', width: 30 },
-        { key: 'nim', width: 16 },
-        { key: 'prodi', width: 22 },
-        { key: 'jabatan', width: 18 },
-        { key: 'hadir', width: 14 },
-        { key: 'nominal', width: 24 },
+        { key: 'waktu', width: 22 },
+        { key: 'shiftTgl', width: 32 },
+        { key: 'anggota', width: 48 },
+        { key: 'personel', width: 16 },
+        { key: 'kaliShift', width: 18 },
+        { key: 'upahBersih', width: 20 },
+        { key: 'tx', width: 16 },
+        { key: 'omzet', width: 20 },
       ];
 
       const hRow = ws.getRow(4);
-      hRow.values = ['No', 'Nama Mahasiswa', 'NIM', 'Program Studi', 'Jabatan Utama', 'Shift Hadir', 'Hak Bagi Hasil (Rp)'];
+      hRow.values = [
+        'Waktu',
+        'Shift Tgl',
+        'Anggota Shift',
+        'Total Personel',
+        'Total Shift',
+        'Upah Bersih (Rp)',
+        'Total Transaksi',
+        'Total Omzet (Rp)',
+      ];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hRow.eachCell((cell: any) => {
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       });
       hRow.height = 24;
 
-      data.summaryPerEmployee.forEach((emp, idx) => {
+      filteredGroups.forEach((g, idx) => {
         const row = ws.addRow({
-          no: idx + 1,
-          nama: emp.fullName,
-          nim: emp.nim,
-          prodi: emp.programStudi,
-          jabatan: emp.jabatan,
-          hadir: `${emp.totalHadir} shift`,
-          nominal: emp.totalNominal,
+          waktu: `${g.sesi} (${g.waktuLabel})`,
+          shiftTgl: `${g.hari} — ${g.shiftTglSummary}`,
+          anggota: g.anggotaShift.map((m) => m.fullName).join(', '),
+          personel: `${g.totalPersonel} Orang`,
+          kaliShift: `${g.totalShiftCount}x Shift`,
+          upahBersih: g.upahBersih,
+          tx: `${g.totalTx} tx`,
+          omzet: g.totalOmzet,
         });
-        row.getCell('nominal').numFmt = '"Rp "#,##0';
+        row.getCell('upahBersih').numFmt = '"Rp "#,##0';
+        row.getCell('omzet').numFmt = '"Rp "#,##0';
         if (idx % 2 === 1) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           row.eachCell((c: any) => {
@@ -598,17 +552,18 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
         }
       });
 
-      // Total Row
       const totalRow = ws.addRow({
-        no: '',
-        nama: 'TOTAL GAJI DIDISTRIBUSIKAN',
-        nim: '',
-        prodi: '',
-        jabatan: '',
-        hadir: `${data.summaryPerEmployee.reduce((s, e) => s + e.totalHadir, 0)} shift`,
-        nominal: data.summaryPerEmployee.reduce((s, e) => s + e.totalNominal, 0),
+        waktu: 'TOTAL KESELURUHAN',
+        shiftTgl: `${filteredGroups.length} Kelompok Shift`,
+        anggota: '',
+        personel: `${tableTotals.totalPersonel} Orang`,
+        kaliShift: `${tableTotals.totalShiftCount}x Shift`,
+        upahBersih: tableTotals.upahBersih,
+        tx: `${tableTotals.totalTx} tx`,
+        omzet: tableTotals.totalOmzet,
       });
-      totalRow.getCell('nominal').numFmt = '"Rp "#,##0';
+      totalRow.getCell('upahBersih').numFmt = '"Rp "#,##0';
+      totalRow.getCell('omzet').numFmt = '"Rp "#,##0';
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       totalRow.eachCell((c: any) => {
         c.font = { bold: true, size: 11 };
@@ -617,11 +572,13 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
       totalRow.height = 24;
 
       const buf = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const blob = new Blob([buf], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Gaji_Bagi_Hasil_Wiramart_${data.range.startDate}_sd_${data.range.endDate}.xlsx`;
+      a.download = `Laporan_Gaji_Per_Shift_Wiramart_${data.range.startDate}_sd_${data.range.endDate}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -631,39 +588,6 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
       setExportLoading(false);
     }
   }
-
-  // Filtered lists
-  const filteredEmployees = useMemo(() => {
-    if (!data) return [];
-    const q = searchMahasiswa.trim().toLowerCase();
-    if (!q) return data.summaryPerEmployee;
-    return data.summaryPerEmployee.filter(
-      (e) =>
-        e.fullName.toLowerCase().includes(q) ||
-        e.nim.toLowerCase().includes(q) ||
-        e.programStudi.toLowerCase().includes(q) ||
-        e.jabatan.toLowerCase().includes(q)
-    );
-  }, [data, searchMahasiswa]);
-
-  const filteredShifts = useMemo(() => {
-    if (!data) return [];
-    let list = data.shifts;
-    if (filterSesi !== 'Semua') {
-      list = list.filter((s) => s.sesi === filterSesi);
-    }
-    const q = searchKasir.trim().toLowerCase();
-    if (q) {
-      list = list.filter(
-        (s) =>
-          s.kasirName.toLowerCase().includes(q) ||
-          s.kasirNim.toLowerCase().includes(q) ||
-          s.tanggal.includes(q) ||
-          s.hari.toLowerCase().includes(q)
-      );
-    }
-    return list;
-  }, [data, filterSesi, searchKasir]);
 
   const grandTotal = data?.grandTotal ?? {
     omzet: 0,
@@ -677,26 +601,81 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
     labaBersihToko: 0,
   };
 
-  const margin = grandTotal.omzet > 0 ? Math.round((grandTotal.labaKotor / grandTotal.omzet) * 100) : 0;
+  const margin =
+    grandTotal.omzet > 0 ? Math.round((grandTotal.labaKotor / grandTotal.omzet) * 100) : 0;
 
-  // Available months quick buttons
   const availableMonths = useMemo(() => {
-    const list = data?.availableMonths && data.availableMonths.length > 0
-      ? data.availableMonths
-      : ['2026-10', '2026-09', '2026-08'];
+    const list =
+      data?.availableMonths && data.availableMonths.length > 0
+        ? data.availableMonths
+        : ['2026-10', '2026-09', '2026-08'];
     return [...new Set(list)];
   }, [data]);
 
   return (
-    <section aria-label="Rekapitulasi Gaji dan Bagi Hasil Per Shift" style={{ marginBottom: 'var(--space-8)' }}>
+    <section
+      aria-label="Laporan Gaji Bagi Hasil Per Shift Wiramart"
+      style={{ marginBottom: 'var(--space-8)' }}
+    >
+      <style>{`
+        .rs-kpi-grid {
+          display: grid;
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 16px;
+        }
+        .rs-desktop-table {
+          display: block;
+        }
+        .rs-mobile-list {
+          display: none;
+        }
+        .rs-toolbar-actions {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+        .rs-search-box {
+          flex: 1 1 240px;
+          max-width: 360px;
+        }
+        @media (max-width: 1100px) {
+          .rs-kpi-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+        }
+        @media (max-width: 768px) {
+          .rs-kpi-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+          .rs-desktop-table {
+            display: none;
+          }
+          .rs-mobile-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+          }
+          .rs-search-box {
+            max-width: 100%;
+            width: 100%;
+            order: 3;
+          }
+        }
+      `}</style>
+
       {/* ─────────────────────────────────────────────────────────────
-          1. HEADER & INTERACTIVE FILTER TOOLBAR (PER TANGGAL & BULAN)
+          1. HEADER & FILTER PERIODE TOOLBAR
           ───────────────────────────────────────────────────────────── */}
       <div
         className="card"
         style={{
-          padding: '16px 20px',
-          marginBottom: 'var(--space-5, 20px)',
+          padding: '14px 16px',
+          marginBottom: '14px',
           border: '1px solid var(--color-border)',
           borderRadius: 'var(--radius-lg, 12px)',
           backgroundColor: 'var(--color-surface, #ffffff)',
@@ -709,14 +688,14 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
             justifyContent: 'space-between',
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: '12px',
-            marginBottom: '14px',
+            gap: '10px',
+            marginBottom: '12px',
           }}
         >
           <div>
             <h2
               style={{
-                fontSize: '1.25rem',
+                fontSize: '1.12rem',
                 fontWeight: 800,
                 color: 'var(--color-text, #111827)',
                 margin: 0,
@@ -725,40 +704,44 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
                 gap: '8px',
               }}
             >
-              <TrendingUp size={22} style={{ color: '#4f46e5' }} />
-              Laporan Gaji Bagi Hasil — {data?.range.label ?? 'Memuat...'}
+              <TrendingUp size={20} style={{ color: '#166534', flexShrink: 0 }} />
+              <span>Laporan Gaji Per Shift Wiramart — {data?.range.label ?? 'Memuat...'}</span>
             </h2>
-            <p style={{ color: 'var(--color-text-muted, #6b7280)', fontSize: '0.82rem', margin: '3px 0 0' }}>
-              Formula Audit-Proof (50% dari Laba Bersih Snapshot Item) · Akun Manager & Dosen
+            <p
+              style={{
+                color: 'var(--color-text-muted, #6b7280)',
+                fontSize: '0.78rem',
+                margin: '2px 0 0',
+              }}
+            >
+              Rekapitulasi Upah Bersih per Kelompok Shift · Klik baris untuk melihat jumlah transaksi & rincian tanggal
             </p>
           </div>
 
-          {/* Quick Refresh Button */}
           <button
             type="button"
             onClick={fetchData}
             disabled={loading}
             className="btn btn-secondary btn-sm"
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-            title="Muat ulang data dari database"
+            title="Muat ulang data"
           >
             <RefreshCw size={14} className={loading ? 'spin-icon' : ''} />
             <span>Segarkan</span>
           </button>
         </div>
 
-        {/* ── Toolbar Pengaturan Filter Periode ── */}
+        {/* Filter Mode & Controls */}
         <div
           style={{
             display: 'flex',
             flexWrap: 'wrap',
-            gap: '12px',
+            gap: '10px',
             alignItems: 'center',
-            paddingTop: '12px',
+            paddingTop: '10px',
             borderTop: '1px solid var(--color-border-light, #f1f5f9)',
           }}
         >
-          {/* Mode Tabs: Bulan / Tanggal / Range / Semua — scrollable pills (mobile-first) */}
           <div
             style={{
               display: 'flex',
@@ -768,46 +751,45 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
               scrollbarWidth: 'none',
               WebkitOverflowScrolling: 'touch',
               paddingBottom: 2,
+              maxWidth: '100%',
             }}
           >
             {[
-              { id: 'monthly', label: '📅 Per Bulan' },
-              { id: 'daily', label: '📆 Per Tanggal' },
-              { id: 'range', label: '🗓️ Rentang Bebas' },
-              { id: 'all', label: '🌐 Semua Waktu' },
+              { id: 'monthly', label: 'Per Bulan' },
+              { id: 'daily', label: 'Per Tanggal' },
+              { id: 'range', label: 'Rentang Bebas' },
+              { id: 'all', label: 'Semua Waktu' },
             ].map((m) => {
               const isActive = filterMode === m.id;
               return (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setFilterMode(m.id as typeof filterMode)}
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: 100,
-                  border: isActive ? '1.5px solid var(--color-primary, #166534)' : '1.5px solid #e2e8f0',
-                  background: isActive ? 'var(--color-primary, #166534)' : '#f8fafc',
-                  color: isActive ? '#ffffff' : 'var(--color-text-muted, #475569)',
-                  fontSize: '0.8rem',
-                  fontWeight: isActive ? 700 : 500,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                  transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
-                  boxShadow: isActive ? '0 0 0 3px #16653422' : 'none',
-                }}
-              >
-                {m.label}
-              </button>
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setFilterMode(m.id as typeof filterMode)}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: 100,
+                    border: isActive
+                      ? '1.5px solid var(--color-primary, #166534)'
+                      : '1.5px solid #e2e8f0',
+                    background: isActive ? 'var(--color-primary, #166534)' : '#f8fafc',
+                    color: isActive ? '#ffffff' : 'var(--color-text-muted, #475569)',
+                    fontSize: '0.78rem',
+                    fontWeight: isActive ? 700 : 500,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                  }}
+                >
+                  {m.label}
+                </button>
               );
             })}
           </div>
 
-          {/* Controls Khusus Berdasarkan Mode Filter */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flex: 1 }}>
-            {/* MODE A: PER BULAN */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', flex: 1 }}>
             {filterMode === 'monthly' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 <input
                   type="month"
                   value={selectedMonth}
@@ -815,23 +797,19 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
                   onChange={(e) => setSelectedMonth(e.target.value)}
                   className="form-input"
                   style={{
-                    padding: '6px 10px',
-                    fontSize: '0.82rem',
-                    minHeight: 34,
-                    width: '145px',
+                    padding: '5px 8px',
+                    fontSize: '0.8rem',
+                    minHeight: 32,
+                    width: '138px',
                     fontWeight: 600,
                   }}
-                  aria-label="Pilih Bulan Rekapan Gaji"
+                  aria-label="Pilih Bulan"
                 />
-
-                {/* Quick Month Buttons */}
-                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Bulan:</span>
                 {availableMonths.map((m) => {
                   const [y, mm] = m.split('-');
                   const monthName = new Intl.DateTimeFormat('id-ID', { month: 'short' }).format(
-                    new Date(parseInt(y), parseInt(mm) - 1, 1)
+                    new Date(parseInt(y, 10), parseInt(mm, 10) - 1, 1)
                   );
-                  const isCurrent = m === currentMonthWib;
                   return (
                     <button
                       key={m}
@@ -840,32 +818,34 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
                       style={{
                         padding: '4px 10px',
                         borderRadius: '99px',
-                        border: selectedMonth === m ? '2px solid #166534' : '1px solid var(--color-border)',
+                        border:
+                          selectedMonth === m
+                            ? '1.5px solid #166534'
+                            : '1px solid var(--color-border)',
                         backgroundColor: selectedMonth === m ? '#16653415' : 'transparent',
                         color: selectedMonth === m ? '#166534' : 'var(--color-text-secondary)',
-                        fontSize: '0.78rem',
+                        fontSize: '0.75rem',
                         fontWeight: selectedMonth === m ? 700 : 500,
                         cursor: 'pointer',
                       }}
                     >
-                      {monthName} {y} {isCurrent && '(Berjalan)'}
+                      {monthName} {y}
                     </button>
                   );
                 })}
               </div>
             )}
 
-            {/* MODE B: PER TANGGAL (HARIAN) */}
             {filterMode === 'daily' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   onClick={() => shiftDay(-1)}
                   className="btn btn-secondary btn-sm"
-                  style={{ minWidth: 32, padding: '6px 8px' }}
+                  style={{ minWidth: 30, padding: '5px 7px' }}
                   title="Hari Sebelumnya"
                 >
-                  <ChevronLeft size={16} />
+                  <ChevronLeft size={15} />
                 </button>
                 <input
                   type="date"
@@ -874,41 +854,37 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
                   onChange={(e) => setSelectedDate(e.target.value)}
                   className="form-input"
                   style={{
-                    padding: '6px 10px',
-                    fontSize: '0.82rem',
-                    minHeight: 34,
-                    width: '140px',
+                    padding: '5px 8px',
+                    fontSize: '0.8rem',
+                    minHeight: 32,
+                    width: '135px',
                     fontWeight: 600,
                   }}
-                  aria-label="Pilih Tanggal Rekapan Gaji"
+                  aria-label="Pilih Tanggal"
                 />
                 <button
                   type="button"
                   onClick={() => shiftDay(1)}
                   disabled={selectedDate >= todayWib}
                   className="btn btn-secondary btn-sm"
-                  style={{ minWidth: 32, padding: '6px 8px' }}
+                  style={{ minWidth: 30, padding: '5px 7px' }}
                   title="Hari Berikutnya"
                 >
-                  <ChevronRight size={16} />
+                  <ChevronRight size={15} />
                 </button>
                 {selectedDate !== todayWib && (
                   <button
                     type="button"
                     onClick={() => setSelectedDate(todayWib)}
                     className="btn btn-secondary btn-sm"
-                    style={{ fontSize: '0.78rem', padding: '4px 10px' }}
+                    style={{ fontSize: '0.75rem', padding: '4px 9px' }}
                   >
                     Hari Ini
                   </button>
                 )}
-                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text)', marginLeft: 4 }}>
-                  {formatTanggalWib(selectedDate)}
-                </span>
               </div>
             )}
 
-            {/* MODE C: RENTANG BEBAS */}
             {filterMode === 'range' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 <input
@@ -917,10 +893,10 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
                   max={rangeEnd || todayWib}
                   onChange={(e) => setRangeStart(e.target.value)}
                   className="form-input"
-                  style={{ padding: '6px 8px', fontSize: '0.82rem', minHeight: 34, width: '135px' }}
+                  style={{ padding: '5px 8px', fontSize: '0.8rem', minHeight: 32, width: '130px' }}
                   aria-label="Tanggal Mulai"
                 />
-                <span style={{ color: 'var(--color-text-muted)' }}>s/d</span>
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>s/d</span>
                 <input
                   type="date"
                   value={rangeEnd}
@@ -928,106 +904,87 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
                   max={todayWib}
                   onChange={(e) => setRangeEnd(e.target.value)}
                   className="form-input"
-                  style={{ padding: '6px 8px', fontSize: '0.82rem', minHeight: 34, width: '135px' }}
+                  style={{ padding: '5px 8px', fontSize: '0.8rem', minHeight: 32, width: '130px' }}
                   aria-label="Tanggal Akhir"
                 />
-                <button
-                  type="button"
-                  onClick={fetchData}
-                  className="btn btn-primary btn-sm"
-                  style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                >
-                  Terapkan
-                </button>
               </div>
             )}
 
-            {/* MODE D: SEMUA DATA */}
             {filterMode === 'all' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    padding: '4px 12px',
-                    borderRadius: '99px',
-                    backgroundColor: '#e0e7ff',
-                    color: '#4338ca',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  <Sparkles size={12} /> Menampilkan seluruh transaksi historis (Agustus – Oktober 2026)
-                </span>
-              </div>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '4px 10px',
+                  borderRadius: '99px',
+                  backgroundColor: '#f0fdf4',
+                  color: '#166534',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                }}
+              >
+                Seluruh Riwayat Operasional (Agustus – Oktober 2026)
+              </span>
             )}
           </div>
         </div>
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          2. EXECUTIVE SUMMARY METRICS (GRAND TOTAL CARDS)
+          2. RINGKASAN EKSEKUTIF (KPI CARDS)
           ───────────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-          gap: 'var(--space-3, 12px)',
-          marginBottom: 'var(--space-5, 20px)',
-        }}
-      >
+      <div className="rs-kpi-grid">
         {[
           {
-            icon: <ShoppingBag size={18} />,
-            label: 'Total Transaksi',
+            icon: <ShoppingBag size={16} />,
+            label: 'Transaksi',
             value: `${grandTotal.txCount.toLocaleString('id-ID')} tx`,
             color: '#4f46e5',
-            sub: `${data?.shifts.length ?? 0} shift aktif`,
+            sub: `${tableTotals.totalShiftCount}x shift berjalan`,
           },
           {
-            icon: <DollarSign size={18} />,
-            label: 'Total Omzet Kasir',
+            icon: <DollarSign size={16} />,
+            label: 'Total Omzet',
             value: formatRupiah(grandTotal.omzet),
             color: '#0284c7',
-            sub: 'Hasil penjualan produk',
+            sub: 'Penjualan produk',
           },
           {
-            icon: <TrendingUp size={18} />,
+            icon: <TrendingUp size={16} />,
             label: `Laba Kotor (${margin}%)`,
             value: formatRupiah(grandTotal.labaKotor),
-            color: grandTotal.labaKotor >= 0 ? '#16a34a' : '#dc2626',
-            sub: 'Basis pembagian bagi hasil',
-          },
-          {
-            icon: <Users size={18} />,
-            label: 'Pool Bagi Hasil (50%)',
-            value: formatRupiah(grandTotal.poolGaji),
-            color: '#d97706',
-            sub: '50% Laba Bersih Operasional',
-          },
-          {
-            icon: <Award size={18} />,
-            label: 'Sudah Didistribusikan',
-            value: formatRupiah(grandTotal.totalDistributed || 0),
             color: '#16a34a',
-            sub: `${data?.summaryPerEmployee.length ?? 0} mahasiswa penerima`,
+            sub: 'Selisih jual & HPP',
           },
           {
-            icon: <Wallet size={18} />,
-            label: 'Laba Bersih Toko',
-            value: formatRupiah(grandTotal.labaBersihToko ?? Math.max(0, grandTotal.labaKotor - (grandTotal.totalDistributed || 0))),
-            color: '#6366f1',
-            sub: 'Kas toko (hak toko + sisa shift)',
+            icon: <Receipt size={16} />,
+            label: 'Beban Toko',
+            value: formatRupiah(grandTotal.biayaOperasional || 0),
+            color: '#dc2626',
+            sub: 'Paten Rp 50rb/bln',
+          },
+          {
+            icon: <Award size={16} />,
+            label: 'Total Upah Shift',
+            value: formatRupiah(grandTotal.totalDistributed || 0),
+            color: '#15803d',
+            sub: `${allGroups.length} kelompok shift`,
+          },
+          {
+            icon: <Wallet size={16} />,
+            label: 'Kas Toko (50%)',
+            value: formatRupiah(grandTotal.labaBersihToko || 0),
+            color: '#4338ca',
+            sub: 'Laba bersih toko',
           },
         ].map((c) => (
           <div
             key={c.label}
             className="card"
             style={{
-              padding: '14px 16px',
+              padding: '10px 12px',
               border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-lg, 10px)',
+              borderRadius: '10px',
               backgroundColor: '#ffffff',
             }}
           >
@@ -1035,31 +992,49 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
+                gap: '6px',
                 color: c.color,
-                marginBottom: '6px',
+                marginBottom: '4px',
               }}
             >
               <div
                 style={{
-                  padding: '6px',
-                  borderRadius: '8px',
+                  padding: '4px',
+                  borderRadius: '6px',
                   backgroundColor: `${c.color}15`,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  flexShrink: 0,
                 }}
               >
                 {c.icon}
               </div>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text-muted)' }}>
+              <span
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: 'var(--color-text-muted)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
                 {c.label}
               </span>
             </div>
-            <div style={{ fontWeight: 800, fontSize: '1.15rem', color: c.color, lineHeight: 1.2 }}>
+            <div
+              style={{
+                fontWeight: 800,
+                fontSize: '1rem',
+                color: c.color,
+                lineHeight: 1.2,
+                whiteSpace: 'nowrap',
+              }}
+            >
               {c.value}
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+            <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '3px' }}>
               {c.sub}
             </div>
           </div>
@@ -1067,97 +1042,77 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          TRANSPARENCY BANNER: SINKRONISASI FINANSIAL & BAGI HASIL (OPSI A)
+          3. TOOLBAR TABEL: FILTER SESI, PENCARIAN & EXPORT EXCEL
           ───────────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '12px',
-          padding: '12px 16px',
-          marginBottom: 'var(--space-5, 20px)',
-          borderRadius: 'var(--radius-lg, 10px)',
-          backgroundColor: '#eff6ff',
-          border: '1px solid #bfdbfe',
-          color: '#1e40af',
-          fontSize: '12px',
-          lineHeight: '1.5',
-        }}
-      >
-        <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px', color: '#2563eb' }} />
-        <div>
-          <span style={{ fontWeight: 700 }}>Integrasi Penuh Finansial & Bagi Hasil: </span>
-          Laba Kotor ({formatRupiah(grandTotal.labaKotor)}) dikurangi Beban Operasional ({formatRupiah(grandTotal.biayaOperasional || 0)}) menghasilkan Laba Bersih Operasional ({formatRupiah(grandTotal.labaOperasionalBersih || 0)}). 
-          Alokasi hak mahasiswa 50% adalah <strong>{formatRupiah(grandTotal.poolGaji)}</strong>. 
-          Sebesar <strong>{formatRupiah(grandTotal.totalDistributed || 0)}</strong> terdistribusi kepada {data?.summaryPerEmployee.length ?? 0} mahasiswa yang bertugas dan hadir pada periode ini. 
-          Sisa alokasi <strong>{formatRupiah(grandTotal.sisaPool || 0)}</strong> (pembulatan / shift tanpa petugas terdata) otomatis disimpan di Kas Toko, sehingga total Laba Bersih Toko menjadi <strong>{formatRupiah(grandTotal.labaBersihToko || 0)}</strong>.
+      <div className="rs-toolbar-actions">
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {(
+            [
+              { key: 'Semua', label: `Semua Shift (${sesiCounts.semua})` },
+              { key: 'Pagi', label: `Pagi (${sesiCounts.pagi})` },
+              { key: 'Siang', label: `Siang (${sesiCounts.siang})` },
+            ] as const
+          ).map((item) => {
+            const active = filterSesi === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setFilterSesi(item.key)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '99px',
+                  border: active ? '1.5px solid #166534' : '1px solid var(--color-border)',
+                  background: active ? '#f0fdf4' : '#ffffff',
+                  color: active ? '#166534' : 'var(--color-text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '0.78rem',
+                  fontWeight: active ? 700 : 500,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                }}
+              >
+                {item.key === 'Pagi' && <Sun size={13} style={{ color: '#d97706' }} />}
+                {item.key === 'Siang' && <Sunset size={13} style={{ color: '#4f46e5' }} />}
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </div>
-      </div>
 
-      {/* ─────────────────────────────────────────────────────────────
-          3. TABS: TABEL GAJI MAHASISWA vs DATA GAJI PER SHIFT
-          ───────────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: 'flex',
-          gap: '8px',
-          marginBottom: '16px',
-          borderBottom: '2px solid var(--color-border)',
-          paddingBottom: '2px',
-        }}
-        role="tablist"
-        aria-label="Tampilan Laporan"
-      >
-        <button
-          type="button"
-          role="tab"
-          id="tab-mahasiswa"
-          aria-selected={mainTab === 'mahasiswa'}
-          onClick={() => setMainTab('mahasiswa')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '10px 20px',
-            borderRadius: '8px 8px 0 0',
-            border: 'none',
-            borderBottom: mainTab === 'mahasiswa' ? '3px solid #166534' : '3px solid transparent',
-            background: mainTab === 'mahasiswa' ? '#f0fdf4' : 'transparent',
-            color: mainTab === 'mahasiswa' ? '#166534' : 'var(--color-text-muted)',
-            fontWeight: mainTab === 'mahasiswa' ? 800 : 600,
-            fontSize: '0.92rem',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          <Award size={18} />
-          <span>TABEL GAJI BAGI HASIL — SEMUA MAHASISWA ({data?.summaryPerEmployee.length ?? 0})</span>
-        </button>
+        <div className="rs-search-box">
+          <div className="form-input-icon" style={{ width: '100%' }}>
+            <Search size={15} className="form-input-icon__icon" aria-hidden="true" />
+            <input
+              className="form-input form-input-icon__input"
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari hari, tanggal, atau nama anggota shift..."
+              style={{ minHeight: 34, fontSize: '0.8rem' }}
+            />
+          </div>
+        </div>
 
         <button
           type="button"
-          role="tab"
-          id="tab-pershift"
-          aria-selected={mainTab === 'shift'}
-          onClick={() => setMainTab('shift')}
+          onClick={handleExportExcel}
+          disabled={exportLoading || filteredGroups.length === 0}
+          className="btn btn-primary btn-sm"
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '8px',
-            padding: '10px 20px',
-            borderRadius: '8px 8px 0 0',
-            border: 'none',
-            borderBottom: mainTab === 'shift' ? '3px solid #4f46e5' : '3px solid transparent',
-            background: mainTab === 'shift' ? '#eef2ff' : 'transparent',
-            color: mainTab === 'shift' ? '#4f46e5' : 'var(--color-text-muted)',
-            fontWeight: mainTab === 'shift' ? 800 : 600,
-            fontSize: '0.92rem',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
+            gap: '6px',
+            backgroundColor: '#166534',
+            borderColor: '#166534',
+            padding: '7px 14px',
+            fontWeight: 700,
+            fontSize: '0.78rem',
           }}
         >
-          <Clock size={18} />
-          <span>DATA GAJI PER SHIFT ({data?.shifts.length ?? 0} Shift)</span>
+          {exportLoading ? <Loader2 size={14} className="spin-icon" /> : <Download size={14} />}
+          <span>Export Shift (.xlsx)</span>
         </button>
       </div>
 
@@ -1172,13 +1127,13 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: '48px 24px',
-            gap: '12px',
+            padding: '40px 20px',
+            gap: '10px',
           }}
         >
-          <Loader2 size={32} className="spin-icon" style={{ color: '#166534' }} />
-          <span style={{ color: 'var(--color-text-muted)', fontWeight: 600, fontSize: '0.9rem' }}>
-            Memuat data laporan produksi dan bagi hasil mahasiswa…
+          <Loader2 size={28} className="spin-icon" style={{ color: '#166534' }} />
+          <span style={{ color: 'var(--color-text-muted)', fontWeight: 600, fontSize: '0.85rem' }}>
+            Memuat laporan gaji per shift Wiramart...
           </span>
         </div>
       )}
@@ -1189,16 +1144,16 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
             display: 'flex',
             alignItems: 'center',
             gap: '10px',
-            padding: '14px 18px',
+            padding: '12px 16px',
             backgroundColor: '#fee2e2',
             border: '1px solid #f87171',
             borderRadius: '8px',
             color: '#dc2626',
-            fontSize: '0.9rem',
-            marginBottom: '16px',
+            fontSize: '0.85rem',
+            marginBottom: '14px',
           }}
         >
-          <AlertCircle size={20} />
+          <AlertCircle size={18} />
           <span style={{ flex: 1 }}>{error}</span>
           <button type="button" onClick={fetchData} className="btn btn-secondary btn-sm">
             Coba Lagi
@@ -1207,373 +1162,736 @@ export default function RekapShift({ period: initialPeriod, dateFrom: propDateFr
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          5. TAB CONTENT 1: TABEL GAJI BAGI HASIL MAHASISWA
+          5. TABEL UTAMA: 6 KOLOM PADAT + DETAIL TRANSAKSI (▼)
           ───────────────────────────────────────────────────────────── */}
-      {!loading && !error && mainTab === 'mahasiswa' && (
-        <div>
-          {/* Header Action & Search Mahasiswa */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '12px',
-              marginBottom: '12px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 280px', maxWidth: '420px' }}>
-              <div className="form-input-icon" style={{ width: '100%' }}>
-                <Search size={16} className="form-input-icon__icon" aria-hidden="true" />
-                <input
-                  className="form-input form-input-icon__input"
-                  type="search"
-                  value={searchMahasiswa}
-                  onChange={(e) => setSearchMahasiswa(e.target.value)}
-                  placeholder="Cari nama mahasiswa, NIM, atau prodi..."
-                  style={{ minHeight: 38, fontSize: '0.85rem' }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <button
-                type="button"
-                onClick={handleExportExcel}
-                disabled={exportLoading || filteredEmployees.length === 0}
-                className="btn btn-primary btn-sm"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  backgroundColor: '#166534',
-                  borderColor: '#166534',
-                  padding: '8px 16px',
-                  fontWeight: 700,
-                }}
-              >
-                {exportLoading ? (
-                  <Loader2 size={16} className="spin-icon" />
-                ) : (
-                  <Download size={16} />
-                )}
-                <span>📥 Export Rekap Gaji (.xlsx)</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Banner Informasi Formula Bagi Hasil */}
-          <div
-            style={{
-              backgroundColor: '#f0fdf4',
-              border: '1px solid #bbf7d0',
-              borderRadius: '8px',
-              padding: '10px 16px',
-              fontSize: '12px',
-              color: '#166534',
-              marginBottom: '14px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <BadgeCheck size={16} style={{ flexShrink: 0 }} />
-            <span>
-              <strong>Metodologi Paten Wiramart:</strong> 50% Laba Kotor tiap shift dibagikan rata kepada seluruh personel
-              yang hadir (status <code>HADIR</code>, <code>TELAT</code>, atau <code>PENGGANTI</code>). Mahasiswa yang tidak hadir (Alpha/Ijin) otomatis Rp 0.
-            </span>
-          </div>
-
-          {filteredEmployees.length === 0 ? (
+      {!loading && !error && (
+        <>
+          {filteredGroups.length === 0 ? (
             <div
               className="card"
               style={{
                 textAlign: 'center',
-                padding: '48px 20px',
+                padding: '40px 20px',
                 color: 'var(--color-text-muted)',
               }}
             >
-              <Users size={40} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-              <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--color-text)' }}>
-                Belum ada data bagi hasil mahasiswa pada periode ini.
+              <Clock size={36} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+              <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--color-text)' }}>
+                Tidak ada data shift pada filter waktu ini.
               </div>
-              <p style={{ fontSize: '0.85rem', marginTop: '6px' }}>
-                Silakan ganti filter periode ke <strong>&quot;Per Bulan&quot;</strong> (misal: Oktober 2026 atau September 2026) untuk melihat rekapitulasi gaji yang lengkap.
+              <p style={{ fontSize: '0.8rem', marginTop: '4px' }}>
+                Silakan pilih bulan atau tanggal lain yang memiliki riwayat operasional.
               </p>
             </div>
           ) : (
-            <div
-              className="card"
-              style={{
-                overflow: 'hidden',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-lg, 10px)',
-              }}
-            >
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                  <thead>
-                    <tr
-                      style={{
-                        backgroundColor: '#f8fafc',
-                        borderBottom: '2px solid var(--color-border)',
-                      }}
-                    >
-                      {['Peringkat', 'Nama Mahasiswa', 'NIM', 'Program Studi', 'Jabatan Utama', 'Shift Hadir', 'Hak Bagi Hasil (Rp)', 'Status'].map(
-                        (h, idx) => (
+            <>
+              {/* ── A. DESKTOP TABLE (6 KOLOM + PANAH ▼) ── */}
+              <div
+                className="card rs-desktop-table"
+                style={{
+                  overflow: 'hidden',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '10px',
+                  backgroundColor: '#ffffff',
+                }}
+              >
+                <div style={{ overflowX: 'auto' }}>
+                  <table
+                    style={{
+                      width: '100%',
+                      borderCollapse: 'collapse',
+                      fontSize: '12.5px',
+                    }}
+                  >
+                    <thead>
+                      <tr
+                        style={{
+                          backgroundColor: '#f8fafc',
+                          borderBottom: '2px solid var(--color-border)',
+                        }}
+                      >
+                        {[
+                          { label: 'Waktu', align: 'left' },
+                          { label: 'Shift Tgl', align: 'left' },
+                          { label: 'Anggota Shift', align: 'left' },
+                          { label: 'Total Personel', align: 'center' },
+                          { label: 'Berapa Kali Shift Total', align: 'center' },
+                          { label: 'Upah Bersih', align: 'right' },
+                          { label: '', align: 'center' },
+                        ].map((col, idx) => (
                           <th
-                            key={h}
+                            key={col.label || idx}
                             style={{
-                              padding: '12px 14px',
-                              textAlign: idx >= 5 && idx <= 7 ? 'center' : idx === 6 ? 'right' : 'left',
+                              padding: '11px 14px',
+                              textAlign: col.align as 'left' | 'center' | 'right',
                               color: '#475569',
                               fontWeight: 700,
                               fontSize: '11px',
                               textTransform: 'uppercase',
-                              letterSpacing: '0.04em',
+                              letterSpacing: '0.03em',
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            {h}
+                            {col.label}
                           </th>
-                        )
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredEmployees.map((emp, idx) => {
-                      const isTop3 = idx < 3 && emp.totalNominal > 0;
-                      return (
-                        <tr
-                          key={emp.employeeId}
-                          style={{
-                            borderBottom: '1px solid var(--color-border-light, #f1f5f9)',
-                            backgroundColor:
-                              idx === 0
-                                ? '#fefce8'
-                                : idx === 1
-                                ? '#f8fafc'
-                                : idx === 2
-                                ? '#fff7ed'
-                                : 'transparent',
-                            transition: 'background-color 0.15s ease',
-                          }}
-                        >
-                          {/* Peringkat / Medali */}
-                          <td style={{ padding: '12px 14px', fontWeight: 700, color: '#64748b', textAlign: 'center' }}>
-                            {idx === 0 ? (
-                              <span title="Juara 1 Perolehan Bagi Hasil">🥇 #1</span>
-                            ) : idx === 1 ? (
-                              <span title="Juara 2">🥈 #2</span>
-                            ) : idx === 2 ? (
-                              <span title="Juara 3">🥉 #3</span>
-                            ) : (
-                              `#${idx + 1}`
-                            )}
-                          </td>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredGroups.map((g) => {
+                        const isPagi = g.sesi === 'Pagi';
+                        const isExpanded = !!expandedGroups[g.groupKey];
 
-                          {/* Nama Mahasiswa */}
-                          <td style={{ padding: '12px 14px', fontWeight: 700, color: 'var(--color-text)' }}>
-                            {emp.fullName}
-                          </td>
-
-                          {/* NIM */}
-                          <td style={{ padding: '12px 14px', fontFamily: 'monospace', color: '#475569', fontSize: '12px' }}>
-                            {emp.nim}
-                          </td>
-
-                          {/* Program Studi */}
-                          <td style={{ padding: '12px 14px', color: '#64748b' }}>{emp.programStudi}</td>
-
-                          {/* Jabatan */}
-                          <td style={{ padding: '12px 14px', color: '#334155', fontWeight: 500 }}>
-                            <span
+                        return (
+                          <Fragment key={g.groupKey}>
+                            <tr
+                              onClick={() => toggleGroup(g.groupKey)}
                               style={{
-                                display: 'inline-block',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                backgroundColor: '#f1f5f9',
-                                fontSize: '11px',
-                                fontWeight: 600,
+                                borderBottom: isExpanded ? 'none' : '1px solid #f1f5f9',
+                                backgroundColor: isExpanded ? '#f0fdf4' : '#ffffff',
+                                cursor: 'pointer',
+                                transition: 'background-color 0.15s ease',
                               }}
                             >
-                              {emp.jabatan}
-                            </span>
-                          </td>
+                              {/* 1. Waktu */}
+                              <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '4px 10px',
+                                    borderRadius: '99px',
+                                    fontSize: '11.5px',
+                                    fontWeight: 800,
+                                    backgroundColor: isPagi ? '#fef3c7' : '#e0e7ff',
+                                    color: isPagi ? '#b45309' : '#4338ca',
+                                  }}
+                                >
+                                  {isPagi ? <Sun size={13} /> : <Sunset size={13} />}
+                                  <span>{g.sesi}</span>
+                                </span>
+                                <div
+                                  style={{
+                                    fontSize: '11px',
+                                    color: '#64748b',
+                                    fontWeight: 600,
+                                    marginTop: '3px',
+                                    paddingLeft: '4px',
+                                  }}
+                                >
+                                  {g.waktuLabel} WIB
+                                </div>
+                              </td>
 
-                          {/* Shift Hadir */}
-                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                            <span
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '3px',
-                                backgroundColor: '#e0e7ff',
-                                color: '#4338ca',
-                                padding: '3px 10px',
-                                borderRadius: '99px',
-                                fontWeight: 800,
-                                fontSize: '12px',
-                              }}
-                            >
-                              <Clock size={11} />
-                              {emp.totalHadir} shift
-                            </span>
-                          </td>
+                              {/* 2. Shift Tgl */}
+                              <td style={{ padding: '12px 14px', minWidth: '170px', maxWidth: '250px' }}>
+                                <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '13px' }}>
+                                  Shift {g.hari}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: '11.5px',
+                                    color: '#475569',
+                                    marginTop: '2px',
+                                    lineHeight: 1.35,
+                                  }}
+                                >
+                                  {g.shiftTglSummary}
+                                </div>
+                              </td>
 
-                          {/* Hak Gaji Bagi Hasil */}
-                          <td
-                            style={{
-                              padding: '12px 14px',
-                              textAlign: 'right',
-                              fontWeight: 800,
-                              fontSize: '0.98rem',
-                              color: emp.totalNominal > 0 ? '#16a34a' : '#94a3b8',
-                            }}
-                          >
-                            {formatRupiah(emp.totalNominal)}
-                          </td>
+                              {/* 3. Anggota Shift */}
+                              <td style={{ padding: '12px 14px', minWidth: '260px', maxWidth: '400px' }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                                  {g.anggotaShift.map((m) => (
+                                    <span
+                                      key={m.employeeId}
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        padding: '3px 9px',
+                                        borderRadius: '6px',
+                                        fontSize: '11.5px',
+                                        fontWeight: 600,
+                                        backgroundColor: '#f8fafc',
+                                        color: '#1e293b',
+                                        border: '1px solid #e2e8f0',
+                                      }}
+                                      title={`${m.fullName} (${m.nim}) — ${m.jabatan}`}
+                                    >
+                                      {m.fullName}
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
 
-                          {/* Status Audit */}
-                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                            {emp.totalNominal > 0 ? (
-                              <span
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  color: '#15803d',
-                                  fontSize: '11px',
-                                  fontWeight: 700,
-                                }}
-                              >
-                                <BadgeCheck size={14} /> Terverifikasi
-                              </span>
-                            ) : (
-                              <span style={{ color: '#94a3b8', fontSize: '11px' }}>—</span>
+                              {/* 4. Total Personel */}
+                              <td style={{ padding: '12px 14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '4px 10px',
+                                    borderRadius: '99px',
+                                    backgroundColor: '#f1f5f9',
+                                    color: '#334155',
+                                    fontWeight: 700,
+                                    fontSize: '12px',
+                                  }}
+                                >
+                                  <Users size={12} />
+                                  {g.totalPersonel} Orang
+                                </span>
+                              </td>
+
+                              {/* 5. Berapa Kali Shift Total */}
+                              <td style={{ padding: '12px 14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '4px 11px',
+                                    borderRadius: '99px',
+                                    backgroundColor: '#e0e7ff',
+                                    color: '#4338ca',
+                                    fontWeight: 800,
+                                    fontSize: '12px',
+                                  }}
+                                >
+                                  <Clock size={12} />
+                                  {g.totalShiftCount}x Shift
+                                </span>
+                              </td>
+
+                              {/* 6. Upah Bersih */}
+                              <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                <span
+                                  style={{
+                                    display: 'inline-block',
+                                    padding: '4px 12px',
+                                    borderRadius: '8px',
+                                    backgroundColor: g.upahBersih > 0 ? '#dcfce7' : '#f1f5f9',
+                                    color: g.upahBersih > 0 ? '#15803d' : '#94a3b8',
+                                    fontWeight: 800,
+                                    fontSize: '13.5px',
+                                  }}
+                                >
+                                  {formatRupiah(g.upahBersih)}
+                                </span>
+                              </td>
+
+                              {/* 7. Panah Detail (▼) */}
+                              <td style={{ padding: '12px 14px', textAlign: 'center', width: '44px' }}>
+                                <button
+                                  type="button"
+                                  aria-label="Lihat rincian transaksi shift"
+                                  aria-expanded={isExpanded}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleGroup(g.groupKey);
+                                  }}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    width: '28px',
+                                    height: '28px',
+                                    borderRadius: '6px',
+                                    border: '1px solid #cbd5e1',
+                                    backgroundColor: isExpanded ? '#166534' : '#ffffff',
+                                    color: isExpanded ? '#ffffff' : '#475569',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                </button>
+                              </td>
+                            </tr>
+
+                            {/* ── KOTAK RINCIAN SPESIFIK (TERSEMBUNYI DI BALIK PANAH ▼) ── */}
+                            {isExpanded && (
+                              <tr style={{ borderBottom: '2px solid #cbd5e1', backgroundColor: '#f8fafc' }}>
+                                <td colSpan={7} style={{ padding: '14px 20px' }}>
+                                  {/* Ringkasan Spesifik Transaksi Kelompok Shift */}
+                                  <div
+                                    style={{
+                                      display: 'grid',
+                                      gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                                      gap: '10px',
+                                      marginBottom: '12px',
+                                      padding: '10px 14px',
+                                      backgroundColor: '#ffffff',
+                                      borderRadius: '8px',
+                                      border: '1px solid #e2e8f0',
+                                    }}
+                                  >
+                                    <div>
+                                      <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                                        Total Transaksi Shift Ini
+                                      </div>
+                                      <div style={{ fontWeight: 800, fontSize: '1rem', color: '#4f46e5' }}>
+                                        {g.totalTx.toLocaleString('id-ID')} Transaksi
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                                        Total Omzet Shift Ini
+                                      </div>
+                                      <div style={{ fontWeight: 800, fontSize: '1rem', color: '#0284c7' }}>
+                                        {formatRupiah(g.totalOmzet)}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                                        Total Laba Kotor Shift Ini
+                                      </div>
+                                      <div style={{ fontWeight: 800, fontSize: '1rem', color: '#0f172a' }}>
+                                        {formatRupiah(g.totalLabaKotor)}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                                        Rata-rata Upah per Pertemuan
+                                      </div>
+                                      <div style={{ fontWeight: 800, fontSize: '1rem', color: '#15803d' }}>
+                                        {formatRupiah(
+                                          g.totalShiftCount > 0
+                                            ? Math.round(g.upahBersih / g.totalShiftCount)
+                                            : 0
+                                        )}{' '}
+                                        / shift
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Sub-tabel Rincian Per Tanggal Shift */}
+                                  <div
+                                    style={{
+                                      borderRadius: '8px',
+                                      border: '1px solid #e2e8f0',
+                                      overflow: 'hidden',
+                                      backgroundColor: '#ffffff',
+                                    }}
+                                  >
+                                    <table
+                                      style={{
+                                        width: '100%',
+                                        borderCollapse: 'collapse',
+                                        fontSize: '12px',
+                                      }}
+                                    >
+                                      <thead>
+                                        <tr
+                                          style={{
+                                            backgroundColor: '#f1f5f9',
+                                            borderBottom: '1px solid #e2e8f0',
+                                          }}
+                                        >
+                                          <th style={{ padding: '8px 12px', textAlign: 'center', width: '40px', color: '#475569' }}>
+                                            #
+                                          </th>
+                                          <th style={{ padding: '8px 12px', textAlign: 'left', color: '#475569' }}>
+                                            Tanggal Shift
+                                          </th>
+                                          <th style={{ padding: '8px 12px', textAlign: 'left', color: '#475569' }}>
+                                            Jam Buka – Tutup
+                                          </th>
+                                          <th style={{ padding: '8px 12px', textAlign: 'left', color: '#475569' }}>
+                                            Kasir & Catatan Kehadiran
+                                          </th>
+                                          <th style={{ padding: '8px 12px', textAlign: 'center', color: '#475569' }}>
+                                            Berapa Transaksi
+                                          </th>
+                                          <th style={{ padding: '8px 12px', textAlign: 'right', color: '#475569' }}>
+                                            Omzet
+                                          </th>
+                                          <th style={{ padding: '8px 12px', textAlign: 'right', color: '#475569' }}>
+                                            Laba Kotor
+                                          </th>
+                                          <th style={{ padding: '8px 12px', textAlign: 'right', color: '#475569' }}>
+                                            Upah Bersih
+                                          </th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {g.sessions.map((sess, sIdx) => (
+                                          <tr
+                                            key={sess.sessionKey}
+                                            style={{
+                                              borderBottom:
+                                                sIdx < g.sessions.length - 1
+                                                  ? '1px solid #f1f5f9'
+                                                  : 'none',
+                                            }}
+                                          >
+                                            <td style={{ padding: '8px 12px', textAlign: 'center', color: '#64748b' }}>
+                                              {sIdx + 1}
+                                            </td>
+                                            <td style={{ padding: '8px 12px', fontWeight: 700, color: '#0f172a' }}>
+                                              {sess.hari}, {formatShortDate(sess.tanggal)}
+                                            </td>
+                                            <td style={{ padding: '8px 12px', color: '#475569' }}>
+                                              {formatTime(sess.clockIn)} –{' '}
+                                              {sess.clockOut ? formatTime(sess.clockOut) : 'Aktif'} WIB
+                                            </td>
+                                            <td style={{ padding: '8px 12px', color: '#334155' }}>
+                                              <span style={{ fontWeight: 600 }}>Kasir: {sess.kasirName}</span>
+                                              {sess.personnel.some((p) => p.lateMinutes > 0) && (
+                                                <span style={{ marginLeft: '6px', color: '#d97706', fontSize: '11px', fontWeight: 600 }}>
+                                                  (Telat:{' '}
+                                                  {sess.personnel
+                                                    .filter((p) => p.lateMinutes > 0)
+                                                    .map((p) => `${p.fullName} +${p.lateMinutes}m`)
+                                                    .join(', ')}
+                                                  )
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td
+                                              style={{
+                                                padding: '8px 12px',
+                                                textAlign: 'center',
+                                                fontWeight: 700,
+                                                color: '#4f46e5',
+                                              }}
+                                            >
+                                              {sess.txCount} tx
+                                            </td>
+                                            <td style={{ padding: '8px 12px', textAlign: 'right', color: '#0f172a' }}>
+                                              {formatRupiah(sess.omzet)}
+                                            </td>
+                                            <td style={{ padding: '8px 12px', textAlign: 'right', color: '#0284c7', fontWeight: 600 }}>
+                                              {formatRupiah(sess.labaKotor)}
+                                            </td>
+                                            <td
+                                              style={{
+                                                padding: '8px 12px',
+                                                textAlign: 'right',
+                                                fontWeight: 800,
+                                                color: '#15803d',
+                                              }}
+                                            >
+                                              {formatRupiah(sess.upahBersih)}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
                             )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr
-                      style={{
-                        borderTop: '2px solid var(--color-border)',
-                        backgroundColor: '#f8fafc',
-                      }}
-                    >
-                      <td colSpan={5} style={{ padding: '14px 16px', fontWeight: 800, fontSize: '0.92rem' }}>
-                        TOTAL POOL GAJI DIDISTRIBUSIKAN ({filteredEmployees.length} Mahasiswa)
-                      </td>
-                      <td style={{ padding: '14px 16px', textAlign: 'center', fontWeight: 800 }}>
-                        {filteredEmployees.reduce((s, e) => s + e.totalHadir, 0)} shift
-                      </td>
-                      <td
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr
                         style={{
-                          padding: '14px 16px',
-                          textAlign: 'right',
-                          fontWeight: 800,
-                          fontSize: '1.1rem',
-                          color: '#16a34a',
+                          borderTop: '2px solid var(--color-border)',
+                          backgroundColor: '#f8fafc',
                         }}
                       >
-                        {formatRupiah(filteredEmployees.reduce((s, e) => s + e.totalNominal, 0))}
-                      </td>
-                      <td />
-                    </tr>
-                  </tfoot>
-                </table>
+                        <td
+                          colSpan={3}
+                          style={{
+                            padding: '12px 14px',
+                            fontWeight: 800,
+                            fontSize: '12.5px',
+                            color: '#0f172a',
+                          }}
+                        >
+                          TOTAL KESELURUHAN ({filteredGroups.length} Kelompok Shift · {tableTotals.totalTx} Transaksi)
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px 14px',
+                            textAlign: 'center',
+                            fontWeight: 800,
+                            color: '#334155',
+                          }}
+                        >
+                          {tableTotals.totalPersonel} Orang
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px 14px',
+                            textAlign: 'center',
+                            fontWeight: 800,
+                            color: '#4338ca',
+                          }}
+                        >
+                          {tableTotals.totalShiftCount}x Shift
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px 14px',
+                            textAlign: 'right',
+                            fontWeight: 800,
+                            fontSize: '14px',
+                            color: '#15803d',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {formatRupiah(tableTotals.upahBersih)}
+                        </td>
+                        <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* ─────────────────────────────────────────────────────────────
-          6. TAB CONTENT 2: DATA GAJI PER SHIFT (PAGI & SIANG)
-          ───────────────────────────────────────────────────────────── */}
-      {!loading && !error && mainTab === 'shift' && (
-        <div>
-          {/* Filter Sesi & Search Kasir */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: '12px',
-              marginBottom: '16px',
-            }}
-          >
-            {/* Filter Sesi buttons */}
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-              {(['Semua', 'Pagi', 'Siang'] as const).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setFilterSesi(s)}
+              {/* ── B. MOBILE HP COMPACT CARDS (<= 768px) ── */}
+              <div className="rs-mobile-list">
+                {filteredGroups.map((g) => {
+                  const isPagi = g.sesi === 'Pagi';
+                  const isExpanded = !!expandedGroups[g.groupKey];
+
+                  return (
+                    <div
+                      key={g.groupKey}
+                      className="card"
+                      style={{
+                        borderRadius: '10px',
+                        border: isExpanded
+                          ? '1.5px solid #166534'
+                          : '1px solid var(--color-border)',
+                        backgroundColor: '#ffffff',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        onClick={() => toggleGroup(g.groupKey)}
+                        style={{ padding: '12px', cursor: 'pointer' }}
+                      >
+                        {/* Baris 1: Shift Tgl (Hari) & Waktu Sesi */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'flex-start',
+                            gap: '8px',
+                            marginBottom: '6px',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#0f172a' }}>
+                              Shift {g.hari}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#475569', marginTop: '1px' }}>
+                              Tgl: {g.shiftTglSummary}
+                            </div>
+                          </div>
+
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '3px 9px',
+                              borderRadius: '99px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              backgroundColor: isPagi ? '#fef3c7' : '#e0e7ff',
+                              color: isPagi ? '#b45309' : '#4338ca',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {isPagi ? <Sun size={11} /> : <Sunset size={11} />}
+                            <span>
+                              {g.sesi} ({g.waktuLabel})
+                            </span>
+                          </span>
+                        </div>
+
+                        {/* Baris 2: Anggota Shift */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '4px',
+                            marginBottom: '10px',
+                          }}
+                        >
+                          {g.anggotaShift.map((m) => (
+                            <span
+                              key={m.employeeId}
+                              style={{
+                                padding: '2px 7px',
+                                borderRadius: '5px',
+                                fontSize: '10.5px',
+                                fontWeight: 600,
+                                backgroundColor: '#f1f5f9',
+                                color: '#1e293b',
+                              }}
+                            >
+                              {m.fullName}
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* Baris 3: Total Personel | Berapa Kali Shift | Upah Bersih + Panah ▼ */}
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '0.9fr 0.9fr 1.2fr auto',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '8px 10px',
+                            borderRadius: '8px',
+                            backgroundColor: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: '9.5px', color: '#64748b', fontWeight: 600 }}>
+                              Total Personel
+                            </div>
+                            <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#0f172a' }}>
+                              {g.totalPersonel} Orang
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '9.5px', color: '#64748b', fontWeight: 600 }}>
+                              Total Shift
+                            </div>
+                            <div style={{ fontSize: '11.5px', fontWeight: 800, color: '#4338ca' }}>
+                              {g.totalShiftCount}x Shift
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '9.5px', color: '#166534', fontWeight: 700 }}>
+                              Upah Bersih
+                            </div>
+                            <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#15803d' }}>
+                              {formatRupiah(g.upahBersih)}
+                            </div>
+                          </div>
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: '26px',
+                              height: '26px',
+                              borderRadius: '6px',
+                              backgroundColor: isExpanded ? '#166534' : '#e2e8f0',
+                              color: isExpanded ? '#ffffff' : '#334155',
+                            }}
+                          >
+                            {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Rincian Transaksi Tersembunyi di Mobile HP */}
+                      {isExpanded && (
+                        <div
+                          style={{
+                            padding: '10px 12px 12px',
+                            backgroundColor: '#f8fafc',
+                            borderTop: '1px solid #e2e8f0',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1fr 1fr 1fr',
+                              gap: '6px',
+                              marginBottom: '8px',
+                              padding: '7px 9px',
+                              backgroundColor: '#ffffff',
+                              borderRadius: '6px',
+                              border: '1px solid #e2e8f0',
+                              fontSize: '11px',
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontSize: '9.5px', color: '#64748b' }}>Transaksi</div>
+                              <div style={{ fontWeight: 800, color: '#4f46e5' }}>{g.totalTx} tx</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '9.5px', color: '#64748b' }}>Total Omzet</div>
+                              <div style={{ fontWeight: 700, color: '#0284c7' }}>
+                                {formatRupiah(g.totalOmzet)}
+                              </div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '9.5px', color: '#64748b' }}>Laba Kotor</div>
+                              <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                                {formatRupiah(g.totalLabaKotor)}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                            {g.sessions.map((sess, idx) => (
+                              <div
+                                key={sess.sessionKey}
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  padding: '6px 9px',
+                                  borderRadius: '6px',
+                                  backgroundColor: '#ffffff',
+                                  border: '1px solid #e2e8f0',
+                                  fontSize: '11px',
+                                }}
+                              >
+                                <div>
+                                  <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                                    #{idx + 1} · {formatShortDate(sess.tanggal)} ({sess.txCount} tx)
+                                  </div>
+                                  <div style={{ fontSize: '10px', color: '#64748b' }}>
+                                    Kasir: {sess.kasirName} · Omzet {formatRupiah(sess.omzet)}
+                                  </div>
+                                </div>
+                                <div style={{ fontWeight: 800, color: '#15803d', fontSize: '11.5px' }}>
+                                  {formatRupiah(sess.upahBersih)}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Footer Total di Mobile */}
+                <div
+                  className="card"
                   style={{
-                    padding: '6px 16px',
-                    borderRadius: '99px',
-                    border: filterSesi === s ? '2px solid #4f46e5' : '1px solid var(--color-border)',
-                    background: filterSesi === s ? '#4f46e515' : 'transparent',
-                    color: filterSesi === s ? '#4f46e5' : 'var(--color-text-secondary)',
-                    cursor: 'pointer',
-                    fontSize: '0.82rem',
-                    fontWeight: filterSesi === s ? 700 : 500,
-                    display: 'inline-flex',
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    backgroundColor: '#f0fdf4',
+                    border: '1.5px solid #86efac',
+                    display: 'flex',
+                    justifyContent: 'space-between',
                     alignItems: 'center',
-                    gap: '6px',
-                    transition: 'all 0.15s ease',
                   }}
                 >
-                  {s === 'Pagi' && <Sun size={14} />}
-                  {s === 'Siang' && <Sunset size={14} />}
-                  <span>{s === 'Semua' ? 'Semua Shift' : `Shift ${s}`}</span>
-                </button>
-              ))}
-            </div>
-
-            {/* Search Kasir */}
-            <div style={{ width: '260px' }}>
-              <input
-                className="form-input"
-                type="search"
-                value={searchKasir}
-                onChange={(e) => setSearchKasir(e.target.value)}
-                placeholder="Cari kasir atau hari..."
-                style={{ minHeight: 36, fontSize: '0.82rem' }}
-              />
-            </div>
-          </div>
-
-          {filteredShifts.length === 0 ? (
-            <div
-              className="card"
-              style={{
-                textAlign: 'center',
-                padding: '48px 20px',
-                color: 'var(--color-text-muted)',
-              }}
-            >
-              <Clock size={40} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-              <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--color-text)' }}>
-                Tidak ada data shift pada filter ini.
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: 800, color: '#166534' }}>
+                      TOTAL ({filteredGroups.length} Kelompok · {tableTotals.totalShiftCount}x Shift)
+                    </div>
+                    <div style={{ fontSize: '10.5px', color: '#15803d' }}>
+                      {tableTotals.totalTx} Transaksi · Omzet {formatRupiah(tableTotals.totalOmzet)}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#15803d' }}>
+                    {formatRupiah(tableTotals.upahBersih)}
+                  </div>
+                </div>
               </div>
-              <p style={{ fontSize: '0.85rem', marginTop: '6px' }}>
-                Coba ubah tanggal atau pilih bulan yang memiliki data transaksi di bagian atas filter.
-              </p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {filteredShifts.map((s) => (
-                <ShiftCard key={s.shiftId} shift={s} />
-              ))}
-            </div>
+            </>
           )}
-        </div>
+        </>
       )}
     </section>
   );

@@ -233,6 +233,102 @@ export const BIAYA_PATEN_BENSIN  = 30_000;
 export const BIAYA_PATEN_BULANAN = BIAYA_PATEN_ATK + BIAYA_PATEN_BENSIN;
 export const PERSEN_BAGI_HASIL   = 50;
 
+// Konfigurasi Keadilan Bagi Hasil Mahasiswa (Bu Dyah & Manajemen Wiramart)
+export const KETUA_UMKM_NIM           = '02302017';
+export const KETUA_UMKM_CANONICAL_ID  = 'bcc2db7b-aee5-4e21-bc0f-312fff73f49e';
+export const KETUA_UMKM_DUPLICATE_ID  = '0ce4873b-0792-446e-b83d-f8b8d13dfff5';
+export const PERSEN_TUNJANGAN_KETUA   = 6; // 6% dari Pool Mahasiswa untuk Ketua UMKM
+export const ERA2_PRESENSI_START_DATE = '2026-10-05'; // Awal absensi kiosk digital
+export const LATE_PENALTY_PER_5MIN    = 3; // Potongan 3% per 5 menit keterlambatan
+export const MAX_LATE_PENALTY_PERCENT = 50; // Maksimal potongan 50% agar hak hadir tidak Rp 0
+
+export function extractRoleFromNotes(
+  notes: string | null | undefined,
+  fallbackJabatan: string | null | undefined,
+): string {
+  if (notes?.startsWith('Peran: ')) {
+    const match = notes.match(/^Peran:\s*([^|]+)/);
+    if (match?.[1]) return match[1].trim();
+  }
+  return (fallbackJabatan || 'Kasir').trim();
+}
+
+/**
+ * Bobot tanggung jawab peran per shift:
+ * - Admin Shift / Kasir: 1.20 (risiko laci kas, stok, HPP, & verifikasi pesanan)
+ * - Kepala Gudang / Gudang: 1.10 (opname fisik, barang masuk, & FEFO)
+ * - CS Pelayan / Customer Service: 1.00 (display rak & pengantaran yang sudah mendapat insentif ongkir)
+ */
+export function getRoleWeight(role: string): number {
+  const r = role.toLowerCase();
+  if (r.includes('admin') || r.includes('kasir') || r.includes('ketua')) return 1.2;
+  if (r.includes('gudang')) return 1.1;
+  return 1.0;
+}
+
+/**
+ * Bobot durasi kerja shift:
+ * - Shift Pagi (07:00-11:30 = 4,5 jam + persiapan buka toko): 1.25
+ * - Shift Siang (11:30-15:00 = 3,5 jam): 1.00
+ */
+export function getSessionDurationWeight(sesi: 'Pagi' | 'Siang'): number {
+  return sesi === 'Pagi' ? 1.25 : 1.0;
+}
+
+/**
+ * Faktor kedisiplinan presensi (Opsi 2A):
+ * - Era 1 (< 2026-10-05, absen kertas): dianggap tepat waktu (faktor 1.0, potongan 0%).
+ * - Era 2 (>= 2026-10-05, absen kiosk): potong 3% setiap kelipatan 5 menit telat,
+ *   maksimal potongan 50% (faktor minimal 0.50). Selisih potongan otomatis terdistribusi
+ *   ke rekan shift yang hadir tepat waktu melalui alokasi proporsional.
+ */
+export function getLateDisciplineFactor(
+  attendanceDate: string,
+  lateMinutes: number | null | undefined,
+): { effectiveLateMinutes: number; penaltyPercent: number; factor: number } {
+  if (attendanceDate < ERA2_PRESENSI_START_DATE) {
+    return { effectiveLateMinutes: 0, penaltyPercent: 0, factor: 1.0 };
+  }
+  const mins = Math.max(0, Math.floor(Number(lateMinutes ?? 0)));
+  if (mins <= 0) {
+    return { effectiveLateMinutes: 0, penaltyPercent: 0, factor: 1.0 };
+  }
+  const blocks5Min = Math.floor(mins / 5);
+  const penaltyPercent = Math.min(MAX_LATE_PENALTY_PERCENT, blocks5Min * LATE_PENALTY_PER_5MIN);
+  const factor = (100 - penaltyPercent) / 100;
+  return { effectiveLateMinutes: mins, penaltyPercent, factor };
+}
+
+export function computePersonnelWeight(input: {
+  role: string;
+  sesi: 'Pagi' | 'Siang';
+  attendanceDate: string;
+  lateMinutes?: number | null;
+}): {
+  roleWeight: number;
+  sessionWeight: number;
+  disciplineFactor: number;
+  penaltyPercent: number;
+  effectiveLateMinutes: number;
+  totalWeight: number;
+} {
+  const roleWeight = getRoleWeight(input.role);
+  const sessionWeight = getSessionDurationWeight(input.sesi);
+  const { effectiveLateMinutes, penaltyPercent, factor } = getLateDisciplineFactor(
+    input.attendanceDate,
+    input.lateMinutes,
+  );
+  const totalWeight = Math.round(roleWeight * sessionWeight * factor * 10000) / 10000;
+  return {
+    roleWeight,
+    sessionWeight,
+    disciplineFactor: factor,
+    penaltyPercent,
+    effectiveLateMinutes,
+    totalWeight,
+  };
+}
+
 /**
  * Bagi `total` rupiah bulat ke porsi proporsional terhadap bobot (bobot ≤ 0 → 0).
  * Metode sisa terbesar (Hamilton): Σ hasil = total persis, nol kebocoran pembulatan.
@@ -280,7 +376,86 @@ function txBase(range: ReportRange) {
   );
 }
 
+export async function ensureFinancialDataIntegrity(): Promise<void> {
+  if (integrityEnsured) return;
+  try {
+    // 1. Nonaktifkan duplikat input manual biaya paten Rp 50.000 jika masih aktif
+    await db.execute(sql`
+      UPDATE operating_expenses
+      SET deleted_at = NOW()
+      WHERE id = '59939e14-c9be-43c9-9431-3b73c933ccfa'
+        AND deleted_at IS NULL
+    `);
+
+    // 2. Koreksi master produk dan snapshot item yang memiliki HPP > Harga Jual (anomali input)
+    await db.execute(sql`
+      UPDATE products
+      SET cost_price = ROUND(selling_price * 0.80)
+      WHERE cost_price > selling_price AND selling_price > 0
+    `);
+
+    const fixedItems = await db.execute(sql`
+      UPDATE transaction_items
+      SET cost_price_snapshot = ROUND(selling_price_snapshot * 0.80),
+          subtotal_cost = qty * ROUND(selling_price_snapshot * 0.80)
+      WHERE cost_price_snapshot > selling_price_snapshot
+      RETURNING transaction_id
+    `);
+    if (Array.isArray(fixedItems) && fixedItems.length > 0) {
+      await db.execute(sql`
+        UPDATE transactions t
+        SET total_cost = sub.sum_cost,
+            gross_profit = t.gross_amount - sub.sum_cost
+        FROM (
+          SELECT transaction_id, COALESCE(SUM(subtotal_cost), 0) AS sum_cost
+          FROM transaction_items
+          GROUP BY transaction_id
+        ) sub
+        WHERE t.id = sub.transaction_id
+          AND (t.total_cost <> sub.sum_cost OR t.gross_profit <> (t.gross_amount - sub.sum_cost))
+      `);
+    }
+
+    // 3. Satukan duplikat data karyawan Gita Aprilianingrum (Kasir -> Ketua UMKM / Admin Shift)
+    await db.execute(sql`
+      UPDATE shifts
+      SET employee_id = ${KETUA_UMKM_CANONICAL_ID}
+      WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
+    `);
+    await db.execute(sql`
+      DELETE FROM attendances a_dup
+      WHERE a_dup.employee_id = ${KETUA_UMKM_DUPLICATE_ID}
+        AND EXISTS (
+          SELECT 1 FROM attendances a_can
+          WHERE a_can.employee_id = ${KETUA_UMKM_CANONICAL_ID}
+            AND a_can.attendance_date = a_dup.attendance_date
+        )
+    `);
+    await db.execute(sql`
+      UPDATE attendances
+      SET employee_id = ${KETUA_UMKM_CANONICAL_ID}
+      WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
+    `);
+    await db.execute(sql`
+      DELETE FROM shift_schedules
+      WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
+    `);
+    await db.execute(sql`
+      DELETE FROM employees
+      WHERE id = ${KETUA_UMKM_DUPLICATE_ID}
+    `);
+
+    integrityEnsured = true;
+  } catch (err) {
+    console.warn('[finance/report] ensureFinancialDataIntegrity warning:', err);
+  }
+}
+
+let integrityEnsured = false;
+
 export async function getFinancialReport(range: ReportRange): Promise<FinancialReport> {
+  await ensureFinancialDataIntegrity();
+
   // 1) Transaksi: omzet, metode, void
   const [tx] = await db
     .select({

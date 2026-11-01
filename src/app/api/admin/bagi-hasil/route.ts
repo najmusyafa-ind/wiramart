@@ -8,13 +8,20 @@
 import { NextRequest } from 'next/server';
 import { and, gte, lte, inArray, desc, eq, lt, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { attendances, transactions, shifts } from '@/lib/db/schema';
+import { attendances, transactions, transactionItems, shifts, employees } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import { z } from 'zod';
 import {
   resolveReportRange,
   getFinancialReport,
   allocateProportional,
+  KETUA_UMKM_NIM,
+  KETUA_UMKM_CANONICAL_ID,
+  KETUA_UMKM_DUPLICATE_ID,
+  PERSEN_TUNJANGAN_KETUA,
+  extractRoleFromNotes,
+  getSessionDurationWeight,
+  computePersonnelWeight,
   type PeriodKey,
 } from '@/lib/finance/report';
 
@@ -78,36 +85,85 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     // 1. Ambil laporan keuangan resmi untuk rentang ini
     const financial = await getFinancialReport(range);
+    const poolHakMahasiswa = financial.summary.alokasiGajiKaryawan;
+    const tunjanganKetua = poolHakMahasiswa > 0
+      ? Math.round((poolHakMahasiswa * PERSEN_TUNJANGAN_KETUA) / 100)
+      : 0;
+    const poolShiftMahasiswa = Math.max(0, poolHakMahasiswa - tunjanganKetua);
 
-    // 1b. Ambil laba kotor transaksi per shift dalam rentang waktu ini
-    const shiftProfits = await db
+    const dailyShiftShares = allocateProportional(
+      poolShiftMahasiswa,
+      financial.daily.map((d) => d.alokasiGajiKaryawan),
+    );
+    const dayShiftPoolMap = new Map<string, number>();
+    financial.daily.forEach((d, idx) => {
+      dayShiftPoolMap.set(d.date, dailyShiftShares[idx] ?? 0);
+    });
+
+    // Ambil shifts dalam rentang waktu ini beserta data kasir
+    const shiftRows = await db
       .select({
-        shiftId: transactions.shiftId,
-        grossProfit: sql<string>`COALESCE(SUM(${transactions.grossProfit}), 0)`,
+        id:           shifts.id,
+        clockIn:      shifts.clockIn,
+        clockOut:     shifts.clockOut,
+        employeeId:   shifts.employeeId,
+        kasirName:    employees.fullName,
+        kasirNim:     employees.nim,
+        kasirProdi:   employees.programStudi,
+        kasirJabatan: employees.jabatan,
       })
-      .from(transactions)
-      .where(
-        and(
-          eq(transactions.status, 'COMPLETED'),
-          eq(transactions.isTest, false),
-          gte(transactions.createdAt, range.start),
-          lt(transactions.createdAt, range.endExclusive),
-        ),
-      )
-      .groupBy(transactions.shiftId);
+      .from(shifts)
+      .innerJoin(employees, eq(shifts.employeeId, employees.id))
+      .where(and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)))
+      .orderBy(shifts.clockIn);
 
-    const profitByShiftId = new Map<string, number>();
-    for (const sp of shiftProfits) {
-      if (sp.shiftId) {
-        profitByShiftId.set(sp.shiftId, parseFloat(sp.grossProfit));
+    for (const s of shiftRows) {
+      if (s.employeeId === KETUA_UMKM_DUPLICATE_ID || s.kasirNim === KETUA_UMKM_NIM) {
+        s.employeeId = KETUA_UMKM_CANONICAL_ID;
+        s.kasirName = 'Gita Aprilianingrum';
+        s.kasirNim = KETUA_UMKM_NIM;
+        s.kasirProdi = 'Akuntansi';
+        s.kasirJabatan = 'Ketua UMKM / Admin Shift';
       }
     }
 
-    // Ambil shifts dalam rentang waktu ini untuk memetakan jam shift
-    const shiftList = await db.query.shifts.findMany({
-      where: and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)),
-      columns: { id: true, employeeId: true, clockIn: true, clockOut: true },
-    });
+    const shiftIds = shiftRows.map((s) => s.id);
+    const profitByShiftId = new Map<string, number>();
+    if (shiftIds.length > 0) {
+      const shiftProfits = await db
+        .select({
+          shiftId:   transactions.shiftId,
+          labaKotor: sql<string>`ROUND(COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalSell} - ${transactionItems.subtotalCost} ELSE 0 END), 0))`,
+        })
+        .from(transactionItems)
+        .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
+        .where(
+          and(
+            eq(transactions.status, 'COMPLETED'),
+            eq(transactions.isTest, false),
+            inArray(transactions.shiftId, shiftIds),
+          ),
+        )
+        .groupBy(transactions.shiftId);
+
+      for (const sp of shiftProfits) {
+        if (sp.shiftId) {
+          profitByShiftId.set(sp.shiftId, parseFloat(sp.labaKotor || '0'));
+        }
+      }
+    }
+
+    const wibDateOf = (d: Date): string =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
+    const sesiOfShift = (clockIn: Date): 'Pagi' | 'Siang' => {
+      const wibHour = parseInt(
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Jakarta', hour: 'numeric', hour12: false,
+        }).format(clockIn),
+        10
+      );
+      return wibHour >= 11 ? 'Siang' : 'Pagi';
+    };
 
     // 2. Ambil absensi yang hadir (HADIR, TELAT, PENGGANTI) pada rentang ini
     const attList = await db.query.attendances.findMany({
@@ -126,6 +182,17 @@ export async function GET(req: NextRequest): Promise<Response> {
       },
       orderBy: [desc(attendances.attendanceDate), attendances.scheduleId],
     });
+
+    for (const att of attList) {
+      if (att.employeeId === KETUA_UMKM_DUPLICATE_ID || att.employee.nim === KETUA_UMKM_NIM) {
+        att.employeeId = KETUA_UMKM_CANONICAL_ID;
+        att.employee.id = KETUA_UMKM_CANONICAL_ID;
+        att.employee.fullName = 'Gita Aprilianingrum';
+        att.employee.nim = KETUA_UMKM_NIM;
+        att.employee.programStudi = 'Akuntansi';
+        att.employee.jabatan = 'Ketua UMKM / Admin Shift';
+      }
+    }
 
     // 3. Kelompokkan kehadiran per tanggal
     const attByDate = new Map<string, typeof attList>();
@@ -177,142 +244,196 @@ export async function GET(req: NextRequest): Promise<Response> {
       totalNominal: number;
     }>();
 
-    // Map laba harian dari finance report
-    const financialDailyMap = new Map(financial.daily.map((d) => [d.date, d]));
-
     // Buat daftar tanggal lengkap dari range
     for (const d of financial.daily) {
-      const attendees = attByDate.get(d.date) ?? [];
-      const poolHariIni = d.alokasiGajiKaryawan ?? 0;
-      const count = attendees.length;
+      const rawAttendees = attByDate.get(d.date) ?? [];
+      const poolHariIni = dayShiftPoolMap.get(d.date) ?? 0;
 
       // Filter shift pada tanggal d.date (WIB)
-      const shiftsOnDate = shiftList.filter((s) => {
-        const wibDate = new Date(s.clockIn.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-        return wibDate === d.date;
-      });
+      const shiftsOnDate = shiftRows.filter((s) => wibDateOf(s.clockIn) === d.date);
+      const shiftPoolMap = new Map<string, {
+        shift: typeof shiftsOnDate[0];
+        sesi: 'Pagi' | 'Siang';
+        pool: number;
+        attendees: typeof rawAttendees;
+      }>();
 
-      const hasMultiShift = shiftsOnDate.length > 1;
-      const shiftPoolMap = new Map<string, { pool: number; attendees: typeof attendees }>();
-
-      if (hasMultiShift) {
-        // Pool harian resmi (sudah dipotong biaya) dibagi proporsional laba tiap shift
-        const shares = allocateProportional(
-          poolHariIni,
-          shiftsOnDate.map((s) => profitByShiftId.get(s.id) ?? 0),
-        );
-        shiftsOnDate.forEach((s, i) => {
-          shiftPoolMap.set(s.id, { pool: shares[i] ?? 0, attendees: [] });
+      for (const s of shiftsOnDate) {
+        shiftPoolMap.set(s.id, {
+          shift: s,
+          sesi: sesiOfShift(s.clockIn),
+          pool: 0,
+          attendees: [],
         });
+      }
 
-        // Multi-tier matching:
-        // Tier 1: Direct att.shiftId
-        // Tier 2: att.employeeId === s.employeeId
-        // Tier 3: Time interval matching via clockInActual
-        // Tier 4: Schedule slot heuristic (Morning 07:30-11:30 vs Afternoon 11:00-15:00)
-        // Tier 5: Fallback to shiftsOnDate[0]
-        for (const att of attendees) {
-          let matchedShift: typeof shiftsOnDate[0] | undefined;
+      // Petakan absensi ke shift pada tanggal tersebut
+      const unmatchedAttendees: typeof rawAttendees = [];
+      for (const att of rawAttendees) {
+        let matchedShift: typeof shiftsOnDate[0] | undefined;
 
-          // Tier 1: Direct shift_id foreign key
-          if (att.shiftId) {
-            matchedShift = shiftsOnDate.find((s) => s.id === att.shiftId);
+        if (att.shiftId) {
+          matchedShift = shiftsOnDate.find((s) => s.id === att.shiftId);
+        }
+        if (!matchedShift) {
+          matchedShift = shiftsOnDate.find((s) => s.employeeId === att.employeeId);
+        }
+        if (!matchedShift && att.clockInActual) {
+          const attTime = new Date(att.clockInActual).getTime();
+          matchedShift = shiftsOnDate.find((s) => {
+            const sIn = s.clockIn.getTime();
+            const sOut = s.clockOut ? s.clockOut.getTime() : sIn + 4 * 3600 * 1000;
+            return attTime >= sIn - 30 * 60 * 1000 && attTime <= sOut + 30 * 60 * 1000;
+          });
+        }
+        if (!matchedShift && att.schedule?.slotStart) {
+          const slotHour = parseInt(att.schedule.slotStart.split(':')[0] ?? '8', 10);
+          const isAfternoon = slotHour >= 11;
+          matchedShift = shiftsOnDate.find((s) => {
+            const isSiang = sesiOfShift(s.clockIn) === 'Siang';
+            return isAfternoon === isSiang;
+          });
+        }
+        if (!matchedShift && shiftsOnDate.length === 1) {
+          matchedShift = shiftsOnDate[0];
+        }
+
+        if (matchedShift && shiftPoolMap.has(matchedShift.id)) {
+          const group = shiftPoolMap.get(matchedShift.id)!;
+          if (!group.attendees.some((x) => x.employee.id === att.employee.id)) {
+            group.attendees.push(att);
           }
+        } else {
+          unmatchedAttendees.push(att);
+        }
+      }
 
-          // Tier 2: Employee who owns the shift session
-          if (!matchedShift) {
-            matchedShift = shiftsOnDate.find((s) => s.employeeId === att.employeeId);
-          }
+      // Auto-integrasi kasir shift jika belum masuk daftar hadir
+      for (const s of shiftsOnDate) {
+        const isTesting = s.kasirName.toLowerCase().includes('testing') || s.kasirNim === '02405013';
+        if (isTesting) continue;
+        const group = shiftPoolMap.get(s.id)!;
+        if (!group.attendees.some((x) => x.employee.id === s.employeeId)) {
+          const sesi = group.sesi;
+          group.attendees.push({
+            id: `shift-kasir-${s.id}`,
+            employeeId: s.employeeId,
+            scheduleId: '',
+            shiftId: s.id,
+            attendanceDate: d.date,
+            clockInActual: s.clockIn,
+            clockOutActual: s.clockOut,
+            status: 'HADIR',
+            lateMinutes: 0,
+            notes: 'Peran: Kasir | Auto-integrated shift cashier',
+            recordedByAdminId: null,
+            fromSwapRequestId: null,
+            createdAt: s.clockIn,
+            updatedAt: s.clockIn,
+            employee: {
+              id: s.employeeId,
+              fullName: s.kasirName,
+              nim: s.kasirNim,
+              programStudi: s.kasirProdi,
+              jabatan: s.kasirJabatan || 'Kasir',
+            },
+            schedule: {
+              slotStart: sesi === 'Siang' ? '11:30' : '07:00',
+              slotEnd: sesi === 'Siang' ? '15:00' : '11:30',
+              dayOfWeek: 'SENIN',
+            },
+          });
+        }
+      }
 
-          // Tier 3: Actual login clock-in timestamp match (with 30m window)
-          if (!matchedShift && att.clockInActual) {
-            const attTime = new Date(att.clockInActual).getTime();
-            matchedShift = shiftsOnDate.find((s) => {
-              const sIn = s.clockIn.getTime();
-              const sOut = s.clockOut ? s.clockOut.getTime() : sIn + 4 * 3600 * 1000;
-              return attTime >= sIn - 30 * 60 * 1000 && attTime <= sOut + 30 * 60 * 1000;
-            });
-          }
+      // Alokasi poolHariIni ke shift-shift pada tanggal ini dengan bobot Laba Kotor × Durasi Sesi
+      const attendeeNominalMap = new Map<string, { nominal: number; roleTask: string; effectiveLate: number }>();
+      const allDayAttendees: typeof rawAttendees = [];
 
-          // Tier 4: Schedule slotStart heuristic
-          if (!matchedShift) {
-            const slotHour = att.schedule?.slotStart ? parseInt(att.schedule.slotStart.split(':')[0] ?? '8', 10) : 8;
-            for (const s of shiftsOnDate) {
-              const shiftHourWib = new Date(s.clockIn.getTime() + 7 * 3600 * 1000).getUTCHours();
-              if (slotHour >= 11 && shiftHourWib >= 11) {
-                matchedShift = s;
-                break;
-              } else if (slotHour < 11 && shiftHourWib < 11) {
-                matchedShift = s;
-                break;
+      if (shiftsOnDate.length > 0) {
+        const hasAnyAttendee = shiftsOnDate.some(
+          (s) => (shiftPoolMap.get(s.id)?.attendees.length ?? 0) > 0,
+        );
+        const shiftWeights = shiftsOnDate.map((s) => {
+          const group = shiftPoolMap.get(s.id)!;
+          if (hasAnyAttendee && group.attendees.length === 0) return 0;
+          const lk = Math.max(0, profitByShiftId.get(s.id) ?? 0);
+          return lk * getSessionDurationWeight(group.sesi);
+        });
+        const shiftShares = allocateProportional(poolHariIni, shiftWeights);
+
+        shiftsOnDate.forEach((s, i) => {
+          const group = shiftPoolMap.get(s.id)!;
+          group.pool = shiftShares[i] ?? 0;
+
+          const evaluated = group.attendees.map((att) => {
+            let roleTask = extractRoleFromNotes(att.notes, att.employee.jabatan);
+            if (att.employee.id === KETUA_UMKM_CANONICAL_ID || att.employee.nim === KETUA_UMKM_NIM) {
+              roleTask = 'Ketua UMKM / Admin Shift';
+            } else if (att.employee.id === s.employeeId && !att.notes?.startsWith('Peran: ')) {
+              const rLower = roleTask.toLowerCase();
+              if (!rLower.includes('admin') && !rLower.includes('kasir')) {
+                roleTask = 'Kasir';
               }
             }
-          }
+            const wInfo = computePersonnelWeight({
+              role: roleTask,
+              sesi: group.sesi,
+              attendanceDate: d.date,
+              lateMinutes: att.lateMinutes,
+            });
+            return { att, roleTask, wInfo };
+          });
 
-          // Tier 5: Safe fallback
-          if (!matchedShift && shiftsOnDate.length > 0) {
-            matchedShift = shiftsOnDate[0];
-          }
-
-          if (matchedShift && shiftPoolMap.has(matchedShift.id)) {
-            shiftPoolMap.get(matchedShift.id)!.attendees.push(att);
-          }
-        }
-
-        // Zero-Leakage Guard: jika ada shift yang menghasilkan laba tapi tidak ada hadirin yang terpetakan,
-        // alihkan sisa pool tersebut secara proporsional ke hadirin shift lain pada tanggal yang sama.
-        let unallocatedShiftPool = 0;
-        let activeAttendeesCount = 0;
-        for (const [, group] of shiftPoolMap.entries()) {
-          if (group.attendees.length === 0) {
-            unallocatedShiftPool += group.pool;
-            group.pool = 0;
-          } else {
-            activeAttendeesCount += group.attendees.length;
-          }
-        }
-        if (unallocatedShiftPool > 0 && activeAttendeesCount > 0) {
-          const bonusPerAttendee = Math.floor(unallocatedShiftPool / activeAttendeesCount);
-          for (const [, group] of shiftPoolMap.entries()) {
-            if (group.attendees.length > 0) {
-              group.pool += bonusPerAttendee * group.attendees.length;
-            }
-          }
-        }
+          const pShares = allocateProportional(
+            group.pool,
+            evaluated.map((e) => e.wInfo.totalWeight),
+          );
+          evaluated.forEach(({ att, roleTask, wInfo }, idx) => {
+            attendeeNominalMap.set(att.id, {
+              nominal: pShares[idx] ?? 0,
+              roleTask,
+              effectiveLate: wInfo.effectiveLateMinutes,
+            });
+            allDayAttendees.push(att);
+          });
+        });
+      } else if (unmatchedAttendees.length > 0) {
+        const evaluated = unmatchedAttendees.map((att) => {
+          const roleTask = extractRoleFromNotes(att.notes, att.employee.jabatan);
+          const slotH = parseInt(att.schedule?.slotStart?.split(':')[0] ?? '8', 10);
+          const sesi: 'Pagi' | 'Siang' = slotH >= 11 ? 'Siang' : 'Pagi';
+          const wInfo = computePersonnelWeight({
+            role: roleTask,
+            sesi,
+            attendanceDate: d.date,
+            lateMinutes: att.lateMinutes,
+          });
+          return { att, roleTask, wInfo };
+        });
+        const pShares = allocateProportional(
+          poolHariIni,
+          evaluated.map((e) => e.wInfo.totalWeight),
+        );
+        evaluated.forEach(({ att, roleTask, wInfo }, idx) => {
+          attendeeNominalMap.set(att.id, {
+            nominal: pShares[idx] ?? 0,
+            roleTask,
+            effectiveLate: wInfo.effectiveLateMinutes,
+          });
+          allDayAttendees.push(att);
+        });
       }
 
-      // Hitung nominal bagi hasil per orang (sesuai shift jika multi-shift)
-      const attendeeNominalMap = new Map<string, number>();
-      if (hasMultiShift) {
-        for (const [, group] of shiftPoolMap.entries()) {
-          const groupCount = group.attendees.length;
-          const nominalGroup = groupCount > 0 ? Math.floor(group.pool / groupCount) : 0;
-          for (const a of group.attendees) {
-            attendeeNominalMap.set(a.id, nominalGroup);
-          }
-        }
-      } else {
-        const nominalRata = count > 0 ? Math.floor(poolHariIni / count) : 0;
-        for (const a of attendees) {
-          attendeeNominalMap.set(a.id, nominalRata);
-        }
-      }
+      const count = allDayAttendees.length;
+      const defaultNominal = count > 0 ? Math.round(poolHariIni / count) : 0;
 
-      const defaultNominal = count > 0 ? Math.floor(poolHariIni / count) : 0;
+      const personnelDetails: WorkerDetail[] = allDayAttendees.map((att) => {
+        const info = attendeeNominalMap.get(att.id);
+        const nominalPerOrang = info?.nominal ?? 0;
+        const roleTask = info?.roleTask ?? extractRoleFromNotes(att.notes, att.employee.jabatan);
+        const effectiveLate = info?.effectiveLate ?? 0;
 
-      const personnelDetails: WorkerDetail[] = attendees.map((att) => {
-        const nominalPerOrang = attendeeNominalMap.get(att.id) ?? defaultNominal;
-
-        // Ekstrak peran dari notes jika ada (cth: "Peran: Kasir | ...")
-        let roleTask = att.employee.jabatan;
-        if (att.notes?.startsWith('Peran: ')) {
-          const match = att.notes.match(/^Peran:\s*([^|]+)/);
-          if (match && match[1]) {
-            roleTask = match[1].trim();
-          }
-        }
-
-        // Hitung menit kerja jika ada clock in & out
         let durasiMenit = 0;
         if (att.clockInActual && att.clockOutActual) {
           durasiMenit = Math.max(0, Math.round(
@@ -320,15 +441,19 @@ export async function GET(req: NextRequest): Promise<Response> {
           ));
         }
 
-        // Akumulasi ke ringkasan per karyawan
         const empId = att.employee.id;
+        const displayJabatan =
+          empId === KETUA_UMKM_CANONICAL_ID || att.employee.nim === KETUA_UMKM_NIM
+            ? 'Ketua UMKM / Admin Shift'
+            : att.employee.jabatan;
+
         if (!empAggMap.has(empId)) {
           empAggMap.set(empId, {
             employeeId: empId,
             fullName: att.employee.fullName,
             nim: att.employee.nim,
             programStudi: att.employee.programStudi,
-            jabatan: att.employee.jabatan,
+            jabatan: displayJabatan,
             totalHadir: 0,
             totalMenitKerja: 0,
             totalNominal: 0,
@@ -345,14 +470,14 @@ export async function GET(req: NextRequest): Promise<Response> {
           fullName: att.employee.fullName,
           nim: att.employee.nim,
           programStudi: att.employee.programStudi,
-          jabatan: att.employee.jabatan,
+          jabatan: displayJabatan,
           roleTask,
-          slotStart: att.schedule.slotStart,
-          slotEnd: att.schedule.slotEnd,
-          status: att.status,
+          slotStart: att.schedule?.slotStart ?? '07:00',
+          slotEnd: att.schedule?.slotEnd ?? '11:30',
+          status: effectiveLate > 0 ? 'TELAT' : 'HADIR',
           clockInActual: att.clockInActual ? att.clockInActual.toISOString() : null,
           clockOutActual: att.clockOutActual ? att.clockOutActual.toISOString() : null,
-          lateMinutes: att.lateMinutes,
+          lateMinutes: effectiveLate,
           nominalBagiHasil: nominalPerOrang,
         };
       });
@@ -367,6 +492,28 @@ export async function GET(req: NextRequest): Promise<Response> {
         nominalPerOrang: defaultNominal,
         personnel: personnelDetails,
       });
+    }
+
+    const totalShiftDistributed = Array.from(empAggMap.values()).reduce(
+      (acc, curr) => acc + curr.totalNominal,
+      0,
+    );
+    if (tunjanganKetua > 0 && totalShiftDistributed > 0) {
+      if (!empAggMap.has(KETUA_UMKM_CANONICAL_ID)) {
+        empAggMap.set(KETUA_UMKM_CANONICAL_ID, {
+          employeeId: KETUA_UMKM_CANONICAL_ID,
+          fullName: 'Gita Aprilianingrum',
+          nim: KETUA_UMKM_NIM,
+          programStudi: 'Akuntansi',
+          jabatan: 'Ketua UMKM / Admin Shift',
+          totalHadir: 0,
+          totalMenitKerja: 0,
+          totalNominal: 0,
+        });
+      }
+      const ketuaAgg = empAggMap.get(KETUA_UMKM_CANONICAL_ID)!;
+      ketuaAgg.jabatan = 'Ketua UMKM / Admin Shift';
+      ketuaAgg.totalNominal += tunjanganKetua;
     }
 
     const summaryPerEmployee = Array.from(empAggMap.values())
