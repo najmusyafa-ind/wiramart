@@ -3,11 +3,34 @@ import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 
 // 1. Load Configurations
-dotenv.config({ path: '.env.local' });
-const prodUrl = process.env.DATABASE_URL!;
+// Sumber (produksi) dibaca dari .env.production.local, tujuan dari .env.staging.
+// .env.local TIDAK dipakai: nilainya bisa berubah dan pernah sama dengan staging.
+const prodEnv = dotenv.parse(fs.readFileSync('.env.production.local'));
+const prodUrl = prodEnv.DATABASE_URL!;
 
 const stagingEnv = dotenv.parse(fs.readFileSync('.env.staging'));
 const stagingUrl = stagingEnv.DATABASE_URL!;
+
+// Pengaman: langkah 3 melakukan TRUNCATE pada tujuan. Jangan pernah jalan bila
+// sumber dan tujuan database yang sama, atau salah satunya kosong.
+// Identitas database = username (kode project Supabase) + host + nama database.
+function dbIdentity(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return `${u.username}@${u.host}${u.pathname}`;
+  } catch {
+    return null;
+  }
+}
+const prodId = dbIdentity(prodUrl);
+const stagingId = dbIdentity(stagingUrl);
+if (!prodId || !stagingId || prodId === stagingId) {
+  console.error('DIBATALKAN: URL produksi dan staging kosong, tidak valid, atau sama. Tidak ada yang diubah.');
+  process.exit(1);
+}
+console.log('Sumber (hanya dibaca):', prodId);
+console.log('Tujuan (akan di-TRUNCATE):', stagingId);
 
 console.log('--- INISIALISASI FULL DATABASE SYNC (PROD -> STAGING) ---');
 console.log('Production URL host:', prodUrl ? prodUrl.split('@')[1] : 'NOT FOUND');

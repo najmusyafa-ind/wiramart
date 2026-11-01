@@ -75,3 +75,6 @@ scripts/demo-*.ts
 scripts/verify-non-interference.ts
 
 .vscode/
+
+# Snapshot DB lokal (preflight migrasi)
+scripts/_backup/

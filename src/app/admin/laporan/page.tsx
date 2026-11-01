@@ -30,6 +30,7 @@ import TutupBukuModal from './TutupBukuModal';
 import LaporanMutasiStokSection from './LaporanMutasiStokSection';
 import RekapKasir from './RekapKasir';
 import RekapShift from './RekapShift';
+import JejakTransaksiPanel from './JejakTransaksiPanel';
 import {
   EXPENSE_CATEGORY_LABEL,
   formatRupiah,
@@ -326,7 +327,7 @@ function VoidModal({ transaction, onClose, onSuccess }: VoidModalProps) {
 // ─────────────────────────────────────────────────────────────
 export default function LaporanPage() {
   const uid = useId();
-  const [mainTab, setMainTab] = useState<'finansial' | 'mutasi_stok' | 'rekap_kasir' | 'rekap_shift'>('finansial');
+  const [mainTab, setMainTab] = useState<'finansial' | 'mutasi_stok' | 'rekap_kasir' | 'rekap_shift' | 'jejak_transaksi'>('finansial');
   const [period, setPeriod] = useState<PeriodKey>('daily');
   const [data, setData] = useState<LaporanData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -971,6 +972,14 @@ export default function LaporanPage() {
               activeBg: '#eef2ff',
               activeBorder: '#6366f1',
             },
+            {
+              id: 'jejak_transaksi',
+              icon: <FileText size={14} />,
+              label: 'Jejak Transaksi (TCL)',
+              activeColor: '#0f766e',
+              activeBg: '#f0fdfa',
+              activeBorder: '#0d9488',
+            },
           ] as const).map((tab) => {
             const isActive = mainTab === tab.id;
             return (
@@ -1011,6 +1020,8 @@ export default function LaporanPage() {
           <LaporanMutasiStokSection />
         ) : mainTab === 'rekap_shift' ? (
           <RekapShift />
+        ) : mainTab === 'jejak_transaksi' ? (
+          <JejakTransaksiPanel />
         ) : (
           <>
             {/* Period selector */}

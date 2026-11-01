@@ -23,7 +23,7 @@
 //  • Header opsional → klien lama tetap berfungsi selama masa transisi.
 // =============================================================
 
-import { createHash, randomInt } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
@@ -122,6 +122,54 @@ function hashRequest(
   return createHash('sha256')
     .update(JSON.stringify({ lines, payments: paymentLines }))
     .digest('hex');
+}
+
+/**
+ * Ekstrak nama langkah gagal dari pesan error untuk kolom `failed_step`.
+ * Nilai pendek ≤ 50 karakter agar muat di varchar(50).
+ */
+function deriveFailedStep(msg: string): string {
+  if (msg.startsWith('INSUFFICIENT_STOCK')) return 'KURANGI_STOK';
+  if (msg.startsWith('PRODUCT_NOT_FOUND'))  return 'VALIDASI_PRODUK';
+  if (msg.includes('transaction_items'))     return 'INSERT_ITEM';
+  if (msg.includes('transaction_payments'))  return 'INSERT_PAYMENT';
+  if (msg.includes('stock_batches'))         return 'UPDATE_BATCH';
+  if (msg.includes('transactions'))          return 'INSERT_TX';
+  return 'UNKNOWN';
+}
+
+/**
+ * Catat penolakan pra-transaksi (sebelum BEGIN) ke transaction_logs dengan outcome = 'REJECTED'.
+ */
+async function logRejected(params: {
+  employeeId: string;
+  shiftId?: string | null;
+  itemCount: number;
+  failedStep: string;
+  reason: string;
+  grossAmount?: number;
+  paymentMethod?: 'CASH' | 'QRIS';
+}) {
+  try {
+    const now = new Date();
+    await db.insert(transactionLogs).values({
+      employeeId: params.employeeId,
+      shiftId: params.shiftId ?? undefined,
+      invoiceAttempt: null,
+      attemptNumber: 1,
+      itemCount: params.itemCount,
+      grossAmount: params.grossAmount !== undefined ? params.grossAmount.toString() : null,
+      paymentMethod: params.paymentMethod ?? null,
+      outcome: 'REJECTED',
+      transactionId: null,
+      rollbackReason: params.reason.substring(0, 500),
+      failedStep: params.failedStep.substring(0, 50),
+      createdAt: now,
+      finishedAt: now,
+    });
+  } catch (err) {
+    console.error('  [AUDIT LOG] Gagal mencatat log REJECTED:', err);
+  }
 }
 
 /** Ambil kode error Postgres, baik langsung maupun terbungkus lewat rantai `cause`. */
@@ -294,6 +342,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (!activeShiftId) {
+      await logRejected({
+        employeeId,
+        itemCount: items.length,
+        failedStep: 'PRE_CHECK_SHIFT',
+        reason: 'Tidak ada shift kasir yang aktif. Buka shift terlebih dahulu.',
+      });
       return apiError('Tidak ada shift kasir yang aktif. Buka shift terlebih dahulu.', 403);
     }
 
@@ -320,10 +374,14 @@ export async function POST(req: NextRequest) {
     for (const item of items) {
       const prod = productRows.find((p) => p.id === item.productId);
       if (!prod) {
-        return apiError(`Produk tidak ditemukan: ${item.productId}`, 400);
+        const msg = `Produk tidak ditemukan: ${item.productId}`;
+        await logRejected({ employeeId, shiftId: activeShiftId, itemCount: items.length, failedStep: 'PRE_CHECK_PRODUK', reason: msg });
+        return apiError(msg, 400);
       }
       if (prod.stockQty < item.qty) {
-        return apiError(`Stok "${prod.name}" tidak cukup. Tersisa: ${prod.stockQty}`, 400);
+        const msg = `Stok "${prod.name}" tidak cukup. Tersisa: ${prod.stockQty}`;
+        await logRejected({ employeeId, shiftId: activeShiftId, itemCount: items.length, failedStep: 'PRE_CHECK_STOK', reason: msg });
+        return apiError(msg, 400);
       }
     }
 
@@ -727,6 +785,29 @@ export async function POST(req: NextRequest) {
     //     console.log('ROLLBACK')    ← hanya jika ADA error (otomatis oleh PG)
     //   }
     // ─────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────
+    // JEJAK TRANSAKSI — Siklus hidup STARTED → COMMITTED / ROLLED_BACK
+    // Sesuai materi dosen: START TRANSACTION → UPDATE/INSERT → SELECT → COMMIT/ROLLBACK
+    //
+    // Log ditulis DI LUAR db.transaction() agar tidak ikut di-rollback.
+    // ─────────────────────────────────────────────────────────────
+    const logId = randomUUID();
+
+    // ── 🟡 STARTED: bukti "memulai transaksi" sebelum BEGIN ─────
+    await db.insert(transactionLogs).values({
+      id: logId,
+      employeeId,
+      shiftId: activeShiftId ?? undefined,
+      invoiceAttempt: null,           // belum punya invoice — dibuat di dalam tx
+      attemptNumber: 1,
+      itemCount: items.length,
+      grossAmount: grossAmount.toString(),
+      paymentMethod: primaryPaymentMethod,
+      outcome: 'STARTED',
+      transactionId: null,
+      rollbackReason: null,
+    });
+
     let result: Awaited<ReturnType<typeof runTransaction>> | undefined;
     for (let attempt = 1; attempt <= MAX_INVOICE_ATTEMPTS; attempt++) {
       const invoiceNumber = generateInvoiceNumber();
@@ -751,21 +832,22 @@ export async function POST(req: NextRequest) {
         console.log(`  Stok produk    : berhasil dikurangi secara atomik\n`);
 
         // ── Catat COMMIT ke tabel transaction_logs (di LUAR tx utama) ──
-        // Ditulis di luar agar log ini TIDAK ikut di-rollback.
-        // Bukti nyata di Supabase: SELECT * FROM transaction_logs
-        await db.insert(transactionLogs).values({
-          employeeId: employeeId,
-          shiftId: activeShiftId ?? undefined,
-          invoiceAttempt: result.invoiceNumber,
-          attemptNumber: attempt,
-          itemCount: items.length,
-          grossAmount: grossAmount.toString(),
-          paymentMethod: primaryPaymentMethod,
-          outcome: 'COMMITTED',
-          transactionId: result.id,
-          rollbackReason: null,
-        });
-        console.log(`  [AUDIT LOG] ✅ Dicatat ke tabel transaction_logs (outcome: COMMITTED)\n`);
+        // UPDATE (bukan INSERT) → log STARTED berubah jadi COMMITTED.
+        // Dibungkus try/catch terpisah agar kegagalan tulis log TIDAK memicu ROLLBACK palsu.
+        try {
+          await db.update(transactionLogs).set({
+            outcome: 'COMMITTED',
+            transactionId: result.id,
+            invoiceAttempt: result.invoiceNumber,
+            attemptNumber: attempt,
+            rollbackReason: null,
+            failedStep: null,
+            finishedAt: new Date(),
+          }).where(eq(transactionLogs.id, logId));
+          console.log(`  [AUDIT LOG] ✅ Dicatat ke tabel transaction_logs (outcome: COMMITTED)\n`);
+        } catch (logErr) {
+          console.error('  [AUDIT LOG] Gagal mencatat log commit:', logErr);
+        }
 
         break;
 
@@ -781,22 +863,18 @@ export async function POST(req: NextRequest) {
         console.error(`  Stok   : TIDAK BERKURANG — rollback atomik oleh PostgreSQL\n`);
 
         // ── Catat ROLLBACK ke tabel transaction_logs (di LUAR tx utama) ──
-        // Karena tx utama sudah di-rollback, satu-satunya cara mencatat
-        // kegagalan ini adalah INSERT di koneksi TERPISAH (di luar tx).
-        // Ini adalah bukti nyata di Supabase bahwa ROLLBACK benar terjadi.
+        // UPDATE log STARTED menjadi ROLLED_BACK + catat langkah gagal.
+        // Karena tx utama sudah di-rollback, INSERT terpisah ini tetap tersimpan.
+        // Bukti nyata di Supabase: SELECT * FROM transaction_logs WHERE outcome='ROLLED_BACK'
         try {
-          await db.insert(transactionLogs).values({
-            employeeId: employeeId,
-            shiftId: activeShiftId ?? undefined,
+          await db.update(transactionLogs).set({
+            outcome: 'ROLLED_BACK',
             invoiceAttempt: invoiceNumber,
             attemptNumber: attempt,
-            itemCount: items.length,
-            grossAmount: grossAmount.toString(),
-            paymentMethod: primaryPaymentMethod,
-            outcome: 'ROLLED_BACK',
-            transactionId: null,
             rollbackReason: rollbackMsg.substring(0, 500),
-          });
+            failedStep: deriveFailedStep(rollbackMsg),
+            finishedAt: new Date(),
+          }).where(eq(transactionLogs.id, logId));
           console.error(`  [AUDIT LOG] ❌ Dicatat ke tabel transaction_logs (outcome: ROLLED_BACK)\n`);
         } catch (logErr) {
           console.error('  [AUDIT LOG] Gagal mencatat log rollback:', logErr);

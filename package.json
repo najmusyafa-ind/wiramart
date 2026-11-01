@@ -13,7 +13,8 @@
     "db:studio": "drizzle-kit studio",
     "db:backup": "tsx scripts/db-backup.ts",
     "db:restore": "tsx scripts/db-restore.ts",
-    "demo:cek": "tsx --env-file=.env.local scripts/cek-demo.ts"
+    "demo:cek": "tsx --env-file=.env.local scripts/cek-demo.ts",
+    "test": "tsx --env-file=.env.local --test --test-force-exit src/__tests__/transaksi-tcl-and-invariants.test.ts"
   },
   "dependencies": {
     "@ericblade/quagga2": "^1.12.1",

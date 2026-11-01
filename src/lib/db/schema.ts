@@ -34,7 +34,11 @@ export const actorTypeEnum         = pgEnum('actor_type',         ['ADMIN', 'EMP
 export const periodTypeEnum        = pgEnum('period_type',        ['DAILY', 'WEEKLY', 'MONTHLY', 'SEMI_ANNUAL']);
 
 // Status hasil akhir percobaan transaksi database (untuk audit trail)
-export const txOutcomeEnum = pgEnum('tx_outcome', ['COMMITTED', 'ROLLED_BACK']);
+// STARTED   = log dibuat tepat sebelum BEGIN (bukti "mulai transaksi")
+// COMMITTED = transaksi berhasil (BEGIN → UPDATE stok → INSERT → COMMIT)
+// ROLLED_BACK = transaksi gagal, PostgreSQL rollback otomatis
+// REJECTED  = ditolak sebelum BEGIN (validasi, idempotency, stok 0, dll)
+export const txOutcomeEnum = pgEnum('tx_outcome', ['COMMITTED', 'ROLLED_BACK', 'STARTED', 'REJECTED']);
 
 // Status pengajuan pindah shift oleh mahasiswa
 export const swapStatusEnum = pgEnum('swap_status', [
@@ -1091,29 +1095,35 @@ export const transactionLogs = pgTable(
     id:               uuid('id').primaryKey().defaultRandom(),
 
     // Siapa yang mencoba transaksi
-    employeeId:       uuid('employee_id').notNull(),
-    shiftId:          uuid('shift_id'),
+    employeeId:       uuid('employee_id').notNull().references(() => employees.id, { onDelete: 'restrict' }),
+    shiftId:          uuid('shift_id').references(() => shifts.id, { onDelete: 'set null' }),
 
-    // Detail percobaan
-    invoiceAttempt:   varchar('invoice_attempt', { length: 30 }).notNull(),
+    // Detail percobaan (nullable untuk REJECTED/STARTED sebelum total dihitung)
+    invoiceAttempt:   varchar('invoice_attempt', { length: 30 }),           // null saat STARTED
     attemptNumber:    integer('attempt_number').notNull().default(1),
     itemCount:        integer('item_count').notNull(),
-    grossAmount:      decimal('gross_amount', { precision: 12, scale: 2 }).notNull(),
-    paymentMethod:    paymentMethodEnum('payment_method').notNull(),
+    grossAmount:      decimal('gross_amount', { precision: 12, scale: 2 }), // null saat STARTED/REJECTED
+    paymentMethod:    paymentMethodEnum('payment_method'),                   // null saat STARTED/REJECTED
 
     // Hasil akhir
-    outcome:          txOutcomeEnum('outcome').notNull(), // 'COMMITTED' | 'ROLLED_BACK'
+    // STARTED → COMMITTED | ROLLED_BACK | REJECTED
+    outcome:          txOutcomeEnum('outcome').notNull(),
 
     // Jika COMMITTED: ID transaksi yang berhasil masuk DB
-    transactionId:    uuid('transaction_id'),
+    transactionId:    uuid('transaction_id').references(() => transactions.id, { onDelete: 'set null' }),
 
-    // Jika ROLLED_BACK: alasan kegagalan
+    // Jika ROLLED_BACK/REJECTED: alasan kegagalan
     rollbackReason:   text('rollback_reason'),
 
-    // Metadata waktu (WIB server time)
+    // Langkah gagal: KURANGI_STOK | INSERT_ITEM | INSERT_PAYMENT | INSERT_TX | dll
+    failedStep:       varchar('failed_step', { length: 50 }),
+
+    // Metadata waktu
     createdAt:        timestamp('created_at', { withTimezone: true })
                         .notNull()
                         .defaultNow(),
+    // Waktu selesai (null selama STARTED / menggantung)
+    finishedAt:       timestamp('finished_at', { withTimezone: true }),
   },
   (t) => ({
     // Index untuk query cepat per karyawan & per shift
@@ -1121,6 +1131,8 @@ export const transactionLogs = pgTable(
     idxShift:    index('transaction_logs_shift_idx').on(t.shiftId),
     idxOutcome:  index('transaction_logs_outcome_idx').on(t.outcome),
     idxCreated:  index('transaction_logs_created_idx').on(t.createdAt),
+    // Index partial: cepat cari log STARTED yang menggantung (belum selesai)
+    idxOpen:     index('transaction_logs_open_idx').on(t.createdAt).where(sql`outcome = 'STARTED'`),
   }),
 );
 
