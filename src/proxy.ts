@@ -81,7 +81,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     const isMaintenance = request.cookies.get('sk_maintenance')?.value === '1';
 
     // Halaman yang tetap accessible saat maintenance (untuk semua role)
-    const maintenanceExempt = ['/maintenance', '/login', '/kasir/login', '/daftar', '/setup'];
+    const maintenanceExempt = ['/maintenance', '/login', '/kasir/login', '/kasir/gudang/login', '/daftar', '/setup'];
     const isExempt = maintenanceExempt.includes(pathname);
 
     if (isMaintenance && !isExempt) {
@@ -100,7 +100,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     return NextResponse.next();
   }
 
-  if (pathname === '/kasir/login') {
+  if (pathname === '/kasir/login' || pathname === '/kasir/gudang/login') {
     return NextResponse.next();
   }
 
@@ -116,9 +116,15 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
   // --- Kasir routes (/kasir/**) ---
   if (pathname.startsWith('/kasir')) {
+    // Kecualikan halaman login kasir dan login gudang
+    if (pathname === '/kasir/login' || pathname === '/kasir/gudang/login') {
+      return NextResponse.next();
+    }
+
     // Izinkan jika memiliki sesi kasir ATAU sesi admin (Admin berhak memantau portal gudang & POS)
     if (!kasirSession && !adminSession) {
-      const url = new URL('/kasir/login', request.url);
+      const targetLogin = pathname.startsWith('/kasir/gudang') ? '/kasir/gudang/login' : '/kasir/login';
+      const url = new URL(targetLogin, request.url);
       url.searchParams.set('from', pathname);
       return NextResponse.redirect(url);
     }

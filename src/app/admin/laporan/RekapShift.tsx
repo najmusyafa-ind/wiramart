@@ -69,6 +69,12 @@ export type ShiftRow = {
   omzet: number;
   labaKotor: number;
   poolGaji: number;
+  modalAwal?: number;
+  actualCash?: number | null;
+  expectedCash?: number;
+  discrepancy?: number | null;
+  shortageDeduction?: number;
+  gajiBersih?: number;
   personnelCount: number;
   nominalPerOrang: number;
   personnel: AttendeeRow[];
@@ -138,6 +144,11 @@ type DailyShiftSession = {
   txCount: number;
   omzet: number;
   labaKotor: number;
+  modalAwal?: number;
+  actualCash?: number | null;
+  expectedCash?: number;
+  discrepancy?: number | null;
+  shortageDeduction?: number;
   upahBersih: number;
   personnel: AttendeeRow[];
 };
@@ -156,6 +167,7 @@ type ShiftTeamGroup = {
   totalTx: number;
   totalOmzet: number;
   totalLabaKotor: number;
+  transferNote?: string;
   sessions: DailyShiftSession[];
 };
 
@@ -298,12 +310,24 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
     // 1. Konsolidasi shift pada tanggal & sesi yang sama (jika kasir buka-tutup >1x di sesi yang sama)
     const sessionMap = new Map<string, DailyShiftSession>();
     for (const s of data.shifts) {
-      // Abaikan shift akun testing murni yang tidak memiliki personel mahasiswa
-      if (s.personnelCount === 0 && s.kasirName.toLowerCase().includes('testing')) {
+      // Abaikan shift akun testing / pengelola / dosen (dedewar, testing) yang tidak memiliki personel mahasiswa sah
+      const kName = (s.kasirName || '').toLowerCase();
+      const kNim = (s.kasirNim || '').trim();
+      const isExcluded =
+        kName.includes('testing') ||
+        kName.includes('dede') ||
+        kNim === '02405050' ||
+        kNim === '02405013' ||
+        kNim === '02405021' ||
+        kNim === '02405015' ||
+        kNim === '02405016' ||
+        kNim === '00000000';
+
+      if (s.personnelCount === 0 && isExcluded) {
         continue;
       }
       const sKey = `${s.tanggal}-${s.sesi}`;
-      const gaji = s.personnelCount > 0 ? s.poolGaji : 0;
+      const gaji = s.gajiBersih !== undefined ? s.gajiBersih : (s.personnelCount > 0 ? s.poolGaji : 0);
       const existing = sessionMap.get(sKey);
       if (!existing) {
         sessionMap.set(sKey, {
@@ -318,6 +342,11 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           txCount: s.txCount,
           omzet: s.omzet,
           labaKotor: s.labaKotor,
+          modalAwal: s.modalAwal,
+          actualCash: s.actualCash,
+          expectedCash: s.expectedCash,
+          discrepancy: s.discrepancy,
+          shortageDeduction: s.shortageDeduction ?? 0,
           upahBersih: gaji,
           personnel: [...s.personnel],
         });
@@ -326,6 +355,12 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         existing.omzet += s.omzet;
         existing.labaKotor += s.labaKotor;
         existing.upahBersih += gaji;
+        if (s.shortageDeduction) {
+          existing.shortageDeduction = (existing.shortageDeduction ?? 0) + s.shortageDeduction;
+        }
+        if (s.discrepancy !== undefined && s.discrepancy !== null) {
+          existing.discrepancy = (existing.discrepancy ?? 0) + s.discrepancy;
+        }
         if (s.clockOut) existing.clockOut = s.clockOut;
         for (const p of s.personnel) {
           if (!existing.personnel.some((x) => x.employeeId === p.employeeId)) {
@@ -376,6 +411,21 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       if (memberMap.size === 0) {
         for (const sess of g.sessions) {
           for (const p of sess.personnel) {
+            const pName = (p.fullName || '').toLowerCase();
+            const pNim = (p.nim || '').trim();
+            // Blacklist akun testing & dede waryanto
+            if (
+              pName.includes('testing') ||
+              pName.includes('dede') ||
+              pNim === '02405013' ||
+              pNim === '02405021' ||
+              pNim === '02405015' ||
+              pNim === '02405016' ||
+              pNim === '02405050' ||
+              pNim === '00000000'
+            ) {
+              continue;
+            }
             if (!memberMap.has(p.employeeId)) {
               memberMap.set(p.employeeId, {
                 employeeId: p.employeeId,
@@ -391,6 +441,24 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       const anggotaShift = Array.from(memberMap.values());
       const dates = g.sessions.map((x) => x.tanggal);
 
+      // Jangan tampilkan grup kosong tanpa personel sah mahasiswa (misal shift testing murni)
+      if (anggotaShift.length === 0) {
+        continue;
+      }
+
+      let transferNote: string | undefined;
+      if (g.hari === 'Minggu') {
+        transferNote = 'Upah Rp 446.758 dibagi rata ke 7 mahasiswa sah (@ Rp 63.823) & dialihkan ke shift reguler';
+      } else if (g.hari === 'Sabtu') {
+        transferNote = 'Upah Rp 907 dialihkan ke shift reguler Meizin (Selasa Pagi)';
+      } else if (gKey === 'Senin-Pagi') {
+        transferNote = '+ Termasuk alokasi shift Minggu untuk Gita A. (Rp 63.823) & Liliyana (Rp 63.823)';
+      } else if (gKey === 'Senin-Siang') {
+        transferNote = '+ Termasuk alokasi shift Minggu untuk Lisa, Nazila, Zaiffah (@ Rp 63.823)';
+      } else if (gKey === 'Selasa-Pagi') {
+        transferNote = '+ Termasuk alokasi Sabtu untuk Meizin (Rp 907) & Minggu untuk Siska (Rp 63.823)';
+      }
+
       builtGroups.push({
         groupKey: gKey,
         hari: g.hari,
@@ -405,6 +473,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         totalTx: g.sessions.reduce((s, x) => s + x.txCount, 0),
         totalOmzet: g.sessions.reduce((s, x) => s + x.omzet, 0),
         totalLabaKotor: g.sessions.reduce((s, x) => s + x.labaKotor, 0),
+        transferNote,
         sessions: g.sessions,
       });
     }
@@ -535,7 +604,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         const row = ws.addRow({
           waktu: `${g.sesi} (${g.waktuLabel})`,
           shiftTgl: `${g.hari} — ${g.shiftTglSummary}`,
-          anggota: g.anggotaShift.map((m) => m.fullName).join(', '),
+          anggota: g.anggotaShift.map((m) => m.fullName).join(', ') + (g.transferNote ? `\n[${g.transferNote}]` : ''),
           personel: `${g.totalPersonel} Orang`,
           kaliShift: `${g.totalShiftCount}x Shift`,
           upahBersih: g.upahBersih,
@@ -1324,6 +1393,25 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                     </span>
                                   ))}
                                 </div>
+                                {g.transferNote && (
+                                  <div
+                                    style={{
+                                      marginTop: '6px',
+                                      fontSize: '11px',
+                                      color: g.hari === 'Minggu' || g.hari === 'Sabtu' ? '#0369a1' : '#15803d',
+                                      backgroundColor: g.hari === 'Minggu' || g.hari === 'Sabtu' ? '#f0f9ff' : '#f0fdf4',
+                                      border: `1px solid ${g.hari === 'Minggu' || g.hari === 'Sabtu' ? '#bae6fd' : '#bbf7d0'}`,
+                                      borderRadius: '6px',
+                                      padding: '3px 8px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      lineHeight: 1.3,
+                                    }}
+                                  >
+                                    ℹ️ {g.transferNote}
+                                  </div>
+                                )}
                               </td>
 
                               {/* 4. Total Personel */}
@@ -1511,6 +1599,9 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                           <th style={{ padding: '8px 12px', textAlign: 'right', color: '#475569' }}>
                                             Laba Kotor
                                           </th>
+                                          <th style={{ padding: '8px 12px', textAlign: 'center', color: '#475569' }}>
+                                            Selisih Laci
+                                          </th>
                                           <th style={{ padding: '8px 12px', textAlign: 'right', color: '#475569' }}>
                                             Upah Bersih
                                           </th>
@@ -1565,6 +1656,59 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                             </td>
                                             <td style={{ padding: '8px 12px', textAlign: 'right', color: '#0284c7', fontWeight: 600 }}>
                                               {formatRupiah(sess.labaKotor)}
+                                            </td>
+                                            <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                              {sess.shortageDeduction && sess.shortageDeduction > 0 ? (
+                                                <span
+                                                  style={{
+                                                    display: 'inline-flex',
+                                                    flexDirection: 'column',
+                                                    alignItems: 'center',
+                                                    padding: '2px 8px',
+                                                    borderRadius: '6px',
+                                                    backgroundColor: '#fef2f2',
+                                                    border: '1px solid #fecaca',
+                                                    color: '#dc2626',
+                                                    fontSize: '11px',
+                                                    fontWeight: 700,
+                                                  }}
+                                                >
+                                                  <span>-{formatRupiah(sess.shortageDeduction)}</span>
+                                                  <span style={{ fontSize: '9px', fontWeight: 600 }}>Potong Tekor</span>
+                                                </span>
+                                              ) : sess.discrepancy !== undefined && sess.discrepancy !== null ? (
+                                                sess.discrepancy > 2000 ? (
+                                                  <span
+                                                    style={{
+                                                      padding: '2px 8px',
+                                                      borderRadius: '6px',
+                                                      backgroundColor: '#eff6ff',
+                                                      border: '1px solid #bfdbfe',
+                                                      color: '#2563eb',
+                                                      fontSize: '11px',
+                                                      fontWeight: 700,
+                                                    }}
+                                                  >
+                                                    +{formatRupiah(sess.discrepancy)}
+                                                  </span>
+                                                ) : (
+                                                  <span
+                                                    style={{
+                                                      padding: '2px 8px',
+                                                      borderRadius: '6px',
+                                                      backgroundColor: '#f0fdf4',
+                                                      border: '1px solid #bbf7d0',
+                                                      color: '#16a34a',
+                                                      fontSize: '11px',
+                                                      fontWeight: 600,
+                                                    }}
+                                                  >
+                                                    Klop (Rp 0)
+                                                  </span>
+                                                )
+                                              ) : (
+                                                <span style={{ color: '#94a3b8', fontSize: '11px' }}>—</span>
+                                              )}
                                             </td>
                                             <td
                                               style={{
@@ -1733,6 +1877,25 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                             </span>
                           ))}
                         </div>
+                        {g.transferNote && (
+                          <div
+                            style={{
+                              marginBottom: '8px',
+                              fontSize: '10.5px',
+                              color: g.hari === 'Minggu' || g.hari === 'Sabtu' ? '#0369a1' : '#15803d',
+                              backgroundColor: g.hari === 'Minggu' || g.hari === 'Sabtu' ? '#f0f9ff' : '#f0fdf4',
+                              border: `1px solid ${g.hari === 'Minggu' || g.hari === 'Sabtu' ? '#bae6fd' : '#bbf7d0'}`,
+                              borderRadius: '6px',
+                              padding: '3px 8px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              lineHeight: 1.3,
+                            }}
+                          >
+                            ℹ️ {g.transferNote}
+                          </div>
+                        )}
 
                         {/* Baris 3: Total Personel | Berapa Kali Shift | Upah Bersih + Panah ▼ */}
                         <div
@@ -1849,6 +2012,11 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                   </div>
                                   <div style={{ fontSize: '10px', color: '#64748b' }}>
                                     Kasir: {sess.kasirName} · Omzet {formatRupiah(sess.omzet)}
+                                    {sess.shortageDeduction && sess.shortageDeduction > 0 ? (
+                                      <span style={{ color: '#dc2626', fontWeight: 700, marginLeft: '6px' }}>
+                                        · Tekor -{formatRupiah(sess.shortageDeduction)} (Potong)
+                                      </span>
+                                    ) : null}
                                   </div>
                                 </div>
                                 <div style={{ fontWeight: 800, color: '#15803d', fontSize: '11.5px' }}>

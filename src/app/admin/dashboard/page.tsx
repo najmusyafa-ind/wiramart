@@ -10,6 +10,8 @@ import {
   qrisReconciliations,
   productProposals,
   stockBatches,
+  stockReceiveDrafts,
+  productConditionReports,
   admins,
 } from '@/lib/db/schema';
 import { eq, and, gte, lte, sql, count, isNull, desc } from 'drizzle-orm';
@@ -131,6 +133,18 @@ async function getDashboardData() {
     })
     .from(stockBatches);
 
+  // 6d. Pending Penerimaan Barang Masuk (Draft Menunggu Approval Dosen/Manager)
+  const [pendingStockReceivesResult] = await db
+    .select({ count: count(stockReceiveDrafts.id) })
+    .from(stockReceiveDrafts)
+    .where(eq(stockReceiveDrafts.status, 'SUBMITTED'));
+
+  // 6e. Pending Laporan Kondisi FEFO (Usulan Tindakan Gudang ke Manager)
+  const [pendingConditionReportsResult] = await db
+    .select({ count: count(productConditionReports.id) })
+    .from(productConditionReports)
+    .where(eq(productConditionReports.status, 'SUBMITTED'));
+
   // 7. Recent Transactions (last 10 today)
   const recentTransactions = await db.query.transactions.findMany({
     where: and(
@@ -150,6 +164,8 @@ async function getDashboardData() {
     pendingSwapsCount: pendingSwapsResult?.count ?? 0,
     pendingProposalsCount: pendingProposalsResult?.count ?? 0,
     criticalBatchesCount: criticalBatchesResult?.count ?? 0,
+    pendingStockReceivesCount: pendingStockReceivesResult?.count ?? 0,
+    pendingConditionReportsCount: pendingConditionReportsResult?.count ?? 0,
     autoClosedShiftsCount: autoClosedShifts.length,
     autoClosedShifts,
     pettyCashOut: Number(pettyCashResult?.cashOut ?? 0),
@@ -403,6 +419,8 @@ export default async function AdminDashboardPage() {
         pendingSwapsCount={data.pendingSwapsCount}
         pendingProposalsCount={data.pendingProposalsCount}
         criticalBatchesCount={data.criticalBatchesCount}
+        pendingStockReceivesCount={data.pendingStockReceivesCount}
+        pendingConditionReportsCount={data.pendingConditionReportsCount}
         autoClosedShiftsCount={data.autoClosedShiftsCount}
         autoClosedShifts={data.autoClosedShifts}
         qrisNeedsAttention={data.qrisNeedsAttention}

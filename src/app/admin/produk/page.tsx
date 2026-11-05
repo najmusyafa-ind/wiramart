@@ -29,12 +29,13 @@ import {
   useState, useEffect, useId, useCallback, useRef,
 } from 'react';
 import {
-  Plus, Search, Package, Edit2, Trash2, Loader2, X, Tag,
+  Plus, Boxes, Search, Package, Edit2, Trash2, Loader2, X, Tag,
   ScanLine, Camera, CameraOff, CheckCircle, AlertCircle,
-  ClipboardList, ImageIcon, RefreshCw, AlertTriangle,
+  ClipboardList, ImageIcon, RefreshCw, AlertTriangle, History,
 } from 'lucide-react';
 import UsulanProdukTab from './UsulanProdukTab';
 import BatchStokTab from './BatchStokTab';
+import RiwayatKoreksiStokTab from './RiwayatKoreksiStokTab';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -861,7 +862,9 @@ export default function ProdukPage() {
   const [lowStockThreshold, setLowStockThreshold] = useState(5);
 
   // ── Tab state: Katalog vs Usulan Kasir (K8) vs Batch Stok (F3) ─────────────
-  const [activeTab, setActiveTab] = useState<'katalog' | 'usulan' | 'batch'>('katalog');
+  const [activeTab, setActiveTab] = useState<'katalog' | 'usulan' | 'batch' | 'riwayat_stok'>('katalog');
+  const [filterHistoryProductId, setFilterHistoryProductId] = useState<string | null>(null);
+  const [filterBatchProductName, setFilterBatchProductName] = useState<string>('');
   const [pendingProposalCount, setPendingProposalCount] = useState<number>(0);
   const [criticalBatchCount, setCriticalBatchCount] = useState<number>(0);
 
@@ -888,6 +891,18 @@ export default function ProdukPage() {
   useEffect(() => {
     fetchPendingProposalsCount();
     fetchCriticalBatchCount();
+
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const tabParam = sp.get('tab');
+      if (tabParam === 'batch' || tabParam === 'usulan' || tabParam === 'riwayat_stok' || tabParam === 'katalog') {
+        setActiveTab(tabParam);
+      }
+      const qParam = sp.get('q') || sp.get('search');
+      if (qParam) {
+        setFilterBatchProductName(qParam);
+      }
+    }
   }, [fetchPendingProposalsCount, fetchCriticalBatchCount]);
 
   useEffect(() => {
@@ -1131,6 +1146,14 @@ export default function ProdukPage() {
           </button>
           <button
             type="button"
+            onClick={() => { setFilterHistoryProductId(null); setActiveTab('riwayat_stok'); }}
+            className={`btn btn-sm ${activeTab === 'riwayat_stok' ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}
+          >
+            <History size={15} /> Riwayat Koreksi Stok
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('batch')}
             className={`btn btn-sm ${activeTab === 'batch' ? 'btn-primary' : 'btn-secondary'}`}
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}
@@ -1160,10 +1183,16 @@ export default function ProdukPage() {
           />
         ) : activeTab === 'batch' ? (
           <BatchStokTab
+            initialSearch={filterBatchProductName}
             onBatchUpdated={() => {
               fetchProducts(search, filterCat);
               fetchCriticalBatchCount();
             }}
+          />
+        ) : activeTab === 'riwayat_stok' ? (
+          <RiwayatKoreksiStokTab
+            filterProductId={filterHistoryProductId}
+            onResetFilter={() => setFilterHistoryProductId(null)}
           />
         ) : (
           <>
@@ -1303,6 +1332,24 @@ export default function ProdukPage() {
                               aria-label={`Edit produk ${p.name}`}
                             >
                               <Edit2 size={15} aria-hidden="true" />
+                            </button>
+                            <button
+                              onClick={() => { setFilterBatchProductName(p.name); setActiveTab('batch'); }}
+                              className="btn btn-ghost btn-sm"
+                              title={`Lihat urutan batch & FEFO ${p.name}`}
+                              aria-label={`Lihat urutan batch & FEFO ${p.name}`}
+                              style={{ color: 'hsl(142 71% 40%)' }}
+                            >
+                              <Boxes size={15} aria-hidden="true" />
+                            </button>
+                            <button
+                              onClick={() => { setFilterHistoryProductId(p.id); setActiveTab('riwayat_stok'); }}
+                              className="btn btn-ghost btn-sm"
+                              title={`Riwayat audit stok ${p.name}`}
+                              aria-label={`Riwayat audit stok ${p.name}`}
+                              style={{ color: 'var(--color-primary)' }}
+                            >
+                              <History size={15} aria-hidden="true" />
                             </button>
                             <button
                               onClick={() => setAdjProduct(p)}

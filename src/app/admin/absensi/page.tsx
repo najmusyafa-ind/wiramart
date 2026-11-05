@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback, useId } from 'react';
+import { useState, useEffect, useCallback, useId, useMemo } from 'react';
 import {
-  ClipboardList, Search, CheckCircle2, XCircle, Clock, AlertTriangle,
-  UserCheck, UserX, CalendarDays, ChevronLeft, ChevronRight, Loader2, X,
-  Download, Award,
+  ClipboardList, Search, CheckCircle2, Clock,
+  UserCheck, UserX, CalendarDays, ChevronLeft, ChevronRight, Loader2,
+  Download, Award, ArrowRight, ShieldCheck,
+  TrendingUp,
 } from 'lucide-react';
 import BagiHasilTab from './BagiHasilTab';
 import { useAdmin } from '../AdminLayoutClient';
@@ -24,25 +25,62 @@ type AttendanceRecord = {
   schedule: { dayOfWeek: string; slotStart: string; slotEnd: string; coordinatorName: string | null };
 };
 
+type EmployeeDisciplineSummary = {
+  employeeId: string;
+  fullName: string;
+  nim: string;
+  programStudi: string;
+  jabatan: string;
+  totalShift: number;
+  hadir: number;
+  telat: number;
+  totalLateMinutes: number;
+  ijin: number;
+  tidakHadir: number;
+  pengganti: number;
+  persenKehadiran: number;
+  skorDisiplin: number;
+  statusDisiplin: 'SANGAT_DISIPLIN' | 'DISIPLIN' | 'CUKUP' | 'PERLU_PERHATIAN';
+};
+
+type ApiSummary = {
+  totalRecords: number;
+  hadir: number;
+  telat: number;
+  totalLateMinutes: number;
+  ijin: number;
+  tidakHadir: number;
+  pengganti: number;
+  avgKehadiran: number;
+  avgDisiplin: number;
+};
+
+type PeriodMode = 'daily' | 'month' | 'last_month' | 'range' | 'all';
+
 // ─── Status Badge ─────────────────────────────────────────────
 const STATUS_CONFIG: Record<AttendanceStatus, { label: string; color: string; icon: React.ReactNode }> = {
-  HADIR:       { label: 'Hadir',       color: 'var(--color-success)',  icon: <CheckCircle2 size={13} /> },
-  TELAT:       { label: 'Telat',       color: 'hsl(38 90% 55%)',       icon: <Clock size={13} /> },
-  IJIN:        { label: 'Ijin',        color: 'hsl(210 80% 60%)',      icon: <UserCheck size={13} /> },
-  TIDAK_HADIR: { label: 'Tidak Hadir', color: 'var(--color-error)',    icon: <UserX size={13} /> },
-  PENGGANTI:   { label: 'Pengganti',   color: 'hsl(280 70% 65%)',      icon: <CalendarDays size={13} /> },
+  HADIR:       { label: 'Hadir',       color: '#16a34a', icon: <CheckCircle2 size={13} /> },
+  TELAT:       { label: 'Telat',       color: '#d97706', icon: <Clock size={13} /> },
+  IJIN:        { label: 'Ijin',        color: '#2563eb', icon: <UserCheck size={13} /> },
+  TIDAK_HADIR: { label: 'Tidak Hadir', color: '#dc2626', icon: <UserX size={13} /> },
+  PENGGANTI:   { label: 'Pengganti',   color: '#7c3aed', icon: <CalendarDays size={13} /> },
 };
 
 function StatusBadge({ status }: { status: AttendanceStatus }) {
-  const cfg = STATUS_CONFIG[status];
+  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.HADIR;
   return (
     <span
       style={{
-        display: 'inline-flex', alignItems: 'center', gap: '4px',
-        padding: '3px 10px', borderRadius: '999px', fontSize: '0.75rem',
-        fontWeight: 600, letterSpacing: '0.02em',
-        background: `${cfg.color}22`, color: cfg.color,
-        border: `1px solid ${cfg.color}44`,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        padding: '2px 8px',
+        borderRadius: '999px',
+        fontSize: '0.75rem',
+        fontWeight: 600,
+        backgroundColor: `${cfg.color}15`,
+        color: cfg.color,
+        border: `1px solid ${cfg.color}35`,
       }}
     >
       {cfg.icon} {cfg.label}
@@ -51,7 +89,6 @@ function StatusBadge({ status }: { status: AttendanceStatus }) {
 }
 
 // ─── Modal Input Manual ───────────────────────────────────────
-// Mapping JS getDay() → nama hari sesuai enum DB
 const JS_DAY_TO_ENUM: Record<number, string> = {
   0: 'MINGGU', 1: 'SENIN', 2: 'SELASA', 3: 'RABU',
   4: 'KAMIS',  5: 'JUMAT', 6: 'SABTU',
@@ -68,30 +105,24 @@ function ManualInputModal({
 }) {
   const uid = useId();
   const [employees, setEmployees] = useState<{ id: string; fullName: string; nim: string }[]>([]);
-  // Semua jadwal diambil dari API, lalu difilter client-side berdasarkan hari
   const [allSchedules, setAllSchedules] = useState<{ id: string; dayOfWeek: string; slotStart: string; slotEnd: string; employeeId: string }[]>([]);
   const [form, setForm] = useState({ employeeId: '', scheduleId: '', status: 'IJIN' as 'IJIN' | 'TIDAK_HADIR', notes: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Hitung nama hari dari prop `date` (YYYY-MM-DD)
   const hariTerpilih = JS_DAY_TO_ENUM[new Date(date + 'T00:00:00').getDay()] ?? '';
 
-  // Filter jadwal: sesuai hari + sesuai karyawan (jika sudah dipilih)
-  const schedules = allSchedules.filter(s => {
+  const schedules = allSchedules.filter((s) => {
     if (s.dayOfWeek !== hariTerpilih) return false;
     if (form.employeeId && s.employeeId !== form.employeeId) return false;
     return true;
   });
 
   useEffect(() => {
-    fetch('/api/admin/karyawan').then(r => r.json()).then(j => setEmployees(j.data ?? []));
-    // Ambil jadwal dengan employee info agar bisa filter per karyawan
-    // Endpoint publik mengembalikan data grouped; kita flatten jadi flat list schedule
+    fetch('/api/admin/karyawan').then((r) => r.json()).then((j) => setEmployees(j.data ?? []));
     fetch('/api/publik/jadwal-slot')
-      .then(r => r.json())
-      .then(j => {
-        // Response: { schedule: DayGroup[] } — flatten entries ke flat list
+      .then((r) => r.json())
+      .then((j) => {
         type RawEntry = { id: string; orderInSlot: number; employeeId: string | null; employeeName: string | null; employeeNim: string | null; isFilled: boolean };
         type RawSlot  = { slotStart: string; slotEnd: string; coordinatorName: string | null; entries: RawEntry[]; filledCount: number; totalCount: number };
         type RawDay   = { dayOfWeek: string; dayOrder: number; slots: RawSlot[] };
@@ -100,7 +131,7 @@ function ManualInputModal({
         for (const day of schedule) {
           for (const slot of day.slots) {
             for (const entry of slot.entries) {
-              if (entry.employeeId) { // hanya slot yang sudah diisi (ada kasir)
+              if (entry.employeeId) {
                 flat.push({ id: entry.id, dayOfWeek: day.dayOfWeek, slotStart: slot.slotStart, slotEnd: slot.slotEnd, employeeId: entry.employeeId });
               }
             }
@@ -109,11 +140,6 @@ function ManualInputModal({
         setAllSchedules(flat);
       });
   }, []);
-
-  // Ketika karyawan diganti → reset jadwal
-  function handleEmpChange(empId: string) {
-    setForm(f => ({ ...f, employeeId: empId, scheduleId: '' }));
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -138,90 +164,108 @@ function ManualInputModal({
       style={{
         position: 'fixed', inset: 0, zIndex: 1000,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 'var(--space-4)', backgroundColor: 'var(--color-overlay)',
-        backdropFilter: 'blur(4px)', animation: 'fade-in 0.2s ease',
+        padding: 'var(--space-4)', backgroundColor: 'rgba(0,0,0,0.5)',
+        backdropFilter: 'blur(4px)',
       }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div style={{
-        background: 'var(--color-surface)', borderRadius: 'var(--radius-xl)',
-        border: '1px solid var(--color-border)', padding: 'var(--space-6)',
-        width: '100%', maxWidth: '440px',
-        boxShadow: '0 24px 48px -12px hsl(0 0% 0% / 0.35)',
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
-          <h2 id={`${uid}-title`} style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
-            Input Absensi Manual
-          </h2>
-          <button onClick={onClose} aria-label="Tutup" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '4px' }}>
-            <X size={20} />
-          </button>
-        </div>
+      <div
+        style={{
+          background: '#ffffff', borderRadius: '12px',
+          border: '1px solid var(--color-border)', padding: '24px',
+          width: '100%', maxWidth: '440px',
+          boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+        }}
+      >
+        <h2 id={`${uid}-title`} style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '6px' }}>
+          Input Manual Presensi Kasir
+        </h2>
+        <p style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', marginBottom: '16px' }}>
+          Khusus pencatatan Ijin atau Tidak Hadir untuk tanggal <strong>{date}</strong>.
+        </p>
 
-        {/* Info tanggal + hari */}
-        <div style={{ margin: '0 0 var(--space-4)', padding: 'var(--space-2) var(--space-3)', background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-          <CalendarDays size={14} aria-hidden="true" />
-          <span>Tanggal: <strong style={{ color: 'var(--color-text)' }}>{date}</strong></span>
-          <span style={{ marginLeft: 'auto', fontSize: '0.7rem', background: 'var(--color-primary-light)', color: 'var(--color-primary)', padding: '2px 8px', borderRadius: 'var(--radius-full)', fontWeight: 'var(--weight-bold)' }}>{hariTerpilih}</span>
-        </div>
-
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <div className="form-group" style={{ margin: 0 }}>
-            <label htmlFor={`${uid}-emp`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>Karyawan *</label>
-            <select id={`${uid}-emp`} className="form-input form-select" value={form.employeeId} onChange={e => handleEmpChange(e.target.value)} required>
-              <option value="">-- Pilih Karyawan --</option>
-              {employees.map(e => <option key={e.id} value={e.id}>{e.fullName} ({e.nim})</option>)}
-            </select>
+        {error && (
+          <div style={{ padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', color: '#b91c1c', fontSize: '0.8rem', marginBottom: '12px' }}>
+            {error}
           </div>
+        )}
 
-          <div className="form-group" style={{ margin: 0 }}>
-            <label htmlFor={`${uid}-sched`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>
-              Jadwal Shift <span style={{ color: 'var(--color-text-muted)', fontWeight: 'normal' }}>— hari {hariTerpilih}{form.employeeId ? ', kasir terpilih' : ''}</span> *
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
+              Nama Kasir / Mahasiswa
             </label>
-            <select id={`${uid}-sched`} className="form-input form-select" value={form.scheduleId} onChange={e => setForm(f => ({ ...f, scheduleId: e.target.value }))} required>
-              <option value="">{schedules.length === 0 ? '-- Tidak ada jadwal untuk hari ini --' : '-- Pilih Jadwal --'}</option>
-              {schedules.map(s => <option key={s.id} value={s.id}>{s.dayOfWeek} {s.slotStart}–{s.slotEnd}</option>)}
+            <select
+              value={form.employeeId}
+              onChange={(e) => setForm((f) => ({ ...f, employeeId: e.target.value, scheduleId: '' }))}
+              className="form-input"
+              style={{ width: '100%' }}
+              required
+            >
+              <option value="">— Pilih Kasir —</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.fullName} ({emp.nim})</option>
+              ))}
             </select>
-            {schedules.length === 0 && hariTerpilih && (
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)', marginTop: '4px', margin: 0 }}>
-                Tidak ada jadwal {hariTerpilih}. Setup jadwal terlebih dahulu di menu Jadwal Shift.
-              </p>
-            )}
           </div>
 
-          <div className="form-group" style={{ margin: 0 }}>
-            <label htmlFor={`${uid}-status`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>Status Kehadiran *</label>
-            <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-              {(['IJIN', 'TIDAK_HADIR'] as const).map(s => (
-                <button
-                  type="button"
-                  key={s}
-                  onClick={() => setForm(f => ({ ...f, status: s }))}
-                  className={`btn ${form.status === s ? (s === 'IJIN' ? 'btn-primary' : 'btn-danger') : 'btn-secondary'}`}
-                  style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-2)' }}
-                >
-                  <span>{STATUS_CONFIG[s].icon}</span>
-                  <span>{STATUS_CONFIG[s].label}</span>
-                </button>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
+              Jadwal Shift ({hariTerpilih})
+            </label>
+            <select
+              value={form.scheduleId}
+              onChange={(e) => setForm((f) => ({ ...f, scheduleId: e.target.value }))}
+              className="form-input"
+              style={{ width: '100%' }}
+              required
+              disabled={!form.employeeId}
+            >
+              <option value="">— Pilih Slot Jadwal —</option>
+              {schedules.map((s) => (
+                <option key={s.id} value={s.id}>{s.slotStart} – {s.slotEnd} ({s.dayOfWeek})</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
+              Status
+            </label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {(['IJIN', 'TIDAK_HADIR'] as const).map((st) => (
+                <label key={st} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '6px', padding: '8px', border: form.status === st ? '2px solid #166534' : '1px solid var(--color-border)', borderRadius: '6px', cursor: 'pointer', backgroundColor: form.status === st ? '#f0fdf4' : '#fff' }}>
+                  <input
+                    type="radio"
+                    name="status"
+                    checked={form.status === st}
+                    onChange={() => setForm((f) => ({ ...f, status: st }))}
+                  />
+                  <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>{st === 'IJIN' ? 'Ijin / Sakit' : 'Tidak Hadir (Alpa)'}</span>
+                </label>
               ))}
             </div>
           </div>
 
-          <div className="form-group" style={{ margin: 0 }}>
-            <label htmlFor={`${uid}-notes`} className="form-label" style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>Catatan (opsional)</label>
-            <textarea id={`${uid}-notes`} className="form-input" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Alasan ijin, keterangan khusus sakit/kuliah..." rows={2} style={{ resize: 'vertical' }} />
+          <div>
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}>
+              Keterangan / Alasan
+            </label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              placeholder="Contoh: Sakit dengan surat dokter / Ijin praktikum kuliah"
+              className="form-input"
+              style={{ width: '100%', minHeight: '60px' }}
+            />
           </div>
 
-          {error && (
-            <div role="alert" style={{ display: 'flex', gap: 8, padding: 'var(--space-2) var(--space-3)', background: 'var(--color-error-light)', border: '1px solid var(--color-error)', borderRadius: 'var(--radius-md)', color: 'var(--color-error)', fontSize: 'var(--text-xs)', alignItems: 'center' }}>
-              <AlertTriangle size={14} aria-hidden="true" /> {error}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: 'var(--space-3)', paddingTop: 'var(--space-2)' }}>
-            <button type="button" onClick={onClose} className="btn btn-secondary" style={{ flex: 1 }}>Batal</button>
-            <button type="submit" disabled={loading} className="btn btn-primary" style={{ flex: 2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-2)' }}>
-              {loading ? <><Loader2 size={16} className="spin-icon" /> Menyimpan...</> : 'Simpan Absensi'}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+            <button type="button" onClick={onClose} className="btn btn-secondary" disabled={loading}>
+              Batal
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? <Loader2 size={14} className="spin-icon" /> : 'Simpan Presensi'}
             </button>
           </div>
         </form>
@@ -230,303 +274,300 @@ function ManualInputModal({
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────
+// ─── Main Absensi Page Component ──────────────────────────────
 export default function AbsensiPage() {
   const { isManager } = useAdmin();
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-  const [activeTab, setActiveTab] = useState<'absensi' | 'bagi_hasil'>('absensi');
-  const [selectedDate, setSelectedDate] = useState(today);
-  const [records, setRecords] = useState<AttendanceRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [searchQ, setSearchQ] = useState('');
-  const [showModal, setShowModal] = useState(false);
-  // Export state
-  // Export state — mode bisa 'month' atau 'range'
-  const [exportMode, setExportMode]     = useState<'month' | 'range'>('month');
-  const [exportMonth, setExportMonth]   = useState(today.slice(0, 7)); // 'YYYY-MM'
-  const [exportStart, setExportStart]   = useState(today.slice(0, 8) + '01'); // awal bulan ini
-  const [exportEnd, setExportEnd]       = useState(today);
-  const [exportLoading, setExportLoading] = useState(false);
 
+  // Navigation tab: 'absensi' vs 'bagi_hasil' (Alokasi 50% Paten)
+  const [activeTab, setActiveTab] = useState<'absensi' | 'bagi_hasil'>('absensi');
+
+  // Sub-view in Absensi: 'summary' (Rekap Disiplin Mahasiswa) vs 'logs' (Detail Log Shift)
+  const [subView, setSubView] = useState<'summary' | 'logs'>('summary');
+
+  const today = useMemo(
+    () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date()),
+    [],
+  );
+
+  // Filter Mode State
+  const [periodMode, setPeriodMode] = useState<PeriodMode>('month');
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [selectedMonth, setSelectedMonth] = useState(today.slice(0, 7));
+  const [rangeStart, setRangeStart] = useState('2026-10-01');
+  const [rangeEnd, setRangeEnd] = useState(today);
+  const [searchQ, setSearchQ] = useState('');
+
+  // Data States
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [summaryByEmployee, setSummaryByEmployee] = useState<EmployeeDisciplineSummary[]>([]);
+  const [apiSummary, setApiSummary] = useState<ApiSummary | null>(null);
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [rangeLabel, setRangeLabel] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+
+  // Fetch data
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/absensi?date=${selectedDate}`);
+      let url = '/api/admin/absensi?';
+      if (periodMode === 'daily') {
+        url += `date=${selectedDate}`;
+      } else if (periodMode === 'month') {
+        url += `period=month&month=${selectedMonth}`;
+      } else if (periodMode === 'last_month') {
+        url += 'period=last_month';
+      } else if (periodMode === 'range') {
+        url += `period=range&startDate=${rangeStart}&endDate=${rangeEnd}`;
+      } else if (periodMode === 'all') {
+        url += 'period=all_time';
+      }
+
+      const res = await fetch(url);
       const json = await res.json();
-      setRecords(json.data ?? []);
-    } catch { /* silent */ }
-    finally { setLoading(false); }
-  }, [selectedDate]);
+      const rawRecords: AttendanceRecord[] = Array.isArray(json.data)
+        ? json.data
+        : (json.data?.records ?? []);
+      const empSummary: EmployeeDisciplineSummary[] = json.data?.summaryByEmployee ?? [];
+      const sum: ApiSummary | null = json.data?.summary ?? null;
+      const months: string[] = json.data?.availableMonths ?? [];
+      const label: string = json.data?.range?.label ?? '';
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+      setRecords(rawRecords);
+      setSummaryByEmployee(empSummary);
+      setApiSummary(sum);
+      if (months.length > 0) setAvailableMonths(months);
+      if (label) setRangeLabel(label);
+    } catch {
+      // silent fallback
+    } finally {
+      setLoading(false);
+    }
+  }, [periodMode, selectedDate, selectedMonth, rangeStart, rangeEnd]);
 
-  // Navigate date
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Navigate single date
   const shiftDate = (days: number) => {
     const d = new Date(selectedDate);
     d.setDate(d.getDate() + days);
     setSelectedDate(d.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }));
   };
 
-  // Filter
-  const filtered = records.filter(r =>
-    searchQ === '' ||
-    r.employee.fullName.toLowerCase().includes(searchQ.toLowerCase()) ||
-    r.employee.nim.includes(searchQ),
-  );
+  // Filtered lists by search
+  const filteredRecords = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    if (!q) return records;
+    return records.filter(
+      (r) =>
+        r.employee.fullName.toLowerCase().includes(q) ||
+        r.employee.nim.includes(q) ||
+        (r.employee.programStudi && r.employee.programStudi.toLowerCase().includes(q)),
+    );
+  }, [records, searchQ]);
 
-  // Summary
-  const summary = {
-    hadir:       records.filter(r => r.status === 'HADIR').length,
-    telat:       records.filter(r => r.status === 'TELAT').length,
-    ijin:        records.filter(r => r.status === 'IJIN').length,
-    tidakHadir:  records.filter(r => r.status === 'TIDAK_HADIR').length,
-    pengganti:   records.filter(r => r.status === 'PENGGANTI').length,
-  };
+  const filteredSummary = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    if (!q) return summaryByEmployee;
+    return summaryByEmployee.filter(
+      (e) =>
+        e.fullName.toLowerCase().includes(q) ||
+        e.nim.includes(q) ||
+        (e.programStudi && e.programStudi.toLowerCase().includes(q)),
+    );
+  }, [summaryByEmployee, searchQ]);
 
-  const isToday = selectedDate === today;
-  const displayDate = new Date(selectedDate + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  // Executive summary counts
+  const summary = useMemo(() => {
+    if (apiSummary) {
+      return {
+        hadir: apiSummary.hadir,
+        telat: apiSummary.telat,
+        totalLateMinutes: apiSummary.totalLateMinutes,
+        ijin: apiSummary.ijin,
+        tidakHadir: apiSummary.tidakHadir,
+        pengganti: apiSummary.pengganti,
+        avgDisiplin: apiSummary.avgDisiplin,
+      };
+    }
+    return {
+      hadir: records.filter((r) => r.status === 'HADIR').length,
+      telat: records.filter((r) => r.status === 'TELAT').length,
+      totalLateMinutes: records.reduce((s, r) => s + (r.lateMinutes > 0 ? r.lateMinutes : 0), 0),
+      ijin: records.filter((r) => r.status === 'IJIN').length,
+      tidakHadir: records.filter((r) => r.status === 'TIDAK_HADIR').length,
+      pengganti: records.filter((r) => r.status === 'PENGGANTI').length,
+      avgDisiplin: 100,
+    };
+  }, [apiSummary, records]);
 
-  // ─── Export Absensi ke Excel (Bulanan atau Range Bebas) ─────
-  async function handleExportAbsensi() {
+  // Export Excel
+  async function handleExportExcel() {
+    if (records.length === 0 && summaryByEmployee.length === 0) {
+      alert('Tidak ada data absensi untuk diekspor.');
+      return;
+    }
     setExportLoading(true);
     try {
-      // Tentukan URL query berdasarkan mode
-      const queryUrl = exportMode === 'month'
-        ? `/api/admin/absensi?month=${exportMonth}&limit=500`
-        : `/api/admin/absensi?startDate=${exportStart}&endDate=${exportEnd}&limit=500`;
-
-      const res = await fetch(queryUrl);
-      const json = await res.json() as { success?: boolean; data?: AttendanceRecord[] };
-      const allRecords: AttendanceRecord[] = json.data ?? [];
-
-      if (allRecords.length === 0) {
-        alert('Tidak ada data absensi untuk periode yang dipilih.');
-        return;
-      }
-
       const ExcelJS = (await import('exceljs')).default;
       const wb = new ExcelJS.Workbook();
-      wb.creator = 'Smartkasir Perwira — Rekap Absensi';
+      wb.creator = 'Smartkasir Perwira — Wiramart UNPERBA';
       wb.created = new Date();
 
-      // Label periode
-      const periodeLabel = exportMode === 'month'
-        ? (() => {
-            const [yr, mo] = exportMonth.split('-').map(Number);
-            return new Date(yr ?? 2026, (mo ?? 1) - 1, 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
-          })()
-        : `${new Date(exportStart + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })} s/d ${new Date(exportEnd + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}`;
-
-      // ── Sheet 1: Detail Absensi ───────────────────────────────
-      const ws = wb.addWorksheet('Detail Absensi');
-      const COL_COUNT = 10;
-      ws.mergeCells(`A1:J1`);
-      const titleCell = ws.getCell('A1');
-      titleCell.value = `REKAP ABSENSI WIRAMART — ${periodeLabel.toUpperCase()}`;
+      // Sheet 1: Rekap Disiplin Mahasiswa
+      const ws1 = wb.addWorksheet('Rekap Disiplin & Gaji');
+      ws1.mergeCells('A1:J1');
+      const t1 = ws1.getCell('A1');
+      t1.value = `REKAP KEDISIPLINAN ABSENSI & KINERJA GAJI — ${rangeLabel.toUpperCase()}`;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const titleCellAny = titleCell as any;
-      titleCellAny.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
-      titleCellAny.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
-      titleCellAny.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(1).height = 28;
-
-      ws.mergeCells(`A2:J2`);
-      const subCell = ws.getCell('A2');
-      subCell.value = `Dicetak: ${new Date().toLocaleString('id-ID')} | UKM Kewirausahaan Universitas Perwira Purbalingga`;
+      (t1 as any).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const subCellAny = subCell as any;
-      subCellAny.font = { size: 9, italic: true, color: { argb: 'FF6B7280' } };
-      subCellAny.alignment = { horizontal: 'center' };
+      (t1 as any).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (t1 as any).alignment = { horizontal: 'center', vertical: 'middle' };
+      ws1.getRow(1).height = 26;
 
-      ws.columns = [
-        { key: 'no',       width: 5 },
-        { key: 'nama',     width: 28 },
-        { key: 'nim',      width: 16 },
-        { key: 'prodi',    width: 22 },
-        { key: 'jabatan',  width: 14 },
-        { key: 'tanggal',  width: 14 },
-        { key: 'hari',     width: 12 },
-        { key: 'jamMasuk', width: 12 },
-        { key: 'terlambat',width: 22 },
-        { key: 'status',   width: 14 },
+      ws1.columns = [
+        { key: 'no', width: 6 },
+        { key: 'nama', width: 28 },
+        { key: 'nim', width: 14 },
+        { key: 'prodi', width: 20 },
+        { key: 'totalShift', width: 12 },
+        { key: 'hadir', width: 12 },
+        { key: 'telat', width: 18 },
+        { key: 'alpa', width: 12 },
+        { key: 'pctHadir', width: 14 },
+        { key: 'skorDisiplin', width: 16 },
       ];
 
-      const hRow = ws.getRow(3);
-      hRow.values = ['No', 'Nama Lengkap', 'NIM', 'Program Studi', 'Jabatan', 'Tanggal', 'Hari', 'Jam Masuk', 'Terlambat (mnt)', 'Status'];
+      const h1 = ws1.getRow(3);
+      h1.values = ['No', 'Nama Mahasiswa', 'NIM', 'Prodi', 'Total Shift', 'Hadir Tepat', 'Telat (x & mnt)', 'Ijin / Alpa', '% Kehadiran', '% Skor Disiplin'];
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hRow.eachCell((cell: any) => {
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        cell.border = { bottom: { style: 'thin', color: { argb: 'FF93C5FD' } } };
-      });
-      hRow.height = 28;
-
-      const statusLabel: Record<string, string> = {
-        HADIR: 'Hadir', TELAT: 'Telat', IJIN: 'Ijin',
-        TIDAK_HADIR: 'Tidak Hadir', PENGGANTI: 'Pengganti',
-      };
-      const statusColor: Record<string, string> = {
-        HADIR: 'FF16A34A', TELAT: 'FFD97706', IJIN: 'FF2563EB',
-        TIDAK_HADIR: 'FFDC2626', PENGGANTI: 'FF7C3AED',
-      };
-
-      allRecords.forEach((r, idx) => {
-        const clockInStr = r.clockInActual
-          ? new Date(r.clockInActual).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-          : '—';
-        const dateStr = new Date(r.attendanceDate + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' });
-        const hariStr = new Date(r.attendanceDate + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long' });
-
-        const row = ws.addRow([
-          idx + 1, r.employee.fullName, r.employee.nim, r.employee.programStudi,
-          r.employee.jabatan, dateStr, hariStr, clockInStr,
-          r.lateMinutes > 0 ? r.lateMinutes : 0,
-          statusLabel[r.status] ?? r.status,
-        ]);
-        if (idx % 2 === 1) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          row.eachCell((cell: any) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }; });
-        }
-        const statusCell = row.getCell(COL_COUNT);
-        const clr = statusColor[r.status] ?? 'FF374151';
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (statusCell as any).font = { bold: true, color: { argb: clr }, size: 9 };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        row.eachCell((cell: any) => { cell.alignment = { vertical: 'middle', wrapText: false }; });
-        row.height = 20;
-      });
-
-      // ── Sheet 2: Ringkasan per Karyawan (ditingkatkan) ────────
-      const ws2 = wb.addWorksheet('Ringkasan per Karyawan');
-      ws2.columns = [
-        { key: 'nama',          width: 30 },
-        { key: 'nim',           width: 16 },
-        { key: 'prodi',         width: 22 },
-        { key: 'jabatan',       width: 14 },
-        { key: 'totalShift',    width: 13 },
-        { key: 'hadir',         width: 10 },
-        { key: 'telat',         width: 10 },
-        { key: 'ijin',          width: 10 },
-        { key: 'bolos',         width: 10 },
-        { key: 'persen',        width: 14 },
-        { key: 'menitTelat',    width: 18 },
-      ];
-
-      const hRow2 = ws2.getRow(1);
-      hRow2.values = ['Nama Lengkap', 'NIM', 'Program Studi', 'Jabatan', 'Total Shift', 'Hadir', 'Telat', 'Ijin', 'Bolos', '% Kehadiran', 'Total Menit Telat'];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hRow2.eachCell((cell: any) => {
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+      h1.eachCell((cell: any) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
       });
-      hRow2.height = 24;
+      h1.height = 22;
 
-      // Group by employee
-      const byEmp = new Map<string, { rec: AttendanceRecord; counts: Record<string, number>; menit: number }>();
-      allRecords.forEach(r => {
-        if (!byEmp.has(r.employee.id)) byEmp.set(r.employee.id, { rec: r, counts: {}, menit: 0 });
-        const e = byEmp.get(r.employee.id)!;
-        e.counts[r.status] = (e.counts[r.status] ?? 0) + 1;
-        e.menit += r.lateMinutes ?? 0;
+      summaryByEmployee.forEach((e, idx) => {
+        ws1.addRow({
+          no: idx + 1,
+          nama: e.fullName,
+          nim: e.nim,
+          prodi: e.programStudi,
+          totalShift: `${e.totalShift}x`,
+          hadir: e.hadir,
+          telat: e.telat > 0 ? `${e.telat}x (${e.totalLateMinutes} mnt)` : '0',
+          alpa: e.ijin + e.tidakHadir,
+          pctHadir: `${e.persenKehadiran}%`,
+          skorDisiplin: `${e.skorDisiplin}%`,
+        });
       });
 
-      let rowIdx2 = 0;
-      byEmp.forEach(({ rec, counts, menit }) => {
-        const hadirCount  = (counts['HADIR'] ?? 0) + (counts['PENGGANTI'] ?? 0);
-        const telatCount  = counts['TELAT'] ?? 0;
-        const ijinCount   = counts['IJIN'] ?? 0;
-        const bolosCount  = counts['TIDAK_HADIR'] ?? 0;
-        const totalShift  = hadirCount + telatCount + ijinCount + bolosCount;
-        // % Kehadiran = (hadir + telat + pengganti) / total × 100
-        const pctHadir    = totalShift > 0 ? Math.round(((hadirCount + telatCount) / totalShift) * 100) : 0;
-
-        const row = ws2.addRow([
-          rec.employee.fullName, rec.employee.nim, rec.employee.programStudi, rec.employee.jabatan,
-          totalShift, hadirCount, telatCount, ijinCount, bolosCount,
-          `${pctHadir}%`,
-          menit,
-        ]);
-
-        if (rowIdx2 % 2 === 1) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          row.eachCell((cell: any) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } }; });
-        }
-        // Warna merah jika bolos > 2
-        if (bolosCount > 2) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (row.getCell('nama') as any).font = { bold: true, color: { argb: 'FFDC2626' } };
-        }
-        row.height = 20;
-        rowIdx2++;
-      });
-
-      // Footer baris total Sheet 2
-      const totalRow = ws2.addRow(['TOTAL', '', '', '',
-        allRecords.length, // total baris shift
-        allRecords.filter(r => r.status === 'HADIR' || r.status === 'PENGGANTI').length,
-        allRecords.filter(r => r.status === 'TELAT').length,
-        allRecords.filter(r => r.status === 'IJIN').length,
-        allRecords.filter(r => r.status === 'TIDAK_HADIR').length,
-        '', ''
-      ]);
+      // Sheet 2: Detail Log Presensi
+      const ws2 = wb.addWorksheet('Log Presensi Shift');
+      ws2.mergeCells('A1:I1');
+      const t2 = ws2.getCell('A1');
+      t2.value = `LOG PRESENSI SHIFT DETAIL — ${rangeLabel.toUpperCase()}`;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      totalRow.eachCell((cell: any) => {
-        cell.font = { bold: true };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+      (t2 as any).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (t2 as any).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (t2 as any).alignment = { horizontal: 'center', vertical: 'middle' };
+      ws2.getRow(1).height = 26;
+
+      ws2.columns = [
+        { key: 'no', width: 6 },
+        { key: 'tanggal', width: 14 },
+        { key: 'nama', width: 26 },
+        { key: 'nim', width: 14 },
+        { key: 'shift', width: 18 },
+        { key: 'clockIn', width: 12 },
+        { key: 'telat', width: 14 },
+        { key: 'status', width: 14 },
+        { key: 'catatan', width: 30 },
+      ];
+
+      const h2 = ws2.getRow(3);
+      h2.values = ['No', 'Tanggal', 'Nama Mahasiswa', 'NIM', 'Jadwal Shift', 'Clock In', 'Keterlambatan', 'Status', 'Catatan'];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      h2.eachCell((cell: any) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+      h2.height = 22;
+
+      records.forEach((r, idx) => {
+        ws2.addRow({
+          no: idx + 1,
+          tanggal: r.attendanceDate,
+          nama: r.employee.fullName,
+          nim: r.employee.nim,
+          shift: `${r.schedule.dayOfWeek} ${r.schedule.slotStart}–${r.schedule.slotEnd}`,
+          clockIn: r.clockInActual ? new Date(r.clockInActual).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—',
+          telat: r.lateMinutes > 0 ? `+${r.lateMinutes} mnt` : '—',
+          status: r.status,
+          catatan: r.notes ?? '—',
+        });
       });
 
-      // Download
-      const buf = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const suffix = exportMode === 'month' ? exportMonth : `${exportStart}_sd_${exportEnd}`;
-      a.download = `Absensi-Wiramart-${suffix}.xlsx`;
+      a.download = `Rekap_Absensi_Disiplin_Wiramart_${today}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (err) {
-      alert('Gagal export: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } catch (e) {
+      console.error(e);
+      alert('Gagal mengekspor data absensi ke Excel.');
     } finally {
       setExportLoading(false);
     }
   }
 
   return (
-    <div>
-      {/* Header */}
-      <div className="page-header">
+    <div className="page-container">
+      {/* ── Page Header ────────────────────────────────────────── */}
+      <div className="page-header" style={{ marginBottom: '16px' }}>
         <div>
-          <h1 className="page-title">
-            {activeTab === 'absensi' ? 'Rekap Absensi Karyawan' : 'Alokasi Bagi Hasil 50% Karyawan'}
+          <h1 className="page-title" style={{ fontSize: '1.4rem', fontWeight: 800 }}>
+            {activeTab === 'absensi' ? 'Rekap Absensi & Kedisiplinan Karyawan' : 'Alokasi Bagi Hasil 50% Karyawan'}
           </h1>
-          <p className="page-subtitle">
+          <p className="page-subtitle" style={{ fontSize: '0.85rem' }}>
             {activeTab === 'absensi'
-              ? 'Pantau kehadiran, keterlambatan, dan status shift kasir harian'
-              : 'Perhitungan transparan pembagian laba harian untuk tim shift toko (Paten Wiramart)'}
+              ? 'Pantau kehadiran, akumulasi keterlambatan, dan skor kedisiplinan yang menentukan porsi upah mahasiswa'
+              : 'Perhitungan transparan pembagian laba harian untuk tim shift toko (Closed-Loop 50:50)'}
           </p>
         </div>
         {activeTab === 'absensi' && (
           <button
             onClick={() => setShowModal(true)}
-            className="btn btn-primary"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            className="btn btn-primary btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}
           >
-            <UserX size={16} aria-hidden="true" /> Input Manual
+            <UserX size={15} aria-hidden="true" /> Input Manual (Ijin/Alpa)
           </button>
         )}
       </div>
 
-      {/* Tab Switcher */}
+      {/* ── Main Tab Switcher ──────────────────────────────────── */}
       <div
         style={{
           display: 'flex',
-          gap: 'var(--space-2)',
-          marginBottom: 'var(--space-5)',
+          gap: '8px',
+          marginBottom: '16px',
           borderBottom: '2px solid var(--color-border)',
-          paddingBottom: 'var(--space-2)',
+          paddingBottom: '8px',
         }}
       >
         <button
@@ -538,17 +579,17 @@ export default function AbsensiPage() {
             gap: 8,
             padding: '8px 16px',
             border: 'none',
-            borderRadius: 'var(--radius-md)',
+            borderRadius: '8px',
             cursor: 'pointer',
             fontWeight: 700,
-            fontSize: 'var(--text-sm)',
-            backgroundColor: activeTab === 'absensi' ? 'var(--color-primary)' : 'transparent',
-            color: activeTab === 'absensi' ? 'white' : 'var(--color-text-secondary)',
+            fontSize: '0.85rem',
+            backgroundColor: activeTab === 'absensi' ? '#166534' : 'transparent',
+            color: activeTab === 'absensi' ? '#ffffff' : 'var(--color-text-secondary)',
             transition: 'all 0.15s ease',
           }}
         >
           <ClipboardList size={16} />
-          <span>📋 Presensi Shift (4 Orang)</span>
+          <span>📋 Rekap Presensi & Kedisiplinan</span>
         </button>
 
         {isManager && (
@@ -561,17 +602,17 @@ export default function AbsensiPage() {
               gap: 8,
               padding: '8px 16px',
               border: 'none',
-              borderRadius: 'var(--radius-md)',
+              borderRadius: '8px',
               cursor: 'pointer',
               fontWeight: 700,
-              fontSize: 'var(--text-sm)',
-              backgroundColor: activeTab === 'bagi_hasil' ? 'hsl(142 71% 35%)' : 'transparent',
-              color: activeTab === 'bagi_hasil' ? 'white' : 'var(--color-text-secondary)',
+              fontSize: '0.85rem',
+              backgroundColor: activeTab === 'bagi_hasil' ? '#166534' : 'transparent',
+              color: activeTab === 'bagi_hasil' ? '#ffffff' : 'var(--color-text-secondary)',
               transition: 'all 0.15s ease',
             }}
           >
             <Award size={16} />
-            <span>💰 Alokasi Bagi Hasil (50% Paten)</span>
+            <span>💰 Rekap Gaji Bagi Hasil (50% Paten)</span>
           </button>
         )}
       </div>
@@ -580,315 +621,568 @@ export default function AbsensiPage() {
         <BagiHasilTab />
       ) : (
         <>
-          {/* Date Navigator + Action Toolbar */}
-          <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
-            <div
-              className="card-body"
-              style={{
-                padding: 'var(--space-3) var(--space-4)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: 'var(--space-3)',
-          }}
-        >
-          {/* Left: Date Navigator */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                background: 'var(--color-surface-alt)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-md)',
-                padding: '2px',
-              }}
-            >
-              <button
-                onClick={() => shiftDate(-1)}
-                className="btn btn-sm btn-secondary"
-                aria-label="Hari sebelumnya"
-                style={{ padding: '6px 8px', minWidth: 32, minHeight: 32, border: 'none', background: 'transparent' }}
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <input
-                type="date"
-                value={selectedDate}
-                max={today}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                style={{
-                  minHeight: 32,
-                  border: 'none',
-                  background: 'transparent',
-                  padding: '0 var(--space-2)',
-                  fontWeight: 'var(--weight-semibold)',
-                  fontSize: 'var(--text-sm)',
-                  color: 'var(--color-text)',
-                  cursor: 'pointer',
-                }}
-                aria-label="Pilih tanggal absensi"
-              />
-              <button
-                onClick={() => shiftDate(1)}
-                disabled={isToday}
-                className="btn btn-sm btn-secondary"
-                aria-label="Hari berikutnya"
-                style={{ padding: '6px 8px', minWidth: 32, minHeight: 32, border: 'none', background: 'transparent', opacity: isToday ? 0.3 : 1 }}
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-            <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
-              {displayDate}
-            </span>
-            {!isToday && (
-              <button
-                onClick={() => setSelectedDate(today)}
-                className="btn btn-sm btn-secondary"
-              >
-                Hari Ini
-              </button>
-            )}
-          </div>
-
-          {/* Right: Export Excel Toolbar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                background: 'var(--color-surface-alt)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-md)',
-                padding: '2px',
-              }}
-            >
-              {(['month', 'range'] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setExportMode(m)}
-                  className={`btn btn-sm ${exportMode === m ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{
-                    padding: '4px 10px',
-                    fontSize: 'var(--text-xs)',
-                    border: 'none',
-                    background: exportMode === m ? 'var(--color-primary)' : 'transparent',
-                    color: exportMode === m ? '#fff' : 'var(--color-text-secondary)',
-                  }}
-                >
-                  {m === 'month' ? 'Per Bulan' : 'Range Bebas'}
-                </button>
-              ))}
-            </div>
-
-            {exportMode === 'month' ? (
-              <input
-                id="export-month"
-                type="month"
-                value={exportMonth}
-                max={today.slice(0, 7)}
-                onChange={(e) => setExportMonth(e.target.value)}
-                className="form-input"
-                style={{ minHeight: 36, padding: '4px 8px', fontSize: 'var(--text-xs)', width: '135px' }}
-                aria-label="Pilih bulan untuk export"
-              />
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-                <input
-                  type="date"
-                  value={exportStart}
-                  max={exportEnd || today}
-                  onChange={(e) => setExportStart(e.target.value)}
-                  className="form-input"
-                  style={{ minHeight: 36, padding: '4px 6px', fontSize: 'var(--text-xs)', width: '120px' }}
-                  aria-label="Tanggal mulai export"
-                />
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>–</span>
-                <input
-                  type="date"
-                  value={exportEnd}
-                  min={exportStart}
-                  max={today}
-                  onChange={(e) => setExportEnd(e.target.value)}
-                  className="form-input"
-                  style={{ minHeight: 36, padding: '4px 6px', fontSize: 'var(--text-xs)', width: '120px' }}
-                  aria-label="Tanggal akhir export"
-                />
+          {/* ── FinOps Transparency Banner ────────────────────────── */}
+          <div
+            style={{
+              backgroundColor: '#f0fdf4',
+              border: '1px solid #bbf7d0',
+              borderRadius: '10px',
+              padding: '12px 16px',
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <ShieldCheck size={24} color="#166534" style={{ flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#166534' }}>
+                  Korelasi Absensi ke Bagi Hasil 50% Wiramart (Closed-Loop)
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#15803d', lineHeight: 1.4 }}>
+                  Gaji dibagi berdasarkan akumulasi poin: <strong>Bobot Peran × Bobot Durasi (Pagi 1.25x vs Siang 1.0x) × Faktor Disiplin Waktu</strong>. Toleransi telat 5 menit; telat di atasnya dipotong 3% per 5 menit keterlambatan (maks 50%).
+                </div>
               </div>
+            </div>
+            {isManager && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('bagi_hasil')}
+                className="btn btn-sm btn-secondary"
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: '#166534',
+                  borderColor: '#bbf7d0',
+                  backgroundColor: '#ffffff',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Buka Rekap Gaji <ArrowRight size={13} />
+              </button>
             )}
+          </div>
 
-            <button
-              id="btn-export-absensi"
-              onClick={handleExportAbsensi}
-              disabled={exportLoading || (exportMode === 'month' ? !exportMonth : !exportStart || !exportEnd)}
-              className="btn btn-secondary btn-sm"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)', whiteSpace: 'nowrap', minHeight: 36 }}
+          {/* ── Integrated Filter Toolbar ─────────────────────────── */}
+          <div
+            className="card"
+            style={{
+              padding: '12px 16px',
+              marginBottom: '16px',
+              border: '1px solid var(--color-border)',
+              borderRadius: '12px',
+              backgroundColor: '#ffffff',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '10px',
+              }}
             >
-              {exportLoading ? <Loader2 size={14} className="spin-icon" /> : <Download size={14} />}
-              Export Excel
-            </button>
-          </div>
-        </div>
-      </div>
+              {/* Left: Mode Switcher Pills */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                {(
+                  [
+                    { mode: 'month', label: 'Per Bulan' },
+                    { mode: 'last_month', label: 'Bulan Lalu' },
+                    { mode: 'daily', label: 'Per Tanggal' },
+                    { mode: 'range', label: 'Rentang Bebas' },
+                    { mode: 'all', label: 'Semua Waktu' },
+                  ] as const
+                ).map(({ mode, label }) => {
+                  const active = periodMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setPeriodMode(mode)}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '99px',
+                        border: active ? '1.5px solid #166534' : '1px solid var(--color-border)',
+                        backgroundColor: active ? '#166534' : '#f8fafc',
+                        color: active ? '#ffffff' : 'var(--color-text-secondary)',
+                        fontSize: '0.75rem',
+                        fontWeight: active ? 700 : 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
 
-      {/* Summary Cards */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-          gap: 'var(--space-3)',
-          marginBottom: 'var(--space-5)',
-        }}
-      >
-        {([
-          { key: 'hadir', label: 'Hadir Tepat', val: summary.hadir, color: 'var(--color-success)', bg: 'var(--color-success-light)' },
-          { key: 'telat', label: 'Terlambat', val: summary.telat, color: 'var(--color-warning)', bg: 'var(--color-warning-light)' },
-          { key: 'ijin',  label: 'Ijin / Sakit', val: summary.ijin, color: 'var(--color-info)', bg: 'var(--color-info-light)' },
-          { key: 'tidakHadir', label: 'Tidak Hadir', val: summary.tidakHadir, color: 'var(--color-error)', bg: 'var(--color-error-light)' },
-          { key: 'pengganti', label: 'Shift Pengganti', val: summary.pengganti, color: 'hsl(280 70% 65%)', bg: 'hsl(280 70% 65% / 0.1)' },
-        ] as const).map((item) => (
-          <div
-            key={item.key}
-            className="stat-card"
-            style={{
-              padding: 'var(--space-4)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              textAlign: 'center',
-              position: 'relative',
-              overflow: 'hidden',
-            }}
-          >
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: item.color }} />
-            <div style={{ fontSize: 'var(--text-3xl)', fontWeight: 'var(--weight-extrabold)', color: item.color, lineHeight: 1 }}>
-              {item.val}
+              {/* Right: Export Excel Button */}
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                disabled={exportLoading || records.length === 0}
+                className="btn btn-secondary btn-sm"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontWeight: 600,
+                  fontSize: '0.75rem',
+                }}
+              >
+                {exportLoading ? <Loader2 size={13} className="spin-icon" /> : <Download size={13} />}
+                Export Excel (.xlsx)
+              </button>
             </div>
-            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-1)', fontWeight: 'var(--weight-medium)' }}>
-              {item.label}
+
+            {/* Sub-controls based on period mode */}
+            <div
+              style={{
+                marginTop: '10px',
+                paddingTop: '10px',
+                borderTop: '1px solid #f1f5f9',
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '8px',
+              }}
+            >
+              {periodMode === 'daily' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => shiftDate(-1)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ minWidth: 28, padding: '4px 6px' }}
+                    title="Hari Sebelumnya"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    max={today}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="form-input"
+                    style={{ padding: '4px 8px', fontSize: '0.8rem', minHeight: 30, width: '135px', fontWeight: 600 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => shiftDate(1)}
+                    disabled={selectedDate >= today}
+                    className="btn btn-secondary btn-sm"
+                    style={{ minWidth: 28, padding: '4px 6px' }}
+                    title="Hari Berikutnya"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                  {selectedDate !== today && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDate(today)}
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                    >
+                      Hari Ini
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {periodMode === 'month' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <input
+                    type="month"
+                    value={selectedMonth}
+                    max={today.slice(0, 7)}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className="form-input"
+                    style={{ padding: '4px 8px', fontSize: '0.8rem', minHeight: 30, width: '135px', fontWeight: 600 }}
+                  />
+                  {availableMonths.map((m) => {
+                    const [y, mm] = m.split('-');
+                    const monthName = new Intl.DateTimeFormat('id-ID', { month: 'short' }).format(
+                      new Date(parseInt(y, 10), parseInt(mm, 10) - 1, 1),
+                    );
+                    const isSel = selectedMonth === m;
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setSelectedMonth(m)}
+                        style={{
+                          padding: '3px 10px',
+                          borderRadius: '99px',
+                          border: isSel ? '1.5px solid #166534' : '1px solid var(--color-border)',
+                          backgroundColor: isSel ? '#16653415' : 'transparent',
+                          color: isSel ? '#166534' : 'var(--color-text-secondary)',
+                          fontSize: '0.75rem',
+                          fontWeight: isSel ? 700 : 500,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {monthName} {y}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {periodMode === 'last_month' && (
+                <span style={{ fontSize: '0.78rem', color: '#166534', fontWeight: 700, backgroundColor: '#f0fdf4', padding: '4px 10px', borderRadius: '6px' }}>
+                  📌 Periode Terpilih: {rangeLabel}
+                </span>
+              )}
+
+              {periodMode === 'range' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <input
+                    type="date"
+                    value={rangeStart}
+                    max={rangeEnd || today}
+                    onChange={(e) => setRangeStart(e.target.value)}
+                    className="form-input"
+                    style={{ padding: '4px 8px', fontSize: '0.8rem', minHeight: 30, width: '130px', fontWeight: 600 }}
+                  />
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>s/d</span>
+                  <input
+                    type="date"
+                    value={rangeEnd}
+                    min={rangeStart}
+                    max={today}
+                    onChange={(e) => setRangeEnd(e.target.value)}
+                    className="form-input"
+                    style={{ padding: '4px 8px', fontSize: '0.8rem', minHeight: 30, width: '130px', fontWeight: 600 }}
+                  />
+                </div>
+              )}
+
+              {periodMode === 'all' && (
+                <span style={{ fontSize: '0.78rem', color: '#166534', fontWeight: 700, backgroundColor: '#f0fdf4', padding: '4px 10px', borderRadius: '6px' }}>
+                  🌐 Menampilkan seluruh riwayat presensi operasional (Agustus – Sekarang)
+                </span>
+              )}
             </div>
           </div>
-        ))}
-      </div>
 
-      {/* Search & Filter */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-        <div className="form-input-icon" style={{ maxWidth: '360px', flex: '1 1 260px' }}>
-          <Search size={16} className="form-input-icon__icon" aria-hidden="true" />
-          <input
-            className="form-input form-input-icon__input"
-            type="search"
-            value={searchQ}
-            onChange={(e) => setSearchQ(e.target.value)}
-            placeholder="Cari kasir atau NIM..."
-            style={{ minHeight: 40 }}
-          />
-        </div>
-        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          Menampilkan {filtered.length} dari {records.length} data
-        </span>
-      </div>
-
-      {/* Table */}
-      {loading ? (
-        <div className="card">
+          {/* ── KPI Summary Cards ─────────────────────────────────── */}
           <div
-            className="empty-state"
-            aria-live="polite"
-            aria-busy="true"
             style={{
-              padding: 'var(--space-12) var(--space-4)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              textAlign: 'center',
-              width: '100%',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+              gap: '10px',
+              marginBottom: '16px',
             }}
           >
-            <Loader2 size={28} className="spin-icon" style={{ opacity: 1, margin: '0 auto var(--space-3)' }} />
-            <p style={{ margin: 0, fontSize: 'var(--text-sm)', textAlign: 'center' }}>Memuat data absensi...</p>
+            {[
+              { label: 'Hadir Tepat', val: summary.hadir, color: '#16a34a', sub: 'Tanpa potongan' },
+              { label: 'Terlambat', val: summary.telat, color: '#d97706', sub: `${summary.totalLateMinutes} mnt akumulasi` },
+              { label: 'Ijin / Sakit', val: summary.ijin, color: '#2563eb', sub: 'Tercatat admin' },
+              { label: 'Tidak Hadir', val: summary.tidakHadir, color: '#dc2626', sub: 'Alpa tanpa ijin' },
+              { label: 'Shift Pengganti', val: summary.pengganti, color: '#7c3aed', sub: 'Swap disetujui' },
+              { label: 'Rata-rata Disiplin', val: `${summary.avgDisiplin}%`, color: '#4338ca', sub: 'Skor ketepatan tim' },
+            ].map((c) => (
+              <div
+                key={c.label}
+                className="card"
+                style={{
+                  padding: '10px 12px',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '10px',
+                  backgroundColor: '#ffffff',
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ fontSize: '1.35rem', fontWeight: 800, color: c.color, lineHeight: 1.1 }}>
+                  {c.val}
+                </div>
+                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                  {c.label}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                  {c.sub}
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="card">
+
+          {/* ── Sub-View Selector & Search Bar ─────────────────────── */}
           <div
-            className="empty-state"
             style={{
-              padding: 'var(--space-12) var(--space-4)',
               display: 'flex',
-              flexDirection: 'column',
+              justifyContent: 'space-between',
               alignItems: 'center',
-              justifyContent: 'center',
-              textAlign: 'center',
-              width: '100%',
+              flexWrap: 'wrap',
+              gap: '10px',
+              marginBottom: '12px',
             }}
           >
-            <ClipboardList size={36} aria-hidden="true" style={{ margin: '0 auto var(--space-3)', opacity: 0.35 }} />
-            <p style={{ margin: 0, fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)', textAlign: 'center' }}>
-              Belum ada data absensi
-            </p>
-            <p style={{ margin: 'var(--space-1) 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'center' }}>
-              {searchQ ? 'Tidak ada hasil yang cocok dengan kata kunci pencarian.' : 'Kasir belum melakukan clock in hari ini, atau belum ada jadwal terdaftar.'}
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="table-wrapper">
-          <table className="table" style={{ fontSize: 'var(--text-sm)' }}>
-            <thead>
-              <tr>
-                <th scope="col">Karyawan</th>
-                <th scope="col">NIM / Prodi</th>
-                <th scope="col">Jadwal Shift</th>
-                <th scope="col">Clock In</th>
-                <th scope="col">Keterlambatan</th>
-                <th scope="col">Status</th>
-                <th scope="col">Catatan</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id}>
-                  <td style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
-                    {r.employee.fullName}
-                  </td>
-                  <td style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-xs)' }}>
-                    <div>{r.employee.nim}</div>
-                    <div style={{ color: 'var(--color-text-muted)', fontSize: '0.7rem' }}>{r.employee.programStudi}</div>
-                  </td>
-                  <td style={{ color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
-                    {r.schedule.dayOfWeek} {r.schedule.slotStart}–{r.schedule.slotEnd}
-                  </td>
-                  <td style={{ color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>
-                    {r.clockInActual ? new Date(r.clockInActual).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—'}
-                  </td>
-                  <td>
-                    {r.lateMinutes > 0 ? (
-                      <span style={{ color: 'var(--color-warning)', fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-xs)' }}>
-                        +{r.lateMinutes} mnt
-                      </span>
-                    ) : (
-                      <span style={{ color: 'var(--color-text-muted)' }}>—</span>
-                    )}
-                  </td>
-                  <td>
-                    <StatusBadge status={r.status} />
-                  </td>
-                  <td style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)', maxWidth: '200px' }}>
-                    {r.notes ?? '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            {/* Sub-view toggle */}
+            <div
+              style={{
+                display: 'inline-flex',
+                backgroundColor: '#f1f5f9',
+                padding: '3px',
+                borderRadius: '8px',
+                border: '1px solid var(--color-border)',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setSubView('summary')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '0.78rem',
+                  fontWeight: subView === 'summary' ? 700 : 500,
+                  backgroundColor: subView === 'summary' ? '#ffffff' : 'transparent',
+                  color: subView === 'summary' ? '#166534' : 'var(--color-text-secondary)',
+                  boxShadow: subView === 'summary' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                }}
+              >
+                📊 Rekap Disiplin & Performa Mahasiswa ({summaryByEmployee.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubView('logs')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '0.78rem',
+                  fontWeight: subView === 'logs' ? 700 : 500,
+                  backgroundColor: subView === 'logs' ? '#ffffff' : 'transparent',
+                  color: subView === 'logs' ? '#166534' : 'var(--color-text-secondary)',
+                  boxShadow: subView === 'logs' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                }}
+              >
+                📝 Detail Log Presensi Shift ({records.length})
+              </button>
+            </div>
 
-          {/* Modal */}
+            {/* Search Box */}
+            <div className="form-input-icon" style={{ maxWidth: '320px', flex: '1 1 200px' }}>
+              <Search size={15} className="form-input-icon__icon" aria-hidden="true" />
+              <input
+                className="form-input form-input-icon__input"
+                type="search"
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                placeholder="Cari nama mahasiswa atau NIM..."
+                style={{ minHeight: 34, fontSize: '0.8rem' }}
+              />
+            </div>
+          </div>
+
+          {/* ── Table Area ────────────────────────────────────────── */}
+          {loading ? (
+            <div className="card" style={{ padding: '40px 16px', textAlign: 'center' }}>
+              <Loader2 size={24} className="spin-icon" style={{ margin: '0 auto 8px' }} />
+              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                Memuat data presensi dan performa mahasiswa...
+              </p>
+            </div>
+          ) : subView === 'summary' ? (
+            /* TABEL REKAP DISIPLIN PER MAHASISWA */
+            filteredSummary.length === 0 ? (
+              <div className="card" style={{ padding: '40px 16px', textAlign: 'center' }}>
+                <ClipboardList size={32} style={{ margin: '0 auto 8px', opacity: 0.35 }} />
+                <p style={{ fontWeight: 600, margin: 0 }}>Belum ada data presensi mahasiswa pada periode ini.</p>
+              </div>
+            ) : (
+              <div className="table-wrapper" style={{ border: '1px solid var(--color-border)', borderRadius: '10px', overflow: 'hidden' }}>
+                <table className="table" style={{ fontSize: '0.8rem', width: '100%' }}>
+                  <thead style={{ backgroundColor: '#f8fafc' }}>
+                    <tr>
+                      <th style={{ width: '40px', textAlign: 'center' }}>#</th>
+                      <th>Mahasiswa</th>
+                      <th>NIM / Prodi</th>
+                      <th style={{ textAlign: 'center' }}>Total Shift</th>
+                      <th style={{ textAlign: 'center' }}>Hadir Tepat</th>
+                      <th style={{ textAlign: 'center' }}>Terlambat</th>
+                      <th style={{ textAlign: 'center' }}>Ijin / Alpa</th>
+                      <th style={{ textAlign: 'center' }}>% Kehadiran</th>
+                      <th style={{ textAlign: 'center' }}>% Skor Disiplin</th>
+                      <th style={{ textAlign: 'center' }}>Status Disiplin</th>
+                      {isManager && <th style={{ textAlign: 'center' }}>Bagi Hasil 50%</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSummary.map((e, idx) => {
+                      const isHigh = e.skorDisiplin >= 95;
+                      const isMed = e.skorDisiplin >= 80 && e.skorDisiplin < 95;
+                      const isLow = e.skorDisiplin < 80;
+                      const badgeColor = isHigh ? '#16a34a' : isMed ? '#0284c7' : '#d97706';
+
+                      return (
+                        <tr key={e.employeeId}>
+                          <td style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>{idx + 1}</td>
+                          <td>
+                            <div style={{ fontWeight: 700, color: 'var(--color-text)' }}>{e.fullName}</div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{e.jabatan}</div>
+                          </td>
+                          <td>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>{e.nim}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>{e.programStudi}</div>
+                          </td>
+                          <td style={{ textAlign: 'center', fontWeight: 600 }}>{e.totalShift}x</td>
+                          <td style={{ textAlign: 'center', color: '#16a34a', fontWeight: 600 }}>{e.hadir}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            {e.telat > 0 ? (
+                              <span style={{ color: '#d97706', fontWeight: 700 }}>
+                                {e.telat}x <span style={{ fontSize: '0.7rem', fontWeight: 500 }}>({e.totalLateMinutes} mnt)</span>
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--color-text-muted)' }}>0</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {e.ijin + e.tidakHadir > 0 ? (
+                              <span style={{ color: e.tidakHadir > 0 ? '#dc2626' : '#2563eb', fontWeight: 600 }}>
+                                {e.ijin + e.tidakHadir}
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--color-text-muted)' }}>0</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center', fontWeight: 700 }}>{e.persenKehadiran}%</td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                padding: '2px 8px',
+                                borderRadius: '99px',
+                                fontSize: '0.75rem',
+                                fontWeight: 800,
+                                backgroundColor: isHigh ? '#dcfce7' : isMed ? '#e0f2fe' : '#fef3c7',
+                                color: isHigh ? '#166534' : isMed ? '#0369a1' : '#b45309',
+                              }}
+                            >
+                              <TrendingUp size={11} /> {e.skorDisiplin}%
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.7rem',
+                                fontWeight: 700,
+                                backgroundColor: `${badgeColor}15`,
+                                color: badgeColor,
+                                border: `1px solid ${badgeColor}35`,
+                              }}
+                            >
+                              {e.statusDisiplin.replace('_', ' ')}
+                            </span>
+                          </td>
+                          {isManager && (
+                            <td style={{ textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={() => setActiveTab('bagi_hasil')}
+                                style={{
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  border: '1px solid #166534',
+                                  backgroundColor: '#f0fdf4',
+                                  color: '#166534',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Lihat Gaji ➔
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : (
+            /* TABEL DETAIL LOG PRESENSI */
+            filteredRecords.length === 0 ? (
+              <div className="card" style={{ padding: '40px 16px', textAlign: 'center' }}>
+                <ClipboardList size={32} style={{ margin: '0 auto 8px', opacity: 0.35 }} />
+                <p style={{ fontWeight: 600, margin: 0 }}>Tidak ada log presensi yang cocok.</p>
+              </div>
+            ) : (
+              <div className="table-wrapper" style={{ border: '1px solid var(--color-border)', borderRadius: '10px', overflow: 'hidden' }}>
+                <table className="table" style={{ fontSize: '0.8rem', width: '100%' }}>
+                  <thead style={{ backgroundColor: '#f8fafc' }}>
+                    <tr>
+                      <th>Tanggal & Hari</th>
+                      <th>Karyawan</th>
+                      <th>NIM / Prodi</th>
+                      <th>Jadwal Shift</th>
+                      <th>Clock In</th>
+                      <th>Keterlambatan</th>
+                      <th>Status</th>
+                      <th>Catatan / Peran</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRecords.map((r) => (
+                      <tr key={r.id}>
+                        <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          <div>{r.attendanceDate}</div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>{r.schedule.dayOfWeek}</div>
+                        </td>
+                        <td style={{ fontWeight: 700, color: 'var(--color-text)' }}>
+                          {r.employee.fullName}
+                        </td>
+                        <td style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>
+                          <div>{r.employee.nim}</div>
+                          <div style={{ color: 'var(--color-text-muted)', fontSize: '0.68rem' }}>{r.employee.programStudi}</div>
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap', fontSize: '0.75rem' }}>
+                          {r.schedule.slotStart}–{r.schedule.slotEnd}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}>
+                          {r.clockInActual ? new Date(r.clockInActual).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                        </td>
+                        <td>
+                          {r.lateMinutes > 0 ? (
+                            <span style={{ color: '#d97706', fontWeight: 700, fontSize: '0.75rem' }}>
+                              +{r.lateMinutes} mnt
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                          )}
+                        </td>
+                        <td>
+                          <StatusBadge status={r.status} />
+                        </td>
+                        <td style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem', maxWidth: '220px' }}>
+                          {r.notes ?? '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+
+          {/* Modal Input Manual */}
           {showModal && (
             <ManualInputModal
               date={selectedDate}

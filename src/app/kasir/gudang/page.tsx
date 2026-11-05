@@ -120,6 +120,39 @@ export default function GudangPortalPage() {
   const [submittingRestock, setSubmittingRestock] = useState(false);
   const [restockSuccessMsg, setRestockSuccessMsg] = useState<string | null>(null);
 
+  // State Modal Rincian Multi-Batch FEFO
+  const [viewingBatchProduct, setViewingBatchProduct] = useState<WarehouseProduct | null>(null);
+  const [productBatches, setProductBatches] = useState<Array<{
+    id: string;
+    batchCode: string;
+    currentQty: number;
+    initialQty: number;
+    expiryDate: string | null;
+    expiryClass: string;
+    expiryStatus: string;
+    daysRemaining: number | null;
+    receivedAt: string;
+    notes: string | null;
+  }>>([]);
+  const [loadingBatches, setLoadingBatches] = useState(false);
+
+  async function openBatchModal(prod: WarehouseProduct) {
+    setViewingBatchProduct(prod);
+    setLoadingBatches(true);
+    setProductBatches([]);
+    try {
+      const res = await fetch(`/api/admin/gudang/batch?productId=${prod.id}`);
+      const j = await res.json();
+      if (j.success && j.data?.batches) {
+        setProductBatches(j.data.batches);
+      }
+    } catch {
+      // silent
+    } finally {
+      setLoadingBatches(false);
+    }
+  }
+
   // State Kamera Scanner
   const [isScanning, setIsScanning] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -137,7 +170,7 @@ export default function GudangPortalPage() {
       );
 
       if (res.status === 401 || res.status === 403) {
-        router.push('/kasir/login');
+        router.push('/kasir/gudang/login');
         return;
       }
 
@@ -1139,8 +1172,29 @@ export default function GudangPortalPage() {
                         </div>
                       )}
 
-                      {/* Baris 3: Tombol Aksi Restock */}
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 4 }}>
+                      {/* Baris 3: Tombol Aksi Restock & Rincian Batch FEFO */}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => openBatchModal(item)}
+                          className="btn btn-secondary"
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            backgroundColor: '#f8fafc',
+                            border: '1px solid #cbd5e1',
+                            color: '#334155',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <Boxes size={14} />
+                          <span>Rincian Batch ({item.activeBatchesCount})</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => openRestockModal(item)}
@@ -1171,6 +1225,272 @@ export default function GudangPortalPage() {
           </section>
         )}
       </main>
+
+      {/* ── MODAL RINCIAN MULTI-BATCH FEFO ── */}
+      {viewingBatchProduct && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            backgroundColor: 'rgba(0,0,0,0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#fff',
+              borderRadius: 16,
+              width: '100%',
+              maxWidth: 580,
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)',
+              border: '1px solid #e2e8f0',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                backgroundColor: '#f8fafc',
+                borderTopLeftRadius: 16,
+                borderTopRightRadius: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    backgroundColor: 'hsl(142 71% 45% / 0.15)',
+                    color: '#16a34a',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Boxes size={20} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '0.95rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                    Pelacakan Multi-Batch &amp; FEFO
+                  </h3>
+                  <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0 }}>
+                    {viewingBatchProduct.name} &bull; Total Stok Rak: <strong>{viewingBatchProduct.stockQty} {viewingBatchProduct.unit}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingBatchProduct(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: 4,
+                  borderRadius: 6,
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div style={{ padding: '16px 20px' }}>
+              {loadingBatches ? (
+                <div style={{ padding: '30px 0', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
+                  Memuat data batch stok...
+                </div>
+              ) : productBatches.length === 0 ? (
+                <div style={{ padding: '30px 0', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
+                  Belum ada riwayat batch terdaftar untuk produk ini.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 4 }}>
+                    Urutan batch di bawah ini disusun otomatis berdasarkan tanggal kedaluwarsa terdekat (First Expired, First Out). Kasir POS akan memotong batch prioritas pertama terlebih dahulu.
+                  </div>
+
+                  {productBatches.map((b, idx) => {
+                    const isFirstActive = idx === productBatches.findIndex((x) => x.currentQty > 0);
+                    const isExpired = b.expiryStatus === 'EXPIRED';
+                    const isCritical = b.expiryStatus === 'CRITICAL_7';
+
+                    return (
+                      <div
+                        key={b.id}
+                        style={{
+                          border: isFirstActive
+                            ? '2px solid #86efac'
+                            : isExpired
+                            ? '1px solid #fca5a5'
+                            : '1px solid #e2e8f0',
+                          backgroundColor: isFirstActive
+                            ? '#f0fdf4'
+                            : isExpired
+                            ? '#fef2f2'
+                            : '#ffffff',
+                          borderRadius: 12,
+                          padding: '12px 14px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6,
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 6 }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: '0.85rem', color: '#0f172a' }}>
+                                #{b.batchCode}
+                              </span>
+                              {isFirstActive ? (
+                                <span
+                                  style={{
+                                    backgroundColor: '#dcfce7',
+                                    color: '#15803d',
+                                    border: '1px solid #86efac',
+                                    borderRadius: 4,
+                                    fontSize: '0.68rem',
+                                    fontWeight: 800,
+                                    padding: '1px 6px',
+                                  }}
+                                >
+                                  ⚡ PRIORITAS 1 (KELUAR DULUAN)
+                                </span>
+                              ) : b.currentQty > 0 ? (
+                                <span
+                                  style={{
+                                    backgroundColor: '#f1f5f9',
+                                    color: '#475569',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: 4,
+                                    fontSize: '0.68rem',
+                                    fontWeight: 600,
+                                    padding: '1px 6px',
+                                  }}
+                                >
+                                  📦 Batch Cadangan (Exp Lebih Panjang)
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    backgroundColor: '#f8fafc',
+                                    color: '#94a3b8',
+                                    borderRadius: 4,
+                                    fontSize: '0.68rem',
+                                    padding: '1px 6px',
+                                  }}
+                                >
+                                  Habis
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>
+                              Diterima: {new Date(b.receivedAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </div>
+                          </div>
+
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '0.88rem', fontWeight: 800, color: b.currentQty > 0 ? '#0f172a' : '#94a3b8' }}>
+                              Sisa: {b.currentQty} / {b.initialQty} {viewingBatchProduct.unit}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            borderTop: '1px dashed #e2e8f0',
+                            paddingTop: 6,
+                            marginTop: 2,
+                            fontSize: '0.75rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <Clock size={12} style={{ color: '#64748b' }} />
+                            <span>
+                              Exp:{' '}
+                              <strong>
+                                {b.expiryDate
+                                  ? new Date(b.expiryDate + 'T00:00:00Z').toLocaleDateString('id-ID', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      year: 'numeric',
+                                    })
+                                  : '—'}
+                              </strong>
+                            </span>
+                          </div>
+                          <div>
+                            {isExpired ? (
+                              <span style={{ color: '#dc2626', fontWeight: 700 }}>
+                                Kedaluwarsa ({Math.abs(b.daysRemaining || 0)} hr lalu)
+                              </span>
+                            ) : isCritical ? (
+                              <span style={{ color: '#d97706', fontWeight: 700 }}>
+                                Sisa {b.daysRemaining} hari (FEFO Kritis)
+                              </span>
+                            ) : (
+                              <span style={{ color: '#16a34a', fontWeight: 600 }}>
+                                Aman ({b.daysRemaining ?? '—'} hr)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                padding: '12px 20px',
+                borderTop: '1px solid #e2e8f0',
+                backgroundColor: '#f8fafc',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                borderBottomLeftRadius: 16,
+                borderBottomRightRadius: 16,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setViewingBatchProduct(null)}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: 8,
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  backgroundColor: '#e2e8f0',
+                  color: '#1e293b',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MODAL RESTOCK / INBOUND BARANG MASUK ── */}
       {selectedProduct && (

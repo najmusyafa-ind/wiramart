@@ -6,7 +6,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { products, stockBatches } from '@/lib/db/schema';
+import { products, stockBatches, stockAdjustments, admins } from '@/lib/db/schema';
 import { eq, and, isNull, ne, gt, type SQL } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
@@ -29,8 +29,8 @@ const PatchSchema = z.object({
 
 export async function PATCH(req: NextRequest, ctx: Context) {
   const payload = await verifyJwt(req);
-  // PATCH: admin ATAU kasir boleh edit produk
-  if (!payload) return apiError('Unauthorized', 401);
+  // PATCH: hanya admin yang boleh ubah HPP, harga jual, dan data produk
+  if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
 
   const { id } = await ctx.params;
 
@@ -41,7 +41,7 @@ export async function PATCH(req: NextRequest, ctx: Context) {
   if (!parsed.success) return apiError(parsed.error.flatten().fieldErrors, 422);
 
   const [existing] = await db
-    .select({ id: products.id })
+    .select({ id: products.id, stockQty: products.stockQty, name: products.name })
     .from(products)
     .where(and(eq(products.id, id), isNull(products.deletedAt)))
     .limit(1);
@@ -139,6 +139,27 @@ export async function PATCH(req: NextRequest, ctx: Context) {
         notes: 'Penyesuaian stok manual katalog produk',
       });
     }
+
+    // Catat riwayat audit stok (siapa yang edit, dari berapa ke berapa, dan kapan)
+    if (existing && existing.stockQty !== updated.stockQty) {
+      const delta = updated.stockQty - existing.stockQty;
+      let adminId = payload.role === 'admin' ? payload.sub : null;
+      if (!adminId) {
+        const [firstAdmin] = await db.select({ id: admins.id }).from(admins).limit(1);
+        adminId = firstAdmin?.id ?? null;
+      }
+      if (adminId) {
+        await db.insert(stockAdjustments).values({
+          productId: id,
+          qtyBefore: existing.stockQty,
+          qtyAfter: updated.stockQty,
+          qtyDiff: delta,
+          reason: `Edit stok master produk oleh ${(payload as any).username || payload.role}`,
+          adjustedByAdminId: adminId,
+          createdAt: new Date(),
+        });
+      }
+    }
   }
 
   return apiOk(updated);
@@ -151,7 +172,7 @@ export async function DELETE(req: NextRequest, ctx: Context) {
   const { id } = await ctx.params;
 
   const [existing] = await db
-    .select({ id: products.id })
+    .select({ id: products.id, stockQty: products.stockQty, name: products.name })
     .from(products)
     .where(and(eq(products.id, id), isNull(products.deletedAt)))
     .limit(1);

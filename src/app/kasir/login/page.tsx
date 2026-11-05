@@ -2,11 +2,12 @@
 
 import { useState, useId, useEffect, useMemo } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   LogIn, AlertCircle, User, Hash, GraduationCap, CheckCircle2,
   Clock, Calendar, UserCheck, ChevronRight, RefreshCw, Sparkles,
-  ShoppingBag, Package, ShieldCheck, HeartHandshake
+  ShoppingBag, Package, ShieldCheck, HeartHandshake, ShoppingCart, Boxes
 } from 'lucide-react';
 
 type ShiftPersonnel = {
@@ -173,26 +174,10 @@ export default function KasirLoginPage() {
 
       setPresensiSuccessMsg(json.message ?? `Presensi berhasil! Selamat bertugas sebagai ${selectedRole}.`);
       
-      // Khusus Petugas Gudang: Auto-login & langsung arahkan ke Portal Gudang
+      // Khusus Petugas Gudang: Langsung arahkan ke Portal Keamanan Gudang (NIM + PIN)
       if (selectedRole === 'Gudang') {
-        try {
-          const authRes = await fetch('/api/auth/kasir', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              fullName:     selectedPerson.fullName ?? '',
-              nim:          selectedPerson.nim ?? '',
-              programStudi: selectedPerson.programStudi ?? '',
-            }),
-          });
-          const authJson = await authRes.json() as { success: boolean; data?: { redirect?: string } };
-          if (authJson.success && authJson.data?.redirect) {
-            router.push(authJson.data.redirect);
-            return;
-          }
-        } catch {
-          // Fallback: biarkan user melihat pesan sukses
-        }
+        router.push('/kasir/gudang/login');
+        return;
       }
 
       // Auto-fill login POS jika orang ini bertugas sebagai Kasir atau Admin Shift
@@ -306,6 +291,7 @@ export default function KasirLoginPage() {
               src="/logo.png"
               alt="Logo Wiramart UNPERBA"
               fill
+              sizes="64px"
               style={{ objectFit: 'contain' }}
               priority
             />
@@ -372,7 +358,7 @@ export default function KasirLoginPage() {
             }}
           >
             <LogIn size={15} />
-            <span>2. Login Petugas (Kasir &amp; Gudang)</span>
+            <span>2. Login Kasir (POS)</span>
           </button>
         </div>
 
@@ -933,7 +919,7 @@ export default function KasirLoginPage() {
               <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('pos')}
+                  onClick={() => router.push('/kasir/gudang/login')}
                   className="btn btn-secondary"
                   style={{
                     display: 'inline-flex',
@@ -945,7 +931,7 @@ export default function KasirLoginPage() {
                   }}
                 >
                   <Package size={13} />
-                  <span>Petugas Gudang? Masuk ke Portal Inventaris &amp; FEFO</span>
+                  <span>Petugas Gudang? Masuk ke Portal Inventaris &amp; FEFO (NIM + PIN)</span>
                   <ChevronRight size={13} />
                 </button>
               </div>
@@ -1133,12 +1119,12 @@ export default function KasirLoginPage() {
           </div>
         )}
 
-        {/* ─── TAB 2: LOGIN PETUGAS (KASIR & GUDANG) ─── */}
+        {/* ─── TAB 2: LOGIN KHUSUS KASIR (POS) ─── */}
         {activeTab === 'pos' && (
           <div>
-            <h1 className="auth-title">Login Petugas Shift &amp; Gudang</h1>
+            <h1 className="auth-title">Login Kasir Toko (POS)</h1>
             <p className="auth-subtitle">
-              Masuk menggunakan NIM terdaftar (berlaku untuk Kasir &amp; Petugas Logistik).
+              Masuk menggunakan NIM terdaftar untuk membuka mesin kasir dan melayani transaksi.
             </p>
 
             <div
@@ -1156,9 +1142,9 @@ export default function KasirLoginPage() {
               }}
               role="note"
             >
-              <Sparkles size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+              <ShoppingCart size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
               <span>
-                Petugas Kasir otomatis membuka POS, sedangkan Petugas Gudang otomatis diarahkan ke Portal Gudang &amp; FEFO.
+                Khusus mahasiswa bertugas Kasir. Petugas Gudang login terpisah via NIM &amp; PIN.
               </span>
             </div>
 
@@ -1172,8 +1158,6 @@ export default function KasirLoginPage() {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                   {[
-                    { role: 'Gudang', label: 'Khalila (Gudang)', fullName: 'Khalila Sevina Nurani', nim: '02601011', prodi: 'Manajemen' },
-                    { role: 'Gudang', label: 'Bagaskara (Gudang)', fullName: 'Bagaskara Putra N.H', nim: '02505035', prodi: 'Teknik Informatika' },
                     { role: 'Kasir', label: 'Tisya (Kasir)', fullName: 'Tisya Nur Febriani', nim: '02601020', prodi: 'Manajemen' },
                     { role: 'Kasir', label: 'Dwi Lia (Kasir)', fullName: 'Dwi Lia Rahmania', nim: '02401083', prodi: 'Manajemen' },
                   ].map((item) => (
@@ -1351,11 +1335,59 @@ export default function KasirLoginPage() {
                 {!isLoading && (
                   <>
                     <LogIn size={20} aria-hidden="true" />
-                    Masuk Petugas Toko &amp; Gudang
+                    Buka Sistem Kasir (POS)
                   </>
                 )}
               </button>
             </form>
+
+            {/* Banner Pemisah Portal Gudang (NIM + PIN) */}
+            <div
+              style={{
+                marginTop: 'var(--space-5)',
+                padding: 'var(--space-3) var(--space-4)',
+                backgroundColor: 'hsl(142 71% 45% / 0.08)',
+                border: '1px solid hsl(142 71% 45% / 0.25)',
+                borderRadius: 'var(--radius-lg)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 'var(--space-3)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--color-primary)',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Boxes size={18} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--color-text)' }}>
+                    Petugas Gudang &amp; Logistik?
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                    Login terpisah via NIM &amp; PIN Mandiri
+                  </div>
+                </div>
+              </div>
+              <Link
+                href="/kasir/gudang/login"
+                className="btn btn-sm btn-primary"
+                style={{ fontSize: '0.72rem', fontWeight: 700, whiteSpace: 'nowrap', padding: '6px 12px' }}
+              >
+                Portal Gudang →
+              </Link>
+            </div>
           </div>
         )}
 

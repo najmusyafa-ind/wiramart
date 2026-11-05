@@ -53,6 +53,18 @@ const TS: Record<string,{color:string;bg:string;border:string}> = {
   OVERAGE: {color:'#0284c7',bg:'#dbeafe',border:'#93c5fd'},
   RUNNING: {color:'#6b7280',bg:'#f3f4f6',border:'#d1d5db'},
 };
+
+function getMonthBounds(offsetMonths = 0): { start: string; end: string } {
+  const now = new Date(Date.now() + 7 * 3600000);
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth() + offsetMonths; // 0-indexed
+  const firstDay = new Date(Date.UTC(y, m, 1));
+  const lastDay = new Date(Date.UTC(y, m + 1, 0));
+  return {
+    start: firstDay.toISOString().slice(0, 10),
+    end: lastDay.toISOString().slice(0, 10),
+  };
+}
 function todayW(): string { return new Date(Date.now()+7*3600000).toISOString().slice(0,10); }
 function prevW(): string { return new Date(Date.now()+7*3600000-6*86400000).toISOString().slice(0,10); }
 
@@ -137,6 +149,42 @@ export default function RekapKasir() {
       {/* Filter */}
       <div className="card" style={{marginBottom:20,borderRadius:14}}>
         <div className="card-body" style={{padding:'14px 18px'}}>
+                    {/* Quick Presets */}
+          <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
+            <span style={{fontSize:'0.72rem',fontWeight:700,color:'var(--color-text-muted)',marginRight:4}}>Periode Cepat:</span>
+            <button
+              type="button"
+              onClick={() => { const t = todayW(); setDateFrom(t); setDateTo(t); fetchData(t, t); }}
+              className="btn btn-secondary btn-sm"
+              style={{fontSize:'0.72rem',padding:'3px 10px',borderRadius:20}}
+            >
+              Hari Ini
+            </button>
+            <button
+              type="button"
+              onClick={() => { const f = prevW(); const t = todayW(); setDateFrom(f); setDateTo(t); fetchData(f, t); }}
+              className="btn btn-secondary btn-sm"
+              style={{fontSize:'0.72rem',padding:'3px 10px',borderRadius:20}}
+            >
+              7 Hari Terakhir
+            </button>
+            <button
+              type="button"
+              onClick={() => { const b = getMonthBounds(0); const t = todayW(); const end = b.end < t ? b.end : t; setDateFrom(b.start); setDateTo(end); fetchData(b.start, end); }}
+              className="btn btn-secondary btn-sm"
+              style={{fontSize:'0.72rem',padding:'3px 10px',borderRadius:20}}
+            >
+              Bulan Ini
+            </button>
+            <button
+              type="button"
+              onClick={() => { const b = getMonthBounds(-1); setDateFrom(b.start); setDateTo(b.end); fetchData(b.start, b.end); }}
+              className="btn btn-secondary btn-sm"
+              style={{fontSize:'0.72rem',padding:'3px 10px',borderRadius:20,backgroundColor:'#f5f3ff',color:'#6d28d9',border:'1px solid #ddd6fe'}}
+            >
+              Bulan Lalu
+            </button>
+          </div>
           <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
             <div className="form-group" style={{margin:0}}>
               <label htmlFor={`${uid}-f`} className="form-label" style={{fontSize:'0.72rem',display:'flex',alignItems:'center',gap:4}}><Calendar size={11}/>Dari</label>
@@ -230,6 +278,7 @@ export default function RekapKasir() {
                     <tr>
                       <th style={{width:28}}>#</th>
                       <th>Kasir</th><th>NIM</th>
+                      <th style={{textAlign:'center'}}>Jam Kerja</th>
                       <th style={{textAlign:'right'}}>Shift</th>
                       <th style={{textAlign:'right'}}>Total Omzet</th>
                       <th style={{textAlign:'right',color:'#16a34a'}}>💵 Cash</th>
@@ -254,6 +303,7 @@ export default function RekapKasir() {
                             <div style={{fontSize:'0.68rem',color:'#9ca3af'}}>{k.jabatan}</div>
                           </td>
                           <td style={{color:'#6b7280',fontFamily:'monospace',fontSize:'0.73rem'}}>{k.kasirNim}</td>
+                          <td style={{textAlign:'center',color:'#475569',fontSize:'0.72rem'}}>{dur(k.totalDurasiMenit)}</td>
                           <td style={{textAlign:'right',fontWeight:700}}>{n(k.totalShift)}</td>
                           <td style={{textAlign:'right',fontWeight:800,color:'#166534'}}>{rp(n(k.totalOmzet))}</td>
                           <td style={{textAlign:'right',fontWeight:700,color:'#16a34a'}}>{rp(n(k.totalPenjualanCash??0))}</td>
@@ -337,26 +387,42 @@ function ShiftModal({kasir,shifts,onClose}:{kasir:KasirSummary;shifts:ShiftDetai
         <div className="table-wrapper" style={{maxHeight:'60vh',overflowY:'auto'}}>
           <table className="table" style={{fontSize:'0.75rem',whiteSpace:'nowrap'}}>
             <thead style={{position:'sticky',top:0,zIndex:2}}>
-              <tr><th>Clock-In</th><th>Clock-Out</th><th>Durasi</th><th style={{textAlign:'right'}}>Omzet</th><th style={{textAlign:'right'}}>Trx</th><th style={{textAlign:'right'}}>Cash</th><th style={{textAlign:'right'}}>QRIS</th><th style={{textAlign:'right'}}>Void</th><th style={{textAlign:'right'}}>Modal</th><th style={{textAlign:'right'}}>Selisih</th><th style={{textAlign:'center'}}>Status</th></tr>
+              <tr>
+                <th>Clock-In</th><th>Clock-Out</th><th>Durasi</th>
+                <th style={{textAlign:'right'}}>Omzet</th>
+                <th style={{textAlign:'right'}}>Laba Kotor</th>
+                <th style={{textAlign:'right',color:'#16a34a'}}>Upah Bersih</th>
+                <th style={{textAlign:'right'}}>Selisih Laci</th>
+                <th style={{textAlign:'right',color:'#dc2626'}}>Potong Tekor</th>
+                <th style={{textAlign:'right',color:'#15803d',fontWeight:800}}>Upah Bersih</th>
+                <th style={{textAlign:'center'}}>Status</th>
+              </tr>
             </thead>
             <tbody>
               {myS.length===0?<tr><td colSpan={11} style={{textAlign:'center',padding:'32px 0',color:'var(--color-text-muted)'}}>Tidak ada shift</td></tr>
               :myS.map(s=>{
                 const tier=s.status==='ACTIVE'?'RUNNING':s.discrepancyTier;
                 const ts=TS[tier]??TS.RUNNING;
+                const labaKotor = n(s.labaKotor);
+                                const isTekor = s.discrepancy !== null && s.discrepancy < -2000;
+                const potongTekor = isTekor ? Math.abs(n(s.discrepancy)) : 0;
+                const upahBersih = Math.max(0, Math.round(labaKotor * 0.5) - potongTekor);
                 return(
                   <tr key={s.shiftId}>
                     <td style={{fontFamily:'monospace',fontSize:'0.7rem'}}>{fdt(s.clockIn)}</td>
                     <td style={{fontFamily:'monospace',fontSize:'0.7rem',color:s.clockOut?'inherit':'#9ca3af'}}>{fdt(s.clockOut)}</td>
                     <td>{dur(s.durasiMenit)}</td>
                     <td style={{textAlign:'right',fontWeight:700,color:'#166534'}}>{rp(n(s.omzet))}</td>
-                    <td style={{textAlign:'right'}}>{n(s.txCount).toLocaleString('id-ID')}</td>
-                    <td style={{textAlign:'right'}}>{n(s.txCountCash)}</td>
-                    <td style={{textAlign:'right'}}>{n(s.txCountQris)}</td>
-                    <td style={{textAlign:'right',color:n(s.voidCount)>0?'#dc2626':'#9ca3af'}}>{n(s.voidCount)}</td>
-                    <td style={{textAlign:'right',color:'#6b7280'}}>{rp(n(s.modalAwal))}</td>
+                    <td style={{textAlign:'right',fontWeight:600}}>{rp(labaKotor)}</td>
+                    <td style={{textAlign:'right',fontWeight:700,color:'#16a34a'}}>{rp(upahBersih)}</td>
                     <td style={{textAlign:'right',fontWeight:600,color:ts.color}}>
                       {s.discrepancy!==null?(s.discrepancy>=0?'+':'')+rp(n(s.discrepancy)):s.status==='ACTIVE'?'(aktif)':'—'}
+                    </td>
+                    <td style={{textAlign:'right',fontWeight:700,color:potongTekor>0?'#dc2626':'#94a3b8'}}>
+                      {potongTekor > 0 ? `-${rp(potongTekor)}` : 'Rp 0'}
+                    </td>
+                    <td style={{textAlign:'right',fontWeight:800,color:'#166534',backgroundColor:'#f0fdf4'}}>
+                      {rp(upahBersih)}
                     </td>
                     <td style={{textAlign:'center'}}>
                       <span style={{display:'inline-block',padding:'2px 10px',borderRadius:999,fontSize:'0.68rem',fontWeight:700,color:ts.color,background:ts.bg,border:`1px solid ${ts.border}`}}>

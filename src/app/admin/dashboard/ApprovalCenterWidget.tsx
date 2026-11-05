@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import {
   ShieldAlert,
+  Truck,
   ArrowLeftRight,
   Clock,
   AlertTriangle,
@@ -31,6 +32,8 @@ export type ApprovalCenterProps = {
   pendingSwapsCount: number;
   pendingProposalsCount?: number;
   criticalBatchesCount?: number;
+  pendingStockReceivesCount?: number;
+  pendingConditionReportsCount?: number;
   autoClosedShiftsCount: number;
   autoClosedShifts: AutoClosedShiftInfo[];
   qrisNeedsAttention: boolean;
@@ -43,6 +46,8 @@ export default function ApprovalCenterWidget({
   pendingSwapsCount,
   pendingProposalsCount = 0,
   criticalBatchesCount = 0,
+  pendingStockReceivesCount = 0,
+  pendingConditionReportsCount = 0,
   autoClosedShiftsCount,
   autoClosedShifts,
   qrisNeedsAttention,
@@ -55,7 +60,9 @@ export default function ApprovalCenterWidget({
     autoClosedShiftsCount +
     (qrisNeedsAttention ? 1 : 0) +
     pendingProposalsCount +
-    (criticalBatchesCount > 0 ? 1 : 0);
+    (criticalBatchesCount > 0 ? 1 : 0) +
+    (pendingStockReceivesCount > 0 ? 1 : 0) +
+    (pendingConditionReportsCount > 0 ? 1 : 0);
 
   return (
     <div className="card" style={{ marginTop: 'var(--space-6)', overflow: 'hidden' }}>
@@ -363,7 +370,7 @@ export default function ApprovalCenterWidget({
           </div>
 
           <Link
-            href="/admin/produk"
+            href="/admin/produk?tab=usulan"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -425,7 +432,7 @@ export default function ApprovalCenterWidget({
           </div>
 
           <Link
-            href="/admin/produk"
+            href="/admin/produk?tab=batch"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -437,6 +444,68 @@ export default function ApprovalCenterWidget({
             }}
           >
             Pantau Batch Kedaluwarsa <ChevronRight size={14} />
+          </Link>
+        </div>
+
+        {/* 6. Persetujuan Barang Masuk Gudang (Manager Dosen Only) */}
+        <div
+          style={{
+            padding: 'var(--space-4)',
+            borderRadius: 'var(--radius-md)',
+            border: `1px solid ${
+              pendingStockReceivesCount > 0 ? 'hsl(38 92% 50%)' : 'var(--color-border)'
+            }`,
+            backgroundColor:
+              pendingStockReceivesCount > 0 ? 'hsl(38 92% 50% / 0.08)' : 'var(--color-surface)',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+              <span
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 600,
+                  fontSize: '0.85rem',
+                  color: pendingStockReceivesCount > 0 ? 'hsl(38 92% 40%)' : 'inherit',
+                }}
+              >
+                <Truck size={16} />
+                Persetujuan Barang Masuk
+              </span>
+              <span
+                className={`badge ${
+                  pendingStockReceivesCount > 0 ? 'badge-warning' : 'badge-success'
+                }`}
+                style={{ fontSize: '0.72rem' }}
+              >
+                {pendingStockReceivesCount > 0 ? `${pendingStockReceivesCount} Menunggu` : 'Nihil'}
+              </span>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '0 0 var(--space-3)' }}>
+              {pendingStockReceivesCount > 0
+                ? 'Petugas gudang telah menginput draft barang masuk dan menunggu verifikasi/approval Manajer (Dosen).'
+                : 'Tidak ada draft penerimaan barang baru yang menunggu persetujuan.'}
+            </p>
+          </div>
+
+          <Link
+            href="/admin/gudang-approval"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              color: 'var(--color-primary)',
+              textDecoration: 'none',
+            }}
+          >
+            Review &amp; Setujui Barang <ChevronRight size={14} />
           </Link>
         </div>
       </div>

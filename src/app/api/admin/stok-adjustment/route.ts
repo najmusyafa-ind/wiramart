@@ -9,13 +9,60 @@
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq, and, gt, asc, sql } from 'drizzle-orm';
+import { eq, and, gt, asc, desc, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { products, stockAdjustments, stockBatches } from '@/lib/db/schema';
+import { products, stockAdjustments, stockBatches, admins } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
+
+// =============================================================
+// GET — Riwayat Audit Koreksi Stok (Kapan, Oleh Siapa, Berapa ke Berapa)
+// =============================================================
+export async function GET(req: NextRequest): Promise<Response> {
+  try {
+    await requireAdmin();
+    const { searchParams } = new URL(req.url);
+    const productId = searchParams.get('productId');
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10)));
+
+    const conditions = [];
+    if (productId) {
+      conditions.push(eq(stockAdjustments.productId, productId));
+    }
+
+    const rows = await db
+      .select({
+        id: stockAdjustments.id,
+        productId: stockAdjustments.productId,
+        productName: products.name,
+        unit: products.unit,
+        qtyBefore: stockAdjustments.qtyBefore,
+        qtyAfter: stockAdjustments.qtyAfter,
+        qtyDiff: stockAdjustments.qtyDiff,
+        reason: stockAdjustments.reason,
+        createdAt: stockAdjustments.createdAt,
+        adminName: admins.fullName,
+        adminNidn: admins.nidn,
+        adminRole: admins.role,
+      })
+      .from(stockAdjustments)
+      .innerJoin(products, eq(stockAdjustments.productId, products.id))
+      .leftJoin(admins, eq(stockAdjustments.adjustedByAdminId, admins.id))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(stockAdjustments.createdAt))
+      .limit(limit);
+
+    return apiOk({ items: rows, total: rows.length });
+  } catch (err) {
+    if (err instanceof AppError) {
+      return apiError(err.message, err.code, err.statusCode);
+    }
+    console.error('[stok-adjustment GET]', err);
+    return apiError('Gagal memuat riwayat koreksi stok.', 'SERVER_ERROR', 500);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────
 // Validation

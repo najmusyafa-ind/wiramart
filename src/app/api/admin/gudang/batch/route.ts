@@ -19,8 +19,8 @@ export const runtime = 'nodejs';
 // ─────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   const session = await verifyJwt(req);
-  if (!session || session.role !== 'admin') {
-    return apiError('Akses ditolak. Memerlukan hak akses Admin/Manajer.', 403);
+  if (!session || (session.role !== 'admin' && session.role !== 'employee')) {
+    return apiError('Akses ditolak. Memerlukan hak akses Admin atau Petugas Gudang.', 403);
   }
 
   const { searchParams } = new URL(req.url);
@@ -111,6 +111,7 @@ export async function GET(req: NextRequest) {
 
       return {
         ...b,
+        costPrice: session.role === 'admin' ? b.costPrice : '0',
         expiryStatus,
         daysRemaining,
       };

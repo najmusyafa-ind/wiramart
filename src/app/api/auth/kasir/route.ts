@@ -83,6 +83,16 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  // 3b. Zero-Trust Enforcement: Akun Petugas Gudang WAJIB login via PIN di Portal Gudang (/kasir/gudang/login)
+  const isGudang = (employee.jabatan ?? '').toLowerCase().includes('gudang');
+  if (isGudang) {
+    return apiError(
+      'Akun Anda terdaftar sebagai Petugas Gudang & Logistik. Demi standar keamanan inventaris, silakan login melalui Portal Gudang menggunakan NIM & PIN.',
+      'GUDANG_PIN_AUTH_REQUIRED',
+      403,
+    );
+  }
+
   // 4. Periksa shift aktif karyawan (dukung resume sesi aktif <12 jam)
   // Cacat 2 Opsi A: Login HANYA otentikasi akun, TIDAK otomatis membuat shift baru tanpa modal awal.
   // Shift baru HANYA dibuat secara resmi saat Buka Shift (input modal awal) di POS.
@@ -201,9 +211,8 @@ export async function POST(request: Request): Promise<Response> {
   });
   const refreshToken = await signRefreshToken(employee.id, 'employee');
 
-  // Cek apakah karyawan bertugas sebagai petugas Gudang
-  const isGudang = (employee.jabatan ?? '').toLowerCase().includes('gudang');
-  const redirectUrl = isGudang ? '/kasir/gudang' : '/kasir/pos';
+  // Khusus Kasir yang lolos otentikasi diarahkan ke POS
+  const redirectUrl = '/kasir/pos';
 
   // Set cookies langsung di NextResponse (reliable di Next.js 16+)
   const response = NextResponse.json({

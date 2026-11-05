@@ -20,6 +20,8 @@ import {
   employees,
   attendances,
   shiftSchedules,
+  shiftCashMovements,
+  transactionPayments,
 } from '@/lib/db/schema';
 import { and, asc, eq, gte, lte, lt, inArray, isNull, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
@@ -40,6 +42,22 @@ import {
 export const runtime = 'nodejs';
 
 const PERIODS: readonly PeriodKey[] = ['daily', 'weekly', 'monthly', 'semi_annual'];
+
+/** Akun admin/testing/dosen yang DILARANG menerima bagi hasil upah mahasiswa */
+function isExcludedAccount(name?: string | null, nim?: string | null): boolean {
+  const lname = (name || '').toLowerCase();
+  const lnim = (nim || '').trim();
+  return (
+    lname.includes('testing') ||
+    lname.includes('dede') ||
+    lnim === '02405013' ||
+    lnim === '02405021' ||
+    lnim === '02405015' ||
+    lnim === '02405016' ||
+    lnim === '02405050' ||
+    lnim === '00000000'
+  );
+}
 
 export async function GET(req: NextRequest): Promise<Response> {
   const payload = await verifyJwt(req);
@@ -157,6 +175,8 @@ export async function GET(req: NextRequest): Promise<Response> {
       scheduleTeams[key] = list;
     }
 
+    // 0c. Weekend (Sabtu/Minggu) tidak ada jadwal resmi Wiramart — query ini dihapus.
+
     // ─────────────────────────────────────────────────────────────
     // 1. Ambil semua shifts dalam rentang (TANPA filter nama testing)
     //    Filter testing hanya untuk tampilan laporan, bukan data shift.
@@ -168,6 +188,9 @@ export async function GET(req: NextRequest): Promise<Response> {
         clockIn: shifts.clockIn,
         clockOut: shifts.clockOut,
         status: shifts.status,
+        modalAwal: shifts.modalAwal,
+        actualCash: shifts.actualCash,
+        serahTerimaDiff: shifts.serahTerimaDiff,
         employeeId: shifts.employeeId,
         kasirName: employees.fullName,
         kasirNim: employees.nim,
@@ -258,24 +281,122 @@ export async function GET(req: NextRequest): Promise<Response> {
       }
     }
 
+    // ── 2b. Audit Uang Kas & Laci per Shift (Petty Cash Movements & Cash Sales) ──
+    const cashMovements = shiftIds.length > 0
+      ? await db
+          .select({
+            shiftId:      shiftCashMovements.shiftId,
+            movementType: shiftCashMovements.movementType,
+            total:        sql<string>`COALESCE(SUM(${shiftCashMovements.amount}), 0)`,
+          })
+          .from(shiftCashMovements)
+          .where(inArray(shiftCashMovements.shiftId, shiftIds))
+          .groupBy(shiftCashMovements.shiftId, shiftCashMovements.movementType)
+      : [];
+
+    const cashOutMap = new Map<string, number>();
+    const cashInMap  = new Map<string, number>();
+    for (const m of cashMovements) {
+      const val = parseFloat(m.total || '0');
+      if (m.movementType === 'CASH_OUT') cashOutMap.set(m.shiftId, val);
+      else if (m.movementType === 'CASH_IN')  cashInMap.set(m.shiftId, val);
+    }
+
+    const splitCash = shiftIds.length > 0
+      ? await db
+          .select({
+            shiftId: transactions.shiftId,
+            total:   sql<string>`COALESCE(SUM(${transactionPayments.amount}), 0)`,
+          })
+          .from(transactionPayments)
+          .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
+          .where(and(
+            inArray(transactions.shiftId, shiftIds),
+            eq(transactions.status, 'COMPLETED'),
+            eq(transactionPayments.paymentMethod, 'CASH'),
+            eq(transactions.isTest, false),
+          ))
+          .groupBy(transactions.shiftId)
+      : [];
+
+    const cashSalesMap = new Map<string, number>();
+    for (const s of splitCash) {
+      if (s.shiftId) {
+        cashSalesMap.set(s.shiftId, (cashSalesMap.get(s.shiftId) ?? 0) + parseFloat(s.total || '0'));
+      }
+    }
+
+    const directCash = shiftIds.length > 0
+      ? await db
+          .select({
+            shiftId: transactions.shiftId,
+            total:   sql<string>`COALESCE(SUM(${transactions.grossAmount}), 0)`,
+          })
+          .from(transactions)
+          .where(and(
+            inArray(transactions.shiftId, shiftIds),
+            eq(transactions.status, 'COMPLETED'),
+            eq(transactions.paymentMethod, 'CASH'),
+            eq(transactions.isTest, false),
+            sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+          ))
+          .groupBy(transactions.shiftId)
+      : [];
+
+    for (const d of directCash) {
+      if (d.shiftId) {
+        cashSalesMap.set(d.shiftId, (cashSalesMap.get(d.shiftId) ?? 0) + parseFloat(d.total || '0'));
+      }
+    }
+
     const wibDateOf = (d: Date): string =>
       new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
 
+    const empScheduleMap = new Map<string, { dayOfWeek: string; slotStart: string }[]>();
+    for (const sr of scheduleRows) {
+      const list = empScheduleMap.get(sr.employeeId) ?? [];
+      list.push({ dayOfWeek: sr.dayOfWeek, slotStart: sr.slotStart });
+      empScheduleMap.set(sr.employeeId, list);
+    }
+
     const sesiByShift = new Map<string, 'Pagi' | 'Siang'>();
     const shiftIdsByDate = new Map<string, string[]>();
+    const HARI_TO_ENUM: Record<number, string> = {
+      0: 'MINGGU', 1: 'SENIN', 2: 'SELASA', 3: 'RABU', 4: 'KAMIS', 5: 'JUMAT', 6: 'SABTU',
+    };
+
     for (const s of shiftRows) {
       const key = wibDateOf(s.clockIn);
       const list = shiftIdsByDate.get(key) ?? [];
       list.push(s.id);
       shiftIdsByDate.set(key, list);
 
-      const wibHour = parseInt(
-        new Intl.DateTimeFormat('en-US', {
-          timeZone: 'Asia/Jakarta', hour: 'numeric', hour12: false,
-        }).format(s.clockIn),
-        10
-      );
-      sesiByShift.set(s.id, wibHour >= 11 ? 'Siang' : 'Pagi');
+      const dayOfWeekNum = new Date(`${key}T00:00:00+07:00`).getDay();
+      const dayEnum = HARI_TO_ENUM[dayOfWeekNum] ?? '';
+
+      // Prioritas 1: Cek jadwal resmi kasir pada hari tersebut
+      const empScheds = empScheduleMap.get(s.employeeId) ?? [];
+      const matchSched = empScheds.find((sch) => sch.dayOfWeek === dayEnum);
+
+      let sesi: 'Pagi' | 'Siang';
+      if (matchSched) {
+        const slotH = parseInt(matchSched.slotStart.split(':')[0] ?? '11', 10);
+        sesi = slotH >= 11 ? 'Siang' : 'Pagi';
+      } else {
+        // Prioritas 2: Midpoint rentang jam buka-tutup shift
+        const inMs = s.clockIn.getTime();
+        const outMs = s.clockOut ? s.clockOut.getTime() : inMs + 4 * 3600 * 1000;
+        const midMs = (inMs + outMs) / 2;
+        const midHour = parseInt(
+          new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Asia/Jakarta', hour: 'numeric', hour12: false,
+          }).format(new Date(midMs)),
+          10
+        );
+        sesi = midHour >= 11 ? 'Siang' : 'Pagi';
+      }
+
+      sesiByShift.set(s.id, sesi);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -375,18 +496,28 @@ export async function GET(req: NextRequest): Promise<Response> {
     // 4b. Integrasi Kasir Shift & Deduplikasi per Shift
     // ─────────────────────────────────────────────────────────────
     for (const s of shiftRows) {
+      const wibDate = wibDateOf(s.clockIn);
+      const dayOfWeek = new Date(wibDate + 'T00:00:00+07:00').getDay(); // 0 = Minggu, 6 = Sabtu
+
+      // Sabtu (6) & Minggu (0): tidak ada jadwal resmi Wiramart.
+      // Shift di hari Sabtu/Minggu dianggap anomali / data uji.
+      // Alokasi gaji = Rp 0 (skip — attByShift akan kosong → bobot 0).
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        attByShift.set(s.id, []); // tidak ada personel sah
+        continue;
+      }
+
       const rawList = attByShift.get(s.id) ?? [];
       const deduped: typeof attRows = [];
       const seenEmp = new Set<string>();
       for (const att of rawList) {
-        if (!seenEmp.has(att.employee.id)) {
+        if (!isExcludedAccount(att.employee.fullName, att.employee.nim) && !seenEmp.has(att.employee.id)) {
           seenEmp.add(att.employee.id);
           deduped.push(att);
         }
       }
 
-      const isTesting = s.kasirName.toLowerCase().includes('testing') || s.kasirNim === '02405013';
-      if (!isTesting && !seenEmp.has(s.employeeId)) {
+      if (!isExcludedAccount(s.kasirName, s.kasirNim) && !seenEmp.has(s.employeeId)) {
         deduped.push({
           id: `shift-kasir-${s.id}`,
           employeeId: s.employeeId,
@@ -420,28 +551,68 @@ export async function GET(req: NextRequest): Promise<Response> {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 4c. Alokasi Pool Shift (Opsi A — 100% Pool Mahasiswa ke Shift)
-    //     Pool harian dibagi ke shift dengan bobot Laba Kotor × Bobot Durasi Sesi
-    //     (Pagi 1.25x vs Siang 1.00x).
+    // 4c. Alokasi Pool Shift — Rumus Hybrid 70/30 (Fair & Transparan)
+    //
+    //  70% → "Jatah Hadir" (Attendance Pool)
+    //         Dibagi proporsional ke tiap shift berdasarkan total poin
+    //         disiplin seluruh personelnya. Tiap orang hadir = 1 unit
+    //         × faktor disiplin ketepatan waktu × bobot sesi.
+    //
+    //  30% → "Bonus Produktivitas" (Performance Pool)
+    //         Dibagi proporsional ke shift berdasarkan laba kotor shift.
+    //         Shift 0 transaksi = 0 bonus (tapi tetap dapat bagian 70%).
+    //
+    //  Hasilnya: Shift Selasa Siang 0-tx tidak lagi dapat Rp 0.
+    //            Total pool 50% tetap terdistribusi tuntas (closed-loop).
     // ─────────────────────────────────────────────────────────────
     const poolShiftMahasiswa = poolHakMahasiswa;
-    const dayPool = new Map<string, number>();
-    for (const d of financial.daily) {
-      dayPool.set(d.date, d.alokasiGajiKaryawan);
-    }
+    const ATTENDANCE_RATIO = 0.70;
+    const PERFORMANCE_RATIO = 0.30;
 
+    // Hitung total poin disiplin seluruh shift (untuk normalisasi Pool A)
+    const shiftAttPoints: number[] = shiftRows.map((s) => {
+      const atts = attByShift.get(s.id) ?? [];
+      if (atts.length === 0) return 0;
+      let sum = 0;
+      for (const att of atts) {
+        const wInfo = computePersonnelWeight({
+          role: extractRoleFromNotes(att.notes, att.employee.jabatan),
+          sesi: sesiByShift.get(s.id) ?? 'Pagi',
+          attendanceDate: wibDateOf(s.clockIn),
+          lateMinutes: att.lateMinutes,
+        });
+        sum += wInfo.totalWeight;
+      }
+      return sum;
+    });
+    const totalAttPoints = shiftAttPoints.reduce((a, b) => a + b, 0);
+
+    // Hitung total laba kotor seluruh shift (untuk normalisasi Pool B)
+    const shiftLabaKotor: number[] = shiftRows.map((s) => {
+      const atts = attByShift.get(s.id) ?? [];
+      if (atts.length === 0) return 0;
+      return Math.max(0, finByShift.get(s.id)?.labaKotor ?? 0);
+    });
+    const totalLabaKotorAllShifts = shiftLabaKotor.reduce((a, b) => a + b, 0);
+
+    // Gabungkan bobot: 70% attendance + 30% performance
+    // Menggunakan cross-multiply agar tidak ada pembagian 0:
+    //   combinedWeight[i] = attPoin[i] × totalLk + (lk[i] / totalLk × totalAttPoin) × totalLk
+    //   Disederhanakan: (0.70 × attPoin[i] × totalLk) + (0.30 × lk[i] × totalAttPoin)
+    const shiftWeights = shiftRows.map((_, idx) => {
+      const att = shiftAttPoints[idx] ?? 0;
+      const lk = shiftLabaKotor[idx] ?? 0;
+      if (att === 0) return 0; // shift tanpa personel sah → dapat Rp 0
+      const attendancePart = ATTENDANCE_RATIO * att * (totalLabaKotorAllShifts > 0 ? totalLabaKotorAllShifts : 1);
+      const performancePart = PERFORMANCE_RATIO * lk * (totalAttPoints > 0 ? totalAttPoints : 1);
+      return attendancePart + performancePart;
+    });
+
+    const shiftShares = allocateProportional(poolShiftMahasiswa, shiftWeights);
     const poolByShift = new Map<string, number>();
-    for (const [date, ids] of shiftIdsByDate) {
-      const hasAnyAttendee = ids.some((id) => (attByShift.get(id)?.length ?? 0) > 0);
-      const weights = ids.map((id) => {
-        if (hasAnyAttendee && (attByShift.get(id)?.length ?? 0) === 0) return 0;
-        const lk = Math.max(0, finByShift.get(id)?.labaKotor ?? 0);
-        const durW = getSessionDurationWeight(sesiByShift.get(id) ?? 'Pagi');
-        return lk * durW;
-      });
-      const shares = allocateProportional(dayPool.get(date) ?? 0, weights);
-      ids.forEach((id, i) => poolByShift.set(id, shares[i] ?? 0));
-    }
+    shiftRows.forEach((s, idx) => {
+      poolByShift.set(s.id, shiftShares[idx] ?? 0);
+    });
 
     // ─────────────────────────────────────────────────────────────
     // 5. Bangun response per shift + akumulasi per karyawan
@@ -475,6 +646,12 @@ export async function GET(req: NextRequest): Promise<Response> {
       omzet: number;
       labaKotor: number;
       poolGaji: number;
+      modalAwal: number;
+      actualCash: number | null;
+      expectedCash: number;
+      discrepancy: number | null;
+      shortageDeduction: number;
+      gajiBersih: number;
       personnelCount: number;
       nominalPerOrang: number;
       personnel: AttendeeRow[];
@@ -506,9 +683,23 @@ export async function GET(req: NextRequest): Promise<Response> {
       const fin = finByShift.get(s.id) ?? { omzet: 0, labaKotor: 0, txCount: 0 };
       const poolGaji = poolByShift.get(s.id) ?? 0;
 
+      // Hitung selisih laci kasir & potong tekor otomatis
+      const rawModal = s.modalAwal ? parseFloat(s.modalAwal) : 100_000;
+      const modalAwal = rawModal > 150_000 ? 100_000 : (rawModal <= 0 ? 100_000 : rawModal);
+      const actualCash = s.actualCash ? parseFloat(s.actualCash) : null;
+      const cashSales = cashSalesMap.get(s.id) ?? 0;
+      const cashOut = cashOutMap.get(s.id) ?? 0;
+      const cashIn = cashInMap.get(s.id) ?? 0;
+      const expectedCash = modalAwal + cashSales - cashOut + cashIn;
+      const discrepancy = actualCash !== null ? actualCash - expectedCash : null;
+      const shortageDeduction = (discrepancy !== null && discrepancy < -2000) ? Math.abs(discrepancy) : 0;
+      // Pilihan 1 (Closed-Loop 50:50): Hak mahasiswa 50% adalah paten dan tidak dipotong sepihak oleh tekor fisik laci kasir,
+      // sehingga Total Upah Shift (50%) = Kas Toko (50%) SAMA PERSIS 100%!
+      const gajiBersih = poolGaji;
+
       const attendeesRaw = attByShift.get(s.id) ?? [];
       const count = attendeesRaw.length;
-      const nominalPerOrang = count > 0 ? Math.round(poolGaji / count) : 0;
+      const nominalPerOrang = count > 0 ? Math.round(gajiBersih / count) : 0;
 
       const dayOfWeek = new Date(wibDate + 'T00:00:00+07:00').getDay();
       const hariStr = HARI[dayOfWeek] ?? wibDate;
@@ -531,11 +722,12 @@ export async function GET(req: NextRequest): Promise<Response> {
           lateMinutes: att.lateMinutes,
         });
 
+        // Tidak ada lagi special case Minggu — weekend sudah di-exclude di tahap 4b
         return { att, roleTask, wInfo };
       });
 
       const personShares = allocateProportional(
-        poolGaji,
+        gajiBersih,
         evaluated.map((e) => e.wInfo.totalWeight),
       );
 
@@ -547,31 +739,33 @@ export async function GET(req: NextRequest): Promise<Response> {
             ? 'Ketua UMKM / Admin Shift'
             : att.employee.jabatan;
 
-        if (!empAgg.has(empId)) {
-          empAgg.set(empId, {
-            employeeId: empId,
-            fullName: att.employee.fullName,
-            nim: att.employee.nim,
-            programStudi: att.employee.programStudi,
-            jabatan: displayJabatan,
-            totalHadir: 0,
-            nominalShift: 0,
-            tunjanganKetua: 0,
-            totalNominal: 0,
-            lateCount: 0,
-            totalLateMinutes: 0,
-            shifts: [],
-          });
+        if (!isExcludedAccount(att.employee.fullName, att.employee.nim)) {
+          if (!empAgg.has(empId)) {
+            empAgg.set(empId, {
+              employeeId: empId,
+              fullName: att.employee.fullName,
+              nim: att.employee.nim,
+              programStudi: att.employee.programStudi,
+              jabatan: displayJabatan,
+              totalHadir: 0,
+              nominalShift: 0,
+              tunjanganKetua: 0,
+              totalNominal: 0,
+              lateCount: 0,
+              totalLateMinutes: 0,
+              shifts: [],
+            });
+          }
+          const agg = empAgg.get(empId)!;
+          agg.totalHadir += 1;
+          agg.nominalShift += share;
+          agg.totalNominal += share;
+          if (wInfo.effectiveLateMinutes > 0) {
+            agg.lateCount += 1;
+            agg.totalLateMinutes += wInfo.effectiveLateMinutes;
+          }
+          agg.shifts.push(`${wibDate} ${sesi}`);
         }
-        const agg = empAgg.get(empId)!;
-        agg.totalHadir += 1;
-        agg.nominalShift += share;
-        agg.totalNominal += share;
-        if (wInfo.effectiveLateMinutes > 0) {
-          agg.lateCount += 1;
-          agg.totalLateMinutes += wInfo.effectiveLateMinutes;
-        }
-        agg.shifts.push(`${wibDate} ${sesi}`);
 
         return {
           employeeId: empId,
@@ -603,6 +797,12 @@ export async function GET(req: NextRequest): Promise<Response> {
         omzet: fin.omzet,
         labaKotor: fin.labaKotor,
         poolGaji,
+        modalAwal,
+        actualCash,
+        expectedCash,
+        discrepancy,
+        shortageDeduction,
+        gajiBersih,
         personnelCount: count,
         nominalPerOrang,
         personnel,
@@ -612,12 +812,11 @@ export async function GET(req: NextRequest): Promise<Response> {
     const summaryPerEmployee = Array.from(empAgg.values())
       .sort((a, b) => b.totalNominal - a.totalNominal);
 
-    const totalDistributed = builtShifts.reduce(
-      (acc, curr) => acc + (curr.personnelCount > 0 ? curr.poolGaji : 0),
-      0,
-    );
-    const sisaPool = Math.max(0, poolHakMahasiswa - totalDistributed);
-    const labaBersihToko = Math.round(fs.labaKotor - fs.biayaOperasional - totalDistributed);
+    // Rumus Hybrid 70/30: Total pool 50% terdistribusi tuntas (closed-loop, zero leakage)
+    const totalDistributed = poolShiftMahasiswa;
+    const sisaPool = 0;
+    // Kas toko paten 50% dari Laba Bersih Operasional
+    const labaBersihToko = fs.labaBersih;
 
     return apiOk({
       range: {

@@ -10,7 +10,7 @@
 //   4. Tabel inventaris per-batch & pelacakan FEFO
 // =============================================================
 
-import { useState, useEffect, useCallback, useId } from 'react';
+import { useState, useEffect, useCallback, useId, useMemo } from 'react';
 import {
   Package, AlertTriangle, AlertCircle, CheckCircle2, Clock, Plus,
   Search, RefreshCw, Loader2, X, ShieldAlert, Calendar, Truck, Tag,
@@ -56,8 +56,10 @@ type ProductOption = {
 
 export default function BatchStokTab({
   onBatchUpdated,
+  initialSearch = '',
 }: {
   onBatchUpdated?: () => void;
+  initialSearch?: string;
 }) {
   const uid = useId();
   const [batches, setBatches] = useState<BatchItem[]>([]);
@@ -72,7 +74,13 @@ export default function BatchStokTab({
   const [error, setError] = useState('');
 
   // Filters
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
+
+  useEffect(() => {
+    if (initialSearch) {
+      setSearch(initialSearch);
+    }
+  }, [initialSearch]);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'EXPIRED' | 'EXPIRING_7' | 'EXPIRING_30' | 'ACTIVE'>('ALL');
   const [expiryClassFilter, setExpiryClassFilter] = useState<string>('ALL');
 
@@ -111,6 +119,17 @@ export default function BatchStokTab({
   useEffect(() => {
     fetchBatches();
   }, [fetchBatches]);
+
+  // Lacak batch aktif pertama per produk untuk visualisasi urutan FEFO
+  const firstActiveBatchPerProduct = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const b of batches) {
+      if (b.currentQty > 0 && !map.has(b.productId)) {
+        map.set(b.productId, b.id);
+      }
+    }
+    return map;
+  }, [batches]);
 
   return (
     <div>
@@ -383,19 +402,68 @@ export default function BatchStokTab({
 
                       {/* Kode Batch */}
                       <td>
-                        <span
-                          style={{
-                            fontFamily: 'monospace',
-                            fontSize: '0.78rem',
-                            fontWeight: 600,
-                            backgroundColor: 'var(--color-surface-elevated)',
-                            padding: '2px 6px',
-                            borderRadius: 'var(--radius-sm)',
-                            border: '1px solid var(--color-border)',
-                          }}
-                        >
-                          {b.batchCode}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+                          <span
+                            style={{
+                              fontFamily: 'monospace',
+                              fontSize: '0.78rem',
+                              fontWeight: 600,
+                              backgroundColor: 'var(--color-surface-elevated)',
+                              padding: '2px 6px',
+                              borderRadius: 'var(--radius-sm)',
+                              border: '1px solid var(--color-border)',
+                            }}
+                          >
+                            {b.batchCode}
+                          </span>
+                          {b.currentQty > 0 ? (
+                            firstActiveBatchPerProduct.get(b.productId) === b.id ? (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 2,
+                                  fontSize: '0.68rem',
+                                  fontWeight: 800,
+                                  backgroundColor: '#dcfce7',
+                                  color: '#15803d',
+                                  border: '1px solid #86efac',
+                                  borderRadius: '4px',
+                                  padding: '1px 5px',
+                                }}
+                              >
+                                ⚡ PRIORITAS 1 (FEFO)
+                              </span>
+                            ) : (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 2,
+                                  fontSize: '0.68rem',
+                                  fontWeight: 600,
+                                  backgroundColor: '#f1f5f9',
+                                  color: '#475569',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: '4px',
+                                  padding: '1px 5px',
+                                }}
+                              >
+                                📦 Batch Cadangan
+                              </span>
+                            )
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: '0.68rem',
+                                color: '#94a3b8',
+                                fontStyle: 'italic',
+                              }}
+                            >
+                              Habis terjual
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Kelas Umur Simpan */}
