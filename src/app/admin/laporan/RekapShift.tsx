@@ -640,8 +640,37 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         r.height = 21;
       });
 
+      // Bagian Pedoman Rumus Detail
+      const noteStartRow = 17;
+      ws1.mergeCells(`B${noteStartRow}:D${noteStartRow}`);
+      const noteTitle = ws1.getCell(`B${noteStartRow}`);
+      noteTitle.value = 'PEDOMAN & FORMULA SISTEM PENGGAJIAN PERSHIFT WIRAMART';
+      noteTitle.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF1E3A5F' } };
+      ws1.getRow(noteStartRow).height = 22;
+
+      const notesList = [
+        { no: '1.', rule: 'Rasio Utama 50% : 50% (Paten)', detail: 'Laba Bersih Toko dibagi seimbang 50% untuk Kas Toko dan 50% untuk Plafon Upah Mahasiswa (Closed-Loop).' },
+        { no: '2.', rule: 'Komposisi Pool Hybrid 70% / 30%', detail: '70% Jatah Kehadiran (Attendance Pool) dibagikan berdasarkan poin kedisiplinan hadir dan ketepatan waktu. 30% Bonus Produktivitas (Performance Pool) dibagikan proporsional sesuai laba kotor shift.' },
+        { no: '3.', rule: 'Faktor Disiplin Waktu Kehadiran', detail: 'Hadir tepat waktu = bobot 1.0 (100%). Keterlambatan dikenakan penalti poin proporsional waktu telat.' },
+        { no: '4.', rule: 'Pembagian Internal Shift', detail: 'Upah yang dialokasikan ke shift dibagikan ke seluruh personel yang hadir di shift tersebut berdasarkan bobot peran & kedisiplinan.' },
+        { no: '5.', rule: 'Distribusi Bulat Tanpa Residu (Hamilton)', detail: 'Seluruh alokasi rupiah dibulatkan menggunakan metode Largest Remainder (Hamilton) sehingga sisa saldo pool selalu Rp 0 (zero-leakage).' },
+      ];
+
+      notesList.forEach((n, idx) => {
+        const rowNum = noteStartRow + 1 + idx;
+        const r = ws1.getRow(rowNum);
+        r.values = ['', `${n.no} ${n.rule}`, n.detail, ''];
+        ws1.mergeCells(`C${rowNum}:D${rowNum}`);
+        ws1.getCell(`B${rowNum}`).font = FONT_BOLD;
+        ws1.getCell(`C${rowNum}`).font = FONT_REGULAR;
+        ws1.getCell(`B${rowNum}`).border = BORDER_THIN as Partial<ExcelJS.Borders>;
+        ws1.getCell(`C${rowNum}`).border = BORDER_THIN as Partial<ExcelJS.Borders>;
+        ws1.getCell(`D${rowNum}`).border = BORDER_THIN as Partial<ExcelJS.Borders>;
+        r.height = 20;
+      });
+
       // ─────────────────────────────────────────────────────────────────────
-      // SHEET 2: REKAP KELOMPOK SHIFT (9 KELOMPOK RESMI)
+      // SHEET 2: REKAP KELOMPOK SHIFT (DENGAN DETAIL GAJI PER ANGGOTA)
       // ─────────────────────────────────────────────────────────────────────
       const ws2 = wb.addWorksheet('Rekap Kelompok Shift', { views: [{ showGridLines: true }] });
       ws2.columns = [
@@ -650,84 +679,121 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         { width: 14 }, // C: Hari
         { width: 10 }, // D: Sesi
         { width: 16 }, // E: Jam Kerja
-        { width: 46 }, // F: Anggota Personel Tetap
-        { width: 14 }, // G: Jml Personel
-        { width: 14 }, // H: Frekuensi Shift
-        { width: 16 }, // I: Total Transaksi
-        { width: 20 }, // J: Total Omzet
-        { width: 20 }, // K: Total Laba Kotor
-        { width: 22 }, // L: Total Upah Bersih
+        { width: 12 }, // F: Jml Personel
+        { width: 14 }, // G: Frekuensi Shift
+        { width: 14 }, // H: Total Tx
+        { width: 18 }, // I: Total Omzet
+        { width: 18 }, // J: Laba Kotor
+        { width: 20 }, // K: Total Upah Bersih
+        { width: 18 }, // L: Rata-Rata/Shift
+        { width: 58 }, // M: Keterangan Detail Upah Per Anggota
       ];
 
-      ws2.mergeCells('B2:L2');
+      ws2.mergeCells('B2:M2');
       const t2 = ws2.getCell('B2');
-      t2.value = 'REKAPITULASI UPAH PER KELOMPOK SHIFT RESMI — WIRAMART';
+      t2.value = 'REKAPITULASI UPAH PER KELOMPOK SHIFT RESMI & DETAIL PEMBAGIAN PER ANGGOTA';
       t2.font = FONT_TITLE;
       t2.fill = FILL_NAVY as ExcelJS.Fill;
       t2.alignment = { horizontal: 'center', vertical: 'middle' };
       ws2.getRow(2).height = 28;
 
-      ws2.mergeCells('B3:L3');
+      ws2.mergeCells('B3:M3');
       const t2Sub = ws2.getCell('B3');
-      t2Sub.value = `Periode: ${data.range.label} | Jadwal Operasional Senin s/d Jumat (9 Kelompok Kerja)`;
+      t2Sub.value = `Periode: ${data.range.label} | Jadwal Operasional Senin s/d Jumat (9 Kelompok Kerja Resmi)`;
       t2Sub.font = FONT_MUTED;
       t2Sub.alignment = { horizontal: 'center', vertical: 'middle' };
       ws2.getRow(3).height = 20;
 
       const headerCols2 = [
-        'No', 'Hari', 'Sesi', 'Jam Kerja', 'Anggota Personel Tetap',
-        'Personel', 'Frekuensi', 'Transaksi', 'Omzet (Rp)', 'Laba Kotor (Rp)', 'Upah Bersih (Rp)'
+        'No', 'Hari', 'Sesi', 'Jam Kerja', 'Personel',
+        'Frekuensi', 'Transaksi', 'Omzet (Rp)', 'Laba Kotor (Rp)', 'Upah Bersih (Rp)', 'Rata-Rata/Shift', 'Keterangan Detail Upah Per Anggota'
       ];
       const r2Header = ws2.getRow(5);
       r2Header.values = ['', ...headerCols2];
-      ['B5','C5','D5','E5','F5','G5','H5','I5','J5','K5','L5'].forEach((addr) => {
+      ['B5','C5','D5','E5','F5','G5','H5','I5','J5','K5','L5','M5'].forEach((addr) => {
         const c = ws2.getCell(addr);
         c.font = FONT_HEADER;
         c.fill = FILL_HEADER as ExcelJS.Fill;
         c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
         c.alignment = {
           vertical: 'middle',
-          horizontal: ['B5','C5','D5','E5','G5','H5'].includes(addr) ? 'center' : (['I5','J5','K5','L5'].includes(addr) ? 'right' : 'left'),
+          horizontal: ['B5','C5','D5','E5','F5','G5'].includes(addr) ? 'center' : (['H5','I5','J5','K5','L5'].includes(addr) ? 'right' : 'left'),
         };
       });
       r2Header.height = 24;
 
+      // Hitung akumulasi per kelompok dan per anggota kelompok
+      const groupStats = new Map<string, {
+        memberNominals: Map<string, number>;
+      }>();
+
+      for (const s of data.shifts) {
+        const gKey = `${s.hari}-${s.sesi}`;
+        if (!groupStats.has(gKey)) {
+          groupStats.set(gKey, { memberNominals: new Map<string, number>() });
+        }
+        const g = groupStats.get(gKey)!;
+        for (const p of s.personnel) {
+          const cur = g.memberNominals.get(p.fullName) ?? 0;
+          g.memberNominals.set(p.fullName, cur + p.nominalBagiHasil);
+        }
+      }
+
       filteredGroups.forEach((g, idx) => {
         const rowNum = 6 + idx;
         const r = ws2.getRow(rowNum);
+        const shiftCount = g.totalShiftCount;
+        const avgPerMeeting = shiftCount > 0 ? Math.round(g.upahBersih / shiftCount) : 0;
+
+        const gStat = groupStats.get(g.groupKey);
+        const memberDetails: string[] = [];
+        if (gStat && gStat.memberNominals.size > 0) {
+          gStat.memberNominals.forEach((nominal, name) => {
+            memberDetails.push(`${name} (Rp ${nominal.toLocaleString('id-ID')})`);
+          });
+        } else {
+          g.anggotaShift.forEach((m) => {
+            memberDetails.push(m.fullName);
+          });
+        }
+        const detailKeterangan = memberDetails.join(', ');
+
         r.values = [
           '',
           idx + 1,
           g.hari,
           g.sesi,
           g.waktuLabel,
-          g.anggotaShift.map((m) => m.fullName).join(', '),
           g.totalPersonel,
           g.totalShiftCount,
           g.totalTx,
           g.totalOmzet,
           g.totalLabaKotor,
           g.upahBersih,
+          avgPerMeeting,
+          detailKeterangan,
         ];
 
-        ['B','C','D','E','F','G','H','I','J','K','L'].forEach((col) => {
+        ['B','C','D','E','F','G','H','I','J','K','L','M'].forEach((col) => {
           const c = ws2.getCell(`${col}${rowNum}`);
           c.font = FONT_REGULAR;
           c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
           c.alignment = {
             vertical: 'middle',
-            horizontal: ['B','C','D','E','G','H'].includes(col) ? 'center' : (['I','J','K','L'].includes(col) ? 'right' : 'left'),
+            horizontal: ['B','C','D','E','F','G'].includes(col) ? 'center' : (['H','I','J','K','L'].includes(col) ? 'right' : 'left'),
+            wrapText: col === 'M',
           };
           if (idx % 2 === 1) c.fill = FILL_ZEBRA as ExcelJS.Fill;
         });
 
+        ws2.getCell(`F${rowNum}`).numFmt = NUMBER_FMT;
         ws2.getCell(`G${rowNum}`).numFmt = NUMBER_FMT;
         ws2.getCell(`H${rowNum}`).numFmt = NUMBER_FMT;
-        ws2.getCell(`I${rowNum}`).numFmt = NUMBER_FMT;
+        ws2.getCell(`I${rowNum}`).numFmt = CURRENCY_FMT;
         ws2.getCell(`J${rowNum}`).numFmt = CURRENCY_FMT;
         ws2.getCell(`K${rowNum}`).numFmt = CURRENCY_FMT;
         ws2.getCell(`L${rowNum}`).numFmt = CURRENCY_FMT;
-        r.height = 22;
+        r.height = 24;
       });
 
       const totalRowNum2 = 6 + filteredGroups.length;
@@ -738,34 +804,36 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         'TOTAL KESELURUHAN',
         '',
         '',
-        `${filteredGroups.length} Kelompok Shift Reguler`,
         tableTotals.totalPersonel,
         tableTotals.totalShiftCount,
         tableTotals.totalTx,
         tableTotals.totalOmzet,
         tableTotals.totalLabaKotor,
         tableTotals.upahBersih,
+        tableTotals.totalShiftCount > 0 ? Math.round(tableTotals.upahBersih / tableTotals.totalShiftCount) : 0,
+        `Selesai 100% — Total Hak Mahasiswa Rp ${tableTotals.upahBersih.toLocaleString('id-ID')} Klop 50:50 dengan Kas Toko`,
       ];
 
       ws2.mergeCells(`C${totalRowNum2}:E${totalRowNum2}`);
-      ['B','C','D','E','F','G','H','I','J','K','L'].forEach((col) => {
+      ['B','C','D','E','F','G','H','I','J','K','L','M'].forEach((col) => {
         const c = ws2.getCell(`${col}${totalRowNum2}`);
         c.font = FONT_BOLD;
         c.fill = FILL_TOTAL as ExcelJS.Fill;
         c.border = BORDER_TOTAL as Partial<ExcelJS.Borders>;
         c.alignment = {
           vertical: 'middle',
-          horizontal: ['C','D','E','G','H'].includes(col) ? 'center' : (['I','J','K','L'].includes(col) ? 'right' : 'left'),
+          horizontal: ['C','D','E','F','G'].includes(col) ? 'center' : (['H','I','J','K','L'].includes(col) ? 'right' : 'left'),
         };
       });
 
+      ws2.getCell(`F${totalRowNum2}`).numFmt = NUMBER_FMT;
       ws2.getCell(`G${totalRowNum2}`).numFmt = NUMBER_FMT;
       ws2.getCell(`H${totalRowNum2}`).numFmt = NUMBER_FMT;
-      ws2.getCell(`I${totalRowNum2}`).numFmt = NUMBER_FMT;
+      ws2.getCell(`I${totalRowNum2}`).numFmt = CURRENCY_FMT;
       ws2.getCell(`J${totalRowNum2}`).numFmt = CURRENCY_FMT;
       ws2.getCell(`K${totalRowNum2}`).numFmt = CURRENCY_FMT;
       ws2.getCell(`L${totalRowNum2}`).numFmt = CURRENCY_FMT;
-      r2Total.height = 24;
+      r2Total.height = 26;
 
       // ─────────────────────────────────────────────────────────────────────
       // SHEET 3: RINCIAN UPAH PER MAHASISWA
@@ -881,7 +949,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       r3Total.height = 24;
 
       // ─────────────────────────────────────────────────────────────────────
-      // SHEET 4: LOG SHIFT HARIAN (AUDIT TRAIL)
+      // SHEET 4: LOG SHIFT HARIAN (DENGAN RINCIAN PEMBAGIAN PER ORANG)
       // ─────────────────────────────────────────────────────────────────────
       const ws4 = wb.addWorksheet('Log Shift Harian', { views: [{ showGridLines: true }] });
       ws4.columns = [
@@ -890,45 +958,46 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         { width: 14 }, // C: Tanggal
         { width: 12 }, // D: Hari
         { width: 10 }, // E: Sesi
-        { width: 28 }, // F: Kasir Bertugas
+        { width: 26 }, // F: Kasir Bertugas
         { width: 16 }, // G: Buka (WIB)
         { width: 16 }, // H: Tutup (WIB)
         { width: 12 }, // I: Transaksi
         { width: 18 }, // J: Omzet (Rp)
         { width: 18 }, // K: Laba Kotor (Rp)
-        { width: 16 }, // L: Selisih Laci
-        { width: 18 }, // M: Upah Shift (Rp)
+        { width: 18 }, // L: Upah Shift (Rp)
+        { width: 14 }, // M: Jml Personel
+        { width: 56 }, // N: Rincian Pembagian Upah Personel Shift
       ];
 
-      ws4.mergeCells('B2:M2');
+      ws4.mergeCells('B2:N2');
       const t4 = ws4.getCell('B2');
-      t4.value = 'JURNAL LOG TRANSAKSI & HASIL OPERASIONAL SETIAP SHIFT — WIRAMART';
+      t4.value = 'JURNAL LOG TRANSAKSI & RINCIAN HASIL OPERASIONAL SETIAP SHIFT';
       t4.font = FONT_TITLE;
       t4.fill = FILL_NAVY as ExcelJS.Fill;
       t4.alignment = { horizontal: 'center', vertical: 'middle' };
       ws4.getRow(2).height = 28;
 
-      ws4.mergeCells('B3:M3');
+      ws4.mergeCells('B3:N3');
       const t4Sub = ws4.getCell('B3');
-      t4Sub.value = `Periode: ${data.range.label} | Total Sesi Shift: ${data.shifts.length} Shift`;
+      t4Sub.value = `Periode: ${data.range.label} | Total Pertemuan Shift: ${data.shifts.length} Shift`;
       t4Sub.font = FONT_MUTED;
       t4Sub.alignment = { horizontal: 'center', vertical: 'middle' };
       ws4.getRow(3).height = 20;
 
       const headerCols4 = [
         'No', 'Tanggal', 'Hari', 'Sesi', 'Kasir Bertugas',
-        'Buka (WIB)', 'Tutup (WIB)', 'Transaksi', 'Omzet (Rp)', 'Laba Kotor (Rp)', 'Selisih Laci', 'Upah Bersih (Rp)'
+        'Buka (WIB)', 'Tutup (WIB)', 'Transaksi', 'Omzet (Rp)', 'Laba Kotor (Rp)', 'Upah Shift (Rp)', 'Personel', 'Rincian Pembagian Upah Personel Shift'
       ];
       const r4Header = ws4.getRow(5);
       r4Header.values = ['', ...headerCols4];
-      ['B5','C5','D5','E5','F5','G5','H5','I5','J5','K5','L5','M5'].forEach((addr) => {
+      ['B5','C5','D5','E5','F5','G5','H5','I5','J5','K5','L5','M5','N5'].forEach((addr) => {
         const c = ws4.getCell(addr);
         c.font = FONT_HEADER;
         c.fill = FILL_HEADER as ExcelJS.Fill;
         c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
         c.alignment = {
           vertical: 'middle',
-          horizontal: ['B5','C5','D5','E5','G5','H5'].includes(addr) ? 'center' : (['I5','J5','K5','L5','M5'].includes(addr) ? 'right' : 'left'),
+          horizontal: ['B5','C5','D5','E5','G5','H5','M5'].includes(addr) ? 'center' : (['I5','J5','K5','L5'].includes(addr) ? 'right' : 'left'),
         };
       });
       r4Header.height = 24;
@@ -937,6 +1006,8 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         const inTime = s.clockIn ? new Date(s.clockIn).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : '-';
         const outTime = s.clockOut ? new Date(s.clockOut).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : 'Berjalan';
         const rowNum = 6 + idx;
+        const personelList = s.personnel.map((p) => `${p.fullName}: Rp ${p.nominalBagiHasil.toLocaleString('id-ID')}`).join(' | ');
+
         const r = ws4.getRow(rowNum);
         r.values = [
           '',
@@ -950,17 +1021,19 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           s.txCount,
           s.omzet,
           s.labaKotor,
-          s.discrepancy ?? 0,
           s.gajiBersih,
+          s.personnelCount,
+          personelList || 'Hanya Kasir',
         ];
 
-        ['B','C','D','E','F','G','H','I','J','K','L','M'].forEach((col) => {
+        ['B','C','D','E','F','G','H','I','J','K','L','M','N'].forEach((col) => {
           const c = ws4.getCell(`${col}${rowNum}`);
           c.font = FONT_REGULAR;
           c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
           c.alignment = {
             vertical: 'middle',
-            horizontal: ['B','C','D','E','G','H'].includes(col) ? 'center' : (['I','J','K','L','M'].includes(col) ? 'right' : 'left'),
+            horizontal: ['B','C','D','E','G','H','M'].includes(col) ? 'center' : (['I','J','K','L'].includes(col) ? 'right' : 'left'),
+            wrapText: col === 'N',
           };
           if (idx % 2 === 1) c.fill = FILL_ZEBRA as ExcelJS.Fill;
         });
@@ -969,9 +1042,131 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         ws4.getCell(`J${rowNum}`).numFmt = CURRENCY_FMT;
         ws4.getCell(`K${rowNum}`).numFmt = CURRENCY_FMT;
         ws4.getCell(`L${rowNum}`).numFmt = CURRENCY_FMT;
-        ws4.getCell(`M${rowNum}`).numFmt = CURRENCY_FMT;
-        r.height = 21;
+        ws4.getCell(`M${rowNum}`).numFmt = NUMBER_FMT;
+        r.height = 22;
       });
+
+      // ─────────────────────────────────────────────────────────────────────
+      // SHEET 5: RINCIAN AUDIT PER SHIFT & PERSONEL (PAYROLL MATRIX)
+      // ─────────────────────────────────────────────────────────────────────
+      const ws5 = wb.addWorksheet('Detail Shift & Personel', { views: [{ showGridLines: true }] });
+      ws5.columns = [
+        { width: 4 },  // Margin A
+        { width: 6 },  // B: No
+        { width: 14 }, // C: Tanggal
+        { width: 12 }, // D: Hari
+        { width: 10 }, // E: Sesi
+        { width: 28 }, // F: Nama Mahasiswa
+        { width: 14 }, // G: NIM
+        { width: 22 }, // H: Peran Tugas
+        { width: 16 }, // I: Status Kehadiran
+        { width: 14 }, // J: Bobot Poin
+        { width: 22 }, // K: Upah Diterima (Rp)
+      ];
+
+      ws5.mergeCells('B2:K2');
+      const t5 = ws5.getCell('B2');
+      t5.value = 'RINCIAN MATRIKS AUDIT PEMBAGIAN UPAH PER SHIFT & PER PERSONEL';
+      t5.font = FONT_TITLE;
+      t5.fill = FILL_NAVY as ExcelJS.Fill;
+      t5.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws5.getRow(2).height = 28;
+
+      ws5.mergeCells('B3:K3');
+      const t5Sub = ws5.getCell('B3');
+      t5Sub.value = `Periode: ${data.range.label} | Transparansi Penuh Distribusi Upah Mahasiswa Berdasarkan Presensi & Kinerja`;
+      t5Sub.font = FONT_MUTED;
+      t5Sub.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws5.getRow(3).height = 20;
+
+      const headerCols5 = [
+        'No', 'Tanggal', 'Hari', 'Sesi', 'Nama Mahasiswa',
+        'NIM', 'Peran Tugas', 'Kehadiran', 'Bobot Poin', 'Upah Bersih (Rp)'
+      ];
+      const r5Header = ws5.getRow(5);
+      r5Header.values = ['', ...headerCols5];
+      ['B5','C5','D5','E5','F5','G5','H5','I5','J5','K5'].forEach((addr) => {
+        const c = ws5.getCell(addr);
+        c.font = FONT_HEADER;
+        c.fill = FILL_HEADER as ExcelJS.Fill;
+        c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
+        c.alignment = {
+          vertical: 'middle',
+          horizontal: ['B5','C5','D5','E5','G5','I5','J5'].includes(addr) ? 'center' : (addr === 'K5' ? 'right' : 'left'),
+        };
+      });
+      r5Header.height = 24;
+
+      let rowIdx5 = 6;
+      let counter5 = 1;
+      let grandTotalMatrixUpah = 0;
+
+      for (const s of data.shifts) {
+        for (const p of s.personnel) {
+          grandTotalMatrixUpah += p.nominalBagiHasil;
+          const r = ws5.getRow(rowIdx5);
+          const lateStr = p.lateMinutes > 0 ? `Telat ${p.lateMinutes}m` : 'Hadir Tepat Waktu';
+
+          r.values = [
+            '',
+            counter5++,
+            s.tanggal,
+            s.hari,
+            s.sesi,
+            p.fullName,
+            p.nim,
+            p.jabatan,
+            lateStr,
+            p.totalWeight ? p.totalWeight.toFixed(2) : '1.00',
+            p.nominalBagiHasil,
+          ];
+
+          ['B','C','D','E','F','G','H','I','J','K'].forEach((col) => {
+            const c = ws5.getCell(`${col}${rowIdx5}`);
+            c.font = FONT_REGULAR;
+            c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
+            c.alignment = {
+              vertical: 'middle',
+              horizontal: ['B','C','D','E','G','I','J'].includes(col) ? 'center' : (col === 'K' ? 'right' : 'left'),
+            };
+            if (counter5 % 2 === 1) c.fill = FILL_ZEBRA as ExcelJS.Fill;
+          });
+
+          ws5.getCell(`K${rowIdx5}`).numFmt = CURRENCY_FMT;
+          r.height = 21;
+          rowIdx5++;
+        }
+      }
+
+      // Baris Total Sheet 5
+      const r5Total = ws5.getRow(rowIdx5);
+      r5Total.values = [
+        '',
+        '',
+        'TOTAL KESELURUHAN',
+        '',
+        '',
+        `${counter5 - 1} Penugasan Personel Shift`,
+        '',
+        '',
+        '',
+        '',
+        grandTotalMatrixUpah,
+      ];
+
+      ws5.mergeCells(`C${rowIdx5}:E${rowIdx5}`);
+      ['B','C','D','E','F','G','H','I','J','K'].forEach((col) => {
+        const c = ws5.getCell(`${col}${rowIdx5}`);
+        c.font = FONT_BOLD;
+        c.fill = FILL_TOTAL as ExcelJS.Fill;
+        c.border = BORDER_TOTAL as Partial<ExcelJS.Borders>;
+        c.alignment = {
+          vertical: 'middle',
+          horizontal: ['C','D','E'].includes(col) ? 'center' : (col === 'K' ? 'right' : 'left'),
+        };
+      });
+      ws5.getCell(`K${rowIdx5}`).numFmt = CURRENCY_FMT;
+      r5Total.height = 24;
 
       // Download file ke browser pengguna
       const buf = await wb.xlsx.writeBuffer();
