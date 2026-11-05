@@ -59,6 +59,10 @@ function isExcludedAccount(name?: string | null, nim?: string | null): boolean {
   );
 }
 
+function wibDateOf(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
+}
+
 export async function GET(req: NextRequest): Promise<Response> {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
@@ -206,9 +210,6 @@ export async function GET(req: NextRequest): Promise<Response> {
         ),
       )
       .orderBy(shifts.clockIn);
-
-    const wibDateOf = (d: Date): string =>
-      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
 
     // Filter: Hari Sabtu (6) & Minggu (0) bukan hari operasional resmi Wiramart.
     // Shift di hari weekend adalah data uji coba, diexclude dari laporan shift mahasiswa.
