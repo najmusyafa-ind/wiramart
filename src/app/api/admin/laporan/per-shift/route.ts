@@ -63,6 +63,14 @@ function wibDateOf(d: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
 }
 
+/**
+ * Mengembalikan indeks hari (0=Minggu, 1=Senin, ..., 6=Sabtu) dalam zona waktu Asia/Jakarta (WIB).
+ * Menggunakan jam 12:00:00 UTC agar tanggal UTC dan WIB sinkron, aman dari pergeseran timezone server (seperti Vercel UTC).
+ */
+function wibDayOfWeek(wibDateStr: string): number {
+  return new Date(`${wibDateStr}T12:00:00Z`).getUTCDay();
+}
+
 export async function GET(req: NextRequest): Promise<Response> {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
@@ -215,7 +223,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     // Shift di hari weekend adalah data uji coba, diexclude dari laporan shift mahasiswa.
     const shiftRows = rawShiftRows.filter((s) => {
       const wib = wibDateOf(s.clockIn);
-      const dow = new Date(`${wib}T00:00:00+07:00`).getDay();
+      const dow = wibDayOfWeek(wib);
       return dow !== 0 && dow !== 6;
     });
 
@@ -380,7 +388,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       list.push(s.id);
       shiftIdsByDate.set(key, list);
 
-      const dayOfWeekNum = new Date(`${key}T00:00:00+07:00`).getDay();
+      const dayOfWeekNum = wibDayOfWeek(key);
       const dayEnum = HARI_TO_ENUM[dayOfWeekNum] ?? '';
 
       // Penentuan Sesi Shift:
@@ -708,7 +716,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       const count = attendeesRaw.length;
       const nominalPerOrang = count > 0 ? Math.round(gajiBersih / count) : 0;
 
-      const dayOfWeek = new Date(wibDate + 'T00:00:00+07:00').getDay();
+      const dayOfWeek = wibDayOfWeek(wibDate);
       const hariStr = HARI[dayOfWeek] ?? wibDate;
 
       const evaluated = attendeesRaw.map((att) => {
