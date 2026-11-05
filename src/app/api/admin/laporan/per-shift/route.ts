@@ -182,7 +182,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     //    Filter testing hanya untuk tampilan laporan, bukan data shift.
     //    Kasir "testing" tetap punya laba dari shift → perlu diinclude.
     // ─────────────────────────────────────────────────────────────
-    const shiftRows = await db
+    const rawShiftRows = await db
       .select({
         id: shifts.id,
         clockIn: shifts.clockIn,
@@ -206,6 +206,17 @@ export async function GET(req: NextRequest): Promise<Response> {
         ),
       )
       .orderBy(shifts.clockIn);
+
+    const wibDateOf = (d: Date): string =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
+
+    // Filter: Hari Sabtu (6) & Minggu (0) bukan hari operasional resmi Wiramart.
+    // Shift di hari weekend adalah data uji coba, diexclude dari laporan shift mahasiswa.
+    const shiftRows = rawShiftRows.filter((s) => {
+      const wib = wibDateOf(s.clockIn);
+      const dow = new Date(`${wib}T00:00:00+07:00`).getDay();
+      return dow !== 0 && dow !== 6;
+    });
 
     const fs = financial.summary;
     const labaOperasionalBersih = Math.max(0, fs.labaKotor - fs.biayaOperasional);
@@ -349,9 +360,6 @@ export async function GET(req: NextRequest): Promise<Response> {
       }
     }
 
-    const wibDateOf = (d: Date): string =>
-      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
-
     const empScheduleMap = new Map<string, { dayOfWeek: string; slotStart: string }[]>();
     for (const sr of scheduleRows) {
       const list = empScheduleMap.get(sr.employeeId) ?? [];
@@ -374,26 +382,35 @@ export async function GET(req: NextRequest): Promise<Response> {
       const dayOfWeekNum = new Date(`${key}T00:00:00+07:00`).getDay();
       const dayEnum = HARI_TO_ENUM[dayOfWeekNum] ?? '';
 
-      // Prioritas 1: Cek jadwal resmi kasir pada hari tersebut
-      const empScheds = empScheduleMap.get(s.employeeId) ?? [];
-      const matchSched = empScheds.find((sch) => sch.dayOfWeek === dayEnum);
-
+      // Penentuan Sesi Shift:
+      // 1. Kamis: Wiramart HANYA punya jadwal sesi Siang (11:00-15:00)
+      // 2. Jam buka >= 11:00 WIB -> Siang
+      // 3. Jam buka >= 10:30 WIB dan kasir punya jadwal resmi Siang pada hari tsb -> Siang
+      // 4. Selain itu -> Pagi (07:30-11:30)
       let sesi: 'Pagi' | 'Siang';
-      if (matchSched) {
-        const slotH = parseInt(matchSched.slotStart.split(':')[0] ?? '11', 10);
-        sesi = slotH >= 11 ? 'Siang' : 'Pagi';
+      if (dayOfWeekNum === 4) {
+        sesi = 'Siang';
       } else {
-        // Prioritas 2: Midpoint rentang jam buka-tutup shift
-        const inMs = s.clockIn.getTime();
-        const outMs = s.clockOut ? s.clockOut.getTime() : inMs + 4 * 3600 * 1000;
-        const midMs = (inMs + outMs) / 2;
-        const midHour = parseInt(
-          new Intl.DateTimeFormat('en-US', {
-            timeZone: 'Asia/Jakarta', hour: 'numeric', hour12: false,
-          }).format(new Date(midMs)),
-          10
-        );
-        sesi = midHour >= 11 ? 'Siang' : 'Pagi';
+        const inParts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Jakarta',
+          hour: 'numeric',
+          minute: 'numeric',
+          hour12: false,
+        }).formatToParts(s.clockIn);
+        const inHour = parseInt(inParts.find((p) => p.type === 'hour')?.value ?? '8', 10);
+        const inMinute = parseInt(inParts.find((p) => p.type === 'minute')?.value ?? '0', 10);
+        const clockMinutes = inHour * 60 + inMinute;
+
+        if (clockMinutes >= 11 * 60) {
+          sesi = 'Siang';
+        } else if (clockMinutes >= 10 * 60 + 30) {
+          const empScheds = empScheduleMap.get(s.employeeId) ?? [];
+          const matchSched = empScheds.find((sch) => sch.dayOfWeek === dayEnum);
+          const schedHour = matchSched ? parseInt(matchSched.slotStart.split(':')[0] ?? '11', 10) : 8;
+          sesi = schedHour >= 11 ? 'Siang' : 'Pagi';
+        } else {
+          sesi = 'Pagi';
+        }
       }
 
       sesiByShift.set(s.id, sesi);
@@ -496,17 +513,6 @@ export async function GET(req: NextRequest): Promise<Response> {
     // 4b. Integrasi Kasir Shift & Deduplikasi per Shift
     // ─────────────────────────────────────────────────────────────
     for (const s of shiftRows) {
-      const wibDate = wibDateOf(s.clockIn);
-      const dayOfWeek = new Date(wibDate + 'T00:00:00+07:00').getDay(); // 0 = Minggu, 6 = Sabtu
-
-      // Sabtu (6) & Minggu (0): tidak ada jadwal resmi Wiramart.
-      // Shift di hari Sabtu/Minggu dianggap anomali / data uji.
-      // Alokasi gaji = Rp 0 (skip — attByShift akan kosong → bobot 0).
-      if (dayOfWeek === 0 || dayOfWeek === 6) {
-        attByShift.set(s.id, []); // tidak ada personel sah
-        continue;
-      }
-
       const rawList = attByShift.get(s.id) ?? [];
       const deduped: typeof attRows = [];
       const seenEmp = new Set<string>();

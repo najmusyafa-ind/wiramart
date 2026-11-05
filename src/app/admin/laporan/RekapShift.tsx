@@ -441,23 +441,17 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       const anggotaShift = Array.from(memberMap.values());
       const dates = g.sessions.map((x) => x.tanggal);
 
+      // Hanya tampilkan hari kerja resmi Wiramart (Senin - Jumat)
+      if (g.hari === 'Sabtu' || g.hari === 'Minggu') {
+        continue;
+      }
+
       // Jangan tampilkan grup kosong tanpa personel sah mahasiswa (misal shift testing murni)
       if (anggotaShift.length === 0) {
         continue;
       }
 
-      let transferNote: string | undefined;
-      if (g.hari === 'Minggu') {
-        transferNote = 'Upah Rp 446.758 dibagi rata ke 7 mahasiswa sah (@ Rp 63.823) & dialihkan ke shift reguler';
-      } else if (g.hari === 'Sabtu') {
-        transferNote = 'Upah Rp 907 dialihkan ke shift reguler Meizin (Selasa Pagi)';
-      } else if (gKey === 'Senin-Pagi') {
-        transferNote = '+ Termasuk alokasi shift Minggu untuk Gita A. (Rp 63.823) & Liliyana (Rp 63.823)';
-      } else if (gKey === 'Senin-Siang') {
-        transferNote = '+ Termasuk alokasi shift Minggu untuk Lisa, Nazila, Zaiffah (@ Rp 63.823)';
-      } else if (gKey === 'Selasa-Pagi') {
-        transferNote = '+ Termasuk alokasi Sabtu untuk Meizin (Rp 907) & Minggu untuk Siska (Rp 63.823)';
-      }
+      const transferNote: string | undefined = undefined;
 
       builtGroups.push({
         groupKey: gKey,
