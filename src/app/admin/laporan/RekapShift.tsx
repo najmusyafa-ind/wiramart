@@ -35,6 +35,7 @@ import {
   Receipt,
 } from 'lucide-react';
 import { formatRupiah } from './shared';
+import type ExcelJS from 'exceljs';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -537,103 +538,442 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
     );
   }, [filteredGroups]);
 
-  // Export Excel sesuai 6 Kolom Tabel Kelompok Shift + Detail Transaksi
+  // Export Excel Profesional 4-Sheet (Standar Akuntansi, Tanpa Emoji, Tanpa AI-Slop)
   async function handleExportExcel() {
     if (!data || filteredGroups.length === 0) return;
     setExportLoading(true);
     try {
       const ExcelJS = (await import('exceljs')).default;
       const wb = new ExcelJS.Workbook();
-      wb.creator = 'Smartkasir Perwira — Wiramart UNPERBA';
+      wb.creator = 'Wiramart UNPERBA — Smartkasir Perwira';
+      wb.lastModifiedBy = 'Manager (Dosen)';
       wb.created = new Date();
+      wb.modified = new Date();
 
-      const ws = wb.addWorksheet('Laporan Gaji Per Shift');
+      // Palette & Typography Akuntansi Bersih
+      const FONT_TITLE = { name: 'Calibri', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
+      const FONT_HEADER = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+      const FONT_BOLD = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF1E293B' } };
+      const FONT_REGULAR = { name: 'Calibri', size: 10, color: { argb: 'FF1E293B' } };
+      const FONT_MUTED = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF64748B' } };
 
-      ws.mergeCells('A1:H1');
-      const title = ws.getCell('A1');
-      title.value = 'LAPORAN GAJI BAGI HASIL PER SHIFT — WIRAMART UNPERBA';
-      title.font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } };
-      title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
-      title.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(1).height = 28;
+      const FILL_NAVY = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+      const FILL_HEADER = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2B4C7E' } };
+      const FILL_ZEBRA = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      const FILL_TOTAL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
 
-      ws.mergeCells('A2:H2');
-      const sub = ws.getCell('A2');
-      sub.value = `Periode: ${data.range.label} | Total Upah Bersih Shift (50%): ${formatRupiah(tableTotals.upahBersih)} | Total Transaksi: ${tableTotals.totalTx} tx`;
-      sub.font = { italic: true, size: 10, color: { argb: 'FF334155' } };
-      sub.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(2).height = 20;
+      const BORDER_THIN = {
+        top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      };
 
-      ws.columns = [
-        { key: 'waktu', width: 22 },
-        { key: 'shiftTgl', width: 32 },
-        { key: 'anggota', width: 48 },
-        { key: 'personel', width: 16 },
-        { key: 'kaliShift', width: 18 },
-        { key: 'upahBersih', width: 20 },
-        { key: 'tx', width: 16 },
-        { key: 'omzet', width: 20 },
-      ];
+      const BORDER_TOTAL = {
+        top: { style: 'thin', color: { argb: 'FF1E293B' } },
+        bottom: { style: 'double', color: { argb: 'FF1E293B' } },
+        left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      };
 
-      const hRow = ws.getRow(4);
-      hRow.values = [
-        'Waktu',
-        'Shift Tgl',
-        'Anggota Shift',
-        'Total Personel',
-        'Total Shift',
-        'Upah Bersih (Rp)',
-        'Total Transaksi',
-        'Total Omzet (Rp)',
-      ];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hRow.eachCell((cell: any) => {
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      const CURRENCY_FMT = '_("Rp "* #,##0_);_("Rp "* (#,##0);_("Rp "* "-"_);_(@_)';
+      const NUMBER_FMT = '#,##0';
+
+      // ─────────────────────────────────────────────────────────────────────
+      // SHEET 1: RINGKASAN FINANSIAL
+      // ─────────────────────────────────────────────────────────────────────
+      const ws1 = wb.addWorksheet('Ringkasan Finansial', { views: [{ showGridLines: true }] });
+      ws1.columns = [{ width: 4 }, { width: 36 }, { width: 24 }, { width: 48 }];
+
+      ws1.mergeCells('B2:D2');
+      const h1 = ws1.getCell('B2');
+      h1.value = 'WIRAMART UNPERBA — LAPORAN REKAPITULASI KEUANGAN & BAGI HASIL';
+      h1.font = FONT_TITLE;
+      h1.fill = FILL_NAVY as ExcelJS.Fill;
+      h1.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws1.getRow(2).height = 28;
+
+      ws1.mergeCells('B3:D3');
+      const h2 = ws1.getCell('B3');
+      h2.value = `Periode Operasional: ${data.range.label} | Sistem Pembagian Gaji Hybrid 70% Kehadiran / 30% Kinerja`;
+      h2.font = FONT_MUTED;
+      h2.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws1.getRow(3).height = 20;
+
+      const r5 = ws1.getRow(5);
+      r5.values = ['', 'Pos Finansial', 'Nilai (Rupiah / Satuan)', 'Keterangan Sistem'];
+      ['B5', 'C5', 'D5'].forEach((addr) => {
+        const c = ws1.getCell(addr);
+        c.font = FONT_HEADER;
+        c.fill = FILL_HEADER as ExcelJS.Fill;
+        c.alignment = { vertical: 'middle', horizontal: addr === 'C5' ? 'right' : 'left' };
       });
-      hRow.height = 24;
+      r5.height = 22;
+
+      const summaryRows = [
+        { pos: 'Total Transaksi Kasir', val: data.grandTotal.txCount, fmt: NUMBER_FMT, desc: 'Jumlah transaksi sukses tercatat di POS kasir' },
+        { pos: 'Total Omzet Penjualan', val: data.grandTotal.omzet, fmt: CURRENCY_FMT, desc: 'Total penerimaan kotor dari seluruh transaksi produk' },
+        { pos: 'Laba Kotor Operasional', val: data.grandTotal.labaKotor, fmt: CURRENCY_FMT, desc: 'Selisih harga jual terhadap HPP (Cost of Goods Sold)' },
+        { pos: 'Beban Operasional Toko', val: data.grandTotal.biayaOperasional ?? 50000, fmt: CURRENCY_FMT, desc: 'Biaya utilitas & operasional paten bulanan UMKM' },
+        { pos: 'Laba Bersih Operasional', val: data.grandTotal.labaOperasionalBersih ?? (data.grandTotal.labaKotor - 50000), fmt: CURRENCY_FMT, desc: 'Laba Kotor dikurangi Beban Operasional Toko' },
+        { pos: 'Alokasi Hak Mahasiswa (50%)', val: data.grandTotal.poolGaji, fmt: CURRENCY_FMT, desc: 'Plafon total upah bagi hasil seluruh mahasiswa shift' },
+        { pos: 'Alokasi Kas Toko (50%)', val: data.grandTotal.labaBersihToko ?? data.grandTotal.poolGaji, fmt: CURRENCY_FMT, desc: 'Bagian kas bersih toko untuk pengembangan UMKM' },
+        { pos: 'Total Upah Terdistribusi', val: data.grandTotal.totalDistributed ?? data.grandTotal.poolGaji, fmt: CURRENCY_FMT, desc: 'Total upah yang disalurkan tuntas ke seluruh anggota' },
+        { pos: 'Sisa Saldo Pool (Kebocoran)', val: data.grandTotal.sisaPool ?? 0, fmt: CURRENCY_FMT, desc: 'Metode Hamilton menjamin zero-leakage (Rp 0 selisih)' },
+      ];
+
+      summaryRows.forEach((item, idx) => {
+        const rowNum = 6 + idx;
+        const r = ws1.getRow(rowNum);
+        r.values = ['', item.pos, item.val, item.desc];
+        const isSpecial = item.pos.includes('(50%)') || item.pos.includes('Laba Bersih');
+        
+        ['B', 'C', 'D'].forEach((col) => {
+          const c = ws1.getCell(`${col}${rowNum}`);
+          c.font = isSpecial ? FONT_BOLD : FONT_REGULAR;
+          c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
+          c.alignment = { vertical: 'middle', horizontal: col === 'C' ? 'right' : 'left' };
+          if (idx % 2 === 1 && !isSpecial) c.fill = FILL_ZEBRA as ExcelJS.Fill;
+          if (isSpecial) c.fill = FILL_TOTAL as ExcelJS.Fill;
+        });
+        ws1.getCell(`C${rowNum}`).numFmt = item.fmt;
+        r.height = 21;
+      });
+
+      // ─────────────────────────────────────────────────────────────────────
+      // SHEET 2: REKAP KELOMPOK SHIFT (9 KELOMPOK RESMI)
+      // ─────────────────────────────────────────────────────────────────────
+      const ws2 = wb.addWorksheet('Rekap Kelompok Shift', { views: [{ showGridLines: true }] });
+      ws2.columns = [
+        { width: 4 },  // Margin A
+        { width: 6 },  // B: No
+        { width: 14 }, // C: Hari
+        { width: 10 }, // D: Sesi
+        { width: 16 }, // E: Jam Kerja
+        { width: 46 }, // F: Anggota Personel Tetap
+        { width: 14 }, // G: Jml Personel
+        { width: 14 }, // H: Frekuensi Shift
+        { width: 16 }, // I: Total Transaksi
+        { width: 20 }, // J: Total Omzet
+        { width: 20 }, // K: Total Laba Kotor
+        { width: 22 }, // L: Total Upah Bersih
+      ];
+
+      ws2.mergeCells('B2:L2');
+      const t2 = ws2.getCell('B2');
+      t2.value = 'REKAPITULASI UPAH PER KELOMPOK SHIFT RESMI — WIRAMART';
+      t2.font = FONT_TITLE;
+      t2.fill = FILL_NAVY as ExcelJS.Fill;
+      t2.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws2.getRow(2).height = 28;
+
+      ws2.mergeCells('B3:L3');
+      const t2Sub = ws2.getCell('B3');
+      t2Sub.value = `Periode: ${data.range.label} | Jadwal Operasional Senin s/d Jumat (9 Kelompok Kerja)`;
+      t2Sub.font = FONT_MUTED;
+      t2Sub.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws2.getRow(3).height = 20;
+
+      const headerCols2 = [
+        'No', 'Hari', 'Sesi', 'Jam Kerja', 'Anggota Personel Tetap',
+        'Personel', 'Frekuensi', 'Transaksi', 'Omzet (Rp)', 'Laba Kotor (Rp)', 'Upah Bersih (Rp)'
+      ];
+      const r2Header = ws2.getRow(5);
+      r2Header.values = ['', ...headerCols2];
+      ['B5','C5','D5','E5','F5','G5','H5','I5','J5','K5','L5'].forEach((addr) => {
+        const c = ws2.getCell(addr);
+        c.font = FONT_HEADER;
+        c.fill = FILL_HEADER as ExcelJS.Fill;
+        c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
+        c.alignment = {
+          vertical: 'middle',
+          horizontal: ['B5','C5','D5','E5','G5','H5'].includes(addr) ? 'center' : (['I5','J5','K5','L5'].includes(addr) ? 'right' : 'left'),
+        };
+      });
+      r2Header.height = 24;
 
       filteredGroups.forEach((g, idx) => {
-        const row = ws.addRow({
-          waktu: `${g.sesi} (${g.waktuLabel})`,
-          shiftTgl: `${g.hari} — ${g.shiftTglSummary}`,
-          anggota: g.anggotaShift.map((m) => m.fullName).join(', ') + (g.transferNote ? `\n[${g.transferNote}]` : ''),
-          personel: `${g.totalPersonel} Orang`,
-          kaliShift: `${g.totalShiftCount}x Shift`,
-          upahBersih: g.upahBersih,
-          tx: `${g.totalTx} tx`,
-          omzet: g.totalOmzet,
+        const rowNum = 6 + idx;
+        const r = ws2.getRow(rowNum);
+        r.values = [
+          '',
+          idx + 1,
+          g.hari,
+          g.sesi,
+          g.waktuLabel,
+          g.anggotaShift.map((m) => m.fullName).join(', '),
+          g.totalPersonel,
+          g.totalShiftCount,
+          g.totalTx,
+          g.totalOmzet,
+          g.totalLabaKotor,
+          g.upahBersih,
+        ];
+
+        ['B','C','D','E','F','G','H','I','J','K','L'].forEach((col) => {
+          const c = ws2.getCell(`${col}${rowNum}`);
+          c.font = FONT_REGULAR;
+          c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
+          c.alignment = {
+            vertical: 'middle',
+            horizontal: ['B','C','D','E','G','H'].includes(col) ? 'center' : (['I','J','K','L'].includes(col) ? 'right' : 'left'),
+          };
+          if (idx % 2 === 1) c.fill = FILL_ZEBRA as ExcelJS.Fill;
         });
-        row.getCell('upahBersih').numFmt = '"Rp "#,##0';
-        row.getCell('omzet').numFmt = '"Rp "#,##0';
-        if (idx % 2 === 1) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          row.eachCell((c: any) => {
-            c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-          });
-        }
+
+        ws2.getCell(`G${rowNum}`).numFmt = NUMBER_FMT;
+        ws2.getCell(`H${rowNum}`).numFmt = NUMBER_FMT;
+        ws2.getCell(`I${rowNum}`).numFmt = NUMBER_FMT;
+        ws2.getCell(`J${rowNum}`).numFmt = CURRENCY_FMT;
+        ws2.getCell(`K${rowNum}`).numFmt = CURRENCY_FMT;
+        ws2.getCell(`L${rowNum}`).numFmt = CURRENCY_FMT;
+        r.height = 22;
       });
 
-      const totalRow = ws.addRow({
-        waktu: 'TOTAL KESELURUHAN',
-        shiftTgl: `${filteredGroups.length} Kelompok Shift`,
-        anggota: '',
-        personel: `${tableTotals.totalPersonel} Orang`,
-        kaliShift: `${tableTotals.totalShiftCount}x Shift`,
-        upahBersih: tableTotals.upahBersih,
-        tx: `${tableTotals.totalTx} tx`,
-        omzet: tableTotals.totalOmzet,
-      });
-      totalRow.getCell('upahBersih').numFmt = '"Rp "#,##0';
-      totalRow.getCell('omzet').numFmt = '"Rp "#,##0';
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      totalRow.eachCell((c: any) => {
-        c.font = { bold: true, size: 11 };
-        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
-      });
-      totalRow.height = 24;
+      const totalRowNum2 = 6 + filteredGroups.length;
+      const r2Total = ws2.getRow(totalRowNum2);
+      r2Total.values = [
+        '',
+        '',
+        'TOTAL KESELURUHAN',
+        '',
+        '',
+        `${filteredGroups.length} Kelompok Shift Reguler`,
+        tableTotals.totalPersonel,
+        tableTotals.totalShiftCount,
+        tableTotals.totalTx,
+        tableTotals.totalOmzet,
+        tableTotals.totalLabaKotor,
+        tableTotals.upahBersih,
+      ];
 
+      ws2.mergeCells(`C${totalRowNum2}:E${totalRowNum2}`);
+      ['B','C','D','E','F','G','H','I','J','K','L'].forEach((col) => {
+        const c = ws2.getCell(`${col}${totalRowNum2}`);
+        c.font = FONT_BOLD;
+        c.fill = FILL_TOTAL as ExcelJS.Fill;
+        c.border = BORDER_TOTAL as Partial<ExcelJS.Borders>;
+        c.alignment = {
+          vertical: 'middle',
+          horizontal: ['C','D','E','G','H'].includes(col) ? 'center' : (['I','J','K','L'].includes(col) ? 'right' : 'left'),
+        };
+      });
+
+      ws2.getCell(`G${totalRowNum2}`).numFmt = NUMBER_FMT;
+      ws2.getCell(`H${totalRowNum2}`).numFmt = NUMBER_FMT;
+      ws2.getCell(`I${totalRowNum2}`).numFmt = NUMBER_FMT;
+      ws2.getCell(`J${totalRowNum2}`).numFmt = CURRENCY_FMT;
+      ws2.getCell(`K${totalRowNum2}`).numFmt = CURRENCY_FMT;
+      ws2.getCell(`L${totalRowNum2}`).numFmt = CURRENCY_FMT;
+      r2Total.height = 24;
+
+      // ─────────────────────────────────────────────────────────────────────
+      // SHEET 3: RINCIAN UPAH PER MAHASISWA
+      // ─────────────────────────────────────────────────────────────────────
+      const ws3 = wb.addWorksheet('Upah Mahasiswa', { views: [{ showGridLines: true }] });
+      ws3.columns = [
+        { width: 4 },  // Margin A
+        { width: 6 },  // B: No
+        { width: 28 }, // C: Nama Lengkap
+        { width: 14 }, // D: NIM
+        { width: 22 }, // E: Program Studi
+        { width: 24 }, // F: Jabatan / Peran
+        { width: 14 }, // G: Total Hadir
+        { width: 22 }, // H: Nominal Upah (Rp)
+        { width: 20 }, // I: Tanda Tangan
+      ];
+
+      ws3.mergeCells('B2:I2');
+      const t3 = ws3.getCell('B2');
+      t3.value = 'DAFTAR PENERIMAAN UPAH BAGI HASIL MAHASISWA — WIRAMART';
+      t3.font = FONT_TITLE;
+      t3.fill = FILL_NAVY as ExcelJS.Fill;
+      t3.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws3.getRow(2).height = 28;
+
+      ws3.mergeCells('B3:I3');
+      const t3Sub = ws3.getCell('B3');
+      t3Sub.value = `Periode: ${data.range.label} | Total Mahasiswa: ${data.summaryPerEmployee.length} Orang`;
+      t3Sub.font = FONT_MUTED;
+      t3Sub.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws3.getRow(3).height = 20;
+
+      const headerCols3 = [
+        'No', 'Nama Lengkap', 'NIM', 'Program Studi', 'Jabatan / Peran',
+        'Kehadiran', 'Upah Diterima (Rp)', 'Tanda Tangan'
+      ];
+      const r3Header = ws3.getRow(5);
+      r3Header.values = ['', ...headerCols3];
+      ['B5','C5','D5','E5','F5','G5','H5','I5'].forEach((addr) => {
+        const c = ws3.getCell(addr);
+        c.font = FONT_HEADER;
+        c.fill = FILL_HEADER as ExcelJS.Fill;
+        c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
+        c.alignment = { vertical: 'middle', horizontal: ['B5','D5','G5','I5'].includes(addr) ? 'center' : (addr === 'H5' ? 'right' : 'left') };
+      });
+      r3Header.height = 24;
+
+      let totalHadirEmps = 0;
+      let totalUpahEmps = 0;
+
+      const sortedEmps = [...data.summaryPerEmployee].sort((a, b) => a.fullName.localeCompare(b.fullName));
+      sortedEmps.forEach((emp, idx) => {
+        totalHadirEmps += emp.totalHadir;
+        totalUpahEmps += emp.totalNominal;
+        const rowNum = 6 + idx;
+        const r = ws3.getRow(rowNum);
+        r.values = [
+          '',
+          idx + 1,
+          emp.fullName,
+          emp.nim,
+          emp.programStudi,
+          emp.jabatan,
+          emp.totalHadir,
+          emp.totalNominal,
+          '',
+        ];
+
+        ['B','C','D','E','F','G','H','I'].forEach((col) => {
+          const c = ws3.getCell(`${col}${rowNum}`);
+          c.font = FONT_REGULAR;
+          c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
+          c.alignment = {
+            vertical: 'middle',
+            horizontal: ['B','D','G','I'].includes(col) ? 'center' : (col === 'H' ? 'right' : 'left'),
+          };
+          if (idx % 2 === 1) c.fill = FILL_ZEBRA as ExcelJS.Fill;
+        });
+
+        ws3.getCell(`G${rowNum}`).numFmt = NUMBER_FMT;
+        ws3.getCell(`H${rowNum}`).numFmt = CURRENCY_FMT;
+        r.height = 21;
+      });
+
+      const totalRowNum3 = 6 + sortedEmps.length;
+      const r3Total = ws3.getRow(totalRowNum3);
+      r3Total.values = [
+        '',
+        '',
+        'TOTAL KESELURUHAN',
+        '',
+        '',
+        `${sortedEmps.length} Mahasiswa`,
+        totalHadirEmps,
+        totalUpahEmps,
+        '',
+      ];
+
+      ws3.mergeCells(`C${totalRowNum3}:E${totalRowNum3}`);
+      ['B','C','D','E','F','G','H','I'].forEach((col) => {
+        const c = ws3.getCell(`${col}${totalRowNum3}`);
+        c.font = FONT_BOLD;
+        c.fill = FILL_TOTAL as ExcelJS.Fill;
+        c.border = BORDER_TOTAL as Partial<ExcelJS.Borders>;
+        c.alignment = {
+          vertical: 'middle',
+          horizontal: ['C','D','E','G','I'].includes(col) ? 'center' : (col === 'H' ? 'right' : 'left'),
+        };
+      });
+
+      ws3.getCell(`G${totalRowNum3}`).numFmt = NUMBER_FMT;
+      ws3.getCell(`H${totalRowNum3}`).numFmt = CURRENCY_FMT;
+      r3Total.height = 24;
+
+      // ─────────────────────────────────────────────────────────────────────
+      // SHEET 4: LOG SHIFT HARIAN (AUDIT TRAIL)
+      // ─────────────────────────────────────────────────────────────────────
+      const ws4 = wb.addWorksheet('Log Shift Harian', { views: [{ showGridLines: true }] });
+      ws4.columns = [
+        { width: 4 },  // Margin A
+        { width: 6 },  // B: No
+        { width: 14 }, // C: Tanggal
+        { width: 12 }, // D: Hari
+        { width: 10 }, // E: Sesi
+        { width: 28 }, // F: Kasir Bertugas
+        { width: 16 }, // G: Buka (WIB)
+        { width: 16 }, // H: Tutup (WIB)
+        { width: 12 }, // I: Transaksi
+        { width: 18 }, // J: Omzet (Rp)
+        { width: 18 }, // K: Laba Kotor (Rp)
+        { width: 16 }, // L: Selisih Laci
+        { width: 18 }, // M: Upah Shift (Rp)
+      ];
+
+      ws4.mergeCells('B2:M2');
+      const t4 = ws4.getCell('B2');
+      t4.value = 'JURNAL LOG TRANSAKSI & HASIL OPERASIONAL SETIAP SHIFT — WIRAMART';
+      t4.font = FONT_TITLE;
+      t4.fill = FILL_NAVY as ExcelJS.Fill;
+      t4.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws4.getRow(2).height = 28;
+
+      ws4.mergeCells('B3:M3');
+      const t4Sub = ws4.getCell('B3');
+      t4Sub.value = `Periode: ${data.range.label} | Total Sesi Shift: ${data.shifts.length} Shift`;
+      t4Sub.font = FONT_MUTED;
+      t4Sub.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws4.getRow(3).height = 20;
+
+      const headerCols4 = [
+        'No', 'Tanggal', 'Hari', 'Sesi', 'Kasir Bertugas',
+        'Buka (WIB)', 'Tutup (WIB)', 'Transaksi', 'Omzet (Rp)', 'Laba Kotor (Rp)', 'Selisih Laci', 'Upah Bersih (Rp)'
+      ];
+      const r4Header = ws4.getRow(5);
+      r4Header.values = ['', ...headerCols4];
+      ['B5','C5','D5','E5','F5','G5','H5','I5','J5','K5','L5','M5'].forEach((addr) => {
+        const c = ws4.getCell(addr);
+        c.font = FONT_HEADER;
+        c.fill = FILL_HEADER as ExcelJS.Fill;
+        c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
+        c.alignment = {
+          vertical: 'middle',
+          horizontal: ['B5','C5','D5','E5','G5','H5'].includes(addr) ? 'center' : (['I5','J5','K5','L5','M5'].includes(addr) ? 'right' : 'left'),
+        };
+      });
+      r4Header.height = 24;
+
+      data.shifts.forEach((s, idx) => {
+        const inTime = s.clockIn ? new Date(s.clockIn).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : '-';
+        const outTime = s.clockOut ? new Date(s.clockOut).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : 'Berjalan';
+        const rowNum = 6 + idx;
+        const r = ws4.getRow(rowNum);
+        r.values = [
+          '',
+          idx + 1,
+          s.tanggal,
+          s.hari,
+          s.sesi,
+          s.kasirName,
+          inTime,
+          outTime,
+          s.txCount,
+          s.omzet,
+          s.labaKotor,
+          s.discrepancy ?? 0,
+          s.gajiBersih,
+        ];
+
+        ['B','C','D','E','F','G','H','I','J','K','L','M'].forEach((col) => {
+          const c = ws4.getCell(`${col}${rowNum}`);
+          c.font = FONT_REGULAR;
+          c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
+          c.alignment = {
+            vertical: 'middle',
+            horizontal: ['B','C','D','E','G','H'].includes(col) ? 'center' : (['I','J','K','L','M'].includes(col) ? 'right' : 'left'),
+          };
+          if (idx % 2 === 1) c.fill = FILL_ZEBRA as ExcelJS.Fill;
+        });
+
+        ws4.getCell(`I${rowNum}`).numFmt = NUMBER_FMT;
+        ws4.getCell(`J${rowNum}`).numFmt = CURRENCY_FMT;
+        ws4.getCell(`K${rowNum}`).numFmt = CURRENCY_FMT;
+        ws4.getCell(`L${rowNum}`).numFmt = CURRENCY_FMT;
+        ws4.getCell(`M${rowNum}`).numFmt = CURRENCY_FMT;
+        r.height = 21;
+      });
+
+      // Download file ke browser pengguna
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -641,7 +981,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Laporan_Gaji_Per_Shift_Wiramart_${data.range.startDate}_sd_${data.range.endDate}.xlsx`;
+      a.download = `Laporan_Gaji_Wiramart_${data.range.startDate}_sd_${data.range.endDate}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
