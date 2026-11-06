@@ -1339,9 +1339,14 @@ export default function PosPage() {
     }
   }, [router]);
 
-  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  const isFirstMountRef = useRef(true);
 
   useEffect(() => {
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      fetchProducts(search, activeCategory);
+      return;
+    }
     const t = setTimeout(() => fetchProducts(search, activeCategory), 300);
     return () => clearTimeout(t);
   }, [search, activeCategory, fetchProducts]);
