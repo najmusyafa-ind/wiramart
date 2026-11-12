@@ -1,4 +1,4 @@
-﻿# 📋 PRD — Wiramart v2.0: Campus Delivery System
+# 📋 PRD — Wiramart v2.0: Campus Delivery System
 > **Versi:** 2.1.0 — Campus Reality Edition  
 > **Tanggal Dibuat:** 2026-10-13 | **Terakhir Diperbarui:** 2026-10-22  
 > **Pemilik Produk:** Najmusyafa (Developer / Mahasiswa UNPERBA)  
@@ -87,8 +87,8 @@ new v2.0: buyers, online_orders, online_order_items, notification_logs
 |---|---|---|
 | Lantai 1 / Pickup | Rp 0 | Rp 0 |
 | Lantai 2 | Rp 1.000 | Rp 1.000 |
-| Lantai 3 | Rp 1.500 | Rp 1.500 |
-| Lantai 4 atau auditorium| Rp 1.500 | Rp 1.500 |
+| Lantai 3 | Rp 2.000 | Rp 2.000 |
+| Lantai 4 atau Auditorium (kode 99) | Rp 2.000 | Rp 2.000 |
 
 
 ---

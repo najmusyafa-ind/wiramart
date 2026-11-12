@@ -21,7 +21,7 @@ Setiap shift wajib membagi peran saat absen di `/kasir/login`:
 2. **Batas Keterlambatan:** Toleransi sistem 15 menit dari jam mulai shift. Lewat 15 menit otomatis tercatat TELAT.
 3. **Aturan Bagi Hasil 50%:** Sistem hanya membagikan jatah bagi hasil kepada petugas yang tercatat HADIR, TELAT, atau PENGGANTI di sistem. Petugas yang tidak absen sampai 30 menit setelah shift berakhir otomatis dikunci menjadi TIDAK_HADIR dan hak bagi hasil hari itu hangus (Rp 0).
 4. **Absen Pulang:** Setelah seluruh tugas shift dan penutupan kasir selesai, buka `/kasir/login` tab Presensi Kehadiran -> klik Absen Pulang pada nama masing-masing -> klik OK.
-5. **Tukar Shift:** Dilarang tukar shift hanya melalui kesepakatan WhatsApp. Pengajuan wajib diinput di `/kasir/tukar-shift` (maksimal 3 kali per minggu), disetujui rekan pengganti, dan disahkan Admin di `/admin/swap-request` sebelum jam shift dimulai.
+5. **Tukar Shift:** Dilarang tukar shift hanya melalui kesepakatan WhatsApp. Pengajuan wajib diinput di `/kasir/tukar-shift` (maksimal 3 kali per minggu), disetujui rekan pengganti, dan disahkan Admin di `/admin/swap-request` sebelum jam shift dimulai. **Penting:** Tukar shift di sistem mengubah template jadwal mingguan (`shift_schedules`) secara berulang; bila pertukaran hanya berlaku untuk 1 minggu tertentu, wajib diajukan tukar kembali pada minggu berikutnya atau dikoordinasikan ke Admin Shift.
 
 ---
 

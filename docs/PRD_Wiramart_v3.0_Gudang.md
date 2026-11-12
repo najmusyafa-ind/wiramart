@@ -193,7 +193,7 @@ if (!draft) return apiError('Penerimaan tidak ditemukan', 404);  // generic — 
 - [ ] Halaman MANAGER: `Antrian Penerimaan Barang` — tampilkan semua draft status `SUBMITTED`
 - [ ] Detail per draft: nama gudang yang input, tanggal submit, list produk + qty + HPP + expired date + kode batch
 - [ ] Tombol **✅ Setujui (ACC)** → status `APPROVED` → **stok masuk ke sistem (ACID)**
-- [ ] Tombol **🔄 Minta Revisi** → status kembali `DRAFT`, GUDANG bisa edit kembali, muncul catatan dari Manajer
+- [ ] Tombol **🔄 Minta Revisi** → status `REVISED`, GUDANG bisa edit kembali dan submit ulang, muncul catatan dari Manajer
 - [ ] Tombol **❌ Tolak** → status `REJECTED`, wajib isi alasan (min 10 char)
 - [ ] Setelah ACC: sistem otomatis INSERT baris baru ke `stock_batches` dan UPDATE `products.stock_qty` dalam **satu ACID transaction**
 - [ ] Log ke `audit_logs` (tabel existing) setiap kali MANAGER ACC barang masuk: `action = 'INSERT'`, `tableName = 'stock_batches'`, `actorType = 'ADMIN'`
@@ -280,7 +280,7 @@ DO $$ BEGIN
     'SUBMITTED',  -- gudang submit, menunggu approval manajer
     'APPROVED',   -- manajer ACC — stok sudah masuk ke sistem
     'REJECTED',   -- manajer tolak — stok tidak masuk
-    'REVISED'     -- manajer minta revisi — kembali ke DRAFT
+    'REVISED'     -- manajer minta revisi — dikembalikan ke gudang untuk diperbaiki & disubmit ulang
   );
 EXCEPTION WHEN duplicate_object THEN null; END $$;
 

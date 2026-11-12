@@ -11,7 +11,7 @@
 |---|---|---|
 | **Petugas Gudang** | `employee` | Buat draft penerimaan, edit draft, submit ke manager, scan FEFO radar, lapor kondisi fisik barang, eksekusi diskon di lapangan |
 | **Admin Shift** | `admin` + `ADMIN_SHIFT` | **TIDAK BISA** akses gudang. Hanya kasir & manajemen shift. |
-| **Manager (Dosen)** | `admin` + `MANAGER` | Approve/Revisi/Tolak penerimaan barang, lihat semua batch, putuskan tindakan FEFO (diskon/tarik/lanjut), generate barcode diskon |
+| **Manager (Dosen)** | `admin` + `MANAGER` | Approve/Revisi/Tolak penerimaan barang, lihat semua batch, putuskan tindakan FEFO (`DISCOUNT`/`DISPLAY_FRONT`/`DESTROY`/`RETURN_SUPPLIER`/`HOLD`), generate barcode diskon |
 
 > [!IMPORTANT]
 > **Admin Shift ≠ Manager.** Admin Shift hanya mengelola kasir dan shift karyawan. Seluruh keputusan gudang adalah **hak eksklusif Manager**.
@@ -35,9 +35,10 @@ flowchart TD
     I -- Tidak --> H
     I -- Ya → Alert Muncul --> J[7. GUDANG: Lapor Kondisi Fisik Barang]
     J --> K{8. MANAGER: Putuskan Tindakan}
-    K -- DISKON --> L[9. Auto-Generate Barcode Diskon]
-    K -- TARIK/DISPOSE --> M[9b. Catat Penarikan]
-    K -- LANJUT JUAL --> N[9c. Monitor Terus]
+    K -- DISCOUNT --> L[9. Auto-Generate Barcode Diskon]
+    K -- DISPLAY_FRONT --> M1[9a. Geser ke Rak Depan Kasir]
+    K -- DESTROY / RETURN_SUPPLIER --> M[9b. Musnahkan / Retur Supplier]
+    K -- HOLD --> N[9c. Tahan & Monitor]
     L --> O[10. GUDANG: Eksekusi Diskon di Lapangan]
     O --> P([Kasir: Scan Barcode Diskon → Harga Otomatis Turun])
 ```
@@ -128,16 +129,16 @@ Setelah barang masuk, sistem otomatis memantau **semua batch yang mendekati expi
 
 | Alert Level | Kondisi | Arti |
 |---|---|---|
-| `H1` (`H1_KRITIS`) | Expired dalam 1 hari | 🔴 KRITIS — harus segera ditangani |
-| `H3` (`H3_URGENT`) | Expired dalam 3 hari | 🟠 URGENT |
-| `H5` (`H5_WASPADA`) | Expired dalam 5 hari | 🟡 WASPADA |
-| `H7` (`H7_MONITOR`) | Expired dalam 7 hari | 🔵 MONITOR |
+| `H1` (`H1_KRITIS`) | Expired dalam ≤ 1 hari | 🔴 KRITIS — harus segera ditangani |
+| `H3` (`H3_URGENT`) | Expired dalam 2–3 hari | 🟠 URGENT |
+| `H5` (`H5_WARNING`) | Expired dalam 4–5 hari | 🟡 WARNING (Waspada) |
+| `H7` (`H7_WATCH`) | Expired dalam 6–7 hari | 🔵 WATCH (Monitor) |
 
-3. Alert disimpan di tabel `fefo_alerts` di database
+3. Alert disimpan di tabel `product_condition_reports` di database dengan status awal `ALERT_ONLY`
 4. Badge merah muncul di UI gudang
 
 > [!NOTE]
-> FEFO Radar hanya refresh saat **petugas klik tombol scan manual** — bukan auto-refresh tiap detik. Ini sengaja untuk menghindari spam request ke server (bug lama sudah diperbaiki).
+> FEFO Radar dijalankan oleh Cron setiap hari pukul **06:00 WIB** (`/api/cron/scan-fefo`) dan juga dapat di-trigger manual saat **petugas klik tombol Scan FEFO Radar** — bukan auto-refresh tiap detik agar tidak membebani server.
 
 ---
 
@@ -150,9 +151,9 @@ Saat radar mendeteksi alert, petugas wajib **turun ke gudang dan lihat kondisi f
 Petugas mengisi:
 - Deskripsi kondisi fisik barang (kemasan penyok? jamuran? bau? dll)
 - Foto kondisi (opsional)
-- Rekomendasi tindakan dari sudut pandang petugas
+- Rekomendasi tindakan dari sudut pandang petugas (+ usulan persentase diskon bila relevan)
 
-Status alert berubah ke: `REPORTED` → masuk antrian keputusan Manager.
+Status laporan di `product_condition_reports` berubah ke: `SUBMITTED` → masuk antrian keputusan Manager (`MANAGER_REVIEW`).
 
 ---
 
@@ -160,23 +161,25 @@ Status alert berubah ke: `REPORTED` → masuk antrian keputusan Manager.
 
 **Endpoint:** `POST /api/admin/gudang/fefo-alerts/{id}/decide`
 
-Manager membuka laporan kondisi yang diajukan petugas, lalu memutuskan:
+Manager membuka laporan kondisi yang diajukan petugas, lalu memutuskan (`manager_decision` di `schema.ts`):
 
-| Keputusan | Kode | Efek Otomatis di Sistem |
+| Keputusan | Kode Enum (`manager_decision`) | Efek Otomatis di Sistem |
 |---|---|---|
-| **Diskon** | `DISKON` | ✨ **Auto-generate barcode diskon khusus** untuk batch itu |
-| **Tarik/Dispose** | `TARIK` | Batch ditandai "ditarik", stok dikurangi |
-| **Lanjut Jual Normal** | `LANJUT` | Alert di-dismiss, monitoring dilanjutkan |
+| **Diskon Darurat** | `DISCOUNT` | ✨ **Auto-generate policy & barcode diskon khusus** (`DISC-...`) untuk batch itu |
+| **Majukan ke Etalase Depan** | `DISPLAY_FRONT` | Instruksi pemindahan ke rak utama kasir |
+| **Musnahkan** | `DESTROY` | Barang dimusnahkan, tercatat di laporan kerugian/mutasi |
+| **Retur ke Supplier** | `RETURN_SUPPLIER` | Barang dikembalikan ke pemasok/konsinyasi |
+| **Tahan & Pantau** | `HOLD` | Ditahan sementara dan terus dimonitor |
 
 > [!IMPORTANT]
-> Hanya **Manager** yang bisa putuskan. Admin Shift ❌ tidak bisa akses endpoint ini.
+> Hanya **Manager** yang bisa putuskan (`APPROVED` / `REJECTED`). Admin Shift ❌ tidak bisa akses endpoint ini.
 
 ---
 
-### 🏷️ Auto-Generate Barcode Diskon (Jika Pilih DISKON)
+### 🏷️ Auto-Generate Barcode Diskon (Jika Pilih `DISCOUNT`)
 
-Saat Manager pilih `DISKON`, sistem otomatis:
-1. Generate **kode barcode unik** (format: `DISC-{batch_code}-{timestamp}`)
+Saat Manager pilih `DISCOUNT`, sistem otomatis:
+1. Membuat kebijakan di `discount_policies` dan generate **kode barcode unik** di `discount_barcodes` (format: `DISC-{batch_code}-{timestamp}`)
 2. Simpan barcode + persentase diskon yang ditetapkan Manager
 3. Kembalikan barcode ke layar Manager
 
@@ -188,29 +191,27 @@ Manager kemudian **cetak/kirim barcode** ke petugas gudang.
 
 **Endpoint:** `POST /api/gudang/fefo-alerts/{id}/execute`
 
-Petugas gudang pergi ke fisik barang, **tempel label barcode diskon** ke produk, lalu klik "Tandai Sudah Dieksekusi" di sistem.
+Petugas gudang pergi ke fisik barang, **tempel label barcode diskon** menutupi barcode asli produk, lalu klik "Tandai Sudah Dieksekusi" di sistem.
 
-Status alert berubah ke: `EXECUTED`.
+Status laporan kondisi berubah ke: `EXECUTED` → `CLOSED`.
 
-**Efek di kasir:** Saat kasir scan produk tersebut, sistem deteksi barcode diskon → **harga otomatis turun** sesuai persentase yang ditetapkan Manager.
+**Efek di kasir:** Saat kasir scan barcode `DISC-...` tersebut, sistem mendeteksi harga override → **harga otomatis turun** sesuai persentase yang ditetapkan Manager dan kuota `remaining_qty` berkurang secara atomik.
 
 ---
 
-## 🧵 Ringkasan Status Flow Lengkap
+## 🧵 Ringkasan Status Flow Lengkap (Sesuai `schema.ts`)
 
-### Penerimaan Barang:
+### Penerimaan Barang (`stock_receive_status`):
 ```
 DRAFT → SUBMITTED → APPROVED ✅
-                 ↘ REVISED → (edit) → SUBMITTED
+                 ↘ REVISED → (edit oleh gudang) → SUBMITTED
                  ↘ REJECTED ❌
 ```
 
-### FEFO Alert:
+### Laporan Kondisi & FEFO (`condition_report_status` + `manager_decision`):
 ```
-DETECTED → REPORTED → DECIDED
-                    ↘ (DISKON) → EXECUTED ✅
-                    ↘ (TARIK)  → DISPOSED ✅
-                    ↘ (LANJUT) → MONITORING
+ALERT_ONLY → SUBMITTED → MANAGER_REVIEW → APPROVED → EXECUTED → CLOSED ✅
+                                        ↘ REJECTED ❌
 ```
 
 ---
