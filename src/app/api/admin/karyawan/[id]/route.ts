@@ -6,13 +6,24 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { employees, shifts, shiftSchedules, admins, auditLogs } from '@/lib/db/schema';
-import { eq, and, isNull, ne } from 'drizzle-orm';
+import { employees, shifts, shiftSchedules, admins, auditLogs, attendances } from '@/lib/db/schema';
+import { eq, and, isNull, ne, inArray } from 'drizzle-orm';
 import { verifyJwt, requireManager, apiOk, apiError } from '@/lib/utils/auth';
 import { AppError } from '@/lib/utils/helpers';
 import bcrypt from 'bcryptjs';
 
 type Context = { params: Promise<{ id: string }> };
+
+/** Rewrites the leading "Peran: <role>" prefix while preserving any "| catatan" suffix. */
+function buildSyncedRoleNote(currentNotes: string | null, nextRole: string): string {
+  if (currentNotes?.startsWith('Peran: ')) {
+    const pipeIdx = currentNotes.indexOf('|');
+    if (pipeIdx !== -1) {
+      return `Peran: ${nextRole} ${currentNotes.slice(pipeIdx).trim()}`;
+    }
+  }
+  return `Peran: ${nextRole}`;
+}
 
 const PatchSchema = z.object({
   fullName: z.string().min(2).max(200).optional(),
@@ -46,8 +57,9 @@ export async function PATCH(req: NextRequest, ctx: Context) {
 
     if (!existing) return apiError('Karyawan tidak ditemukan', 404);
 
+    const now = new Date();
     const updateData: Record<string, unknown> = {
-      updatedAt: new Date(),
+      updatedAt: now,
     };
 
     if (parsed.data.fullName !== undefined) updateData.fullName = parsed.data.fullName.trim();
@@ -69,7 +81,8 @@ export async function PATCH(req: NextRequest, ctx: Context) {
     if (parsed.data.programStudi !== undefined) {
       updateData.programStudi = parsed.data.programStudi.trim();
     }
-    if (parsed.data.jabatan !== undefined) updateData.jabatan = parsed.data.jabatan;
+    const trimmedJabatan = parsed.data.jabatan?.trim();
+    if (trimmedJabatan) updateData.jabatan = trimmedJabatan;
     if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
     if (parsed.data.isKetuaShift !== undefined) {
       updateData.isKetuaShift = parsed.data.isKetuaShift;
@@ -96,33 +109,93 @@ export async function PATCH(req: NextRequest, ctx: Context) {
       updateData.pinLockedUntil = null;
     }
 
-    const [updated] = await db
-      .update(employees)
-      .set(updateData)
-      .where(eq(employees.id, id))
-      .returning({
-        id: employees.id,
-        fullName: employees.fullName,
-        nim: employees.nim,
-        programStudi: employees.programStudi,
-        jabatan: employees.jabatan,
-        isKetuaShift: employees.isKetuaShift,
-        isActive: employees.isActive,
-        pinHash: employees.pinHash,
-      });
+    const { updated, syncedAttendanceCount } = await db.transaction(async (tx) => {
+      const [updatedEmp] = await tx
+        .update(employees)
+        .set(updateData)
+        .where(eq(employees.id, id))
+        .returning({
+          id: employees.id,
+          fullName: employees.fullName,
+          nim: employees.nim,
+          programStudi: employees.programStudi,
+          jabatan: employees.jabatan,
+          isKetuaShift: employees.isKetuaShift,
+          isActive: employees.isActive,
+          pinHash: employees.pinHash,
+        });
 
-    // CISO Guard: Catat audit logs jika ada manipulasi PIN
-    if (parsed.data.pin || parsed.data.deletePin) {
-      await db.insert(auditLogs).values({
-        tableName: 'employees',
-        recordId: id,
-        action: 'UPDATE',
-        oldValues: JSON.stringify({ action: 'PIN_OPERATION', hadPin: !!existing.pinHash }),
-        newValues: JSON.stringify({ action: parsed.data.deletePin ? 'PIN_DELETED' : 'PIN_UPDATED' }),
-        actorType: 'ADMIN',
-        actorId: manager.sub,
-      });
-    }
+      let syncedCount = 0;
+
+      // Sinkronkan "Peran: <jabatan>" di presensi hari ini (WIB) agar UI kiosk
+      // (/kasir/login), rekap absensi, & bobot bagi-hasil tetap selaras saat
+      // Manager mengoreksi jabatan karyawan yang sudah terlanjur absen.
+      if (trimmedJabatan) {
+        const todayWib = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Jakarta',
+        }).format(now);
+
+        const todayAtts = await tx
+          .select({
+            id: attendances.id,
+            notes: attendances.notes,
+          })
+          .from(attendances)
+          .where(
+            and(
+              eq(attendances.employeeId, id),
+              eq(attendances.attendanceDate, todayWib),
+              inArray(attendances.status, ['HADIR', 'TELAT', 'PENGGANTI']),
+            ),
+          );
+
+        for (const att of todayAtts) {
+          if (att.notes !== null && !att.notes.startsWith('Peran: ')) {
+            continue;
+          }
+          const nextNotes = buildSyncedRoleNote(att.notes, trimmedJabatan);
+          if (nextNotes === att.notes) {
+            continue;
+          }
+
+          await tx
+            .update(attendances)
+            .set({
+              notes: nextNotes,
+              recordedByAdminId: manager.sub,
+              updatedAt: now,
+            })
+            .where(eq(attendances.id, att.id));
+
+          await tx.insert(auditLogs).values({
+            tableName: 'attendances',
+            recordId: att.id,
+            action: 'UPDATE',
+            oldValues: JSON.stringify({ notes: att.notes }),
+            newValues: JSON.stringify({ notes: nextNotes, syncedFromEmployeeJabatan: trimmedJabatan }),
+            actorType: 'ADMIN',
+            actorId: manager.sub,
+          });
+
+          syncedCount += 1;
+        }
+      }
+
+      // CISO Guard: Catat audit logs jika ada manipulasi PIN
+      if (parsed.data.pin || parsed.data.deletePin) {
+        await tx.insert(auditLogs).values({
+          tableName: 'employees',
+          recordId: id,
+          action: 'UPDATE',
+          oldValues: JSON.stringify({ action: 'PIN_OPERATION', hadPin: !!existing.pinHash }),
+          newValues: JSON.stringify({ action: parsed.data.deletePin ? 'PIN_DELETED' : 'PIN_UPDATED' }),
+          actorType: 'ADMIN',
+          actorId: manager.sub,
+        });
+      }
+
+      return { updated: updatedEmp, syncedAttendanceCount: syncedCount };
+    });
 
     return apiOk({
       id: updated.id,
@@ -133,6 +206,7 @@ export async function PATCH(req: NextRequest, ctx: Context) {
       isKetuaShift: updated.isKetuaShift,
       isActive: updated.isActive,
       hasPin: !!updated.pinHash,
+      syncedAttendanceCount,
     });
   } catch (err) {
     if (err instanceof AppError) {
