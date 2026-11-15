@@ -169,7 +169,7 @@ describe('2. Integrasi TCL (COMMIT, REJECTED, ROLLED_BACK, Idempotency) & 3. Kon
     }
     // Bersihkan log REJECTED/ROLLED_BACK yang dibuat selama test oleh kasir ini dalam 2 menit terakhir
     await db.execute(sql`
-      DELETE FROM pos.transaction_logs
+      DELETE FROM public.transaction_logs
       WHERE employee_id = ${testEmployeeId}::uuid
         AND outcome IN ('REJECTED', 'ROLLED_BACK')
         AND created_at > now() - interval '2 minutes'
@@ -413,8 +413,8 @@ describe('4. Invarian & Normalisasi Database (Data Integrity Audit)', () => {
   it('tidak ada produk atau batch dengan stok negatif', async () => {
     const res = await db.execute<{ neg_prod: number; neg_batch: number }>(sql`
       SELECT
-        (SELECT count(*)::int FROM gudang.products WHERE stock_qty < 0) AS neg_prod,
-        (SELECT count(*)::int FROM gudang.stock_batches WHERE current_qty < 0) AS neg_batch
+        (SELECT count(*)::int FROM public.products WHERE stock_qty < 0) AS neg_prod,
+        (SELECT count(*)::int FROM public.stock_batches WHERE current_qty < 0) AS neg_batch
     `);
     assert.equal(res[0].neg_prod, 0, 'Tidak boleh ada produk dengan stock_qty < 0');
     assert.equal(res[0].neg_batch, 0, 'Tidak boleh ada stock_batches dengan current_qty < 0');
@@ -428,10 +428,10 @@ describe('4. Invarian & Normalisasi Database (Data Integrity Audit)', () => {
       orphan_log_shift: number;
     }>(sql`
       SELECT
-        (SELECT count(*)::int FROM pos.transaction_items ti LEFT JOIN pos.transactions t ON t.id = ti.transaction_id WHERE t.id IS NULL) AS orphan_items,
-        (SELECT count(*)::int FROM pos.transaction_payments tp LEFT JOIN pos.transactions t ON t.id = tp.transaction_id WHERE t.id IS NULL) AS orphan_payments,
-        (SELECT count(*)::int FROM pos.transaction_logs tl LEFT JOIN pos.transactions t ON t.id = tl.transaction_id WHERE tl.transaction_id IS NOT NULL AND t.id IS NULL) AS orphan_log_tx,
-        (SELECT count(*)::int FROM pos.transaction_logs tl LEFT JOIN hr.shifts s ON s.id = tl.shift_id WHERE tl.shift_id IS NOT NULL AND s.id IS NULL) AS orphan_log_shift
+        (SELECT count(*)::int FROM public.transaction_items ti LEFT JOIN public.transactions t ON t.id = ti.transaction_id WHERE t.id IS NULL) AS orphan_items,
+        (SELECT count(*)::int FROM public.transaction_payments tp LEFT JOIN public.transactions t ON t.id = tp.transaction_id WHERE t.id IS NULL) AS orphan_payments,
+        (SELECT count(*)::int FROM public.transaction_logs tl LEFT JOIN public.transactions t ON t.id = tl.transaction_id WHERE tl.transaction_id IS NOT NULL AND t.id IS NULL) AS orphan_log_tx,
+        (SELECT count(*)::int FROM public.transaction_logs tl LEFT JOIN public.shifts s ON s.id = tl.shift_id WHERE tl.shift_id IS NOT NULL AND s.id IS NULL) AS orphan_log_shift
     `);
     assert.equal(res[0].orphan_items, 0);
     assert.equal(res[0].orphan_payments, 0);
@@ -444,8 +444,8 @@ describe('4. Invarian & Normalisasi Database (Data Integrity Audit)', () => {
       SELECT count(*)::int AS mismatch_count
       FROM (
         SELECT t.id, t.gross_amount, COALESCE(SUM(ti.subtotal_sell), 0) AS sum_items
-        FROM pos.transactions t
-        JOIN pos.transaction_items ti ON ti.transaction_id = t.id
+        FROM public.transactions t
+        JOIN public.transaction_items ti ON ti.transaction_id = t.id
         GROUP BY t.id, t.gross_amount
         HAVING ABS(t.gross_amount - COALESCE(SUM(ti.subtotal_sell), 0)) > 1
       ) sub
@@ -454,8 +454,8 @@ describe('4. Invarian & Normalisasi Database (Data Integrity Audit)', () => {
   });
 });
 
-describe('5. Multi-Schema Architecture & 3NF Gudang Integrity (v4.0)', () => {
-  it('seluruh 33 tabel dikelompokkan bersih ke 6 schema domain dan 0 tabel tersisa di public', async () => {
+describe('5. Public Schema Restoration & 3NF Gudang Integrity (v4.1)', () => {
+  it('seluruh 33 tabel berada di schema public dan 0 tabel tersisa di schema domain lama', async () => {
     const counts = await db.execute<{ schemaname: string; table_count: number }>(sql`
       SELECT schemaname, count(*)::int AS table_count
       FROM pg_tables
@@ -464,20 +464,17 @@ describe('5. Multi-Schema Architecture & 3NF Gudang Integrity (v4.0)', () => {
       ORDER BY schemaname
     `);
     const map = new Map(counts.map((r) => [r.schemaname, r.table_count]));
-    assert.equal(map.get('public') ?? 0, 0, 'Schema public tidak boleh menyimpan tabel aplikasi');
-    assert.equal(map.get('core'), 6);
-    assert.equal(map.get('hr'), 5);
-    assert.equal(map.get('gudang'), 11);
-    assert.equal(map.get('pos'), 4);
-    assert.equal(map.get('finance'), 3);
-    assert.equal(map.get('delivery'), 4);
+    assert.equal(map.get('public') ?? 0, 33, 'Seluruh 33 tabel aplikasi wajib berada di schema public');
+    for (const oldSchema of ['core', 'hr', 'gudang', 'pos', 'finance', 'delivery']) {
+      assert.equal(map.get(oldSchema) ?? 0, 0, `Schema lama ${oldSchema} harus kosong`);
+    }
   });
 
   it('ke-33 tabel mengaktifkan RLS serta memiliki policy deny anon & authenticated', async () => {
     const weakTables = await db.execute<{ schemaname: string; tablename: string }>(sql`
       SELECT t.schemaname, t.tablename
       FROM pg_tables t
-      WHERE t.schemaname IN ('core', 'hr', 'gudang', 'pos', 'finance', 'delivery')
+      WHERE t.schemaname = 'public'
         AND (
           t.rowsecurity = false
           OR NOT EXISTS (
@@ -497,7 +494,7 @@ describe('5. Multi-Schema Architecture & 3NF Gudang Integrity (v4.0)', () => {
     const droppedCols = await db.execute<{ table_name: string; column_name: string }>(sql`
       SELECT table_name, column_name
       FROM information_schema.columns
-      WHERE table_schema = 'gudang'
+      WHERE table_schema = 'public'
         AND (
           (table_name = 'stock_receive_drafts' AND column_name = 'supplier_name')
           OR (table_name = 'stock_receive_items' AND column_name = 'product_name')
@@ -513,9 +510,9 @@ describe('5. Multi-Schema Architecture & 3NF Gudang Integrity (v4.0)', () => {
       orphan_adj_batch: number;
     }>(sql`
       SELECT
-        (SELECT count(*)::int FROM gudang.stock_batches sb LEFT JOIN gudang.suppliers s ON s.id = sb.supplier_id WHERE sb.supplier_id IS NOT NULL AND s.id IS NULL) AS orphan_batch_supplier,
-        (SELECT count(*)::int FROM gudang.stock_batches sb LEFT JOIN gudang.stock_receive_items sri ON sri.id = sb.receive_item_id WHERE sb.receive_item_id IS NOT NULL AND sri.id IS NULL) AS orphan_batch_receive_item,
-        (SELECT count(*)::int FROM gudang.stock_adjustments sa LEFT JOIN gudang.stock_batches sb ON sb.id = sa.batch_id WHERE sa.batch_id IS NOT NULL AND sb.id IS NULL) AS orphan_adj_batch
+        (SELECT count(*)::int FROM public.stock_batches sb LEFT JOIN public.suppliers s ON s.id = sb.supplier_id WHERE sb.supplier_id IS NOT NULL AND s.id IS NULL) AS orphan_batch_supplier,
+        (SELECT count(*)::int FROM public.stock_batches sb LEFT JOIN public.stock_receive_items sri ON sri.id = sb.receive_item_id WHERE sb.receive_item_id IS NOT NULL AND sri.id IS NULL) AS orphan_batch_receive_item,
+        (SELECT count(*)::int FROM public.stock_adjustments sa LEFT JOIN public.stock_batches sb ON sb.id = sa.batch_id WHERE sa.batch_id IS NOT NULL AND sb.id IS NULL) AS orphan_adj_batch
     `);
     assert.equal(orphanFks[0].orphan_batch_supplier, 0);
     assert.equal(orphanFks[0].orphan_batch_receive_item, 0);

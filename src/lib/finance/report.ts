@@ -517,7 +517,7 @@ export async function ensureFinancialDataIntegrity(): Promise<void> {
   try {
     // 1. Nonaktifkan duplikat input manual biaya paten Rp 50.000 jika masih aktif
     await db.execute(sql`
-      UPDATE finance.operating_expenses
+      UPDATE public.operating_expenses
       SET deleted_at = NOW()
       WHERE id = '59939e14-c9be-43c9-9431-3b73c933ccfa'
         AND deleted_at IS NULL
@@ -525,13 +525,13 @@ export async function ensureFinancialDataIntegrity(): Promise<void> {
 
     // 2. Koreksi master produk dan snapshot item yang memiliki HPP > Harga Jual (anomali input)
     await db.execute(sql`
-      UPDATE gudang.products
+      UPDATE public.products
       SET cost_price = ROUND(selling_price * 0.80)
       WHERE cost_price > selling_price AND selling_price > 0
     `);
 
     const fixedItems = await db.execute(sql`
-      UPDATE pos.transaction_items
+      UPDATE public.transaction_items
       SET cost_price_snapshot = ROUND(selling_price_snapshot * 0.80),
           subtotal_cost = qty * ROUND(selling_price_snapshot * 0.80)
       WHERE cost_price_snapshot > selling_price_snapshot
@@ -539,12 +539,12 @@ export async function ensureFinancialDataIntegrity(): Promise<void> {
     `);
     if (Array.isArray(fixedItems) && fixedItems.length > 0) {
       await db.execute(sql`
-        UPDATE pos.transactions t
+        UPDATE public.transactions t
         SET total_cost = sub.sum_cost,
             gross_profit = t.gross_amount - sub.sum_cost
         FROM (
           SELECT transaction_id, COALESCE(SUM(subtotal_cost), 0) AS sum_cost
-          FROM pos.transaction_items
+          FROM public.transaction_items
           GROUP BY transaction_id
         ) sub
         WHERE t.id = sub.transaction_id
@@ -554,30 +554,30 @@ export async function ensureFinancialDataIntegrity(): Promise<void> {
 
     // 3. Satukan duplikat data karyawan Gita Aprilianingrum (Kasir -> Ketua UMKM / Admin Shift)
     await db.execute(sql`
-      UPDATE hr.shifts
+      UPDATE public.shifts
       SET employee_id = ${KETUA_UMKM_CANONICAL_ID}
       WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
     `);
     await db.execute(sql`
-      DELETE FROM hr.attendances a_dup
+      DELETE FROM public.attendances a_dup
       WHERE a_dup.employee_id = ${KETUA_UMKM_DUPLICATE_ID}
         AND EXISTS (
-          SELECT 1 FROM hr.attendances a_can
+          SELECT 1 FROM public.attendances a_can
           WHERE a_can.employee_id = ${KETUA_UMKM_CANONICAL_ID}
             AND a_can.attendance_date = a_dup.attendance_date
         )
     `);
     await db.execute(sql`
-      UPDATE hr.attendances
+      UPDATE public.attendances
       SET employee_id = ${KETUA_UMKM_CANONICAL_ID}
       WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
     `);
     await db.execute(sql`
-      DELETE FROM hr.shift_schedules
+      DELETE FROM public.shift_schedules
       WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
     `);
     await db.execute(sql`
-      DELETE FROM core.employees
+      DELETE FROM public.employees
       WHERE id = ${KETUA_UMKM_DUPLICATE_ID}
     `);
 

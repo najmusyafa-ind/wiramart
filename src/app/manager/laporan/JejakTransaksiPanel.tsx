@@ -196,7 +196,7 @@ export default function JejakTransaksiPanel() {
               fontWeight: 600,
             }}
           >
-            Tabel: pos.transaction_logs
+            Tabel: public.transaction_logs
           </span>
         </div>
         <div
