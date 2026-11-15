@@ -3,11 +3,11 @@
 // /daftar — Halaman Self-Service: Aktivasi Dosen + Daftar Mahasiswa
 // =============================================================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useId } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
-  GraduationCap, Users, KeyRound, Search, CheckCircle,
+  GraduationCap, Users, Search, CheckCircle,
   AlertCircle, Loader2, ArrowLeft, ChevronRight,
 } from 'lucide-react';
 
@@ -46,7 +46,7 @@ function StepDots({ total, current }: { total: number; current: number }) {
           width: i === current ? 20 : 8, height: 8,
           borderRadius: 'var(--radius-full)',
           background: i === current ? 'var(--color-primary)' : 'var(--color-border)',
-          transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+          transition: 'width 0.3s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
         }} />
       ))}
     </div>
@@ -137,10 +137,13 @@ function ShiftGrid({ onSelect, selected }: {
                       </div>
                     ) : (
                       <button
+                        type="button"
+                        aria-pressed={selected === entry.id}
                         key={entry.id}
                         onClick={() => onSelect(entry.id)}
                         style={{
-                          padding: 'var(--space-2) var(--space-4)',
+                          padding: '8px var(--space-4)',
+                          minHeight: 44,
                           border: selected === entry.id
                             ? '2px solid var(--color-primary)'
                             : '1.5px dashed hsl(145,55%,50%)',
@@ -152,7 +155,7 @@ function ShiftGrid({ onSelect, selected }: {
                           color: selected === entry.id ? 'var(--color-primary)' : 'hsl(145,55%,28%)',
                           cursor: 'pointer',
                           fontWeight: selected === entry.id ? 'var(--weight-semibold)' : 'var(--weight-medium)',
-                          transition: 'all 0.2s cubic-bezier(0.16,1,0.3,1)',
+                          transition: 'background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
                           display: 'flex', alignItems: 'center', gap: 4,
                         }}
                       >
@@ -178,6 +181,7 @@ function ShiftGrid({ onSelect, selected }: {
 // PANEL: Dosen — Aktivasi / Lupa Password
 // ─────────────────────────────────────────────────────────────
 function PanelDosen({ onBack }: { onBack: () => void }) {
+  const uid = useId();
   const [tab, setTab] = useState<DosenTab>('aktivasi');
   const [nidn, setNidn] = useState('');
   const [namaLengkap, setNamaLengkap] = useState('');
@@ -217,19 +221,26 @@ function PanelDosen({ onBack }: { onBack: () => void }) {
 
   return (
     <div>
-      <button onClick={onBack} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', marginBottom: 'var(--space-4)' }}>
-        <ArrowLeft size={14} /> Kembali
+      <button type="button" onClick={onBack} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', minHeight: 44, padding: '0 8px', marginBottom: 'var(--space-3)' }}>
+        <ArrowLeft size={16} /> Kembali
       </button>
 
-      <div style={{ display: 'flex', gap: 0, marginBottom: 'var(--space-5)', borderBottom: '2px solid var(--color-border)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 0, marginBottom: 'var(--space-5)', borderBottom: '2px solid var(--color-border)' }}>
         {(['aktivasi', 'lupa'] as DosenTab[]).map((t) => (
-          <button key={t} onClick={() => { setTab(t); setResult(null); }} style={{
-            background: 'none', border: 'none', cursor: 'pointer', padding: 'var(--space-2) var(--space-4)',
-            fontSize: 'var(--text-sm)', fontWeight: tab === t ? 'var(--weight-bold)' : 'var(--weight-normal)',
-            color: tab === t ? 'var(--color-primary)' : 'var(--color-text-muted)',
-            borderBottom: tab === t ? '2px solid var(--color-primary)' : '2px solid transparent',
-            marginBottom: -2,
-          }}>
+          <button
+            type="button"
+            key={t}
+            aria-pressed={tab === t}
+            onClick={() => { setTab(t); setResult(null); }}
+            style={{
+              flex: '1 1 130px',
+              background: 'none', border: 'none', cursor: 'pointer', padding: '10px var(--space-4)', minHeight: 44,
+              fontSize: 'var(--text-sm)', fontWeight: tab === t ? 'var(--weight-bold)' : 'var(--weight-normal)',
+              color: tab === t ? 'var(--color-primary)' : 'var(--color-text-muted)',
+              borderBottom: tab === t ? '2px solid var(--color-primary)' : '2px solid transparent',
+              marginBottom: -2,
+            }}
+          >
             {t === 'aktivasi' ? '✨ Aktivasi Akun' : '🔑 Lupa Password'}
           </button>
         ))}
@@ -237,21 +248,21 @@ function PanelDosen({ onBack }: { onBack: () => void }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
         <div className="form-group">
-          <label className="form-label">NIDN / NIDK</label>
-          <input className="form-input" placeholder="Contoh: 0412345678" value={nidn} onChange={e => setNidn(e.target.value)} />
+          <label htmlFor={`${uid}-nidn`} className="form-label">NIDN / NIDK</label>
+          <input id={`${uid}-nidn`} inputMode="numeric" className="form-input" style={{ fontSize: 'var(--text-base)', minHeight: 44 }} placeholder="Contoh: 0412345678" value={nidn} onChange={e => setNidn(e.target.value)} />
           <p className="form-hint">Nomor Induk Dosen Nasional atau Nomor Induk Dosen Khusus.</p>
         </div>
         <div className="form-group">
-          <label className="form-label">Nama Lengkap</label>
-          <input className="form-input" placeholder="Nama sesuai dokumen resmi" value={namaLengkap} onChange={e => setNamaLengkap(e.target.value)} />
+          <label htmlFor={`${uid}-nama`} className="form-label">Nama Lengkap</label>
+          <input id={`${uid}-nama`} className="form-input" style={{ fontSize: 'var(--text-base)', minHeight: 44 }} placeholder="Nama sesuai dokumen resmi" value={namaLengkap} onChange={e => setNamaLengkap(e.target.value)} />
         </div>
         <div className="form-group">
-          <label className="form-label">{tab === 'aktivasi' ? 'Buat Password Baru' : 'Password Baru'}</label>
-          <input className="form-input" type="password" placeholder="Minimal 6 karakter" value={password} onChange={e => setPassword(e.target.value)} />
+          <label htmlFor={`${uid}-pass`} className="form-label">{tab === 'aktivasi' ? 'Buat Password Baru' : 'Password Baru'}</label>
+          <input id={`${uid}-pass`} className="form-input" style={{ fontSize: 'var(--text-base)', minHeight: 44 }} type="password" placeholder="Minimal 6 karakter" value={password} onChange={e => setPassword(e.target.value)} />
         </div>
         <div className="form-group">
-          <label className="form-label">Konfirmasi Password</label>
-          <input className="form-input" type="password" placeholder="Ulangi password baru" value={konfirmasi} onChange={e => setKonfirmasi(e.target.value)} />
+          <label htmlFor={`${uid}-conf`} className="form-label">Konfirmasi Password</label>
+          <input id={`${uid}-conf`} className="form-input" style={{ fontSize: 'var(--text-base)', minHeight: 44 }} type="password" placeholder="Ulangi password baru" value={konfirmasi} onChange={e => setKonfirmasi(e.target.value)} />
         </div>
 
         {result && (
@@ -261,7 +272,7 @@ function PanelDosen({ onBack }: { onBack: () => void }) {
           </div>
         )}
 
-        <button onClick={handleSubmit} className="btn btn-primary" disabled={loading || !nidn || !namaLengkap || !password || !konfirmasi} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <button type="button" onClick={handleSubmit} className="btn btn-primary" disabled={loading || !nidn || !namaLengkap || !password || !konfirmasi} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 44 }}>
           {loading ? <><Loader2 size={16} className="spin-icon" /> Memproses...</> : (tab === 'aktivasi' ? '✅ Aktivasi Akun' : '🔑 Reset Password')}
         </button>
       </div>
@@ -285,6 +296,7 @@ const PRODI_OPTIONS: { fakultas: string; prodi: string[] }[] = [
 ];
 
 function PanelMahasiswa({ onBack }: { onBack: () => void }) {
+  const uid = useId();
   const [tab, setTab] = useState<MahasiswaTab>('daftar');
   // Step daftar: 1 = isi data, 2 = pilih slot, 3 = sukses
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -348,19 +360,26 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
 
   return (
     <div>
-      <button onClick={onBack} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', marginBottom: 'var(--space-4)' }}>
-        <ArrowLeft size={14} /> Kembali
+      <button type="button" onClick={onBack} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', minHeight: 44, padding: '0 8px', marginBottom: 'var(--space-3)' }}>
+        <ArrowLeft size={16} /> Kembali
       </button>
 
       {/* Tab */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: 'var(--space-5)', borderBottom: '2px solid var(--color-border)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 0, marginBottom: 'var(--space-5)', borderBottom: '2px solid var(--color-border)' }}>
         {([['daftar', '📝 Daftar Shift'], ['lupa-nim', '🔍 Lupa NIM']] as [MahasiswaTab, string][]).map(([t, label]) => (
-          <button key={t} onClick={() => { setTab(t as MahasiswaTab); setError(null); }} style={{
-            background: 'none', border: 'none', cursor: 'pointer', padding: 'var(--space-2) var(--space-4)',
-            fontSize: 'var(--text-sm)', fontWeight: tab === t ? 'var(--weight-bold)' : 'var(--weight-normal)',
-            color: tab === t ? 'var(--color-primary)' : 'var(--color-text-muted)',
-            borderBottom: tab === t ? '2px solid var(--color-primary)' : '2px solid transparent', marginBottom: -2,
-          }}>{label}</button>
+          <button
+            type="button"
+            aria-pressed={tab === t}
+            key={t}
+            onClick={() => { setTab(t as MahasiswaTab); setError(null); }}
+            style={{
+              flex: '1 1 130px',
+              background: 'none', border: 'none', cursor: 'pointer', padding: '10px var(--space-4)', minHeight: 44,
+              fontSize: 'var(--text-sm)', fontWeight: tab === t ? 'var(--weight-bold)' : 'var(--weight-normal)',
+              color: tab === t ? 'var(--color-primary)' : 'var(--color-text-muted)',
+              borderBottom: tab === t ? '2px solid var(--color-primary)' : '2px solid transparent', marginBottom: -2,
+            }}
+          >{label}</button>
         ))}
       </div>
 
@@ -372,17 +391,19 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
           {step === 1 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               <div className="form-group">
-                <label className="form-label">Nama Lengkap</label>
-                <input className="form-input" placeholder="Sesuai data pendaftaran" value={nama} onChange={e => setNama(e.target.value)} />
+                <label htmlFor={`${uid}-nama`} className="form-label">Nama Lengkap</label>
+                <input id={`${uid}-nama`} className="form-input" style={{ fontSize: 'var(--text-base)', minHeight: 44 }} placeholder="Sesuai data pendaftaran" value={nama} onChange={e => setNama(e.target.value)} />
               </div>
               <div className="form-group">
-                <label className="form-label">NIM</label>
-                <input className="form-input" placeholder="Nomor Induk Mahasiswa" value={nim} onChange={e => setNim(e.target.value)} />
+                <label htmlFor={`${uid}-nim`} className="form-label">NIM</label>
+                <input id={`${uid}-nim`} inputMode="numeric" className="form-input" style={{ fontSize: 'var(--text-base)', minHeight: 44 }} placeholder="Nomor Induk Mahasiswa" value={nim} onChange={e => setNim(e.target.value)} />
               </div>
               <div className="form-group">
-                <label className="form-label">Program Studi *</label>
+                <label htmlFor={`${uid}-prodi`} className="form-label">Program Studi *</label>
                 <select
+                  id={`${uid}-prodi`}
                   className="form-input form-select"
+                  style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
                   value={prodi}
                   onChange={e => setProdi(e.target.value)}
                   required
@@ -398,10 +419,11 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                 </select>
               </div>
               <button
+                type="button"
                 onClick={() => { setError(null); setStep(2); }}
                 className="btn btn-primary"
                 disabled={!nama || !nim || !prodi}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 44 }}
               >
                 Lanjut Pilih Shift <ChevronRight size={16} />
               </button>
@@ -410,9 +432,9 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
 
           {step === 2 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-              <div style={{ padding: 'var(--space-3)', background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)' }}>
-                <strong>{nama}</strong> · NIM {nim} · {prodi}
-                <button onClick={() => setStep(1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)', fontSize: 'var(--text-xs)', marginLeft: 8 }}>ubah</button>
+              <div style={{ padding: 'var(--space-3)', background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                <span><strong>{nama}</strong> · NIM {nim} · {prodi}</span>
+                <button type="button" onClick={() => setStep(1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)', fontSize: 'var(--text-xs)', fontWeight: 600, minHeight: 44, padding: '0 8px', display: 'inline-flex', alignItems: 'center' }}>ubah</button>
               </div>
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
                 Pilih slot jadwal yang <strong>kosong</strong>:
@@ -423,13 +445,14 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                   <AlertCircle size={16} style={{ flexShrink: 0 }} /> {error}
                 </div>
               )}
-              <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-                <button onClick={() => setStep(1)} className="btn btn-secondary" style={{ flex: 1 }}>Kembali</button>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => setStep(1)} className="btn btn-secondary" style={{ flex: 1, minWidth: 100, minHeight: 44 }}>Kembali</button>
                 <button
+                  type="button"
                   onClick={handleDaftar}
                   className="btn btn-primary"
                   disabled={!selectedSlot || loading}
-                  style={{ flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                  style={{ flex: 2, minWidth: 160, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                 >
                   {loading ? <><Loader2 size={16} className="spin-icon" /> Mendaftar...</> : '✅ Daftar Sekarang'}
                 </button>
@@ -443,7 +466,7 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                 <CheckCircle size={36} style={{ color: 'var(--color-success)' }} />
               </div>
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text)', textAlign: 'center' }}>{successMsg}</p>
-              <a href="/login" className="btn btn-primary">Login Sekarang →</a>
+              <a href="/login" className="btn btn-primary" style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>Login Sekarang →</a>
             </div>
           )}
         </div>
@@ -457,13 +480,15 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
             Jika masih tidak ditemukan, hubungi admin Wiramart atau kaprodi.
           </p>
           <div className="form-group">
-            <label className="form-label">Nama Lengkap</label>
-            <input className="form-input" placeholder="Sesuai data pendaftaran" value={lupaName} onChange={e => setLupaName(e.target.value)} />
+            <label htmlFor={`${uid}-lupa-nama`} className="form-label">Nama Lengkap</label>
+            <input id={`${uid}-lupa-nama`} className="form-input" style={{ fontSize: 'var(--text-base)', minHeight: 44 }} placeholder="Sesuai data pendaftaran" value={lupaName} onChange={e => setLupaName(e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Program Studi</label>
+            <label htmlFor={`${uid}-lupa-prodi`} className="form-label">Program Studi</label>
             <select
+              id={`${uid}-lupa-prodi`}
               className="form-input form-select"
+              style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
               value={lupaProdi}
               onChange={e => setLupaProdi(e.target.value)}
             >
@@ -490,10 +515,11 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
             </div>
           )}
           <button
+            type="button"
             onClick={handleCariNim}
             className="btn btn-primary"
             disabled={lupaLoading || !lupaName || !lupaProdi}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 44 }}
           >
             {lupaLoading ? <><Loader2 size={16} className="spin-icon" /> Mencari...</> : <><Search size={16} /> Cari NIM</>}
           </button>
@@ -511,8 +537,9 @@ export default function DaftarPage() {
 
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'var(--color-bg)', padding: 'var(--space-5)',
+      minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--color-bg)',
+      padding: 'calc(var(--space-5) + env(safe-area-inset-top, 0px)) var(--space-4) calc(var(--space-5) + env(safe-area-inset-bottom, 0px))',
     }}>
       <div style={{ width: '100%', maxWidth: 480 }}>
         {/* Logo */}
@@ -522,6 +549,7 @@ export default function DaftarPage() {
               src="/logo.png"
               alt="Logo Wiramart UNPERBA"
               fill
+              sizes="64px"
               style={{ objectFit: 'contain' }}
               priority
             />
@@ -542,49 +570,55 @@ export default function DaftarPage() {
                   Pilih peran kamu:
                 </p>
                 <button
+                  type="button"
                   onClick={() => setMode('dosen')}
                   style={{
+                    width: '100%',
                     padding: 'var(--space-5)', border: '1.5px solid var(--color-border)',
                     borderRadius: 'var(--radius-lg)', background: 'var(--color-surface)',
                     cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 'var(--space-4)',
-                    transition: 'all 0.2s ease', textAlign: 'left',
+                    transition: 'border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                    textAlign: 'left',
                   }}
                   onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
                   onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 >
-                  <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: 'var(--color-primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: 'var(--color-primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <GraduationCap size={22} style={{ color: 'var(--color-primary)' }} />
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', marginBottom: 2 }}>Dosen / Admin</div>
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Aktivasi akun atau reset password dengan NIDN/NIDK</div>
-                  </div>
-                  <ChevronRight size={18} style={{ marginLeft: 'auto', color: 'var(--color-text-muted)' }} />
+                  </span>
+                  <span style={{ display: 'block', minWidth: 0 }}>
+                    <span style={{ display: 'block', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', marginBottom: 2 }}>Dosen / Admin</span>
+                    <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Aktivasi akun atau reset password dengan NIDN/NIDK</span>
+                  </span>
+                  <ChevronRight size={18} style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--color-text-muted)' }} />
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => setMode('mahasiswa')}
                   style={{
+                    width: '100%',
                     padding: 'var(--space-5)', border: '1.5px solid var(--color-border)',
                     borderRadius: 'var(--radius-lg)', background: 'var(--color-surface)',
                     cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 'var(--space-4)',
-                    transition: 'all 0.2s ease', textAlign: 'left',
+                    transition: 'border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                    textAlign: 'left',
                   }}
                   onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
                   onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 >
-                  <div style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: 'var(--color-info-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: 'var(--color-info-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Users size={22} style={{ color: 'var(--color-info)' }} />
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', marginBottom: 2 }}>Mahasiswa / Karyawan</div>
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Daftar shift atau cari NIM yang terlupakan</div>
-                  </div>
-                  <ChevronRight size={18} style={{ marginLeft: 'auto', color: 'var(--color-text-muted)' }} />
+                  </span>
+                  <span style={{ display: 'block', minWidth: 0 }}>
+                    <span style={{ display: 'block', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', marginBottom: 2 }}>Mahasiswa / Karyawan</span>
+                    <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Daftar shift atau cari NIM yang terlupakan</span>
+                  </span>
+                  <ChevronRight size={18} style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--color-text-muted)' }} />
                 </button>
 
                 <div style={{ textAlign: 'center', paddingTop: 'var(--space-2)' }}>
-                  <a href="/login" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  <a href="/login" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minHeight: 44, padding: '8px 12px', gap: 4 }}>
                     Sudah punya akun? <span style={{ color: 'var(--color-primary)' }}>Login di sini</span>
                   </a>
                 </div>

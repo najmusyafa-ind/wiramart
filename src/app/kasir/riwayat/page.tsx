@@ -1,6 +1,6 @@
-﻿'use client';
+'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ChevronLeft, Receipt, Banknote, QrCode, Clock,
@@ -117,9 +117,11 @@ function TrxRow({ trx }: { trx: Transaksi }) {
     }}>
       {/* Header baris */}
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         style={{
-          width: '100%', padding: '12px 14px',
+          width: '100%', minHeight: 52, padding: '12px 14px',
           display: 'flex', alignItems: 'center', gap: 10,
           background: 'none', border: 'none', cursor: 'pointer',
           textAlign: 'left',
@@ -234,99 +236,142 @@ function TrxRow({ trx }: { trx: Transaksi }) {
   );
 }
 
+async function requestRiwayat(tgl: string, signal?: AbortSignal) {
+  const res = await fetch(`/api/kasir/riwayat?tanggal=${tgl}`, { signal });
+  if (res.status === 401 || res.status === 403) {
+    return { status: 'unauthorized' as const };
+  }
+  const json = await res.json();
+  if (json.success) {
+    return { status: 'ok' as const, data: json.data as RiwayatData };
+  }
+  return { status: 'error' as const, error: (json.message as string | undefined) ?? 'Gagal memuat data.' };
+}
+
 // ── Halaman Utama ────────────────────────────────────────────
 export default function KasirRiwayatPage() {
   const router = useRouter();
 
-  const todayWIB = (() => {
+  const [todayWIB] = useState(() => {
     const d = new Date(Date.now() + 7 * 60 * 60 * 1000);
     return d.toISOString().slice(0, 10);
-  })();
+  });
 
   const [tanggal, setTanggal] = useState(todayWIB);
   const [data, setData] = useState<RiwayatData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const fetchData = useCallback(async (tgl: string) => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`/api/kasir/riwayat?tanggal=${tgl}`);
-      if (res.status === 401 || res.status === 403) {
-        router.push('/kasir/login');
-        return;
-      }
-      const json = await res.json();
-      if (json.success) {
-        setData(json.data);
-      } else {
-        setError(json.message ?? 'Gagal memuat data.');
-      }
-    } catch {
-      setError('Koneksi gagal. Coba lagi.');
-    } finally {
-      setLoading(false);
-    }
-  }, [router]);
+  useEffect(() => {
+    const controller = new AbortController();
 
-  useEffect(() => { fetchData(tanggal); }, [tanggal, fetchData]);
+    requestRiwayat(tanggal, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        if (result.status === 'unauthorized') {
+          router.push('/kasir/login');
+          return;
+        }
+        if (result.status === 'error') {
+          setError(result.error);
+          return;
+        }
+        setError('');
+        setData(result.data);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setError('Koneksi gagal. Coba lagi.');
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [tanggal, router]);
 
   const s = data?.summary;
 
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--color-bg)', paddingBottom: 32 }}>
+    <div style={{ minHeight: '100svh', background: 'var(--color-bg)', paddingBottom: 'calc(32px + env(safe-area-inset-bottom, 0px))' }}>
 
       {/* ── Header ── */}
       <div style={{
         background: 'var(--color-surface)',
         borderBottom: '1px solid var(--color-border)',
-        padding: '14px 16px',
+        padding: '12px 16px',
         display: 'flex', alignItems: 'center', gap: 12,
         position: 'sticky', top: 0, zIndex: 10,
         boxShadow: 'var(--shadow-xs)',
       }}>
         <button
+          type="button"
           onClick={() => router.push('/kasir/pos')}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-secondary)', padding: 4, display: 'flex' }}
+          style={{
+            background: 'var(--color-surface-muted)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 10,
+            cursor: 'pointer',
+            color: 'var(--color-text)',
+            minWidth: 44,
+            minHeight: 44,
+            padding: 0,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
           aria-label="Kembali ke POS"
         >
           <ChevronLeft size={22} />
         </button>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-text)' }}>Riwayat Transaksi Saya</div>
           {data && (
-            <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {data.kasir.namaLengkap} · {data.kasir.nim}
             </div>
           )}
         </div>
-        <Receipt size={20} color="var(--color-primary)" />
+        <Receipt size={20} color="var(--color-primary)" style={{ flexShrink: 0 }} />
       </div>
 
       <div style={{ padding: '16px 16px 0' }}>
 
         {/* ── Filter Tanggal ── */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8,
           background: 'var(--color-surface)',
           border: '1px solid var(--color-border)',
-          borderRadius: 10, padding: '10px 14px',
+          borderRadius: 10, padding: '8px 14px',
           marginBottom: 16,
         }}>
-          <Calendar size={16} color="var(--color-primary)" />
-          <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', flex: 1 }}>
+          <Calendar size={16} color="var(--color-primary)" style={{ flexShrink: 0 }} />
+          <label htmlFor="riwayat-tanggal" style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)', flex: 1 }}>
             Tanggal
           </label>
           <input
+            id="riwayat-tanggal"
             type="date"
             value={tanggal}
             max={todayWIB}
-            onChange={(e) => setTanggal(e.target.value)}
+            onChange={(e) => {
+              setLoading(true);
+              setError('');
+              setTanggal(e.target.value);
+            }}
             style={{
-              border: 'none', outline: 'none',
-              background: 'transparent',
-              fontSize: 13, fontWeight: 600,
+              border: '1px solid var(--color-border)',
+              borderRadius: 8,
+              padding: '6px 10px',
+              minHeight: 44,
+              outline: 'none',
+              background: 'var(--color-surface)',
+              fontSize: '1rem',
+              fontWeight: 600,
               color: 'var(--color-primary)',
               cursor: 'pointer',
             }}
@@ -395,7 +440,7 @@ export default function KasirRiwayatPage() {
             )}
 
             {/* Summary cards 2x2 */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))', gap: 10, marginBottom: 16 }}>
               <SummaryCard label="Total Struk" value={`${s?.jumlahStruk ?? 0} transaksi`} icon={ShoppingBag} color="hsl(220 80% 55%)" />
               <SummaryCard label="Total Omzet" value={rp(s?.totalOmzet ?? 0)} icon={TrendingUp} color="hsl(142 60% 38%)" />
               <SummaryCard label="Tunai (Cash)" value={rp(s?.totalCash ?? 0)} icon={Banknote} color="hsl(35 90% 50%)" />

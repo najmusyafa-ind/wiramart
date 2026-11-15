@@ -13,6 +13,7 @@ import type { NextConfig } from "next";
 // - connect-src openfoodfacts  → Barcode lookup di BarcodeScanner
 // - frame-ancestors 'none'     → Proteksi clickjacking
 // ─────────────────────────────────────────────────────────────────────────────
+const isProd = process.env.NODE_ENV === 'production';
 const supabaseHostPattern = '*.supabase.co *.supabase.in';
 
 const ContentSecurityPolicy = `
@@ -27,10 +28,12 @@ const ContentSecurityPolicy = `
   base-uri 'self';
   form-action 'self';
   frame-ancestors 'none';
-  upgrade-insecure-requests;
+  ${isProd ? 'upgrade-insecure-requests;' : ''}
 `.replace(/\n/g, ' ').replace(/\s{2,}/g, ' ').trim();
 
 const nextConfig: NextConfig = {
+  // Jangan bocorkan header X-Powered-By: Next.js
+  poweredByHeader: false,
   // Sembunyikan floating badge "N" Next.js dev indicator agar tidak menutupi mobile bottom nav saat testing localhost
   devIndicators: false,
   // Cegah error Cross-Origin dev resources saat diakses dari 127.0.0.1 atau localhost
@@ -85,11 +88,29 @@ const nextConfig: NextConfig = {
             value: 'strict-origin-when-cross-origin',
           },
           {
-            // Permissions Policy — nonaktifkan API yang tidak dipakai
-            // Camera diizinkan untuk barcode scanner di kasir
-            key: 'Permissions-Policy',
-            value: 'camera=self, microphone=(), geolocation=(), payment=()',
+            // Isolasi browsing context dari tab eksternal (window.opener)
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin',
           },
+          {
+            // Nonaktifkan DNS prefetching untuk privasi
+            key: 'X-DNS-Prefetch-Control',
+            value: 'off',
+          },
+          {
+            // Permissions Policy — sintaks kurung camera=(self) wajib sesuai spec modern
+            // Camera hanya diizinkan pada origin sendiri untuk barcode scanner kasir/gudang
+            key: 'Permissions-Policy',
+            value: 'camera=(self), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()',
+          },
+          ...(isProd
+            ? [
+                {
+                  key: 'Strict-Transport-Security',
+                  value: 'max-age=63072000; includeSubDomains',
+                },
+              ]
+            : []),
         ],
       },
     ];

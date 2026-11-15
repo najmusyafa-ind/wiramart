@@ -7,6 +7,7 @@
 import { and, eq, gt, isNull, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { products, categories } from '@/lib/db/schema';
+import { getLowStockThreshold } from '@/lib/services/operationalSettingsService';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ export type KatalogItem = {
   unit: string;
   photoUrl: string | null;
   isAvailable: boolean;       // stockQty > 0 && isActive
+  isLowStock?: boolean;       // 0 < stockQty <= operationalSettings.lowStockThreshold
   categoryId: string;
   categoryName: string;
 };
@@ -39,31 +41,35 @@ export type KatalogItem = {
 export async function getKatalog(): Promise<{
   items: KatalogItem[];
   lastUpdated: string;
+  lowStockThreshold: number;
 }> {
-  const rows = await db
-    .select({
-      id: products.id,
-      name: products.name,
-      description: products.description,
-      sellingPrice: products.sellingPrice,
-      stockQty: products.stockQty,
-      unit: products.unit,
-      photoUrl: products.photoUrl,
-      isActive: products.isActive,
-      categoryId: categories.id,
-      categoryName: categories.name,
-    })
-    .from(products)
-    .innerJoin(categories, eq(products.categoryId, categories.id))
-    .where(
-      and(
-        eq(products.isActive, true),
-        isNull(products.deletedAt),
-        eq(categories.isActive, true),
-        isNull(categories.deletedAt),
-      ),
-    )
-    .orderBy(categories.name, products.name);
+  const [rows, lowStockThreshold] = await Promise.all([
+    db
+      .select({
+        id: products.id,
+        name: products.name,
+        description: products.description,
+        sellingPrice: products.sellingPrice,
+        stockQty: products.stockQty,
+        unit: products.unit,
+        photoUrl: products.photoUrl,
+        isActive: products.isActive,
+        categoryId: categories.id,
+        categoryName: categories.name,
+      })
+      .from(products)
+      .innerJoin(categories, eq(products.categoryId, categories.id))
+      .where(
+        and(
+          eq(products.isActive, true),
+          isNull(products.deletedAt),
+          eq(categories.isActive, true),
+          isNull(categories.deletedAt),
+        ),
+      )
+      .orderBy(categories.name, products.name),
+    getLowStockThreshold(),
+  ]);
 
   const items: KatalogItem[] = rows.map((row) => ({
     id: row.id,
@@ -74,6 +80,7 @@ export async function getKatalog(): Promise<{
     unit: row.unit,
     photoUrl: row.photoUrl,
     isAvailable: row.isActive && row.stockQty > 0,
+    isLowStock: row.isActive && row.stockQty > 0 && row.stockQty <= lowStockThreshold,
     categoryId: row.categoryId,
     categoryName: row.categoryName,
   }));
@@ -81,6 +88,7 @@ export async function getKatalog(): Promise<{
   return {
     items,
     lastUpdated: new Date().toISOString(),
+    lowStockThreshold,
   };
 }
 

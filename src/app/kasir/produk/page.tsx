@@ -21,7 +21,7 @@ declare class BarcodeDetector {
 import { useState, useEffect, useCallback, useRef, useId } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Plus, Search, Edit2, Package, X, Loader2, ChevronLeft,
+  Plus, Search, Package, X, Loader2, ChevronLeft,
   Camera, CameraOff, ScanLine, CheckCircle, AlertCircle, Eye,
 } from 'lucide-react';
 
@@ -78,6 +78,77 @@ function BarcodeScanner({ onDetected, onClose }: BarcodeScannerProps) {
   const [fetchingOff, setFetchingOff] = useState(false);
   const [detectedCode, setDetectedCode] = useState('');
 
+  const onDetectedRef = useRef(onDetected);
+  useEffect(() => {
+    onDetectedRef.current = onDetected;
+  }, [onDetected]);
+
+  const handleBarcode = useCallback(async (code: string) => {
+    cancelAnimationFrame(rafRef.current);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    setDetectedCode(code);
+    setStatus('detected');
+    setFetchingOff(true);
+
+    let productName: string | undefined;
+    try {
+      const res = await fetch(
+        `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name_id,product_name,brands,quantity`,
+        { signal: AbortSignal.timeout(5000) },
+      );
+      if (res.ok) {
+        const data = await res.json() as OpenFoodFactsResult;
+        if (data.status === 1 && data.product) {
+          productName = data.product.product_name_id
+            || data.product.product_name
+            || (data.product.brands ? `${data.product.brands} (${data.product.quantity ?? ''})`.trim() : undefined);
+        }
+      }
+    } catch { /* timeout — lanjut tanpa nama */ }
+    finally { setFetchingOff(false); }
+
+    onDetectedRef.current(code, productName);
+  }, []);
+
+  const scanLoop = useCallback(() => {
+    if (!videoRef.current || !detectorRef.current) return;
+    const video = videoRef.current;
+    async function detect() {
+      if (video.readyState < 2) { rafRef.current = requestAnimationFrame(detect); return; }
+      try {
+        const barcodes = await detectorRef.current!.detect(video);
+        if (barcodes.length > 0) { handleBarcode(barcodes[0]!.rawValue); return; }
+      } catch { /* frame decode error — continue */ }
+      rafRef.current = requestAnimationFrame(detect);
+    }
+    rafRef.current = requestAnimationFrame(detect);
+  }, [handleBarcode]);
+
+  const startQuagga = useCallback(async () => {
+    try {
+      const Quagga = (await import('@ericblade/quagga2')).default;
+      setStatus('scanning');
+      Quagga.init({
+        inputStream: {
+          type: 'LiveStream',
+          target: videoRef.current!.parentElement as HTMLElement,
+          constraints: { facingMode: 'environment', width: 1280, height: 720 },
+        },
+        decoder: { readers: ['ean_reader', 'ean_8_reader', 'code_128_reader', 'upc_reader'] },
+      }, (err: Error | null) => {
+        if (err) { setErrorMsg('Gagal init scanner (Quagga2).'); setStatus('error'); return; }
+        Quagga.start();
+        Quagga.onDetected((result) => {
+          const code = result.codeResult?.code ?? '';
+          if (code) { Quagga.stop(); handleBarcode(code); }
+        });
+      });
+    } catch {
+      setErrorMsg('Browser tidak mendukung Barcode Scanner. Gunakan Chrome atau Edge terbaru.');
+      setStatus('error');
+    }
+  }, [handleBarcode]);
+
   useEffect(() => {
     let cancelled = false;
     async function startCamera() {
@@ -122,74 +193,7 @@ function BarcodeScanner({ onDetected, onClose }: BarcodeScannerProps) {
       cancelAnimationFrame(rafRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function scanLoop() {
-    if (!videoRef.current || !detectorRef.current) return;
-    const video = videoRef.current;
-    async function detect() {
-      if (video.readyState < 2) { rafRef.current = requestAnimationFrame(detect); return; }
-      try {
-        const barcodes = await detectorRef.current!.detect(video);
-        if (barcodes.length > 0) { handleBarcode(barcodes[0]!.rawValue); return; }
-      } catch { /* frame decode error — continue */ }
-      rafRef.current = requestAnimationFrame(detect);
-    }
-    rafRef.current = requestAnimationFrame(detect);
-  }
-
-  async function startQuagga() {
-    try {
-      const Quagga = (await import('@ericblade/quagga2')).default;
-      setStatus('scanning');
-      Quagga.init({
-        inputStream: {
-          type: 'LiveStream',
-          target: videoRef.current!.parentElement as HTMLElement,
-          constraints: { facingMode: 'environment', width: 1280, height: 720 },
-        },
-        decoder: { readers: ['ean_reader', 'ean_8_reader', 'code_128_reader', 'upc_reader'] },
-      }, (err: Error | null) => {
-        if (err) { setErrorMsg('Gagal init scanner (Quagga2).'); setStatus('error'); return; }
-        Quagga.start();
-        Quagga.onDetected((result) => {
-          const code = result.codeResult?.code ?? '';
-          if (code) { Quagga.stop(); handleBarcode(code); }
-        });
-      });
-    } catch {
-      setErrorMsg('Browser tidak mendukung Barcode Scanner. Gunakan Chrome atau Edge terbaru.');
-      setStatus('error');
-    }
-  }
-
-  async function handleBarcode(code: string) {
-    cancelAnimationFrame(rafRef.current);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    setDetectedCode(code);
-    setStatus('detected');
-    setFetchingOff(true);
-
-    let productName: string | undefined;
-    try {
-      const res = await fetch(
-        `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name_id,product_name,brands,quantity`,
-        { signal: AbortSignal.timeout(5000) },
-      );
-      if (res.ok) {
-        const data = await res.json() as OpenFoodFactsResult;
-        if (data.status === 1 && data.product) {
-          productName = data.product.product_name_id
-            || data.product.product_name
-            || (data.product.brands ? `${data.product.brands} (${data.product.quantity ?? ''})`.trim() : undefined);
-        }
-      }
-    } catch { /* timeout — lanjut tanpa nama */ }
-    finally { setFetchingOff(false); }
-
-    onDetected(code, productName);
-  }
+  }, [scanLoop, startQuagga]);
 
   return (
     <div
@@ -202,7 +206,7 @@ function BarcodeScanner({ onDetected, onClose }: BarcodeScannerProps) {
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="card" style={{ width: '100%', maxWidth: 460, overflow: 'hidden' }}>
+      <div className="card" style={{ width: '100%', maxWidth: 460, maxHeight: '90dvh', overflowY: 'auto' }}>
         {/* Header */}
         <div className="card-header">
           <h2 id={`${uid}-scanner-title`} className="card-title"
@@ -210,9 +214,17 @@ function BarcodeScanner({ onDetected, onClose }: BarcodeScannerProps) {
             <ScanLine size={16} aria-hidden="true" />
             Scan Barcode Produk
           </h2>
-          <button onClick={onClose} aria-label="Tutup scanner"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'flex' }}>
-            <X size={18} aria-hidden="true" />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Tutup scanner"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--color-text-muted)', minWidth: 44, minHeight: 44,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8,
+            }}
+          >
+            <X size={20} aria-hidden="true" />
           </button>
         </div>
 
@@ -320,12 +332,6 @@ function ProdukModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
-  // Sync prefill saat props berubah (scanner → modal)
-  useEffect(() => {
-    if (prefillBarcode) setForm(p => ({ ...p, barcode: prefillBarcode }));
-    if (prefillName) setForm(p => ({ ...p, name: prefillName }));
-  }, [prefillBarcode, prefillName]);
-
   function handleFoto(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -397,11 +403,11 @@ function ProdukModal({
     }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{
         background: 'var(--color-surface)', width: '100%', maxWidth: 520,
-        borderRadius: '20px 20px 0 0', padding: 'var(--space-6)',
-        maxHeight: '92dvh', overflowY: 'auto',
+        borderRadius: '20px 20px 0 0', padding: 'var(--space-6) var(--space-5) calc(var(--space-6) + env(safe-area-inset-bottom, 0px))',
+        maxHeight: '90dvh', overflowY: 'auto',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
-          <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 'var(--space-3)' }}>
+          <div style={{ minWidth: 0 }}>
             <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', margin: 0 }}>
               {isEdit ? 'Detail Informasi Produk' : '💡 Usulkan Produk Baru'}
             </h2>
@@ -409,7 +415,17 @@ function ProdukModal({
               {isEdit ? 'Informasi spesifikasi barang di sistem kasir' : 'Kirim usulan barang baru ke Gudang / Admin untuk penetapan HPP & harga jual'}
             </p>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }} aria-label="Tutup modal">
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+              minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', flexShrink: 0, borderRadius: 8,
+              color: 'var(--color-text-secondary)',
+            }}
+            aria-label="Tutup modal"
+          >
             <X size={20} />
           </button>
         </div>
@@ -470,7 +486,7 @@ function ProdukModal({
                 <label style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6,
                   background: 'var(--color-primary-light)', color: 'var(--color-primary)',
-                  padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
+                  minHeight: 44, padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
                   fontSize: 'var(--text-sm)', fontWeight: 600,
                 }}>
                   {preview ? 'Ganti Foto' : 'Pilih Foto'}
@@ -547,11 +563,11 @@ function ProdukModal({
           )}
 
           {!isEdit ? (
-            <button type="submit" className="btn btn-primary" disabled={saving} style={{ marginTop: 8, padding: '12px 16px', fontSize: 14, fontWeight: 700 }}>
+            <button type="submit" className="btn btn-primary" disabled={saving} style={{ marginTop: 8, minHeight: 44, padding: '12px 16px', fontSize: 14, fontWeight: 700 }}>
               {saving ? <><Loader2 size={16} className="spin-icon" /> Mengirim Usulan...</> : '📨 Kirim Usulan Produk ke Gudang / Admin'}
             </button>
           ) : (
-            <button type="button" onClick={onClose} className="btn btn-secondary" style={{ marginTop: 8, padding: '12px 16px', fontSize: 14, fontWeight: 600 }}>
+            <button type="button" onClick={onClose} className="btn btn-secondary" style={{ marginTop: 8, minHeight: 44, padding: '12px 16px', fontSize: 14, fontWeight: 600 }}>
               Tutup Detail
             </button>
           )}
@@ -561,6 +577,23 @@ function ProdukModal({
   );
 }
 
+async function requestAdminProducts(q: string, signal?: AbortSignal) {
+  const res = await fetch(`/api/admin/produk?q=${encodeURIComponent(q)}`, { signal });
+  if (res.status === 401 || res.status === 403) {
+    return { status: 'unauthorized' as const };
+  }
+  const json = await res.json();
+  if (json.success && json.data) {
+    return {
+      status: 'ok' as const,
+      products: json.data.products as Product[],
+      categories: json.data.categories as Category[],
+      lowStockThreshold: json.data.lowStockThreshold as unknown,
+    };
+  }
+  return { status: 'error' as const };
+}
+
 // ────────────────────────────────────────────────
 // Halaman utama Kelola Produk (Kasir)
 // ────────────────────────────────────────────────
@@ -568,6 +601,7 @@ export default function KasirProdukPage() {
   const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [lowStockThreshold, setLowStockThreshold] = useState(5);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -577,42 +611,80 @@ export default function KasirProdukPage() {
   const [prefillName, setPrefillName] = useState<string | undefined>();
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
+  const applyProductsResult = useCallback(
+    (result: Awaited<ReturnType<typeof requestAdminProducts>>) => {
+      if (result.status === 'unauthorized') {
+        router.push('/kasir/login');
+        return;
+      }
+      if (result.status === 'ok') {
+        setProducts(result.products);
+        setCategories(result.categories);
+        if (typeof result.lowStockThreshold === 'number' && result.lowStockThreshold > 0) {
+          setLowStockThreshold(result.lowStockThreshold);
+        }
+      }
+    },
+    [router],
+  );
+
   const fetchProducts = useCallback(async (q = '') => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/produk?q=${encodeURIComponent(q)}`);
-      if (res.status === 401 || res.status === 403) { router.push('/kasir/login'); return; }
-      const json = await res.json();
-      if (json.success) {
-        setProducts(json.data.products);
-        setCategories(json.data.categories);
-      }
+      const result = await requestAdminProducts(q);
+      applyProductsResult(result);
     } finally {
       setLoading(false);
     }
-  }, [router]);
-
-  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  }, [applyProductsResult]);
 
   useEffect(() => {
+    let cancelled = false;
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const b = params.get('barcode');
       const n = params.get('nama');
       const t = params.get('tambah');
       if (b || n || t === '1') {
-        if (b) setPrefillBarcode(b);
-        if (n) setPrefillName(n);
-        setEditData(null);
-        setShowModal(true);
+        Promise.resolve().then(() => {
+          if (cancelled) return;
+          if (b) setPrefillBarcode(b);
+          if (n) setPrefillName(n);
+          setEditData(null);
+          setShowModal(true);
+        });
       }
     }
+    return () => { cancelled = true; };
   }, []);
 
+  const lastExecutedSearchRef = useRef(search);
+
   useEffect(() => {
-    const t = setTimeout(() => fetchProducts(search), 350);
-    return () => clearTimeout(t);
-  }, [search, fetchProducts]);
+    const controller = new AbortController();
+    const delayMs = lastExecutedSearchRef.current !== search ? 350 : 0;
+
+    const timer = setTimeout(() => {
+      lastExecutedSearchRef.current = search;
+      requestAdminProducts(search, controller.signal)
+        .then((result) => {
+          if (!controller.signal.aborted) {
+            applyProductsResult(result);
+          }
+        })
+        .catch(() => { /* network / abort ignored */ })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setLoading(false);
+          }
+        });
+    }, delayMs);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [search, applyProductsResult]);
 
   function handleBarcodeDetected(barcode: string, productName?: string) {
     setShowScanner(false);
@@ -632,43 +704,60 @@ export default function KasirProdukPage() {
   }
 
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--color-bg)', paddingBottom: 24 }}>
+    <div style={{ minHeight: '100svh', background: 'var(--color-bg)', paddingBottom: 'calc(92px + env(safe-area-inset-bottom, 0px))' }}>
       {/* Header */}
       <div style={{
         background: 'var(--color-surface)',
         borderBottom: '1px solid var(--color-border)',
-        padding: '14px 16px',
-        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '12px 16px',
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10,
         position: 'sticky', top: 0, zIndex: 10,
         boxShadow: 'var(--shadow-xs)',
       }}>
         <button
+          type="button"
           onClick={() => router.push('/kasir/pos')}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: 'var(--color-text-secondary)', padding: 4 }}
+          style={{
+            background: 'var(--color-surface-muted)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 10,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: 44,
+            minHeight: 44,
+            padding: 0,
+            flexShrink: 0,
+            color: 'var(--color-text)',
+          }}
           aria-label="Kembali ke POS"
         >
           <ChevronLeft size={22} />
         </button>
-        <div style={{ flex: 1 }}>
-          <h1 style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-bold)', lineHeight: 1.2 }}>Kelola Produk</h1>
-          <p style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{products.length} produk tersedia</p>
+        <div style={{ flex: '1 1 120px', minWidth: 0 }}>
+          <h1 style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-bold)', lineHeight: 1.2, margin: 0 }}>Kelola Produk</h1>
+          <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: 0 }}>{products.length} produk tersedia</p>
         </div>
         {/* Tombol Scan Barcode */}
         <button
           id="btn-scan-barcode-kasir"
+          type="button"
           onClick={() => { setEditData(null); setShowScanner(true); }}
           className="btn btn-secondary btn-sm"
+          style={{ minWidth: 44, minHeight: 44, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
           title="Scan barcode untuk tambah produk"
           aria-label="Scan barcode produk"
         >
-          <ScanLine size={15} />
-          <span style={{ display: 'none' }}>Scan</span>
+          <ScanLine size={16} />
         </button>
         {/* Tombol Tambah Manual */}
         <button
           id="btn-tambah-produk-kasir"
+          type="button"
           onClick={() => { setEditData(null); setPrefillBarcode(undefined); setPrefillName(undefined); setShowModal(true); }}
           className="btn btn-primary btn-sm"
+          style={{ minHeight: 44, padding: '8px 14px', flexShrink: 0 }}
         >
           <Plus size={15} /> Usul Produk
         </button>
@@ -678,17 +767,19 @@ export default function KasirProdukPage() {
       <div style={{
         margin: '12px 16px 6px',
         display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))',
         gap: 10,
       }}>
         <button
           id="btn-tambah-produk-banner"
+          type="button"
           onClick={() => { setEditData(null); setPrefillBarcode(undefined); setPrefillName(undefined); setShowModal(true); }}
           style={{
             background: 'var(--color-primary)',
             color: '#fff',
             border: 'none',
             borderRadius: 12,
+            minHeight: 60,
             padding: '12px 14px',
             display: 'flex',
             flexDirection: 'column',
@@ -711,12 +802,14 @@ export default function KasirProdukPage() {
 
         <button
           id="btn-scan-barcode-banner"
+          type="button"
           onClick={() => { setEditData(null); setShowScanner(true); }}
           style={{
             background: 'var(--color-surface)',
             color: 'var(--color-primary)',
             border: '1.5px solid var(--color-primary)',
             borderRadius: 12,
+            minHeight: 60,
             padding: '12px 14px',
             display: 'flex',
             flexDirection: 'column',
@@ -788,11 +881,12 @@ export default function KasirProdukPage() {
             <Package size={36} style={{ margin: '0 auto var(--space-2)', opacity: 0.35 }} />
             <span style={{ fontSize: 14, textAlign: 'center' }}>{search ? `Tidak ada hasil untuk "${search}"` : 'Belum ada produk.'}</span>
             <button
+              type="button"
               onClick={() => { setEditData(null); setPrefillBarcode(undefined); setPrefillName(search); setShowModal(true); }}
               className="btn btn-primary btn-sm"
-              style={{ marginTop: 12 }}
+              style={{ marginTop: 12, minHeight: 44, padding: '8px 16px' }}
             >
-              <Plus size={14} /> + Tambah Produk "{search || 'Baru'}"
+              <Plus size={14} /> + Tambah Produk &ldquo;{search || 'Baru'}&rdquo;
             </button>
           </div>
         ) : (
@@ -800,7 +894,7 @@ export default function KasirProdukPage() {
             <div key={p.id} style={{
               background: 'var(--color-surface)', borderRadius: 12,
               border: '1px solid var(--color-border)',
-              padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12,
             }}>
               {/* Foto */}
               <div style={{
@@ -813,10 +907,23 @@ export default function KasirProdukPage() {
                   : <Package size={28} color="var(--color-text-muted)" />}
               </div>
               {/* Info */}
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ flex: '1 1 140px', minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
                 <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                  {p.categoryName ?? '—'} · Stok: <strong style={{ color: p.stockQty <= 2 ? 'var(--color-error)' : 'inherit' }}>{p.stockQty} {p.unit}</strong>
+                  {p.categoryName ?? '—'} · Stok:{' '}
+                  <strong
+                    style={{
+                      color:
+                        p.stockQty <= 0
+                          ? 'var(--color-error)'
+                          : p.stockQty <= lowStockThreshold
+                          ? 'hsl(38 92% 30%)'
+                          : 'inherit',
+                    }}
+                  >
+                    {p.stockQty} {p.unit}
+                    {p.stockQty <= 0 ? ' (Habis)' : p.stockQty <= lowStockThreshold ? ' (Menipis)' : ''}
+                  </strong>
                   {p.barcode && <span> · <code style={{ fontSize: 10 }}>{p.barcode}</code></span>}
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--color-primary)', fontWeight: 700, marginTop: 2 }}>
@@ -826,12 +933,14 @@ export default function KasirProdukPage() {
               {/* Tombol Aksi Ubah Stok & Harga (Sangat Jelas Ada Tulisannya) */}
               <button
                 id={`btn-edit-produk-${p.id}`}
+                type="button"
                 onClick={() => { setEditData(p); setShowModal(true); }}
                 style={{
                   background: 'var(--color-primary-light)',
                   border: '1px solid var(--color-primary)',
                   borderRadius: 8,
-                  padding: '8px 10px',
+                  minHeight: 44,
+                  padding: '8px 12px',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 5,
@@ -840,7 +949,7 @@ export default function KasirProdukPage() {
                   color: 'var(--color-primary)',
                   cursor: 'pointer',
                   flexShrink: 0,
-                  transition: 'all 0.15s ease',
+                  transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
                   whiteSpace: 'nowrap',
                 }}
                 title="Lihat detail spesifikasi produk"
@@ -857,15 +966,17 @@ export default function KasirProdukPage() {
       {/* Floating Action Button (FAB) Tambah Produk untuk Kemudahan di HP Kasir */}
       <button
         id="fab-tambah-produk-kasir"
+        type="button"
         onClick={() => { setEditData(null); setPrefillBarcode(undefined); setPrefillName(undefined); setShowModal(true); }}
         style={{
           position: 'fixed',
-          bottom: 24,
+          bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
           right: 16,
           zIndex: 30,
           display: 'flex',
           alignItems: 'center',
           gap: 6,
+          minHeight: 48,
           padding: '12px 18px',
           borderRadius: 9999,
           background: 'var(--color-primary)',
@@ -893,6 +1004,7 @@ export default function KasirProdukPage() {
       {/* Produk Modal */}
       {showModal && (
         <ProdukModal
+          key={`${editData?.id ?? 'new'}-${prefillBarcode ?? ''}-${prefillName ?? ''}`}
           categories={categories}
           editData={editData}
           prefillBarcode={prefillBarcode}

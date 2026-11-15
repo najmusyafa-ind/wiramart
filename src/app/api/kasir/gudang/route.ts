@@ -10,7 +10,7 @@ import { NextRequest } from 'next/server';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import { db } from '@/lib/db/client';
 import { employees, admins } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import {
   getWarehouseSummary,
   getWarehouseProducts,
@@ -27,16 +27,32 @@ export async function GET(req: NextRequest) {
     return apiError('Unauthorized: Akses khusus petugas toko / admin', 401);
   }
 
-  let actorInfo = {
+  const sessionIssuedAtMs = payload.iat ? payload.iat * 1000 : undefined;
+  let actorInfo: {
+    id: string;
+    name: string;
+    nim: string;
+    jabatan: string;
+    canMutateStock: boolean;
+    actorRole: 'EMPLOYEE' | 'MANAGER' | 'ADMIN_SHIFT';
+    sessionIssuedAtMs?: number;
+  } = {
     id: payload.sub,
     name: 'Petugas Gudang',
     nim: 'GUDANG',
     jabatan: 'Gudang & Logistik',
+    canMutateStock: true,
+    actorRole: 'EMPLOYEE',
+    sessionIssuedAtMs,
   };
 
   if (payload.role === 'employee') {
     const employee = await db.query.employees.findFirst({
-      where: and(eq(employees.id, payload.sub), eq(employees.isActive, true)),
+      where: and(
+        eq(employees.id, payload.sub),
+        eq(employees.isActive, true),
+        isNull(employees.deletedAt),
+      ),
       columns: { id: true, fullName: true, nim: true, jabatan: true },
     });
 
@@ -49,21 +65,36 @@ export async function GET(req: NextRequest) {
       name: employee.fullName,
       nim: employee.nim,
       jabatan: employee.jabatan ?? 'Gudang',
+      canMutateStock: true,
+      actorRole: 'EMPLOYEE',
+      sessionIssuedAtMs,
     };
   } else if (payload.role === 'admin') {
     const adminRow = await db.query.admins.findFirst({
-      where: and(eq(admins.id, payload.sub), eq(admins.isActive, true)),
+      where: and(
+        eq(admins.id, payload.sub),
+        eq(admins.isActive, true),
+        isNull(admins.deletedAt),
+      ),
       columns: { id: true, fullName: true, nidn: true, role: true },
     });
 
-    if (adminRow) {
-      actorInfo = {
-        id: adminRow.id,
-        name: adminRow.fullName,
-        nim: adminRow.nidn ?? 'ADMIN',
-        jabatan: adminRow.role === 'MANAGER' ? 'Manager (Dosen)' : 'Admin Shift',
-      };
+    if (!adminRow) {
+      return apiError('Sesi admin tidak aktif atau sudah dinonaktifkan', 403);
     }
+
+    const isManager = adminRow.role === 'MANAGER';
+    actorInfo = {
+      id: adminRow.id,
+      name: adminRow.fullName,
+      nim: adminRow.nidn ?? 'ADMIN',
+      jabatan: isManager ? 'Manager (Dosen)' : 'Admin Shift (Pantau)',
+      canMutateStock: isManager,
+      actorRole: isManager ? 'MANAGER' : 'ADMIN_SHIFT',
+      sessionIssuedAtMs,
+    };
+  } else {
+    return apiError('Unauthorized: Peran tidak diizinkan mengakses portal gudang', 403);
   }
 
   const { searchParams } = new URL(req.url);
@@ -110,7 +141,40 @@ const restockSchema = z.object({
 export async function POST(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || (payload.role !== 'employee' && payload.role !== 'admin')) {
-    return apiError('Unauthorized: Akses khusus petugas toko / admin', 401);
+    return apiError('Unauthorized: Akses khusus petugas gudang / Manager', 401);
+  }
+
+  // Separation of Duty: ADMIN_SHIFT hanya akses baca (monitoring); mutasi langsung hanya MANAGER / Petugas Gudang
+  if (payload.role === 'admin') {
+    const adminRow = await db.query.admins.findFirst({
+      where: and(
+        eq(admins.id, payload.sub),
+        eq(admins.isActive, true),
+        isNull(admins.deletedAt),
+      ),
+      columns: { role: true },
+    });
+    if (!adminRow) {
+      return apiError('Akun admin tidak aktif atau tidak ditemukan', 403);
+    }
+    if (adminRow.role !== 'MANAGER') {
+      return apiError(
+        'Akses ditolak: Admin Shift hanya memiliki akses pantau gudang (read-only). Persetujuan barang masuk/restock langsung hanya oleh Manager (Dosen).',
+        403,
+      );
+    }
+  } else {
+    const employee = await db.query.employees.findFirst({
+      where: and(
+        eq(employees.id, payload.sub),
+        eq(employees.isActive, true),
+        isNull(employees.deletedAt),
+      ),
+      columns: { id: true },
+    });
+    if (!employee) {
+      return apiError('Data petugas gudang tidak aktif atau tidak ditemukan', 403);
+    }
   }
 
   let body: unknown;

@@ -22,20 +22,15 @@ export default function CartFloatingBar() {
 
   return (
     <div className="pwa-floating-bar" role="region" aria-label="Ringkasan Keranjang">
-      <div
+      <button
+        type="button"
         className="pwa-floating-bar-inner"
         onClick={() => setIsDrawerOpen(true)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            setIsDrawerOpen(true);
-          }
-        }}
+        aria-label={`Buka keranjang, ${totalItems} item, ${formattedSubtotal}`}
       >
         <div className="pwa-floating-bar-info">
           <div className="pwa-floating-cart-count">
-            <ShoppingBag size={20} />
+            <ShoppingBag size={20} aria-hidden="true" />
             <span className="pwa-floating-badge">{totalItems}</span>
           </div>
 
@@ -47,9 +42,9 @@ export default function CartFloatingBar() {
 
         <div className="pwa-floating-cta">
           <span>Keranjang</span>
-          <ChevronRight size={16} />
+          <ChevronRight size={16} aria-hidden="true" />
         </div>
-      </div>
+      </button>
     </div>
   );
 }

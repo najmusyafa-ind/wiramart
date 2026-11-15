@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { signAccessToken, signRefreshToken } from '@/lib/utils/auth';
 import { apiError } from '@/lib/utils/helpers';
+import { getDashboardPathForRole } from '@/lib/utils/routes';
 import { adminAuthLimiter } from '@/lib/utils/rate-limit';
 
 export const runtime = 'nodejs';
@@ -141,7 +142,7 @@ export async function POST(request: Request): Promise<Response> {
       role: 'admin',
       adminRole,
       name: employee.fullName,
-      redirect: '/admin/dashboard',
+      redirect: getDashboardPathForRole(adminRole),
     },
   });
 

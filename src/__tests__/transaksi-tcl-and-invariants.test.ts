@@ -169,7 +169,7 @@ describe('2. Integrasi TCL (COMMIT, REJECTED, ROLLED_BACK, Idempotency) & 3. Kon
     }
     // Bersihkan log REJECTED/ROLLED_BACK yang dibuat selama test oleh kasir ini dalam 2 menit terakhir
     await db.execute(sql`
-      DELETE FROM transaction_logs
+      DELETE FROM pos.transaction_logs
       WHERE employee_id = ${testEmployeeId}::uuid
         AND outcome IN ('REJECTED', 'ROLLED_BACK')
         AND created_at > now() - interval '2 minutes'
@@ -413,8 +413,8 @@ describe('4. Invarian & Normalisasi Database (Data Integrity Audit)', () => {
   it('tidak ada produk atau batch dengan stok negatif', async () => {
     const res = await db.execute<{ neg_prod: number; neg_batch: number }>(sql`
       SELECT
-        (SELECT count(*)::int FROM products WHERE stock_qty < 0) AS neg_prod,
-        (SELECT count(*)::int FROM stock_batches WHERE current_qty < 0) AS neg_batch
+        (SELECT count(*)::int FROM gudang.products WHERE stock_qty < 0) AS neg_prod,
+        (SELECT count(*)::int FROM gudang.stock_batches WHERE current_qty < 0) AS neg_batch
     `);
     assert.equal(res[0].neg_prod, 0, 'Tidak boleh ada produk dengan stock_qty < 0');
     assert.equal(res[0].neg_batch, 0, 'Tidak boleh ada stock_batches dengan current_qty < 0');
@@ -428,10 +428,10 @@ describe('4. Invarian & Normalisasi Database (Data Integrity Audit)', () => {
       orphan_log_shift: number;
     }>(sql`
       SELECT
-        (SELECT count(*)::int FROM transaction_items ti LEFT JOIN transactions t ON t.id = ti.transaction_id WHERE t.id IS NULL) AS orphan_items,
-        (SELECT count(*)::int FROM transaction_payments tp LEFT JOIN transactions t ON t.id = tp.transaction_id WHERE t.id IS NULL) AS orphan_payments,
-        (SELECT count(*)::int FROM transaction_logs tl LEFT JOIN transactions t ON t.id = tl.transaction_id WHERE tl.transaction_id IS NOT NULL AND t.id IS NULL) AS orphan_log_tx,
-        (SELECT count(*)::int FROM transaction_logs tl LEFT JOIN shifts s ON s.id = tl.shift_id WHERE tl.shift_id IS NOT NULL AND s.id IS NULL) AS orphan_log_shift
+        (SELECT count(*)::int FROM pos.transaction_items ti LEFT JOIN pos.transactions t ON t.id = ti.transaction_id WHERE t.id IS NULL) AS orphan_items,
+        (SELECT count(*)::int FROM pos.transaction_payments tp LEFT JOIN pos.transactions t ON t.id = tp.transaction_id WHERE t.id IS NULL) AS orphan_payments,
+        (SELECT count(*)::int FROM pos.transaction_logs tl LEFT JOIN pos.transactions t ON t.id = tl.transaction_id WHERE tl.transaction_id IS NOT NULL AND t.id IS NULL) AS orphan_log_tx,
+        (SELECT count(*)::int FROM pos.transaction_logs tl LEFT JOIN hr.shifts s ON s.id = tl.shift_id WHERE tl.shift_id IS NOT NULL AND s.id IS NULL) AS orphan_log_shift
     `);
     assert.equal(res[0].orphan_items, 0);
     assert.equal(res[0].orphan_payments, 0);
@@ -444,12 +444,81 @@ describe('4. Invarian & Normalisasi Database (Data Integrity Audit)', () => {
       SELECT count(*)::int AS mismatch_count
       FROM (
         SELECT t.id, t.gross_amount, COALESCE(SUM(ti.subtotal_sell), 0) AS sum_items
-        FROM transactions t
-        JOIN transaction_items ti ON ti.transaction_id = t.id
+        FROM pos.transactions t
+        JOIN pos.transaction_items ti ON ti.transaction_id = t.id
         GROUP BY t.id, t.gross_amount
         HAVING ABS(t.gross_amount - COALESCE(SUM(ti.subtotal_sell), 0)) > 1
       ) sub
     `);
     assert.equal(res[0].mismatch_count, 0, 'gross_amount harus selalu konsisten dengan jumlah subtotal item');
+  });
+});
+
+describe('5. Multi-Schema Architecture & 3NF Gudang Integrity (v4.0)', () => {
+  it('seluruh 33 tabel dikelompokkan bersih ke 6 schema domain dan 0 tabel tersisa di public', async () => {
+    const counts = await db.execute<{ schemaname: string; table_count: number }>(sql`
+      SELECT schemaname, count(*)::int AS table_count
+      FROM pg_tables
+      WHERE schemaname IN ('public', 'core', 'hr', 'gudang', 'pos', 'finance', 'delivery')
+      GROUP BY schemaname
+      ORDER BY schemaname
+    `);
+    const map = new Map(counts.map((r) => [r.schemaname, r.table_count]));
+    assert.equal(map.get('public') ?? 0, 0, 'Schema public tidak boleh menyimpan tabel aplikasi');
+    assert.equal(map.get('core'), 6);
+    assert.equal(map.get('hr'), 5);
+    assert.equal(map.get('gudang'), 11);
+    assert.equal(map.get('pos'), 4);
+    assert.equal(map.get('finance'), 3);
+    assert.equal(map.get('delivery'), 4);
+  });
+
+  it('ke-33 tabel mengaktifkan RLS serta memiliki policy deny anon & authenticated', async () => {
+    const weakTables = await db.execute<{ schemaname: string; tablename: string }>(sql`
+      SELECT t.schemaname, t.tablename
+      FROM pg_tables t
+      WHERE t.schemaname IN ('core', 'hr', 'gudang', 'pos', 'finance', 'delivery')
+        AND (
+          t.rowsecurity = false
+          OR NOT EXISTS (
+            SELECT 1 FROM pg_policies p
+            WHERE p.schemaname = t.schemaname AND p.tablename = t.tablename AND 'anon'::name = ANY(p.roles)
+          )
+          OR NOT EXISTS (
+            SELECT 1 FROM pg_policies p
+            WHERE p.schemaname = t.schemaname AND p.tablename = t.tablename AND 'authenticated'::name = ANY(p.roles)
+          )
+        )
+    `);
+    assert.equal(weakTables.length, 0, `Tabel tanpa RLS lengkap: ${JSON.stringify(weakTables)}`);
+  });
+
+  it('kolom redundan 3NF telah dibersihkan & FK gudang tidak memiliki orphan', async () => {
+    const droppedCols = await db.execute<{ table_name: string; column_name: string }>(sql`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'gudang'
+        AND (
+          (table_name = 'stock_receive_drafts' AND column_name = 'supplier_name')
+          OR (table_name = 'stock_receive_items' AND column_name = 'product_name')
+          OR (table_name = 'product_condition_reports' AND column_name IN ('product_id', 'expiry_date'))
+          OR (table_name = 'discount_barcodes' AND column_name IN ('product_id', 'discounted_price', 'discount_pct', 'valid_until'))
+        )
+    `);
+    assert.equal(droppedCols.length, 0, `Kolom 3NF redundan masih ada: ${JSON.stringify(droppedCols)}`);
+
+    const orphanFks = await db.execute<{
+      orphan_batch_supplier: number;
+      orphan_batch_receive_item: number;
+      orphan_adj_batch: number;
+    }>(sql`
+      SELECT
+        (SELECT count(*)::int FROM gudang.stock_batches sb LEFT JOIN gudang.suppliers s ON s.id = sb.supplier_id WHERE sb.supplier_id IS NOT NULL AND s.id IS NULL) AS orphan_batch_supplier,
+        (SELECT count(*)::int FROM gudang.stock_batches sb LEFT JOIN gudang.stock_receive_items sri ON sri.id = sb.receive_item_id WHERE sb.receive_item_id IS NOT NULL AND sri.id IS NULL) AS orphan_batch_receive_item,
+        (SELECT count(*)::int FROM gudang.stock_adjustments sa LEFT JOIN gudang.stock_batches sb ON sb.id = sa.batch_id WHERE sa.batch_id IS NOT NULL AND sb.id IS NULL) AS orphan_adj_batch
+    `);
+    assert.equal(orphanFks[0].orphan_batch_supplier, 0);
+    assert.equal(orphanFks[0].orphan_batch_receive_item, 0);
+    assert.equal(orphanFks[0].orphan_adj_batch, 0);
   });
 });

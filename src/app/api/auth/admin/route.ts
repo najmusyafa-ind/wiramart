@@ -11,6 +11,7 @@ import { admins, employees } from '@/lib/db/schema';
 import { NextResponse } from 'next/server';
 import { verifyPassword, signAccessToken, signRefreshToken } from '@/lib/utils/auth';
 import { apiError, apiOk } from '@/lib/utils/helpers';
+import { getDashboardPathForRole } from '@/lib/utils/routes';
 import { adminAuthLimiter } from '@/lib/utils/rate-limit';
 
 export const runtime = 'nodejs';
@@ -188,7 +189,7 @@ export async function POST(request: Request): Promise<Response> {
         role: 'admin',
         adminRole,
         name: admin.fullName,
-        redirect: '/admin/dashboard',
+        redirect: getDashboardPathForRole(adminRole),
       },
     });
 
@@ -269,7 +270,7 @@ export async function POST(request: Request): Promise<Response> {
         role: 'admin',
         adminRole,
         name: employee.fullName,
-        redirect: '/admin/dashboard',
+        redirect: getDashboardPathForRole(adminRole),
       },
     });
 

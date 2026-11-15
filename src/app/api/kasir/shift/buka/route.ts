@@ -32,6 +32,42 @@ const bukaShiftSchema = z.object({
   pin: z.string().min(1, 'PIN tidak boleh kosong').max(20).optional(),
 });
 
+/** Ambil kode error Postgres, baik langsung maupun terbungkus lewat rantai `cause`. */
+function readPgCode(err: unknown): string | undefined {
+  let cur: unknown = err;
+  for (let depth = 0; depth < 5 && typeof cur === 'object' && cur !== null; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+async function closeStaleShift(shiftId: string, clockOut: Date): Promise<void> {
+  await db
+    .update(shifts)
+    .set({ clockOut, status: 'CLOSED' })
+    .where(and(eq(shifts.id, shiftId), eq(shifts.status, 'ACTIVE')));
+}
+
+function buildActiveShiftResponse(
+  message: string,
+  shift: {
+    id: string;
+    modalAwal: string | null;
+    serahTerimaDiff: string | null;
+    auditFlags: string | null;
+  },
+): Response {
+  return apiOk({
+    message,
+    shiftId: shift.id,
+    modalAwal: shift.modalAwal !== null ? Number(shift.modalAwal) : null,
+    serahTerimaDiff: shift.serahTerimaDiff !== null ? Number(shift.serahTerimaDiff) : null,
+    auditFlags: shift.auditFlags ?? 'NORMAL',
+  });
+}
+
 export async function PATCH(req: NextRequest): Promise<Response> {
   // 1. Auth
   const payload = await verifyJwt(req);
@@ -72,37 +108,54 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   // Durasi shift UNPERBA adalah 4 jam. Batas overlap wajar adalah 4.5 jam.
   const FOUR_AND_HALF_HOURS = 4.5 * 60 * 60 * 1000;
   const TWELVE_HOURS = 12 * 60 * 60 * 1000;
-  const existingStoreShift = await db.query.shifts.findFirst({
-    where: isTestingMode
-      ? and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut))
-      : and(eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut)),
-    orderBy: [desc(shifts.clockIn)],
-  });
+  const now = new Date();
+  let shiftToFill: { id: string } | null = null;
 
-  if (existingStoreShift) {
-    const shiftAge = Date.now() - new Date(existingStoreShift.clockIn).getTime();
-    if (shiftAge > TWELVE_HOURS) {
-      // Auto-close shift lama yang sudah basi (>12 jam)
-      await db
-        .update(shifts)
-        .set({ clockOut: new Date(), status: 'CLOSED' })
-        .where(eq(shifts.id, existingStoreShift.id));
-    } else if (existingStoreShift.employeeId !== employeeId && shiftAge > FOUR_AND_HALF_HOURS) {
-      // Shift aktif dari kasir shift roster sebelumnya yang belum ditutup (>4.5 jam dan beda kasir)
-      // Auto-close shift lama tersebut saat kasir shift baru membuka laci kasir baru
-      await db
-        .update(shifts)
-        .set({ clockOut: new Date(), status: 'CLOSED' })
-        .where(eq(shifts.id, existingStoreShift.id));
-    } else if (existingStoreShift.modalAwal !== null) {
-      // Modal awal laci toko sudah dibuka (oleh kasir ini atau rekan dalam slot shift yang sama)
-      return apiOk({
-        message: isTestingMode ? 'Shift testing aktif.' : 'Shift laci toko sudah aktif dengan modal awal.',
-        shiftId: existingStoreShift.id,
-        modalAwal: Number(existingStoreShift.modalAwal),
-        serahTerimaDiff: existingStoreShift.serahTerimaDiff ? Number(existingStoreShift.serahTerimaDiff) : null,
-        auditFlags: existingStoreShift.auditFlags ?? 'NORMAL',
-      });
+  if (!isTestingMode) {
+    const existingStoreShift = await db.query.shifts.findFirst({
+      where: and(eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut)),
+      orderBy: [desc(shifts.clockIn)],
+    });
+
+    if (existingStoreShift) {
+      const shiftAge = now.getTime() - new Date(existingStoreShift.clockIn).getTime();
+      if (shiftAge > TWELVE_HOURS) {
+        // Auto-close shift lama yang sudah basi (>12 jam)
+        await closeStaleShift(existingStoreShift.id, now);
+      } else if (existingStoreShift.employeeId !== employeeId && shiftAge > FOUR_AND_HALF_HOURS) {
+        // Shift aktif dari kasir shift roster sebelumnya yang belum ditutup (>4.5 jam dan beda kasir)
+        // Auto-close shift lama tersebut saat kasir shift baru membuka laci kasir baru
+        await closeStaleShift(existingStoreShift.id, now);
+      } else if (existingStoreShift.modalAwal !== null) {
+        // Modal awal laci toko sudah dibuka (oleh kasir ini atau rekan dalam slot shift yang sama)
+        return buildActiveShiftResponse('Shift laci toko sudah aktif dengan modal awal.', existingStoreShift);
+      } else {
+        shiftToFill = { id: existingStoreShift.id };
+      }
+    }
+  }
+
+  // 3b. D8 Guard: pastikan karyawan ini sendiri tidak punya shift ACTIVE tersisa sebelum insert baru
+  // Query tanpa filter isNull(clockOut) agar setiap baris status='ACTIVE' terdeteksi sebelum menyentuh index parsial D8.
+  if (!shiftToFill) {
+    const ownActiveShift = await db.query.shifts.findFirst({
+      where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
+      orderBy: [desc(shifts.clockIn)],
+    });
+
+    if (ownActiveShift) {
+      const ownAge = now.getTime() - new Date(ownActiveShift.clockIn).getTime();
+      const maxAge = isTestingMode ? TWELVE_HOURS : FOUR_AND_HALF_HOURS;
+      if (ownAge > maxAge || ownActiveShift.clockOut !== null) {
+        await closeStaleShift(ownActiveShift.id, ownActiveShift.clockOut ?? now);
+      } else if (ownActiveShift.modalAwal !== null) {
+        return buildActiveShiftResponse(
+          isTestingMode ? 'Shift testing aktif.' : 'Shift laci toko sudah aktif dengan modal awal.',
+          ownActiveShift,
+        );
+      } else {
+        shiftToFill = { id: ownActiveShift.id };
+      }
     }
   }
 
@@ -153,9 +206,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
 
   // 5. Buat shift aktif baru secara atomik dengan modal awal yang valid (Cacat 2 Opsi A)
   let activeShiftId: string;
-  if (existingStoreShift && existingStoreShift.modalAwal === null) {
-    // Sesi aktif tanpa modal awal -> update modal awal
-    await db
+  if (shiftToFill) {
+    // Sesi aktif tanpa modal awal -> isi modal awal hanya jika masih ACTIVE & modalAwal IS NULL
+    const [updatedShift] = await db
       .update(shifts)
       .set({
         modalAwal: finalModalAwal.toString(),
@@ -163,26 +216,57 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         serahTerimaDiff: serahTerimaDiff !== null ? serahTerimaDiff.toString() : null,
         auditFlags,
       })
-      .where(eq(shifts.id, existingStoreShift.id));
-    activeShiftId = existingStoreShift.id;
-  } else {
-    // Buat baris shift baru secara resmi
-    const [newShift] = await db
-      .insert(shifts)
-      .values({
-        employeeId,
-        status: 'ACTIVE',
-        modalAwal: finalModalAwal.toString(),
-        cashBreakdownOpen: breakdown ?? null,
-        serahTerimaDiff: serahTerimaDiff !== null ? serahTerimaDiff.toString() : null,
-        auditFlags,
-      })
+      .where(and(eq(shifts.id, shiftToFill.id), eq(shifts.status, 'ACTIVE'), isNull(shifts.modalAwal)))
       .returning({ id: shifts.id });
 
-    if (!newShift) {
-      return apiError('Gagal membuka shift laci kas.', 'SHIFT_CREATE_FAILED', 500);
+    if (!updatedShift) {
+      const latestShift = await db.query.shifts.findFirst({
+        where: eq(shifts.id, shiftToFill.id),
+      });
+      if (latestShift?.status === 'ACTIVE' && latestShift.modalAwal !== null) {
+        return buildActiveShiftResponse(
+          isTestingMode ? 'Shift testing aktif.' : 'Shift laci toko sudah aktif dengan modal awal.',
+          latestShift,
+        );
+      }
+      return apiError('Shift sudah ditutup sebelum modal awal disimpan.', 'SHIFT_ALREADY_CLOSED', 409);
     }
-    activeShiftId = newShift.id;
+    activeShiftId = updatedShift.id;
+  } else {
+    // Buat baris shift baru secara resmi (dilindungi D8 partial unique index idx_shifts_one_active_per_employee)
+    try {
+      const [newShift] = await db
+        .insert(shifts)
+        .values({
+          employeeId,
+          status: 'ACTIVE',
+          modalAwal: finalModalAwal.toString(),
+          cashBreakdownOpen: breakdown ?? null,
+          serahTerimaDiff: serahTerimaDiff !== null ? serahTerimaDiff.toString() : null,
+          auditFlags,
+        })
+        .returning({ id: shifts.id });
+
+      if (!newShift) {
+        return apiError('Gagal membuka shift laci kas.', 'SHIFT_CREATE_FAILED', 500);
+      }
+      activeShiftId = newShift.id;
+    } catch (err) {
+      if (readPgCode(err) !== '23505') throw err;
+
+      // D8 concurrency guard: request paralel untuk employeeId yang sama lebih dulu membuka shift ACTIVE
+      const concurrentShift = await db.query.shifts.findFirst({
+        where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
+        orderBy: [desc(shifts.clockIn)],
+      });
+      if (!concurrentShift) {
+        return apiError('Shift kasir sedang diproses bersamaan. Muat ulang halaman.', 'SHIFT_CONFLICT', 409);
+      }
+      return buildActiveShiftResponse(
+        isTestingMode ? 'Shift testing aktif.' : 'Shift laci toko sudah aktif dengan modal awal.',
+        concurrentShift,
+      );
+    }
   }
 
   return apiOk({

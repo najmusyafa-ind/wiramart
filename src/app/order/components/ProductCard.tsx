@@ -13,16 +13,18 @@ import { useCart } from '@/features/order/cart.context';
 
 interface ProductCardProps {
   product: KatalogItem;
+  lowStockThreshold?: number;
 }
 
-export default function ProductCard({ product }: ProductCardProps) {
+export default function ProductCard({ product, lowStockThreshold = 5 }: ProductCardProps) {
   const { addItem, updateQuantity, getItemQuantity } = useCart();
   const [imgError, setImgError] = React.useState(false);
   const [toast, setToast] = React.useState<string | null>(null);
   const qtyInCart = getItemQuantity(product.id);
 
   const isOutOfStock = !product.isAvailable || product.stockQty <= 0;
-  const isLowStock = !isOutOfStock && product.stockQty <= 5;
+  const isLowStock =
+    !isOutOfStock && (product.isLowStock ?? product.stockQty <= lowStockThreshold);
 
   const showToast = (msg: string) => {
     setToast(msg);

@@ -1,13 +1,11 @@
 // =============================================================
 // GET /api/admin/laporan — Rekap keuangan per periode
-// Query params: period=daily|weekly|monthly|semi_annual
-//               dateFrom=YYYY-MM-DD & dateTo=YYYY-MM-DD (override, WIB, maks 400 hari)
+// Query params: period=daily|weekly|monthly|semi_annual|october|november|oct_nov|all
+//               dateFrom=YYYY-MM-DD & dateTo=YYYY-MM-DD (override, WIB, maks 1.100 hari)
 //
 // Semua angka keuangan berasal dari lib/finance/report.ts (satu sumber kebenaran):
 // batas hari WIB, data uji (is_test) dikecualikan, laba hanya dari item ber-HPP,
 // Laba Bersih = Laba Kotor − Biaya Operasional.
-// Nama field lama (grossAmount, grossProfit, amountCash, …) dipertahankan
-// untuk kompatibilitas dengan widget dashboard.
 // =============================================================
 
 import { NextRequest } from 'next/server';
@@ -18,13 +16,23 @@ import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import {
   getFinancialReport,
   resolveReportRange,
+  summarizeDailyByMonth,
+  isPeriodKey,
   InvalidRangeError,
-  type PeriodKey,
 } from '@/lib/finance/report';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const PERIODS: readonly PeriodKey[] = ['daily', 'weekly', 'monthly', 'semi_annual'];
+const SQL_IN_CHUNK_SIZE = 1_500;
+
+function chunkArray<T>(items: readonly T[], size = SQL_IN_CHUNK_SIZE): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
 
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
@@ -35,7 +43,10 @@ export async function GET(req: NextRequest) {
 
   const sp = new URL(req.url).searchParams;
   const rawPeriod = sp.get('period');
-  const period = PERIODS.find((p) => p === rawPeriod) ?? null;
+  if (rawPeriod && !isPeriodKey(rawPeriod)) {
+    return apiError(`Parameter period '${rawPeriod}' tidak valid`, 400);
+  }
+  const period = rawPeriod && isPeriodKey(rawPeriod) ? rawPeriod : null;
 
   let range;
   try {
@@ -52,8 +63,9 @@ export async function GET(req: NextRequest) {
   try {
     const report = await getFinancialReport(range);
     const s = report.summary;
+    const monthly = summarizeDailyByMonth(report.daily);
 
-    // ── Top 5 produk terlaris (COMPLETED, bukan data uji) ──────
+    // ── Top 15 produk terlaris (COMPLETED, bukan data uji) ──────
     const topProducts = await db
       .select({
         productName:  transactionItems.productNameSnapshot,
@@ -72,9 +84,9 @@ export async function GET(req: NextRequest) {
       )
       .groupBy(transactionItems.productNameSnapshot)
       .orderBy(sql`SUM(${transactionItems.qty}) DESC`)
-      .limit(5);
+      .limit(15);
 
-    // ── 20 transaksi terbaru (tabel + tombol Void), bukan data uji ──
+    // ── Transaksi terbaru periode ini (hingga 100 transaksi), bukan data uji ──
     const recentTransactions = await db
       .select({
         id:            transactions.id,
@@ -100,20 +112,26 @@ export async function GET(req: NextRequest) {
         ),
       )
       .orderBy(sql`${transactions.createdAt} DESC`)
-      .limit(20);
+      .limit(100);
 
-    // ── Pecahan pembayaran untuk 20 transaksi terbaru (Split Payment) ──
+    // ── Pecahan pembayaran (Split Payment) ──
     const txIds = recentTransactions.map((t) => t.id);
-    const recentPayments = txIds.length > 0
-      ? await db
-          .select({
-            transactionId: transactionPayments.transactionId,
-            paymentMethod: transactionPayments.paymentMethod,
-            amount:        transactionPayments.amount,
-          })
-          .from(transactionPayments)
-          .where(inArray(transactionPayments.transactionId, txIds))
-      : [];
+    const recentPayments: Array<{
+      transactionId: string;
+      paymentMethod: string;
+      amount: string;
+    }> = [];
+    for (const idChunk of chunkArray(txIds)) {
+      const payChunk = await db
+        .select({
+          transactionId: transactionPayments.transactionId,
+          paymentMethod: transactionPayments.paymentMethod,
+          amount:        transactionPayments.amount,
+        })
+        .from(transactionPayments)
+        .where(inArray(transactionPayments.transactionId, idChunk));
+      recentPayments.push(...payChunk);
+    }
 
     const paymentsByTx = new Map<string, typeof recentPayments>();
     for (const p of recentPayments) {
@@ -132,7 +150,7 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // ── Shift dalam periode (dengan modal awal & rekap laci) ────────────────
+    // ── Shift dalam periode (hingga 1.000 shift agar periode Oktober+November/Keseluruhan tercakup penuh) ──
     const shiftList = await db
       .select({
         shiftId:            shifts.id,
@@ -157,11 +175,11 @@ export async function GET(req: NextRequest) {
           lt(shifts.clockIn, range.endExclusive),
           sql`LOWER(${employees.fullName}) NOT LIKE '%testing%'`,
           sql`LOWER(${employees.fullName}) NOT LIKE '%dede%'`,
-          sql`${employees.nim} NOT IN ('02405013')`
-        )
+          sql`${employees.nim} NOT IN ('02405013', '00000000')`,
+        ),
       )
       .orderBy(sql`${shifts.clockIn} DESC`)
-      .limit(100);
+      .limit(1000);
 
     const shiftIds = shiftList.map((s) => s.shiftId);
 
@@ -170,65 +188,64 @@ export async function GET(req: NextRequest) {
     const shiftCashInMap  = new Map<string, number>();
     const shiftSalesMap   = new Map<string, number>();
 
-    if (shiftIds.length > 0) {
-      // 1) Petty cash movements
-      const movements = await db
-        .select({
-          shiftId: shiftCashMovements.shiftId,
-          movementType: shiftCashMovements.movementType,
-          total: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}), 0)`,
-        })
-        .from(shiftCashMovements)
-        .where(inArray(shiftCashMovements.shiftId, shiftIds))
-        .groupBy(shiftCashMovements.shiftId, shiftCashMovements.movementType);
+    for (const idChunk of chunkArray(shiftIds)) {
+      const [movements, splitCashSales, directCashSales] = await Promise.all([
+        db
+          .select({
+            shiftId: shiftCashMovements.shiftId,
+            movementType: shiftCashMovements.movementType,
+            total: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}), 0)`,
+          })
+          .from(shiftCashMovements)
+          .where(inArray(shiftCashMovements.shiftId, idChunk))
+          .groupBy(shiftCashMovements.shiftId, shiftCashMovements.movementType),
+        db
+          .select({
+            shiftId: transactions.shiftId,
+            total: sql<string>`COALESCE(SUM(${transactionPayments.amount}), 0)`,
+          })
+          .from(transactionPayments)
+          .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
+          .where(
+            and(
+              inArray(transactions.shiftId, idChunk),
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactionPayments.paymentMethod, 'CASH'),
+              eq(transactions.isTest, false),
+            ),
+          )
+          .groupBy(transactions.shiftId),
+        db
+          .select({
+            shiftId: transactions.shiftId,
+            total: sql<string>`COALESCE(SUM(${transactions.grossAmount}), 0)`,
+          })
+          .from(transactions)
+          .where(
+            and(
+              inArray(transactions.shiftId, idChunk),
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.paymentMethod, 'CASH'),
+              eq(transactions.isTest, false),
+              sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+            ),
+          )
+          .groupBy(transactions.shiftId),
+      ]);
 
       for (const m of movements) {
         const val = parseFloat(m.total || '0');
         if (m.movementType === 'CASH_OUT') {
-          shiftCashOutMap.set(m.shiftId, val);
+          shiftCashOutMap.set(m.shiftId, (shiftCashOutMap.get(m.shiftId) ?? 0) + val);
         } else if (m.movementType === 'CASH_IN') {
-          shiftCashInMap.set(m.shiftId, val);
+          shiftCashInMap.set(m.shiftId, (shiftCashInMap.get(m.shiftId) ?? 0) + val);
         }
       }
-
-      // 2) Penjualan tunai dari pecahan split payment
-      const splitCashSales = await db
-        .select({
-          shiftId: transactions.shiftId,
-          total: sql<string>`COALESCE(SUM(${transactionPayments.amount}), 0)`,
-        })
-        .from(transactionPayments)
-        .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
-        .where(and(
-          inArray(transactions.shiftId, shiftIds),
-          eq(transactions.status, 'COMPLETED'),
-          eq(transactionPayments.paymentMethod, 'CASH'),
-          eq(transactions.isTest, false),
-        ))
-        .groupBy(transactions.shiftId);
-
-      for (const s of splitCashSales) {
-        shiftSalesMap.set(s.shiftId, (shiftSalesMap.get(s.shiftId) ?? 0) + parseFloat(s.total || '0'));
+      for (const sc of splitCashSales) {
+        shiftSalesMap.set(sc.shiftId, (shiftSalesMap.get(sc.shiftId) ?? 0) + parseFloat(sc.total || '0'));
       }
-
-      // 3) Transaksi langsung tunai lama yang belum tercatat di transaction_payments
-      const directCashSales = await db
-        .select({
-          shiftId: transactions.shiftId,
-          total: sql<string>`COALESCE(SUM(${transactions.grossAmount}), 0)`,
-        })
-        .from(transactions)
-        .where(and(
-          inArray(transactions.shiftId, shiftIds),
-          eq(transactions.status, 'COMPLETED'),
-          eq(transactions.paymentMethod, 'CASH'),
-          eq(transactions.isTest, false),
-          sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
-        ))
-        .groupBy(transactions.shiftId);
-
-      for (const d of directCashSales) {
-        shiftSalesMap.set(d.shiftId, (shiftSalesMap.get(d.shiftId) ?? 0) + parseFloat(d.total || '0'));
+      for (const dc of directCashSales) {
+        shiftSalesMap.set(dc.shiftId, (shiftSalesMap.get(dc.shiftId) ?? 0) + parseFloat(dc.total || '0'));
       }
     }
 
@@ -260,6 +277,7 @@ export async function GET(req: NextRequest) {
         labaBersih:          s.labaBersih,
         biayaPerKategori:    s.biayaPerKategori,
       },
+      monthly,
       daily: report.daily,
       checks: report.checks,
       // Kompatibilitas grafik lama
@@ -274,13 +292,17 @@ export async function GET(req: NextRequest) {
       topProducts,
       recentTransactions: enhancedRecentTransactions,
       shifts: shiftList.map((sh) => {
-        // Opsi A (Model Kasir Kas Tetap Rp 100.000 per shift):
-        // Modal awal toko ditetapkan Rp 100.000 per shift (kas kecil kembalian).
-        // Jika tercatat angka rolling laci (> Rp 150.000) karena kasir menginput total kas shift sebelumnya,
-        // gunakan modal paten toko Rp 100.000 agar tidak memicu tekor semu (phantom deficit).
-        const rawModal = sh.modalAwal ? parseFloat(sh.modalAwal) : 100_000;
-        const modalAwal = rawModal > 150_000 ? 100_000 : (rawModal <= 0 ? 100_000 : rawModal);
-        const actualCash = sh.actualCash ? parseFloat(sh.actualCash) : null;
+        const parsedModal = sh.modalAwal !== null && sh.modalAwal !== undefined && sh.modalAwal !== ''
+          ? parseFloat(sh.modalAwal)
+          : NaN;
+        const modalAwal = Number.isFinite(parsedModal) ? parsedModal : 100_000;
+        const rawModalWarning = modalAwal > 150_000 || modalAwal <= 0;
+
+        const parsedActual = sh.actualCash !== null && sh.actualCash !== undefined && sh.actualCash !== ''
+          ? parseFloat(sh.actualCash)
+          : NaN;
+        const actualCash = Number.isFinite(parsedActual) ? parsedActual : null;
+
         const cashSales = shiftSalesMap.get(sh.shiftId) ?? 0;
         const cashOut = shiftCashOutMap.get(sh.shiftId) ?? 0;
         const cashIn = shiftCashInMap.get(sh.shiftId) ?? 0;
@@ -295,13 +317,10 @@ export async function GET(req: NextRequest) {
             statusLaci = 'BALANCED';
             discrepancyTier = 'HIJAU';
           } else if (Math.abs(discrepancy) <= 2000) {
-            // Toleransi K7: <= Rp 2.000 dianggap HIJAU (PAS / Wajar)
             statusLaci = 'BALANCED';
             discrepancyTier = 'HIJAU';
           } else if (discrepancy < 0) {
             statusLaci = 'SHORTAGE';
-            // Kuning: tekor antara Rp 2.001 s/d Rp 20.000
-            // Merah: tekor > Rp 20.000
             discrepancyTier = discrepancy < -20000 ? 'MERAH' : 'KUNING';
           } else {
             statusLaci = 'OVERAGE';
@@ -309,8 +328,10 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        // Beda serah terima hanya ditampilkan jika kasir menginput nominal riil non-rolling (<= 150k)
-        const serahTerimaDiff = rawModal > 150_000 ? null : (sh.serahTerimaDiff ? parseFloat(sh.serahTerimaDiff) : null);
+        const parsedSerah = sh.serahTerimaDiff !== null && sh.serahTerimaDiff !== undefined && sh.serahTerimaDiff !== ''
+          ? parseFloat(sh.serahTerimaDiff)
+          : NaN;
+        const serahTerimaDiff = Number.isFinite(parsedSerah) ? parsedSerah : null;
 
         return {
           shiftId:            sh.shiftId,
@@ -318,6 +339,7 @@ export async function GET(req: NextRequest) {
           clockOut:           sh.clockOut,
           status:             sh.status,
           modalAwal,
+          rawModalWarning,
           cashSales,
           cashOut,
           cashIn,

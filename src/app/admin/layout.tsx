@@ -1,15 +1,11 @@
-import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
-import { getAdminSession } from '@/lib/utils/auth';
-import AdminLayoutClient from './AdminLayoutClient';
-import { db } from '@/lib/db/client';
-import { admins } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import PortalLayoutClient from '@/features/portal/PortalLayoutClient';
+import { requireAdminShiftActor } from '@/features/portal/server-auth';
 
 export const metadata: Metadata = {
   title: {
-    template: '%s | Admin — Smartkasir Perwira',
-    default: 'Dashboard Admin — Smartkasir Perwira',
+    template: '%s | Admin Shift — Smartkasir Perwira',
+    default: 'Dashboard Admin Shift — Smartkasir Perwira',
   },
 };
 
@@ -18,25 +14,15 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Server-side auth check — hanya baca cookie sk_admin
-  const session = await getAdminSession();
-
-  if (!session) {
-    redirect('/login');
-  }
-
-  // Fetch admin full name & role
-  const admin = await db.query.admins.findFirst({
-    where: eq(admins.id, session.sub),
-    columns: { fullName: true, role: true },
-  });
-
-  const adminName = admin?.fullName ?? 'Admin';
-  const adminRole = (admin?.role as 'MANAGER' | 'ADMIN_SHIFT') ?? session.adminRole ?? 'ADMIN_SHIFT';
+  const actor = await requireAdminShiftActor();
 
   return (
-    <AdminLayoutClient adminName={adminName} adminRole={adminRole}>
+    <PortalLayoutClient
+      adminName={actor.adminName}
+      adminRole={actor.adminRole}
+      sessionIssuedAtMs={actor.sessionIssuedAtMs}
+    >
       {children}
-    </AdminLayoutClient>
+    </PortalLayoutClient>
   );
 }

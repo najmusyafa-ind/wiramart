@@ -13,14 +13,12 @@ import {
   RefreshCw,
   MapPin,
   MessageCircle,
-  Package,
   Send,
   ShieldCheck,
   AlertTriangle,
   CheckCircle2,
   Loader2,
   Inbox,
-  Clock,
 } from 'lucide-react';
 
 interface DeliveryItem {
@@ -56,6 +54,7 @@ export default function PengirimanRunnerPage() {
   const [orders, setOrders] = useState<DeliveryOrder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmNoShowId, setConfirmNoShowId] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ id: string; type: 'ok' | 'err'; text: string } | null>(null);
   const [pinInputs, setPinInputs] = useState<Record<string, string>>({});
   const [packedChecklist, setPackedChecklist] = useState<Record<string, boolean>>({});
@@ -76,11 +75,17 @@ export default function PengirimanRunnerPage() {
   }, []);
 
   useEffect(() => {
-    load();
+    let active = true;
+    Promise.resolve().then(() => {
+      if (active) void load();
+    });
     const t = setInterval(() => {
-      if (document.visibilityState === 'visible') load();
+      if (document.visibilityState === 'visible') void load();
     }, 15_000);
-    return () => clearInterval(t);
+    return () => {
+      active = false;
+      clearInterval(t);
+    };
   }, [load]);
 
   async function act(
@@ -129,16 +134,37 @@ export default function PengirimanRunnerPage() {
   const completedOrders = orders?.filter((o) => o.status === 'COMPLETED') ?? [];
 
   return (
-    <div style={{ maxWidth: 640, margin: '0 auto', padding: '16px', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div
+      style={{
+        maxWidth: 640,
+        margin: '0 auto',
+        padding: '16px 16px calc(24px + env(safe-area-inset-bottom, 0px))',
+        minHeight: '100svh',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+      }}
+    >
       {/* Top Bar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 8, borderBottom: '1px solid var(--color-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 10,
+          paddingBottom: 10,
+          borderBottom: '1px solid var(--color-border)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <Link
             href="/kasir/pos"
             aria-label="Kembali ke POS"
             style={{
-              width: 36,
-              height: 36,
+              width: 44,
+              height: 44,
+              flexShrink: 0,
               borderRadius: '50%',
               display: 'grid',
               placeItems: 'center',
@@ -147,9 +173,9 @@ export default function PengirimanRunnerPage() {
               textDecoration: 'none',
             }}
           >
-            <ChevronLeft size={20} />
+            <ChevronLeft size={20} aria-hidden="true" />
           </Link>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 800 }}>Pengiriman Saya</h1>
             <p style={{ margin: 0, fontSize: '12px', color: 'var(--color-text-muted)' }}>
               Tugas runner / delivery kampus Wiramart
@@ -159,14 +185,14 @@ export default function PengirimanRunnerPage() {
 
         <button
           type="button"
+          className="btn btn-ghost"
           onClick={load}
           aria-label="Muat ulang tugas"
           style={{
-            border: 'none',
+            minHeight: 44,
             background: 'var(--color-surface-muted)',
             borderRadius: 'var(--radius-md)',
-            padding: '8px 12px',
-            cursor: 'pointer',
+            padding: '0 14px',
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
@@ -174,7 +200,7 @@ export default function PengirimanRunnerPage() {
             color: 'var(--color-text)',
           }}
         >
-          <RefreshCw size={14} className={orders === null ? 'spin-icon' : ''} />
+          <RefreshCw size={14} aria-hidden="true" className={orders === null ? 'spin-icon' : ''} />
           <span>Refresh</span>
         </button>
       </div>
@@ -212,7 +238,7 @@ export default function PengirimanRunnerPage() {
             border: '1px dashed var(--color-border)',
           }}
         >
-          <Inbox size={44} style={{ opacity: 0.3, margin: '0 auto 8px' }} />
+          <Inbox size={44} aria-hidden="true" style={{ opacity: 0.3, margin: '0 auto 8px' }} />
           <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>Tidak ada tugas pengantaran</h3>
           <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--color-text-muted)' }}>
             Pesanan delivery yang di-assign oleh admin akan muncul di sini.
@@ -241,7 +267,7 @@ export default function PengirimanRunnerPage() {
                 }}
               >
                 {/* Header card */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                   <div>
                     <span style={{ fontSize: '15px', fontWeight: 800 }}>#{o.orderNumber}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, fontSize: '13px', fontWeight: 700, color: 'var(--color-primary)' }}>
@@ -261,8 +287,20 @@ export default function PengirimanRunnerPage() {
                 </div>
 
                 {/* Buyer info */}
-                <div style={{ background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)', padding: 10, fontSize: '12.5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
+                <div
+                  style={{
+                    background: 'var(--color-surface-muted)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: 12,
+                    fontSize: '13px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: '1 1 180px' }}>
                     <strong>{o.buyerName}</strong> (NIM: {o.buyerNim})
                     {o.deliveryNote && (
                       <div style={{ fontStyle: 'italic', color: 'var(--color-text-secondary)', marginTop: 2 }}>
@@ -274,26 +312,31 @@ export default function PengirimanRunnerPage() {
                     href={`https://wa.me/${o.buyerWhatsapp}`}
                     target="_blank"
                     rel="noreferrer"
+                    aria-label={`Hubungi ${o.buyerName} via WhatsApp`}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
-                      gap: 4,
-                      background: '#25D366',
-                      color: '#fff',
-                      padding: '4px 10px',
+                      justifyContent: 'center',
+                      gap: 6,
+                      minHeight: 44,
+                      minWidth: 44,
+                      flexShrink: 0,
+                      background: 'hsl(142, 70%, 28%)',
+                      color: 'var(--color-text-inverse, hsl(0, 0%, 100%))',
+                      padding: '0 14px',
                       borderRadius: 'var(--radius-full)',
                       textDecoration: 'none',
-                      fontSize: '12px',
+                      fontSize: '13px',
                       fontWeight: 600,
                     }}
                   >
-                    <MessageCircle size={13} /> WA
+                    <MessageCircle size={15} aria-hidden="true" /> WA
                   </a>
                 </div>
 
                 {/* Items Packing Checklist */}
                 <div>
-                  <div style={{ fontSize: '11.5px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', marginBottom: 6 }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', marginBottom: 6 }}>
                     Daftar Produk ({o.items.length}) — Centang saat mengemas:
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -305,19 +348,20 @@ export default function PengirimanRunnerPage() {
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: 10,
-                            padding: '6px 10px',
+                            gap: 12,
+                            minHeight: 44,
+                            padding: '8px 12px',
                             borderRadius: 'var(--radius-md)',
                             background: checked ? 'var(--color-primary-light)' : 'var(--color-surface-muted)',
                             cursor: 'pointer',
-                            fontSize: '13px',
+                            fontSize: '13.5px',
                           }}
                         >
                           <input
                             type="checkbox"
                             checked={checked}
                             onChange={() => toggleCheck(it.id)}
-                            style={{ accentColor: 'var(--color-primary)', width: 16, height: 16 }}
+                            style={{ accentColor: 'var(--color-primary)', width: 20, height: 20, flexShrink: 0 }}
                           />
                           <span style={{ flex: 1, textDecoration: checked ? 'line-through' : 'none', opacity: checked ? 0.7 : 1 }}>
                             {it.productName} <strong>× {it.quantity}</strong>
@@ -333,6 +377,7 @@ export default function PengirimanRunnerPage() {
                 {o.status === 'PREPARING' && (
                   <button
                     type="button"
+                    className="btn btn-primary"
                     disabled={isBusy}
                     onClick={() => act(o.id, { action: 'berangkat' })}
                     style={{
@@ -340,7 +385,7 @@ export default function PengirimanRunnerPage() {
                       minHeight: 46,
                       borderRadius: 'var(--radius-md)',
                       background: 'linear-gradient(135deg, var(--color-primary), hsl(145, 65%, 26%))',
-                      color: '#fff',
+                      color: 'var(--color-text-inverse, hsl(0, 0%, 100%))',
                       border: 'none',
                       fontWeight: 700,
                       fontSize: '14px',
@@ -349,55 +394,61 @@ export default function PengirimanRunnerPage() {
                       justifyContent: 'center',
                       gap: 8,
                       cursor: 'pointer',
-                      boxShadow: '0 4px 12px rgba(27, 122, 66, 0.25)',
+                      boxShadow: '0 4px 12px hsla(145, 64%, 28%, 0.25)',
                     }}
                   >
-                    {isBusy ? <Loader2 size={16} className="spin-icon" /> : <Send size={16} />}
+                    {isBusy ? <Loader2 size={16} aria-hidden="true" className="spin-icon" /> : <Send size={16} aria-hidden="true" />}
                     <span>Siapkan & Berangkat Sekarang</span>
                   </button>
                 )}
 
                 {o.status === 'OUT_FOR_DELIVERY' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px dashed var(--color-border)', paddingTop: 10 }}>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <ShieldCheck size={14} style={{ color: 'var(--color-primary)' }} />
+                    <div style={{ fontSize: '12.5px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <ShieldCheck size={14} aria-hidden="true" style={{ color: 'var(--color-primary)', flexShrink: 0 }} />
                       <span>Minta <strong>PIN 6-digit</strong> dari pembeli saat tiba:</span>
                     </div>
 
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       <input
                         type="text"
                         inputMode="numeric"
                         pattern="\d*"
                         maxLength={6}
                         placeholder="6 Digit PIN"
+                        aria-label={`PIN 6 digit untuk pesanan ${o.buyerName}`}
                         value={pinVal}
                         onChange={(e) => {
                           const val = e.target.value.replace(/\D/g, '').slice(0, 6);
                           setPinInputs((prev) => ({ ...prev, [o.id]: val }));
                         }}
                         style={{
-                          flex: 1,
+                          flex: '1 1 160px',
+                          minWidth: 140,
                           minHeight: 44,
+                          padding: '0 12px',
                           fontSize: '18px',
                           fontWeight: 800,
                           textAlign: 'center',
                           letterSpacing: '0.2em',
                           borderRadius: 'var(--radius-md)',
                           border: '1.5px solid var(--color-border)',
-                          outline: 'none',
+                          background: 'var(--color-surface, hsl(0, 0%, 100%))',
+                          color: 'var(--color-text)',
                         }}
                       />
                       <button
                         type="button"
+                        className="btn"
                         disabled={isBusy || pinVal.length !== 6}
                         onClick={() => act(o.id, { action: 'verifikasi-pin', pin: pinVal })}
                         style={{
                           padding: '0 16px',
                           minHeight: 44,
+                          flexShrink: 0,
                           borderRadius: 'var(--radius-md)',
                           background: pinVal.length === 6 ? 'var(--color-primary)' : 'var(--color-surface-muted)',
-                          color: pinVal.length === 6 ? '#fff' : 'var(--color-text-muted)',
+                          color: pinVal.length === 6 ? 'var(--color-text-inverse, hsl(0, 0%, 100%))' : 'var(--color-text-muted)',
                           border: 'none',
                           fontWeight: 700,
                           fontSize: '13px',
@@ -407,40 +458,77 @@ export default function PengirimanRunnerPage() {
                           cursor: pinVal.length === 6 ? 'pointer' : 'not-allowed',
                         }}
                       >
-                        {isBusy ? <Loader2 size={14} className="spin-icon" /> : <CheckCircle2 size={14} />}
+                        {isBusy ? <Loader2 size={14} aria-hidden="true" className="spin-icon" /> : <CheckCircle2 size={14} aria-hidden="true" />}
                         <span>Verifikasi</span>
                       </button>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 2 }}>
-                      <span style={{ fontSize: '12px', color: o.noShowCount > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
-                        {o.noShowCount > 0 ? `Sudah dicatat ${o.noShowCount}x no-show` : ''}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={isBusy}
-                        onClick={() => {
-                          if (window.confirm('Catat pembeli tidak ada di lokasi?')) {
-                            act(o.id, { action: 'no-show' });
-                          }
-                        }}
+                    {confirmNoShowId === o.id ? (
+                      <div
+                        role="alert"
                         style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: 'var(--color-error)',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4,
-                          cursor: 'pointer',
-                          padding: '4px 6px',
+                          background: 'var(--color-error-light, hsl(0, 80%, 96%))',
+                          border: '1px solid var(--color-error)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: 12,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 10,
                         }}
                       >
-                        <AlertTriangle size={13} />
-                        <span>Pembeli Tidak Ada</span>
-                      </button>
-                    </div>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-error)' }}>
+                          Yakin catat pembeli tidak ada di lokasi?
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            disabled={isBusy}
+                            onClick={() => setConfirmNoShowId(null)}
+                            style={{ minHeight: 44, padding: '0 14px' }}
+                          >
+                            Batal
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger"
+                            disabled={isBusy}
+                            onClick={() => {
+                              setConfirmNoShowId(null);
+                              void act(o.id, { action: 'no-show' });
+                            }}
+                            style={{ minHeight: 44, padding: '0 14px' }}
+                          >
+                            Ya, Catat No-Show
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingTop: 2 }}>
+                        <span style={{ fontSize: '12px', color: o.noShowCount > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
+                          {o.noShowCount > 0 ? `Sudah dicatat ${o.noShowCount}x no-show` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          disabled={isBusy}
+                          onClick={() => setConfirmNoShowId(o.id)}
+                          style={{
+                            color: 'var(--color-error)',
+                            fontSize: '12.5px',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            minHeight: 44,
+                            padding: '0 12px',
+                          }}
+                        >
+                          <AlertTriangle size={14} aria-hidden="true" />
+                          <span>Pembeli Tidak Ada</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 

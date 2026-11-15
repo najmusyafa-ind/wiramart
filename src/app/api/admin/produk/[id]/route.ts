@@ -3,12 +3,21 @@
 // DELETE /api/admin/produk/[id] — Soft delete produk
 // =============================================================
 
+import { randomInt } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { products, stockBatches, stockAdjustments, admins } from '@/lib/db/schema';
-import { eq, and, isNull, ne, gt, type SQL } from 'drizzle-orm';
+import {
+  products,
+  stockBatches,
+  stockAdjustments,
+  admins,
+  discountPolicies,
+  discountBarcodes,
+} from '@/lib/db/schema';
+import { eq, and, isNull, ne, gt, gte, asc, inArray, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { getTodayWib } from '@/lib/utils/helpers';
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -22,6 +31,7 @@ const PatchSchema = z.object({
   // Stok yang dilihat user saat form dibuka. Dipakai untuk mendeteksi tabrakan
   // dengan penjualan/restock yang terjadi selama form terbuka.
   expectedStockQty: z.number().int().nonnegative().optional(),
+  stockAdjustmentReason: z.string().max(300).optional(),
   unit: z.string().max(20).optional(),
   isActive: z.boolean().optional(),
   categoryId: z.string().uuid().optional(),
@@ -33,6 +43,9 @@ export async function PATCH(req: NextRequest, ctx: Context) {
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
 
   const { id } = await ctx.params;
+  if (!z.string().uuid().safeParse(id).success) {
+    return apiError('ID produk tidak valid', 400);
+  }
 
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('Invalid JSON', 400); }
@@ -40,129 +53,233 @@ export async function PATCH(req: NextRequest, ctx: Context) {
   const parsed = PatchSchema.safeParse(body);
   if (!parsed.success) return apiError(parsed.error.flatten().fieldErrors, 422);
 
-  const [existing] = await db
-    .select({ id: products.id, stockQty: products.stockQty, name: products.name })
-    .from(products)
-    .where(and(eq(products.id, id), isNull(products.deletedAt)))
-    .limit(1);
-
-  if (!existing) return apiError('Produk tidak ditemukan', 404);
-
-  const updateData: Record<string, unknown> = { updatedAt: new Date() };
-  if (parsed.data.name !== undefined) updateData.name = parsed.data.name.trim();
-  if (parsed.data.description !== undefined) updateData.description = parsed.data.description.trim();
-  if (parsed.data.costPrice !== undefined) updateData.costPrice = parsed.data.costPrice.toString();
-  if (parsed.data.sellingPrice !== undefined) updateData.sellingPrice = parsed.data.sellingPrice.toString();
-  // ── Stok: lindungi dari 'lost update' ────────────────────────
-  // Tanpa expectedStockQty (klien lama) → perilaku lama.
-  // stockQty == expectedStockQty → stok TIDAK diedit user → jangan disentuh sama sekali
-  //   (inilah yang mencegah penjualan yang terjadi selama form terbuka tertimpa).
-  // stockQty != expectedStockQty → user sengaja mengubah stok → hanya berlaku
-  //   bila stok di DB masih sama dengan yang dilihat user (UPDATE bersyarat atomik).
-  let stockGuard: SQL | undefined;
   const { stockQty, expectedStockQty } = parsed.data;
-  if (stockQty !== undefined) {
-    if (expectedStockQty === undefined) {
-      updateData.stockQty = stockQty;
-    } else if (stockQty !== expectedStockQty) {
-      updateData.stockQty = stockQty;
-      stockGuard = eq(products.stockQty, expectedStockQty);
-    }
-  }
-  if (parsed.data.unit !== undefined) updateData.unit = parsed.data.unit;
-  if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
-  if (parsed.data.categoryId !== undefined) updateData.categoryId = parsed.data.categoryId;
+  // Stok hanya diubah jika user memang mengirim nilai berbeda dari expectedStockQty
+  // (atau expectedStockQty tidak dikirim oleh klien lama).
+  const isStockUpdateRequested =
+    stockQty !== undefined &&
+    (expectedStockQty === undefined || stockQty !== expectedStockQty);
 
-  if (parsed.data.barcode !== undefined) {
-    const newBarcode = parsed.data.barcode?.trim() || null;
-    if (newBarcode) {
-      const [duplicate] = await db
-        .select({ id: products.id, name: products.name })
-        .from(products)
-        .where(
-          and(
-            eq(products.barcode, newBarcode),
-            ne(products.id, id),
-            isNull(products.deletedAt),
-          ),
-        )
-        .limit(1);
-      if (duplicate) {
-        return apiError(`Barcode sudah digunakan oleh produk "${duplicate.name}"`, 409);
-      }
-    }
-    updateData.barcode = newBarcode;
-  }
-
-  const [updated] = await db
-    .update(products)
-    .set(updateData)
-    .where(and(eq(products.id, id), isNull(products.deletedAt), stockGuard))
-    .returning();
-
-  if (!updated) {
-    // Bedakan: produk hilang vs stok bergeser saat form terbuka
-    const [fresh] = await db
-      .select({ stockQty: products.stockQty })
+  const txResult = await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({
+        id: products.id,
+        stockQty: products.stockQty,
+        name: products.name,
+        costPrice: products.costPrice,
+      })
       .from(products)
       .where(and(eq(products.id, id), isNull(products.deletedAt)))
+      .for('update')
       .limit(1);
-    if (!fresh) return apiError('Produk tidak ditemukan', 404);
-    return apiError(
-      `Stok produk berubah sejak halaman dimuat (stok sekarang: ${fresh.stockQty}). ` +
-      'Muat ulang halaman, lalu ulangi perubahan stok.',
-      409,
-    );
-  }
 
-  // Sinkronisasi batch inventaris (Cacat 5 Opsi A)
-  if (parsed.data.stockQty !== undefined) {
-    const currentBatches = await db
-      .select({ id: stockBatches.id, currentQty: stockBatches.currentQty })
-      .from(stockBatches)
-      .where(and(eq(stockBatches.productId, id), gt(stockBatches.currentQty, 0)));
-
-    const totalBatchQty = currentBatches.reduce((acc, b) => acc + b.currentQty, 0);
-    const newStock = updated.stockQty;
-
-    if (newStock > totalBatchQty) {
-      // Ada penambahan stok manual yang belum memiliki batch -> buat batch default
-      const delta = newStock - totalBatchQty;
-      const batchCode = `ADJ-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
-      await db.insert(stockBatches).values({
-        productId: id,
-        batchCode,
-        costPrice: updated.costPrice,
-        initialQty: delta,
-        currentQty: delta,
-        expiryClass: 'PANJANG',
-        notes: 'Penyesuaian stok manual katalog produk',
-      });
+    if (!existing) {
+      return { ok: false as const, status: 404, message: 'Produk tidak ditemukan' };
     }
 
-    // Catat riwayat audit stok (siapa yang edit, dari berapa ke berapa, dan kapan)
-    if (existing && existing.stockQty !== updated.stockQty) {
-      const delta = updated.stockQty - existing.stockQty;
-      let adminId = payload.role === 'admin' ? payload.sub : null;
-      if (!adminId) {
-        const [firstAdmin] = await db.select({ id: admins.id }).from(admins).limit(1);
-        adminId = firstAdmin?.id ?? null;
+    if (
+      isStockUpdateRequested &&
+      expectedStockQty !== undefined &&
+      existing.stockQty !== expectedStockQty
+    ) {
+      return {
+        ok: false as const,
+        status: 409,
+        message:
+          `Stok produk berubah sejak halaman dimuat (stok sekarang: ${existing.stockQty}). ` +
+          'Muat ulang halaman, lalu ulangi perubahan stok.',
+      };
+    }
+
+    const updateData: Partial<typeof products.$inferInsert> = { updatedAt: new Date() };
+    if (parsed.data.name !== undefined) updateData.name = parsed.data.name.trim();
+    if (parsed.data.description !== undefined) updateData.description = parsed.data.description.trim();
+    if (parsed.data.costPrice !== undefined) updateData.costPrice = parsed.data.costPrice.toString();
+    if (parsed.data.sellingPrice !== undefined) updateData.sellingPrice = parsed.data.sellingPrice.toString();
+    if (isStockUpdateRequested && stockQty !== undefined) {
+      updateData.stockQty = stockQty;
+    }
+    if (parsed.data.unit !== undefined) updateData.unit = parsed.data.unit;
+    if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
+    if (parsed.data.categoryId !== undefined) updateData.categoryId = parsed.data.categoryId;
+
+    if (parsed.data.barcode !== undefined) {
+      const newBarcode = parsed.data.barcode?.trim() || null;
+      if (newBarcode) {
+        const [duplicate] = await tx
+          .select({ id: products.id, name: products.name })
+          .from(products)
+          .where(
+            and(
+              eq(products.barcode, newBarcode),
+              ne(products.id, id),
+              isNull(products.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (duplicate) {
+          return {
+            ok: false as const,
+            status: 409,
+            message: `Barcode sudah digunakan oleh produk "${duplicate.name}"`,
+          };
+        }
       }
-      if (adminId) {
-        await db.insert(stockAdjustments).values({
+      updateData.barcode = newBarcode;
+    }
+
+    const [updated] = await tx
+      .update(products)
+      .set(updateData)
+      .where(and(eq(products.id, id), isNull(products.deletedAt)))
+      .returning();
+
+    if (!updated) {
+      return { ok: false as const, status: 404, message: 'Produk tidak ditemukan' };
+    }
+
+    // Sinkronisasi batch inventaris & catat audit bila ada perubahan stok
+    if (isStockUpdateRequested) {
+      const now = new Date();
+      const currentBatches = await tx
+        .select({
+          id: stockBatches.id,
+          currentQty: stockBatches.currentQty,
+        })
+        .from(stockBatches)
+        .where(and(eq(stockBatches.productId, id), gt(stockBatches.currentQty, 0)))
+        .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt), asc(stockBatches.id))
+        .for('update');
+
+      const totalBatchQty = currentBatches.reduce((acc, b) => acc + b.currentQty, 0);
+      const newStock = updated.stockQty;
+
+      if (newStock > totalBatchQty) {
+        // Penambahan stok manual -> buat batch baru memakai tanggal WIB
+        const deltaBatch = newStock - totalBatchQty;
+        const batchCode = `ADJ-${getTodayWib(now).replace(/-/g, '')}-${randomInt(1000, 10000)}`;
+        await tx.insert(stockBatches).values({
           productId: id,
-          qtyBefore: existing.stockQty,
-          qtyAfter: updated.stockQty,
-          qtyDiff: delta,
-          reason: `Edit stok master produk oleh ${(payload as any).username || payload.role}`,
-          adjustedByAdminId: adminId,
-          createdAt: new Date(),
+          batchCode,
+          costPrice: updated.costPrice,
+          initialQty: deltaBatch,
+          currentQty: deltaBatch,
+          expiryClass: 'PANJANG',
+          notes: 'Penyesuaian stok manual katalog produk',
         });
+      } else if (newStock < totalBatchQty) {
+        // Pengurangan stok manual -> kurangi batch aktif berurutan FEFO & sinkronkan promo terkait
+        let reduceRemaining = totalBatchQty - newStock;
+        for (const b of currentBatches) {
+          if (reduceRemaining <= 0) break;
+          const deduct = Math.min(b.currentQty, reduceRemaining);
+          const [updatedBatch] = await tx
+            .update(stockBatches)
+            .set({
+              currentQty: sql`${stockBatches.currentQty} - ${deduct}`,
+              updatedAt: now,
+            })
+            .where(and(eq(stockBatches.id, b.id), gte(stockBatches.currentQty, deduct)))
+            .returning({
+              id: stockBatches.id,
+              currentQty: stockBatches.currentQty,
+            });
+
+          if (updatedBatch) {
+            const linkedPolicies = await tx
+              .select({ id: discountPolicies.id })
+              .from(discountPolicies)
+              .where(
+                and(
+                  eq(discountPolicies.batchId, b.id),
+                  eq(discountPolicies.isActive, true),
+                ),
+              );
+
+            if (linkedPolicies.length > 0) {
+              const policyIds = linkedPolicies.map((p) => p.id);
+              await tx
+                .update(discountBarcodes)
+                .set({
+                  remainingQty: sql`LEAST(${discountBarcodes.remainingQty}, ${updatedBatch.currentQty})`,
+                  ...(updatedBatch.currentQty <= 0 ? { isActive: false } : {}),
+                })
+                .where(
+                  and(
+                    inArray(discountBarcodes.policyId, policyIds),
+                    eq(discountBarcodes.isActive, true),
+                  ),
+                );
+
+              if (updatedBatch.currentQty <= 0) {
+                await tx
+                  .update(discountPolicies)
+                  .set({ isActive: false, updatedAt: now })
+                  .where(and(inArray(discountPolicies.id, policyIds), eq(discountPolicies.isActive, true)));
+              } else {
+                await tx
+                  .update(discountPolicies)
+                  .set({
+                    allowedQty: sql`LEAST(${discountPolicies.allowedQty}, ${discountPolicies.soldQty} + ${updatedBatch.currentQty})`,
+                    updatedAt: now,
+                  })
+                  .where(and(inArray(discountPolicies.id, policyIds), eq(discountPolicies.isActive, true)));
+              }
+            }
+          }
+
+          reduceRemaining -= deduct;
+        }
+      }
+
+      // Catat riwayat audit stok lengkap dengan identitas pelaku yang sebenarnya & alasan
+      if (existing.stockQty !== updated.stockQty) {
+        const delta = updated.stockQty - existing.stockQty;
+        const [actorAdmin] = await tx
+          .select({
+            id: admins.id,
+            fullName: admins.fullName,
+            nidn: admins.nidn,
+            role: admins.role,
+          })
+          .from(admins)
+          .where(eq(admins.id, payload.sub))
+          .limit(1);
+
+        let adminId = actorAdmin?.id ?? null;
+        if (!adminId) {
+          const [firstAdmin] = await tx.select({ id: admins.id }).from(admins).limit(1);
+          adminId = firstAdmin?.id ?? null;
+        }
+
+        if (adminId) {
+          const actorName = actorAdmin?.fullName || actorAdmin?.nidn || payload.username;
+          const actorRole = actorAdmin?.role ?? payload.adminRole ?? 'ADMIN';
+          const customReason = parsed.data.stockAdjustmentReason?.trim();
+          const reason = customReason
+            ? `Edit stok master produk oleh ${actorName} (${actorRole}): ${customReason}`
+            : `Edit stok master produk oleh ${actorName} (${actorRole})`;
+
+          await tx.insert(stockAdjustments).values({
+            productId: id,
+            qtyBefore: existing.stockQty,
+            qtyAfter: updated.stockQty,
+            qtyDiff: delta,
+            reason,
+            adjustedByAdminId: adminId,
+            createdAt: now,
+          });
+        }
       }
     }
-  }
 
-  return apiOk(updated);
+    return { ok: true as const, data: updated };
+  });
+
+  if (!txResult.ok) {
+    return apiError(txResult.message, txResult.status);
+  }
+  return apiOk(txResult.data);
 }
 
 export async function DELETE(req: NextRequest, ctx: Context) {
@@ -170,19 +287,47 @@ export async function DELETE(req: NextRequest, ctx: Context) {
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
 
   const { id } = await ctx.params;
+  if (!z.string().uuid().safeParse(id).success) {
+    return apiError('ID produk tidak valid', 400);
+  }
 
-  const [existing] = await db
-    .select({ id: products.id, stockQty: products.stockQty, name: products.name })
-    .from(products)
-    .where(and(eq(products.id, id), isNull(products.deletedAt)))
-    .limit(1);
+  const deletedOk = await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ id: products.id })
+      .from(products)
+      .where(and(eq(products.id, id), isNull(products.deletedAt)))
+      .for('update')
+      .limit(1);
 
-  if (!existing) return apiError('Produk tidak ditemukan', 404);
+    if (!existing) return false;
 
-  await db
-    .update(products)
-    .set({ deletedAt: new Date(), isActive: false, updatedAt: new Date() })
-    .where(eq(products.id, id));
+    const now = new Date();
+    await tx
+      .update(products)
+      .set({ deletedAt: now, isActive: false, updatedAt: now })
+      .where(eq(products.id, id));
 
+    const productPolicies = await tx
+      .select({ id: discountPolicies.id })
+      .from(discountPolicies)
+      .where(eq(discountPolicies.productId, id));
+
+    if (productPolicies.length > 0) {
+      const policyIds = productPolicies.map((p) => p.id);
+      await tx
+        .update(discountPolicies)
+        .set({ isActive: false, updatedAt: now })
+        .where(and(inArray(discountPolicies.id, policyIds), eq(discountPolicies.isActive, true)));
+
+      await tx
+        .update(discountBarcodes)
+        .set({ isActive: false, remainingQty: 0 })
+        .where(and(inArray(discountBarcodes.policyId, policyIds), eq(discountBarcodes.isActive, true)));
+    }
+
+    return true;
+  });
+
+  if (!deletedOk) return apiError('Produk tidak ditemukan', 404);
   return apiOk({ message: 'Produk berhasil dihapus' });
 }

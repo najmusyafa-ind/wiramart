@@ -1,0 +1,1944 @@
+'use client';
+
+import { useState, useEffect, useId, useCallback, useRef, useMemo } from 'react';
+import {
+  BarChart3,
+  TrendingUp,
+  DollarSign,
+  ShoppingBag,
+  CreditCard,
+  Banknote,
+  Calendar,
+  Download,
+  AlertTriangle,
+  X,
+  Loader2,
+  FileText,
+  CheckCircle,
+  QrCode,
+  Receipt,
+  Wallet,
+  Users,
+  Users2,
+  ArrowLeftRight,
+  Lock,
+  Boxes,
+} from 'lucide-react';
+import type { PeriodKey, MonthlyBreakdownRow } from '@/lib/finance/report';
+import { useTableSelection } from '@/hooks/useTableSelection';
+import { SelectAllCheckbox, SelectedRowsBar } from '@/components/admin/SelectedRowsBar';
+import { exportSelectedRowsToExcel, todayWibSlug } from '@/lib/utils/exportSelectedExcel';
+import RekapHarian from './RekapHarian';
+import BiayaOperasionalPanel from './BiayaOperasionalPanel';
+import TutupBukuModal from './TutupBukuModal';
+import LaporanMutasiStokSection from '@/features/portal/laporan/LaporanMutasiStokSection';
+import RekapKasir from './RekapKasir';
+import RekapShift from '@/features/portal/laporan/RekapShift';
+import JejakTransaksiPanel from './JejakTransaksiPanel';
+import {
+  formatRupiah,
+  noticeStyle,
+  type DailyRowUi,
+  type IntegrityChecksUi,
+} from '@/features/portal/laporan/shared';
+
+// ─────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────
+
+type RecentTransaction = {
+  id: string;
+  invoiceNumber: string;
+  paymentMethod: 'CASH' | 'QRIS' | 'SPLIT';
+  payments?: { paymentMethod: 'CASH' | 'QRIS'; amount: string }[];
+  status: 'COMPLETED' | 'VOID';
+  grossAmount: string;
+  cashReceived: string | null;
+  changeAmount: string | null;
+  voidReason: string | null;
+  voidedAt: string | null;
+  createdAt: string;
+  employeeName: string;
+  employeeId: string;
+};
+
+type ShiftRecord = {
+  shiftId: string;
+  clockIn: string;
+  clockOut: string | null;
+  status: string;
+  modalAwal: number | null;
+  rawModalWarning?: boolean;
+  cashSales?: number;
+  cashOut?: number;
+  cashIn?: number;
+  expectedCash?: number;
+  actualCash?: number | null;
+  discrepancy?: number | null;
+  statusLaci?: 'RUNNING' | 'BALANCED' | 'SHORTAGE' | 'OVERAGE';
+  discrepancyTier?: 'HIJAU' | 'KUNING' | 'MERAH' | 'OVERAGE';
+  notes?: string | null;
+  kasirName: string;
+  kasirNim: string;
+  serahTerimaDiff?: number | null;
+  auditFlags?: string[] | null;
+};
+
+type LaporanData = {
+  period: string;
+  label: string;
+  rangeStartDate?: string;
+  rangeEndDate?: string;
+  summary: {
+    grossAmount: number;
+    grossProfit: number;
+    totalHpp: number;
+    totalCount: number;
+    countCash: number;
+    countQris: number;
+    countVoid: number;
+    amountCash: number;
+    amountQris: number;
+    voidAmount: number;
+    alokasiGajiKaryawan?: number;
+    persenBagiHasil?: number;
+    omzetTanpaHpp: number;
+    unitTanpaHpp: number;
+    labaLengkap: boolean;
+    biayaOperasional: number;
+    labaBersih: number;
+  };
+  monthly?: MonthlyBreakdownRow[];
+  daily: DailyRowUi[];
+  checks: IntegrityChecksUi;
+  topProducts: { productName: string; totalQty: number; totalRevenue: string }[];
+  dailyChart: {
+    day: string;
+    revenue: string;
+    profit: string;
+    txCount: number;
+    amountCash: string;
+    amountQris: string;
+  }[];
+  recentTransactions: RecentTransaction[];
+  shifts: ShiftRecord[];
+};
+
+// ─────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────
+function formatRp(n: number | string) {
+  const num = typeof n === 'string' ? parseFloat(n) : n;
+  return 'Rp ' + (isNaN(num) ? 0 : num).toLocaleString('id-ID');
+}
+
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString('id-ID', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  });
+}
+
+const PERIODS: { key: PeriodKey; label: string }[] = [
+  { key: 'daily',       label: 'Hari Ini' },
+  { key: 'weekly',      label: 'Minggu Ini' },
+  { key: 'monthly',     label: 'Bulan Ini' },
+  { key: 'october',     label: 'Oktober' },
+  { key: 'november',    label: 'November' },
+  { key: 'oct_nov',     label: 'Oktober + November' },
+  { key: 'semi_annual', label: '6 Bulan' },
+  { key: 'all',         label: 'Keseluruhan' },
+];
+
+// ─────────────────────────────────────────────────────────────
+// Void Modal Component
+// ─────────────────────────────────────────────────────────────
+type VoidModalProps = {
+  transaction: RecentTransaction;
+  onClose: () => void;
+  onSuccess: () => void;
+};
+
+function VoidModal({ transaction, onClose, onSuccess }: VoidModalProps) {
+  const uid = useId();
+  const [alasan, setAlasan] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+
+  // Focus trap: fokus ke textarea saat modal buka
+  useEffect(() => {
+    reasonRef.current?.focus();
+    // Escape key close
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  async function handleVoid() {
+    if (!alasan.trim()) { setError('Alasan wajib diisi.'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/admin/transaksi/${transaction.id}/void`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alasan: alasan.trim() }),
+      });
+      const json = await res.json() as { success?: boolean; error?: string };
+      if (res.ok && json.success) {
+        onSuccess();
+        onClose();
+      } else {
+        setError(typeof json.error === 'string' ? json.error : 'Gagal void transaksi.');
+      }
+    } catch {
+      setError('Terjadi kesalahan jaringan. Coba lagi.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    // Backdrop
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`${uid}-void-title`}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 'var(--space-4)',
+        backdropFilter: 'blur(4px)',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="card"
+        style={{
+          width: '100%', maxWidth: 440,
+          animation: 'slideUpFade 0.2s var(--ease-out-expo)',
+        }}
+      >
+        {/* Header */}
+        <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h2
+            id={`${uid}-void-title`}
+            className="card-title"
+            style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--color-error)' }}
+          >
+            <AlertTriangle size={16} aria-hidden="true" />
+            Batalkan Transaksi (Void)
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Tutup modal"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'flex' }}
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          {/* Info transaksi */}
+          <div
+            style={{
+              backgroundColor: 'var(--color-surface-alt)',
+              borderRadius: 'var(--radius-md)',
+              padding: 'var(--space-3)',
+              fontSize: 'var(--text-sm)',
+              display: 'flex', flexDirection: 'column', gap: 'var(--space-1)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--color-text-muted)' }}>Invoice</span>
+              <strong>{transaction.invoiceNumber}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--color-text-muted)' }}>Total</span>
+              <strong>{formatRp(transaction.grossAmount)}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--color-text-muted)' }}>Kasir</span>
+              <span>{transaction.employeeName}</span>
+            </div>
+          </div>
+
+          {/* Warning */}
+          <div
+            role="alert"
+            style={{
+              backgroundColor: 'var(--color-error-light)',
+              color: 'var(--color-error)',
+              borderRadius: 'var(--radius-md)',
+              padding: 'var(--space-3)',
+              fontSize: 'var(--text-xs)',
+              lineHeight: 1.6,
+            }}
+          >
+            Transaksi yang di-void <strong>tidak dapat dibatalkan</strong>. Stok produk akan
+            dikembalikan secara otomatis. Pastikan alasan void sudah benar.
+          </div>
+
+          {/* Input alasan */}
+          <div className="form-group">
+            <label htmlFor={`${uid}-alasan`} className="form-label">
+              Alasan Void <span aria-hidden="true" style={{ color: 'var(--color-error)' }}>*</span>
+            </label>
+            <textarea
+              ref={reasonRef}
+              id={`${uid}-alasan`}
+              className="form-input form-textarea"
+              rows={3}
+              placeholder="Contoh: Salah input produk, permintaan pembeli, dll."
+              value={alasan}
+              onChange={(e) => { setAlasan(e.target.value); setError(''); }}
+              maxLength={300}
+              aria-required="true"
+              aria-describedby={error ? `${uid}-void-error` : undefined}
+            />
+            {error && (
+              <p id={`${uid}-void-error`} role="alert" style={{ color: 'var(--color-error)', fontSize: 'var(--text-xs)', marginTop: 'var(--space-1)' }}>
+                {error}
+              </p>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+            <button onClick={onClose} className="btn btn-secondary" disabled={loading}>
+              Batal
+            </button>
+            <button
+              onClick={handleVoid}
+              className="btn btn-danger"
+              disabled={loading || !alasan.trim()}
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            >
+              {loading ? (
+                <><Loader2 size={14} className="spin-icon" aria-hidden="true" /> Memproses...</>
+              ) : (
+                <><AlertTriangle size={14} aria-hidden="true" /> Konfirmasi Void</>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Main Page
+// ─────────────────────────────────────────────────────────────
+export default function LaporanPage() {
+  const uid = useId();
+  const [mainTab, setMainTab] = useState<'finansial' | 'mutasi_stok' | 'rekap_kasir' | 'rekap_shift' | 'jejak_transaksi'>('finansial');
+  const [period, setPeriod] = useState<PeriodKey>('daily');
+  const [useCustomDates, setUseCustomDates] = useState(false);
+  const [draftFrom, setDraftFrom] = useState(() => `${todayWibSlug().slice(0, 7)}-01`);
+  const [draftTo, setDraftTo] = useState(() => todayWibSlug());
+  const [appliedFrom, setAppliedFrom] = useState(() => `${todayWibSlug().slice(0, 7)}-01`);
+  const [appliedTo, setAppliedTo] = useState(() => todayWibSlug());
+  const [dateFormError, setDateFormError] = useState('');
+
+  // State fetch terstruktur (menghindari setState sinkron inside useEffect)
+  const [silentTick, setSilentTick] = useState(0);
+  const [loadedState, setLoadedState] = useState<{
+    baseKey: string;
+    requestKey: string;
+    data: LaporanData | null;
+    error: string;
+  } | null>(null);
+
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportHarianLoading, setExportHarianLoading] = useState(false);
+  const [exportNotice, setExportNotice] = useState('');
+  const [voidTarget, setVoidTarget] = useState<RecentTransaction | null>(null);
+  const [showTutupBuku, setShowTutupBuku] = useState(false);
+
+  const txSelection = useTableSelection();
+  const shiftSelection = useTableSelection();
+
+  // Sync tab jika dibuka via query parameter ?tab=mutasi_stok (async microtask agar bebas setState-in-effect)
+  useEffect(() => {
+    let cancelled = false;
+    if (typeof window !== 'undefined') {
+      const tabParam = new URLSearchParams(window.location.search).get('tab');
+      if (tabParam === 'mutasi' || tabParam === 'mutasi_stok') {
+        Promise.resolve().then(() => {
+          if (!cancelled) setMainTab('mutasi_stok');
+        });
+      }
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const queryString = useMemo(() => {
+    const qs = new URLSearchParams();
+    if (useCustomDates && appliedFrom && appliedTo) {
+      qs.set('dateFrom', appliedFrom);
+      qs.set('dateTo', appliedTo);
+    } else {
+      qs.set('period', period);
+    }
+    return qs.toString();
+  }, [useCustomDates, appliedFrom, appliedTo, period]);
+
+  const requestKey = `${queryString}:${silentTick}`;
+  const loading = !loadedState || loadedState.baseKey !== queryString;
+  const data = loadedState?.data ?? null;
+  const error = loadedState?.requestKey === requestKey ? loadedState.error : '';
+
+  const reloadData = useCallback(() => {
+    setSilentTick((t) => t + 1);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const baseKey = queryString;
+    const reqKey = requestKey;
+    fetch(`/api/admin/laporan?${queryString}`)
+      .then(async (res) => {
+        const json = (await res.json()) as { success?: boolean; data?: LaporanData; error?: string };
+        if (cancelled) return;
+        if (!res.ok || !json.success) {
+          setLoadedState((prev) => ({
+            baseKey,
+            requestKey: reqKey,
+            data: prev?.baseKey === baseKey ? prev.data : null,
+            error: json.error ?? 'Gagal memuat laporan',
+          }));
+          return;
+        }
+        setLoadedState({
+          baseKey,
+          requestKey: reqKey,
+          data: json.data ?? null,
+          error: '',
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoadedState((prev) => ({
+            baseKey,
+            requestKey: reqKey,
+            data: prev?.baseKey === baseKey ? prev.data : null,
+            error: 'Terjadi kesalahan jaringan. Periksa koneksi Anda.',
+          }));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [queryString, requestKey]);
+
+  function handleSelectPreset(key: PeriodKey) {
+    setDateFormError('');
+    setUseCustomDates(false);
+    setPeriod(key);
+  }
+
+  function handleApplyCustomRange(e: React.FormEvent) {
+    e.preventDefault();
+    if (!draftFrom || !draftTo) {
+      setDateFormError('Tanggal mulai dan tanggal akhir wajib diisi.');
+      return;
+    }
+    if (draftFrom > draftTo) {
+      setDateFormError('Tanggal mulai tidak boleh melebihi tanggal akhir.');
+      return;
+    }
+    setDateFormError('');
+    setAppliedFrom(draftFrom);
+    setAppliedTo(draftTo);
+    setUseCustomDates(true);
+  }
+
+  async function downloadServerExcel(url: string, fallbackName: string): Promise<void> {
+    setExportNotice('');
+    const res = await fetch(url);
+    if (!res.ok) {
+      let msg = 'Gagal mengunduh file Excel.';
+      try {
+        const errJson = (await res.json()) as { error?: string };
+        if (errJson.error) msg = errJson.error;
+      } catch {
+        // non-JSON response
+      }
+      setExportNotice(msg);
+      return;
+    }
+
+    const truncated = res.headers.get('X-Export-Truncated') === '1';
+    const maxRows = res.headers.get('X-Export-Max-Rows') ?? '10.000';
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    const nameMatch = /filename="?([^";\r\n]+)"?/i.exec(disposition);
+    const filename = nameMatch?.[1] || fallbackName;
+
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+
+    if (truncated) {
+      setExportNotice(
+        `Perhatian: Data melebihi batas ${maxRows} baris/sheet sehingga sebagian daftar dipotong. Perkecil rentang tanggal untuk ekspor penuh per bagian.`,
+      );
+    }
+  }
+
+  // ── Export Excel 1-Sheet Skema Harian (Executive) ─────────────
+  async function handleDownloadSkemaHarian() {
+    if (!data) return;
+    setExportHarianLoading(true);
+    try {
+      const slug = useCustomDates ? `${appliedFrom}_sd_${appliedTo}` : period;
+      await downloadServerExcel(
+        `/api/admin/export/harian?${queryString}`,
+        `skema-harian-wiramart-${slug}-${todayWibSlug()}.xlsx`,
+      );
+    } catch {
+      setExportNotice('Terjadi kesalahan koneksi saat mengunduh skema harian.');
+    } finally {
+      setExportHarianLoading(false);
+    }
+  }
+
+  // ── Export Excel Multi-Sheet Lengkap (7 Sheet dari Server) ────
+  async function handleExport() {
+    if (!data) return;
+    setExportLoading(true);
+    try {
+      const slug = useCustomDates ? `${appliedFrom}_sd_${appliedTo}` : period;
+      await downloadServerExcel(
+        `/api/admin/export?type=sales_report&${queryString}`,
+        `laporan-penjualan-lengkap-${slug}-${todayWibSlug()}.xlsx`,
+      );
+    } catch {
+      setExportNotice('Terjadi kesalahan koneksi saat mengunduh laporan multi-sheet.');
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
+  // ── Selection helpers untuk Transaksi Terbaru & Audit Shift ───
+  const visibleTxIds = useMemo(
+    () => (data?.recentTransactions ?? []).map((t) => t.id),
+    [data?.recentTransactions],
+  );
+  const selectedTxs = useMemo(
+    () => txSelection.getSelectedRows(data?.recentTransactions ?? [], (t) => t.id),
+    [txSelection, data?.recentTransactions],
+  );
+  const selectedTxStats = useMemo(() => {
+    return selectedTxs.reduce(
+      (acc, t) => {
+        const amt = parseFloat(t.grossAmount) || 0;
+        if (t.status === 'VOID') {
+          acc.voidCount += 1;
+          acc.voidAmount += amt;
+        } else {
+          acc.validCount += 1;
+          acc.validAmount += amt;
+        }
+        if (t.paymentMethod === 'CASH') acc.cashCount += 1;
+        else if (t.paymentMethod === 'QRIS') acc.qrisCount += 1;
+        else acc.splitCount += 1;
+        return acc;
+      },
+      { validCount: 0, validAmount: 0, voidCount: 0, voidAmount: 0, cashCount: 0, qrisCount: 0, splitCount: 0 },
+    );
+  }, [selectedTxs]);
+
+  async function handleExportSelectedTx(): Promise<void> {
+    if (selectedTxs.length === 0) return;
+    await exportSelectedRowsToExcel({
+      filename: `transaksi-terpilih-${todayWibSlug()}.xlsx`,
+      sheetName: 'Transaksi Terpilih',
+      title: `TRANSAKSI TERPILIH (${selectedTxs.length} Struk)`,
+      subtitle: `Periode: ${data?.label ?? '-'} | Dicetak ${todayWibSlug()} WIB`,
+      rows: selectedTxs,
+      columns: [
+        { header: 'Invoice', key: 'invoiceNumber', width: 22, format: 'text', aggregate: 'count', value: (t) => t.invoiceNumber },
+        { header: 'Waktu (WIB)', key: 'createdAt', width: 20, format: 'text', aggregate: 'none', value: (t) => formatDateTime(t.createdAt) },
+        { header: 'Kasir', key: 'employeeName', width: 24, format: 'text', aggregate: 'none', value: (t) => t.employeeName },
+        { header: 'Metode', key: 'paymentMethod', width: 12, format: 'text', aggregate: 'none', value: (t) => t.paymentMethod },
+        { header: 'Status', key: 'status', width: 12, format: 'text', aggregate: 'none', value: (t) => t.status === 'VOID' ? 'VOID' : 'OK' },
+        { header: 'Nominal Bruto (Rp)', key: 'grossAmount', width: 18, format: 'currency', aggregate: 'sum', value: (t) => parseFloat(t.grossAmount) || 0 },
+        { header: 'Nominal Valid (Rp)', key: 'validAmount', width: 18, format: 'currency', aggregate: 'sum', value: (t) => (t.status === 'COMPLETED' ? parseFloat(t.grossAmount) || 0 : 0) },
+        { header: 'Alasan Void', key: 'voidReason', width: 28, format: 'text', aggregate: 'none', value: (t) => t.voidReason ?? '' },
+      ],
+    });
+  }
+
+  const visibleShiftIds = useMemo(
+    () => (data?.shifts ?? []).map((s) => s.shiftId),
+    [data?.shifts],
+  );
+  const selectedShifts = useMemo(
+    () => shiftSelection.getSelectedRows(data?.shifts ?? [], (s) => s.shiftId),
+    [shiftSelection, data?.shifts],
+  );
+  const selectedShiftStats = useMemo(() => {
+    return selectedShifts.reduce(
+      (acc, sh) => {
+        acc.modalAwal += sh.modalAwal ?? 0;
+        acc.cashSales += sh.cashSales ?? 0;
+        acc.cashOut += sh.cashOut ?? 0;
+        acc.cashIn += sh.cashIn ?? 0;
+        acc.expectedCash += sh.expectedCash ?? 0;
+        if (sh.actualCash !== null && sh.actualCash !== undefined) {
+          acc.actualCash += sh.actualCash;
+          acc.countedCount += 1;
+        }
+        if (sh.status === 'CLOSED' && sh.discrepancy !== null && sh.discrepancy !== undefined) {
+          acc.discrepancy += sh.discrepancy;
+          acc.closedDiffCount += 1;
+        }
+        return acc;
+      },
+      { modalAwal: 0, cashSales: 0, cashOut: 0, cashIn: 0, expectedCash: 0, actualCash: 0, countedCount: 0, discrepancy: 0, closedDiffCount: 0 },
+    );
+  }, [selectedShifts]);
+
+  async function handleExportSelectedShifts(): Promise<void> {
+    if (selectedShifts.length === 0) return;
+    await exportSelectedRowsToExcel({
+      filename: `audit-shift-terpilih-${todayWibSlug()}.xlsx`,
+      sheetName: 'Audit Shift Terpilih',
+      title: `AUDIT LACI SHIFT TERPILIH (${selectedShifts.length} Shift)`,
+      subtitle: `Periode: ${data?.label ?? '-'} | Dicetak ${todayWibSlug()} WIB`,
+      rows: selectedShifts,
+      columns: [
+        { header: 'Kasir', key: 'kasirName', width: 24, format: 'text', aggregate: 'count', value: (s) => s.kasirName },
+        { header: 'NIM', key: 'kasirNim', width: 14, format: 'text', aggregate: 'none', value: (s) => s.kasirNim },
+        { header: 'Clock In', key: 'clockIn', width: 18, format: 'text', aggregate: 'none', value: (s) => formatDateTime(s.clockIn) },
+        { header: 'Clock Out', key: 'clockOut', width: 18, format: 'text', aggregate: 'none', value: (s) => s.clockOut ? formatDateTime(s.clockOut) : 'Sedang Berjalan' },
+        { header: 'Status', key: 'status', width: 12, format: 'text', aggregate: 'none', value: (s) => s.status },
+        { header: 'Modal Awal', key: 'modalAwal', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.modalAwal ?? 0 },
+        { header: 'Tunai Terjual', key: 'cashSales', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.cashSales ?? 0 },
+        { header: 'Petty Cash (-)', key: 'cashOut', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.cashOut ?? 0 },
+        { header: 'Kas Masuk (+)', key: 'cashIn', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.cashIn ?? 0 },
+        { header: 'Expected Kas', key: 'expectedCash', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.expectedCash ?? 0 },
+        { header: 'Fisik Laci', key: 'actualCash', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.actualCash ?? 0 },
+        { header: 'Selisih', key: 'discrepancy', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.discrepancy ?? 0 },
+        { header: 'Catatan', key: 'notes', width: 28, format: 'text', aggregate: 'none', value: (s) => s.notes ?? '' },
+      ],
+    });
+  }
+
+  // ── Chart helpers ───────────────────────────────────────────
+  const maxRevenue = data?.dailyChart.reduce(
+    (m, d) => Math.max(m, parseFloat(d.revenue) || 0), 1,
+  ) ?? 1;
+
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────
+  return (
+    <>
+      {/* Void Modal */}
+      {voidTarget && (
+        <VoidModal
+          transaction={voidTarget}
+          onClose={() => setVoidTarget(null)}
+          onSuccess={reloadData}
+        />
+      )}
+
+      {/* Tutup Buku Modal */}
+      <TutupBukuModal
+        isOpen={showTutupBuku}
+        onClose={() => setShowTutupBuku(false)}
+        onSuccess={() => {
+          setShowTutupBuku(false);
+          reloadData();
+        }}
+      />
+
+      <div>
+        {/* ── HEADER MOBILE-FIRST ── */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 12,
+            marginBottom: 12,
+          }}
+        >
+          {/* Judul + Tanggal */}
+          <div>
+            <h1
+              className="page-title"
+              style={{ margin: 0, fontSize: 'clamp(1.15rem, 4vw, 1.55rem)', fontWeight: 800 }}
+            >
+              Laporan Keuangan
+            </h1>
+            <p
+              className="page-subtitle"
+              style={{ margin: '2px 0 0', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}
+            >
+              {data?.label ?? '—'}
+              {data?.rangeStartDate && data?.rangeEndDate ? ` · ${data.rangeStartDate} s/d ${data.rangeEndDate}` : ''}
+            </p>
+          </div>
+
+          {/* Export Dropdown — tampil ikonis di HP, teks di desktop */}
+          <div style={{ position: 'relative', flexShrink: 0 }} id={`${uid}-export-wrapper`}>
+            <button
+              id={`${uid}-export-toggle`}
+              type="button"
+              onClick={() => {
+                const el = document.getElementById(`${uid}-export-menu`);
+                if (el) el.style.display = el.style.display === 'none' ? 'flex' : 'none';
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '8px 12px',
+                borderRadius: 10,
+                border: '1.5px solid #16a34a',
+                background: '#f0fdf4',
+                color: '#15803d',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+              }}
+              aria-label="Pilih format ekspor Excel"
+            >
+              <Download size={14} aria-hidden="true" />
+              <span>Export ▾</span>
+            </button>
+
+            {/* Dropdown panel — hidden by default */}
+            <div
+              id={`${uid}-export-menu`}
+              style={{
+                display: 'none',
+                flexDirection: 'column',
+                gap: 4,
+                position: 'absolute',
+                right: 0,
+                top: 'calc(100% + 6px)',
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: 12,
+                padding: 8,
+                minWidth: 210,
+                boxShadow: '0 8px 30px -4px rgba(0,0,0,0.12)',
+                zIndex: 100,
+              }}
+            >
+              <button
+                id={`${uid}-export-harian`}
+                type="button"
+                onClick={() => {
+                  const el = document.getElementById(`${uid}-export-menu`);
+                  if (el) el.style.display = 'none';
+                  handleDownloadSkemaHarian();
+                }}
+                disabled={!data || exportHarianLoading}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: !data || exportHarianLoading ? '#f1f5f9' : '#f0fdf4',
+                  color: !data || exportHarianLoading ? '#94a3b8' : '#15803d',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: !data || exportHarianLoading ? 'not-allowed' : 'pointer',
+                  textAlign: 'left',
+                  width: '100%',
+                }}
+                aria-label="Unduh 1-Sheet Skema Harian Excel"
+              >
+                {exportHarianLoading
+                  ? <><Loader2 size={13} className="spin-icon" /> Mengunduh...</>
+                  : <><span>📊</span> 1-Sheet Harian (.xlsx)</>
+                }
+              </button>
+              <button
+                id={`${uid}-export`}
+                type="button"
+                onClick={() => {
+                  const el = document.getElementById(`${uid}-export-menu`);
+                  if (el) el.style.display = 'none';
+                  handleExport();
+                }}
+                disabled={!data || exportLoading}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: !data || exportLoading ? '#f1f5f9' : '#f8fafc',
+                  color: !data || exportLoading ? '#94a3b8' : '#334155',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: !data || exportLoading ? 'not-allowed' : 'pointer',
+                  textAlign: 'left',
+                  width: '100%',
+                }}
+                aria-label="Export multi-sheet ke Excel"
+              >
+                {exportLoading
+                  ? <><Loader2 size={13} className="spin-icon" /> Exporting...</>
+                  : <><span>📑</span> Multi-Sheet Lengkap</>
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {exportNotice && (
+          <div
+            role="alert"
+            style={{
+              ...noticeStyle('warning'),
+              marginBottom: 'var(--space-4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 'var(--space-2)',
+            }}
+          >
+            <span>{exportNotice}</span>
+            <button
+              type="button"
+              onClick={() => setExportNotice('')}
+              aria-label="Tutup pemberitahuan ekspor"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 4 }}
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
+        {/* ── TUTUP BUKU — Hero Action Card ── */}
+        <button
+          id={`${uid}-tutup-buku`}
+          type="button"
+          onClick={() => setShowTutupBuku(true)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            padding: '13px 20px',
+            borderRadius: 12,
+            border: '1.5px solid hsl(217 91% 50%)',
+            background: 'linear-gradient(135deg, hsl(217 91% 60%), hsl(230 85% 58%))',
+            color: '#ffffff',
+            fontSize: '0.9rem',
+            fontWeight: 800,
+            cursor: 'pointer',
+            marginBottom: 14,
+            boxShadow: '0 4px 14px -2px hsl(217 91% 60% / 0.4)',
+            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+            letterSpacing: '0.01em',
+          }}
+          aria-label="Tutup Buku Finansial Harian (Locking Period)"
+        >
+          <Lock size={15} aria-hidden="true" />
+          <span>Tutup Buku Hari Ini</span>
+        </button>
+
+        {/* ─── MOBILE SCROLLABLE PILL TAB BAR ─── */}
+        <div
+          role="tablist"
+          aria-label="Pilih Jenis Laporan"
+          style={{
+            display: 'flex',
+            gap: 6,
+            marginBottom: 'var(--space-5)',
+            overflowX: 'auto',
+            flexWrap: 'nowrap',
+            scrollbarWidth: 'none',
+            paddingBottom: 4,
+            /* Fade hints at the trailing edge so user knows it's scrollable */
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          {([
+            {
+              id: 'finansial',
+              icon: <BarChart3 size={14} />,
+              label: 'Finansial & Kasir',
+              activeColor: '#166534',
+              activeBg: '#f0fdf4',
+              activeBorder: '#16a34a',
+            },
+            {
+              id: 'mutasi_stok',
+              icon: <Boxes size={14} />,
+              label: 'Stok Gudang',
+              activeColor: '#0369a1',
+              activeBg: '#e0f2fe',
+              activeBorder: '#0284c7',
+            },
+            {
+              id: 'rekap_kasir',
+              icon: <Users2 size={14} />,
+              label: 'Rekap Kasir',
+              activeColor: '#6d28d9',
+              activeBg: '#f5f3ff',
+              activeBorder: '#7c3aed',
+            },
+            {
+              id: 'rekap_shift',
+              icon: <TrendingUp size={14} />,
+              label: 'Rekap Shift',
+              activeColor: '#4338ca',
+              activeBg: '#eef2ff',
+              activeBorder: '#6366f1',
+            },
+            {
+              id: 'jejak_transaksi',
+              icon: <FileText size={14} />,
+              label: 'Jejak Transaksi (TCL)',
+              activeColor: '#0f766e',
+              activeBg: '#f0fdfa',
+              activeBorder: '#0d9488',
+            },
+          ] as const).map((tab) => {
+            const isActive = mainTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => setMainTab(tab.id)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '9px 16px',
+                  borderRadius: 100,
+                  border: isActive ? `1.5px solid ${tab.activeBorder}` : '1.5px solid #e2e8f0',
+                  background: isActive ? tab.activeBg : '#f8fafc',
+                  color: isActive ? tab.activeColor : '#64748b',
+                  fontWeight: isActive ? 700 : 500,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                  boxShadow: isActive ? `0 0 0 3px ${tab.activeBorder}22` : 'none',
+                }}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {mainTab === 'rekap_kasir' ? (
+          <RekapKasir />
+        ) : mainTab === 'mutasi_stok' ? (
+          <LaporanMutasiStokSection />
+        ) : mainTab === 'rekap_shift' ? (
+          <RekapShift />
+        ) : mainTab === 'jejak_transaksi' ? (
+          <JejakTransaksiPanel />
+        ) : (
+          <>
+            {/* Period selector + custom date range */}
+            <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
+              <div className="card-body" style={{ padding: 'var(--space-3) var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                <div
+                  role="group"
+                  aria-label="Pilih periode laporan"
+                  style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}
+                >
+                  {PERIODS.map((p) => {
+                    const isPresetActive = !useCustomDates && period === p.key;
+                    return (
+                      <button
+                        key={p.key}
+                        type="button"
+                        id={`${uid}-period-${p.key}`}
+                        onClick={() => handleSelectPreset(p.key)}
+                        className={`btn btn-sm ${isPresetActive ? 'btn-primary' : 'btn-secondary'}`}
+                        aria-pressed={isPresetActive}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <form
+                  onSubmit={handleApplyCustomRange}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-2)',
+                    flexWrap: 'wrap',
+                    paddingTop: 'var(--space-2)',
+                    borderTop: '1px solid var(--color-border)',
+                  }}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-text-secondary)' }}>
+                    <Calendar size={14} aria-hidden="true" />
+                    Rentang Custom (WIB):
+                  </span>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={draftFrom}
+                    max={draftTo || todayWibSlug()}
+                    onChange={(e) => { setDraftFrom(e.target.value); setDateFormError(''); }}
+                    aria-label="Tanggal mulai laporan"
+                    style={{ width: 145, minHeight: 34, padding: '4px 8px', fontSize: 'var(--text-xs)' }}
+                  />
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>s/d</span>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={draftTo}
+                    min={draftFrom}
+                    max={todayWibSlug()}
+                    onChange={(e) => { setDraftTo(e.target.value); setDateFormError(''); }}
+                    aria-label="Tanggal akhir laporan"
+                    style={{ width: 145, minHeight: 34, padding: '4px 8px', fontSize: 'var(--text-xs)' }}
+                  />
+                  <button
+                    type="submit"
+                    className={`btn btn-sm ${useCustomDates ? 'btn-primary' : 'btn-secondary'}`}
+                  >
+                    Terapkan Rentang
+                  </button>
+                  {useCustomDates && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => handleSelectPreset(period)}
+                    >
+                      Reset ke Preset
+                    </button>
+                  )}
+                  {dateFormError && (
+                    <span role="alert" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-error)' }}>
+                      {dateFormError}
+                    </span>
+                  )}
+                </form>
+              </div>
+            </div>
+
+        {error && (
+          <div className="alert alert-error" role="alert" style={{ marginBottom: 'var(--space-4)' }}>
+            {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div
+            className="card"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 'var(--space-16) var(--space-6)',
+              minHeight: 280,
+              gap: 'var(--space-3)',
+              textAlign: 'center',
+              width: '100%',
+              boxShadow: 'var(--shadow-sm)',
+            }}
+          >
+            <div
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: '50%',
+                background: 'var(--color-primary-light)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--color-primary)',
+              }}
+            >
+              <Loader2 size={26} className="spin-icon" aria-hidden="true" />
+            </div>
+            <div style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
+              Memuat Laporan Keuangan...
+            </div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', maxWidth: 360, lineHeight: 1.5 }}>
+              Menghitung omzet, HPP, laba kotor, dan bagi hasil 50% shift
+            </div>
+          </div>
+        ) : data ? (
+          <>
+            {/* ─── Peringatan keakuratan ──────────────────────── */}
+            {!data.summary.labaLengkap && (
+              <div role="alert" style={{ ...noticeStyle('warning'), marginBottom: 'var(--space-4)' }}>
+                <strong>Laba belum lengkap.</strong> Ada penjualan {data.summary.unitTanpaHpp} unit produk
+                (omzet {formatRupiah(data.summary.omzetTanpaHpp)}) yang HPP-nya belum diisi. Penjualan tersebut
+                tetap masuk Omzet, tetapi <strong>tidak dihitung</strong> dalam Laba Kotor/Bersih. Lengkapi HPP
+                di menu Produk agar laba akurat.
+              </div>
+            )}
+            {(!data.checks.methodSplitMatches || !data.checks.itemsMatchOmzet || !data.checks.dailyMatchesSummary) && (
+              <div role="alert" style={{ ...noticeStyle('error'), marginBottom: 'var(--space-4)' }}>
+                <strong>Pemeriksaan konsistensi gagal.</strong> Total per metode/rincian/harian tidak sama dengan
+                ringkasan. Jangan gunakan angka ini sebelum diperiksa.
+              </div>
+            )}
+
+            {/* ─── CLUSTER 1: Arus Pendapatan & Metode Pembayaran ── */}
+            <div style={{ marginBottom: 'var(--space-6)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
+                <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', margin: 0 }}>
+                  <TrendingUp size={16} style={{ color: 'var(--color-primary)' }} aria-hidden="true" />
+                  Arus Pendapatan &amp; Penjualan
+                </h2>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  Total {data.summary.totalCount} transaksi ({data.summary.countVoid > 0 ? `${data.summary.countVoid} void dibatalkan` : '0 void'})
+                </span>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                  gap: 'var(--space-4)',
+                }}
+              >
+                {/* Total Omzet */}
+                <article id={`${uid}-card-total`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-primary)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
+                    <TrendingUp size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label">Total Omzet Penjualan</div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
+                    {formatRp(data.summary.grossAmount)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    100% total omzet kotor periode ini
+                  </div>
+                </article>
+
+                {/* Cash */}
+                <article id={`${uid}-card-cash`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-success)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-success-light)', color: 'var(--color-success)' }}>
+                    <Banknote size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label">Penerimaan Tunai (Cash)</div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-success)' }}>
+                    {formatRp(data.summary.amountCash)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    {data.summary.countCash} transaksi {data.summary.grossAmount > 0 ? `(${Math.round((data.summary.amountCash / data.summary.grossAmount) * 100)}% omzet)` : ''}
+                  </div>
+                </article>
+
+                {/* QRIS */}
+                <article id={`${uid}-card-qris`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-info)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-info-light)', color: 'var(--color-info)' }}>
+                    <QrCode size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label">Penerimaan Non-Tunai (QRIS)</div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-info)' }}>
+                    {formatRp(data.summary.amountQris)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    {data.summary.countQris} transaksi {data.summary.grossAmount > 0 ? `(${Math.round((data.summary.amountQris / data.summary.grossAmount) * 100)}% omzet)` : ''}
+                  </div>
+                </article>
+              </div>
+            </div>
+
+            {/* ─── CLUSTER 2: Profitabilitas & Kalkulasi Laba Bersih (Sistem Bagi Hasil 50:50) ── */}
+            <div style={{ marginBottom: 'var(--space-6)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+                <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', margin: 0 }}>
+                  <Wallet size={16} style={{ color: 'var(--color-success)' }} aria-hidden="true" />
+                  Profitabilitas &amp; Beban Toko
+                </h2>
+                <span style={{ fontSize: 'var(--text-xs)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-alt)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)', fontWeight: 'var(--weight-medium)' }}>
+                  Rumus: (Laba Kotor − Biaya Operasional) = Laba Bersih Operasional → 50% Mahasiswa : 50% Wiramart
+                </span>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: 'var(--space-4)',
+                }}
+              >
+                {/* Laba Kotor */}
+                <article id={`${uid}-card-laba`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-warning)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)' }}>
+                    <DollarSign size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label">Laba Kotor{!data.summary.labaLengkap && ' *'}</div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
+                    {formatRupiah(data.summary.grossProfit)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    Omzet − Total HPP ({formatRupiah(data.summary.totalHpp)})
+                  </div>
+                  {!data.summary.labaLengkap && (
+                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)', marginTop: 'var(--space-1)' }}>
+                      * Sebagian produk belum memiliki data HPP
+                    </div>
+                  )}
+                </article>
+
+                {/* Bagi Hasil Karyawan (50% Paten) */}
+                <article id={`${uid}-card-gaji`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-primary)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
+                    <Users size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label" style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-primary)' }}>
+                    Bagi Hasil Mahasiswa (50%)
+                  </div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
+                    {formatRupiah(data.summary.alokasiGajiKaryawan ?? Math.round(data.summary.grossProfit * 0.5))}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    50% dari sisa laba bersih operasional
+                  </div>
+                </article>
+
+                {/* Biaya Operasional */}
+                <article id={`${uid}-card-biaya`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-error)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-error-light)', color: 'var(--color-error)' }}>
+                    <Receipt size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label">Biaya Operasional Toko</div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: data.summary.biayaOperasional > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
+                    {formatRupiah(data.summary.biayaOperasional)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    Paten bulanan 50rb (ATK 20rb + Bensin 30rb) + pengeluaran lain
+                  </div>
+                </article>
+
+                {/* Laba Bersih Toko */}
+                <article id={`${uid}-card-bersih`} className="stat-card" style={{ position: 'relative', overflow: 'hidden', border: '1px solid var(--color-success-light)' }}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }} />
+                  <div className="stat-card__icon" style={{ backgroundColor: data.summary.labaBersih < 0 ? 'var(--color-error-light)' : 'var(--color-success-light)', color: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }}>
+                    <Wallet size={20} aria-hidden="true" />
+                  </div>
+                  <div className="stat-card__label" style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
+                    Laba Bersih Wiramart (50%){!data.summary.labaLengkap && ' *'}
+                  </div>
+                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }}>
+                    {formatRupiah(data.summary.labaBersih)}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
+                    Hak bersih toko setelah biaya &amp; bagi hasil
+                  </div>
+                </article>
+              </div>
+
+              <div style={{ marginTop: 'var(--space-3)', padding: 'var(--space-3) var(--space-4)', background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', fontSize: 'var(--text-xs)', color: 'var(--color-text)', display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)' }}>
+                <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>🤝</span>
+                <div style={{ lineHeight: 1.6 }}>
+                  <strong>Sistem Bagi Hasil 50:50 Wiramart:</strong> Laba kotor penjualan dikurangi biaya operasional toko terlebih dahulu untuk mendapatkan <strong>Laba Bersih Operasional</strong>. Hasil bersih tersebut kemudian dibagi <strong>50%</strong> untuk hak mahasiswa (akumulasi per shift dan dibagi rata antar 4 role shift), dan <strong>50%</strong> menjadi laba bersih hak milik toko Wiramart. Pada periode bulanan, biaya paten Rp 50.000 (ATK Rp 20.000 + Bensin Rp 30.000) otomatis diikutsertakan.
+                </div>
+              </div>
+            </div>
+
+            {/* ─── Ringkasan Per Bulan (jika rentang multi-bulan) ─ */}
+            {data.monthly && data.monthly.length > 1 && (
+              <section className="card" style={{ marginBottom: 'var(--space-6)' }} aria-labelledby={`${uid}-monthly-title`}>
+                <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                  <h2
+                    id={`${uid}-monthly-title`}
+                    className="card-title"
+                    style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+                  >
+                    <Calendar size={16} aria-hidden="true" /> Rekap Bulanan ({data.monthly.length} Bulan)
+                  </h2>
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                    Akumulasi konsisten dengan total harian
+                  </span>
+                </div>
+                <div className="table-wrapper">
+                  <table className="table" style={{ fontSize: 'var(--text-xs)', whiteSpace: 'nowrap' }}>
+                    <thead>
+                      <tr>
+                        <th scope="col">Bulan</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Hari Aktif</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Trx</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Void</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Omzet</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Cash</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>QRIS</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>HPP</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Laba Kotor</th>
+                        <th scope="col" style={{ textAlign: 'right', color: 'var(--color-primary)' }}>50% Mahasiswa</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>Biaya</th>
+                        <th scope="col" style={{ textAlign: 'right' }}>50% Wiramart</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.monthly.map((m) => (
+                        <tr key={m.monthKey}>
+                          <td style={{ fontWeight: 'var(--weight-semibold)' }}>{m.monthLabel}</td>
+                          <td className="text-right">{m.activeDays}</td>
+                          <td className="text-right">{m.txCount}</td>
+                          <td className="text-right" style={{ color: m.voidCount > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>{m.voidCount}</td>
+                          <td className="text-right" style={{ fontWeight: 'var(--weight-semibold)' }}>{formatRupiah(m.omzet)}</td>
+                          <td className="text-right">{formatRupiah(m.omzetCash)}</td>
+                          <td className="text-right">{formatRupiah(m.omzetQris)}</td>
+                          <td className="text-right">{formatRupiah(m.hppTerjual)}</td>
+                          <td className="text-right" style={{ color: m.labaKotor < 0 ? 'var(--color-error)' : 'var(--color-success)' }}>{formatRupiah(m.labaKotor)}</td>
+                          <td className="text-right" style={{ color: 'var(--color-primary)', fontWeight: 'var(--weight-medium)' }}>{formatRupiah(m.alokasiGajiKaryawan)}</td>
+                          <td className="text-right">{formatRupiah(m.biayaOperasional)}</td>
+                          <td className="text-right" style={{ fontWeight: 'var(--weight-bold)', color: m.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }}>{formatRupiah(m.labaBersih)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {/* ─── Rekap Harian ────────────────────────────────── */}
+            <RekapHarian rows={data.daily} labaLengkap={data.summary.labaLengkap} />
+
+            {/* ─── Biaya Operasional (input & daftar) ──────────── */}
+            <BiayaOperasionalPanel
+              period={period}
+              dateFrom={useCustomDates ? appliedFrom : undefined}
+              dateTo={useCustomDates ? appliedTo : undefined}
+              onChanged={reloadData}
+            />
+
+            {/* ─── Row: Top Produk + Void info ──────────────────── */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: 'var(--space-5)',
+                marginBottom: 'var(--space-6)',
+              }}
+            >
+              {/* Top Produk Terlaris */}
+              <div className="card">
+                <div className="card-header">
+                  <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                    <TrendingUp size={16} aria-hidden="true" /> Top {data.topProducts.length || 5} Produk Terlaris
+                  </h2>
+                </div>
+                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                  {data.topProducts.length === 0 ? (
+                    <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
+                      Belum ada data produk
+                    </p>
+                  ) : data.topProducts.map((p, i) => (
+                    <div key={p.productName} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                        <span style={{
+                          width: 24, height: 24, borderRadius: '50%',
+                          background: i === 0 ? 'var(--color-primary)' : 'var(--color-surface-alt)',
+                          color: i === 0 ? 'white' : 'var(--color-text-muted)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-bold)', flexShrink: 0,
+                        }}>
+                          {i + 1}
+                        </span>
+                        <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-medium)' }}>
+                          {p.productName}
+                        </span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)' }}>
+                          {p.totalQty} pcs
+                        </div>
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                          {formatRp(p.totalRevenue)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Ringkasan Metode + Void Count */}
+              <div className="card">
+                <div className="card-header">
+                  <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                    <CreditCard size={16} aria-hidden="true" /> Ringkasan Pembayaran
+                  </h2>
+                </div>
+                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+                  {[
+                    { label: 'Cash', amount: data.summary.amountCash, count: data.summary.countCash, color: 'var(--color-success)', icon: <Banknote size={16} aria-hidden="true" /> },
+                    { label: 'QRIS', amount: data.summary.amountQris, count: data.summary.countQris, color: 'var(--color-info)', icon: <QrCode size={16} aria-hidden="true" /> },
+                  ].map((m) => (
+                    <div key={m.label}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-1)' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: m.color, fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)' }}>
+                          {m.icon} {m.label}
+                        </span>
+                        <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)' }}>{formatRp(m.amount)}</span>
+                      </div>
+                      {/* Progress bar proporsional */}
+                      <div style={{ height: 6, borderRadius: 3, backgroundColor: 'var(--color-border)', overflow: 'hidden' }}>
+                        <div style={{
+                          height: '100%',
+                          borderRadius: 3,
+                          backgroundColor: m.color,
+                          width: data.summary.grossAmount > 0
+                            ? `${(m.amount / data.summary.grossAmount * 100).toFixed(1)}%`
+                            : '0%',
+                          transition: 'width 0.6s var(--ease-out-expo)',
+                        }} aria-hidden="true" />
+                      </div>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                        {m.count} transaksi
+                        {data.summary.grossAmount > 0 && ` · ${(m.amount / data.summary.grossAmount * 100).toFixed(1)}%`}
+                      </div>
+                    </div>
+                  ))}
+                  {data.summary.countVoid > 0 && (
+                    <div style={{ paddingTop: 'var(--space-2)', borderTop: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-sm)' }}>
+                      <span style={{ color: 'var(--color-error)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                        <ShoppingBag size={14} aria-hidden="true" /> Void
+                      </span>
+                      <strong style={{ color: 'var(--color-error)' }}>{data.summary.countVoid} transaksi</strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* ─── Bar Chart Stacked: Cash vs QRIS per hari ─────── */}
+            {data.dailyChart.length > 0 && (
+              <div className="card" style={{ marginBottom: 'var(--space-6)' }}>
+                <div className="card-header">
+                  <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                    <BarChart3 size={16} aria-hidden="true" /> Grafik Omzet Harian
+                  </h2>
+                  {/* Legenda */}
+                  <div style={{ display: 'flex', gap: 'var(--space-4)', fontSize: 'var(--text-xs)' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--color-success)', display: 'inline-block' }} aria-hidden="true" />
+                      Cash
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--color-info)', display: 'inline-block' }} aria-hidden="true" />
+                      QRIS
+                    </span>
+                  </div>
+                </div>
+                <div className="card-body">
+                  <div
+                    role="img"
+                    aria-label="Grafik bar omzet harian"
+                    style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-2)', height: 180, overflowX: 'auto', paddingBottom: 'var(--space-4)' }}
+                  >
+                    {data.dailyChart.map((d) => {
+                      const total = parseFloat(d.revenue) || 0;
+                      const cash  = parseFloat(d.amountCash) || 0;
+                      const qris  = parseFloat(d.amountQris) || 0;
+                      const totalHeight = (total / maxRevenue) * 140;
+                      const cashPct  = total > 0 ? cash / total : 0;
+                      const qrisPct  = total > 0 ? qris / total : 0;
+
+                      return (
+                        <div
+                          key={d.day}
+                          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 36, flex: 1 }}
+                        >
+                          {/* Bar stacked */}
+                          <div
+                            title={`${d.day}\nTotal: ${formatRp(total)}\nCash: ${formatRp(cash)}\nQRIS: ${formatRp(qris)}\n${d.txCount} transaksi`}
+                            style={{
+                              width: '100%', maxWidth: 28,
+                              height: `${Math.max(totalHeight, 4)}px`,
+                              display: 'flex', flexDirection: 'column-reverse',
+                              borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
+                              overflow: 'hidden',
+                              transition: 'height 0.4s var(--ease-out-expo)',
+                            }}
+                          >
+                            <div style={{ flex: cashPct, backgroundColor: 'var(--color-success)', minHeight: cash > 0 ? 2 : 0 }} />
+                            <div style={{ flex: qrisPct, backgroundColor: 'var(--color-info)', minHeight: qris > 0 ? 2 : 0 }} />
+                          </div>
+                          {/* Label tanggal */}
+                          <span style={{ fontSize: 9, color: 'var(--color-text-muted)', transform: 'rotate(-45deg)', whiteSpace: 'nowrap', transformOrigin: 'top center' }}>
+                            {d.day.slice(5)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ─── Tabel Transaksi Terbaru + Void ──────────────── */}
+            <div className="card">
+              <div className="card-header">
+                <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <FileText size={16} aria-hidden="true" /> Transaksi Terbaru
+                </h2>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  {data.recentTransactions.length} transaksi ditampilkan
+                </span>
+              </div>
+              <div className="card-body" style={{ padding: 0, overflowX: 'auto' }}>
+                {data.recentTransactions.length === 0 ? (
+                  <p style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
+                    Belum ada transaksi pada periode ini
+                  </p>
+                ) : (
+                  <>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                          <th scope="col" style={{ padding: 'var(--space-3) var(--space-3)', width: 38, textAlign: 'center' }}>
+                            <SelectAllCheckbox
+                              checked={txSelection.allVisibleSelected(visibleTxIds)}
+                              indeterminate={txSelection.someVisibleSelected(visibleTxIds)}
+                              onChange={() => txSelection.toggleAll(visibleTxIds)}
+                              ariaLabel="Pilih semua transaksi terlihat"
+                            />
+                          </th>
+                          {['Invoice', 'Waktu', 'Kasir', 'Metode', 'Total', 'Status', 'Aksi'].map((h) => (
+                            <th
+                              key={h}
+                              scope="col"
+                              style={{
+                                padding: 'var(--space-3) var(--space-4)',
+                                textAlign: 'left', fontWeight: 'var(--weight-semibold)',
+                                color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.recentTransactions.map((t) => {
+                          const isSelected = txSelection.isSelected(t.id);
+                          return (
+                            <tr
+                              key={t.id}
+                              style={{
+                                borderBottom: '1px solid var(--color-border)',
+                                opacity: t.status === 'VOID' ? 0.55 : 1,
+                                backgroundColor: isSelected ? 'hsl(152 60% 96% / 0.7)' : undefined,
+                                transition: 'background-color var(--duration-fast)',
+                              }}
+                            >
+                              <td style={{ padding: 'var(--space-3) var(--space-3)', textAlign: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => txSelection.toggleRow(t.id)}
+                                  aria-label={`Pilih transaksi ${t.invoiceNumber}`}
+                                  style={{
+                                    width: 16,
+                                    height: 16,
+                                    cursor: 'pointer',
+                                    accentColor: 'var(--color-primary)',
+                                    verticalAlign: 'middle',
+                                  }}
+                                />
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', fontFamily: 'monospace', fontSize: 'var(--text-xs)', whiteSpace: 'nowrap' }}>
+                                {t.invoiceNumber}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
+                                {formatDateTime(t.createdAt)}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
+                                {t.employeeName}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                                <span
+                                  title={
+                                    t.paymentMethod === 'SPLIT' && t.payments && t.payments.length > 0
+                                      ? t.payments.map((p) => `${p.paymentMethod}: ${formatRp(p.amount)}`).join(' + ')
+                                      : undefined
+                                  }
+                                  style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                    fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
+                                    backgroundColor: t.paymentMethod === 'CASH'
+                                      ? 'var(--color-success-light)'
+                                      : t.paymentMethod === 'QRIS'
+                                      ? 'var(--color-info-light)'
+                                      : 'hsl(var(--color-primary-h, 220), 80%, 93%)',
+                                    color: t.paymentMethod === 'CASH'
+                                      ? 'var(--color-success)'
+                                      : t.paymentMethod === 'QRIS'
+                                      ? 'var(--color-info)'
+                                      : 'var(--color-primary)',
+                                  }}>
+                                  {t.paymentMethod === 'CASH' ? (
+                                    <Banknote size={11} aria-hidden="true" />
+                                  ) : t.paymentMethod === 'QRIS' ? (
+                                    <QrCode size={11} aria-hidden="true" />
+                                  ) : (
+                                    <ArrowLeftRight size={11} aria-hidden="true" />
+                                  )}
+                                  {t.paymentMethod === 'SPLIT' ? 'SPLIT' : t.paymentMethod}
+                                </span>
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)', whiteSpace: 'nowrap' }}>
+                                {formatRp(t.grossAmount)}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                                {t.status === 'VOID' ? (
+                                  <span
+                                    title={t.voidReason ?? ''}
+                                    style={{
+                                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                                      padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                      fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
+                                      backgroundColor: 'var(--color-error-light)',
+                                      color: 'var(--color-error)',
+                                    }}
+                                  >
+                                    <AlertTriangle size={11} aria-hidden="true" /> VOID
+                                  </span>
+                                ) : (
+                                  <span style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                    fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
+                                    backgroundColor: 'var(--color-success-light)',
+                                    color: 'var(--color-success)',
+                                  }}>
+                                    <CheckCircle size={11} aria-hidden="true" /> OK
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                                {t.status === 'COMPLETED' && (
+                                  <button
+                                    onClick={() => setVoidTarget(t)}
+                                    aria-label={`Void transaksi ${t.invoiceNumber}`}
+                                    style={{
+                                      background: 'none',
+                                      border: '1px solid var(--color-error)',
+                                      color: 'var(--color-error)',
+                                      borderRadius: 'var(--radius-sm)',
+                                      padding: '3px 10px',
+                                      fontSize: 'var(--text-xs)',
+                                      cursor: 'pointer',
+                                      fontWeight: 'var(--weight-semibold)',
+                                      transition: 'background-color var(--duration-fast)',
+                                    }}
+                                  >
+                                    Void
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <SelectedRowsBar
+                      selectedCount={selectedTxs.length}
+                      itemLabel="transaksi"
+                      metrics={[
+                        { label: 'Valid (OK)', value: `${selectedTxStats.validCount} trx · ${formatRp(selectedTxStats.validAmount)}`, tone: 'success' },
+                        { label: 'Void', value: `${selectedTxStats.voidCount} trx · ${formatRp(selectedTxStats.voidAmount)}`, tone: selectedTxStats.voidCount > 0 ? 'danger' : 'default' },
+                        { label: 'Metode', value: `Cash ${selectedTxStats.cashCount} · QRIS ${selectedTxStats.qrisCount} · Split ${selectedTxStats.splitCount}`, tone: 'info' },
+                      ]}
+                      onExportExcel={handleExportSelectedTx}
+                      onClear={txSelection.clearSelection}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* ── CARD AUDIT LACI & REKAP SHIFT KASIR ────────────────── */}
+            <div className="card" style={{ marginTop: 'var(--space-6)', overflow: 'hidden' }}>
+              <div
+                className="card-header"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: 'var(--space-4) var(--space-5)',
+                  borderBottom: '1px solid var(--color-border)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <Wallet size={18} style={{ color: 'var(--color-primary)' }} aria-hidden="true" />
+                  <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-semibold)', margin: 0 }}>
+                    Audit Laci &amp; Riwayat Shift Kasir
+                  </h2>
+                </div>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  {data.shifts?.length ?? 0} shift dalam periode ini
+                </span>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                {!data.shifts || data.shifts.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
+                    Tidak ada sesi shift tercatat dalam periode ini.
+                  </div>
+                ) : (
+                  <>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-xs)' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface-elevated)', textAlign: 'left' }}>
+                          <th scope="col" style={{ padding: 'var(--space-3) var(--space-3)', width: 38, textAlign: 'center' }}>
+                            <SelectAllCheckbox
+                              checked={shiftSelection.allVisibleSelected(visibleShiftIds)}
+                              indeterminate={shiftSelection.someVisibleSelected(visibleShiftIds)}
+                              onChange={() => shiftSelection.toggleAll(visibleShiftIds)}
+                              ariaLabel="Pilih semua audit shift terlihat"
+                            />
+                          </th>
+                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Kasir</th>
+                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Waktu Sesi</th>
+                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Modal Awal</th>
+                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Penjualan Tunai</th>
+                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Petty Cash (-)</th>
+                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Kas Masuk (+)</th>
+                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Expected Kas</th>
+                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Fisik Laci (Blind Count)</th>
+                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Selisih</th>
+                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Status Audit</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.shifts.map((sh) => {
+                          const isClosed = sh.status === 'CLOSED';
+                          const isShortage = sh.statusLaci === 'SHORTAGE';
+                          const isOverage  = sh.statusLaci === 'OVERAGE';
+                          const isBalanced = sh.statusLaci === 'BALANCED';
+                          const isSelected = shiftSelection.isSelected(sh.shiftId);
+
+                          return (
+                            <tr
+                              key={sh.shiftId}
+                              style={{
+                                borderBottom: '1px solid var(--color-border)',
+                                backgroundColor: isSelected ? 'hsl(214 85% 96% / 0.75)' : undefined,
+                              }}
+                            >
+                              <td style={{ padding: 'var(--space-3) var(--space-3)', textAlign: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => shiftSelection.toggleRow(sh.shiftId)}
+                                  aria-label={`Pilih shift ${sh.kasirName}`}
+                                  style={{
+                                    width: 16,
+                                    height: 16,
+                                    cursor: 'pointer',
+                                    accentColor: 'var(--color-primary)',
+                                    verticalAlign: 'middle',
+                                  }}
+                                />
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                                <div style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
+                                  {sh.kasirName}
+                                </div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
+                                  NIM {sh.kasirNim}
+                                </div>
+                                {sh.notes && (
+                                  <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)', marginTop: 2, fontStyle: 'italic' }}>
+                                    Catatan: &ldquo;{sh.notes}&rdquo;
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
+                                <div>{formatDateTime(sh.clockIn)}</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
+                                  {sh.clockOut ? `s/d ${formatDateTime(sh.clockOut)}` : '🟢 Sedang Berjalan'}
+                                </div>
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
+                                <div>{sh.modalAwal !== null ? formatRp(sh.modalAwal) : '—'}</div>
+                                {sh.rawModalWarning && (
+                                  <div style={{ fontSize: '0.68rem', color: 'var(--color-warning)', fontWeight: 600, marginTop: 2 }}>
+                                    ⚠️ Modal awal di luar kewajaran
+                                  </div>
+                                )}
+                                {sh.serahTerimaDiff !== null && sh.serahTerimaDiff !== undefined && Math.abs(sh.serahTerimaDiff) > 0 && (
+                                  <div style={{ fontSize: '0.68rem', color: 'var(--color-error)', fontWeight: 600, marginTop: 2 }}>
+                                    ⚠️ Beda serah terima: {sh.serahTerimaDiff > 0 ? `+${formatRp(sh.serahTerimaDiff)}` : formatRp(sh.serahTerimaDiff)}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: 'var(--color-success)', fontWeight: 600 }}>
+                                +{formatRp(sh.cashSales ?? 0)}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: (sh.cashOut ?? 0) > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
+                                {(sh.cashOut ?? 0) > 0 ? `-${formatRp(sh.cashOut ?? 0)}` : 'Rp 0'}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: (sh.cashIn ?? 0) > 0 ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
+                                {(sh.cashIn ?? 0) > 0 ? `+${formatRp(sh.cashIn ?? 0)}` : 'Rp 0'}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', fontWeight: 700 }}>
+                                {sh.expectedCash !== undefined ? formatRp(sh.expectedCash) : '—'}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', fontWeight: 700 }}>
+                                {sh.actualCash !== null && sh.actualCash !== undefined
+                                  ? formatRp(sh.actualCash)
+                                  : isClosed ? 'Tidak diisi' : 'Belum tutup'}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', fontWeight: 800 }}>
+                                {sh.discrepancy !== null && sh.discrepancy !== undefined ? (
+                                  <span style={{
+                                    color: isShortage
+                                      ? 'var(--color-error)'
+                                      : isOverage
+                                      ? 'var(--color-info)'
+                                      : 'var(--color-success)',
+                                  }}>
+                                    {sh.discrepancy > 0 ? `+${formatRp(sh.discrepancy)}` : formatRp(sh.discrepancy)}
+                                  </span>
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                              <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                                {!isClosed ? (
+                                  <span style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                    backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)',
+                                    fontWeight: 600,
+                                  }}>
+                                    ⏳ AKTIF
+                                  </span>
+                                ) : sh.discrepancyTier === 'HIJAU' || isBalanced ? (
+                                  <span style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                    backgroundColor: 'var(--color-success-light)', color: 'var(--color-success)',
+                                    fontWeight: 600,
+                                  }}>
+                                    <CheckCircle size={11} /> PAS (≤ 2k)
+                                  </span>
+                                ) : sh.discrepancyTier === 'KUNING' ? (
+                                  <span style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                    backgroundColor: 'hsl(38 92% 95%)', color: 'hsl(38 92% 35%)',
+                                    fontWeight: 600, border: '1px solid hsl(38 92% 80%)',
+                                  }}>
+                                    <AlertTriangle size={11} /> TEKOR SEDANG (≤ 20k)
+                                  </span>
+                                ) : sh.discrepancyTier === 'MERAH' || isShortage ? (
+                                  <span style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                    backgroundColor: 'var(--color-error-light)', color: 'var(--color-error)',
+                                    fontWeight: 600, border: '1px solid var(--color-error)',
+                                  }}>
+                                    <AlertTriangle size={11} /> TEKOR BERAT (&gt; 20k)
+                                  </span>
+                                ) : (
+                                  <span style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
+                                    backgroundColor: 'var(--color-info-light)', color: 'var(--color-info)',
+                                    fontWeight: 600,
+                                  }}>
+                                    ⬆️ LEBIH
+                                  </span>
+                                )}
+
+                                {sh.auditFlags?.includes('FRAUD_CASH_SUSPICIOUS') && (
+                                  <div style={{ marginTop: 4 }}>
+                                    <span
+                                      className="badge badge-error"
+                                      style={{ fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                                      title="Ada penjualan tunai tetapi kasir menutup shift dengan fisik uang persis modal awal"
+                                    >
+                                      🚨 FRAUD LACI PERSIS MODAL
+                                    </span>
+                                  </div>
+                                )}
+                                {sh.auditFlags?.includes('SERAH_TERIMA_DIFF') && (
+                                  <div style={{ marginTop: 4 }}>
+                                    <span
+                                      className="badge badge-warning"
+                                      style={{ fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                                      title="Modal awal buka shift berbeda dari fisik tutup shift sebelumnya"
+                                    >
+                                      ⚠️ SELISIH SERAH TERIMA
+                                    </span>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <SelectedRowsBar
+                      selectedCount={selectedShifts.length}
+                      itemLabel="shift"
+                      metrics={[
+                        { label: 'Modal Awal', value: formatRp(selectedShiftStats.modalAwal), tone: 'default' },
+                        { label: 'Tunai Terjual', value: formatRp(selectedShiftStats.cashSales), tone: 'success' },
+                        { label: 'Expected Kas', value: formatRp(selectedShiftStats.expectedCash), tone: 'info' },
+                        { label: `Fisik Laci (${selectedShiftStats.countedCount})`, value: formatRp(selectedShiftStats.actualCash), tone: 'default' },
+                        {
+                          label: `Selisih (${selectedShiftStats.closedDiffCount} tutup)`,
+                          value: selectedShiftStats.discrepancy > 0
+                            ? `+${formatRp(selectedShiftStats.discrepancy)}`
+                            : formatRp(selectedShiftStats.discrepancy),
+                          tone: selectedShiftStats.discrepancy < -2000 ? 'danger' : selectedShiftStats.discrepancy > 2000 ? 'info' : 'success',
+                        },
+                      ]}
+                      onExportExcel={handleExportSelectedShifts}
+                      onClear={shiftSelection.clearSelection}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
+          </>
+        )}
+      </div>
+    </>
+  );
+}

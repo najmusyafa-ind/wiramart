@@ -12,6 +12,8 @@ import { db } from '@/lib/db/client';
 import {
   products,
   stockBatches,
+  discountPolicies,
+  discountBarcodes,
   buyers,
   onlineOrders,
   onlineOrderItems,
@@ -19,12 +21,14 @@ import {
   type OnlineOrder,
   type OnlineOrderItem,
 } from '@/lib/db/schema';
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
-import { AppError } from '@/lib/utils/helpers';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { AppError, getTodayWib } from '@/lib/utils/helpers';
 import { generateHandoverPin } from './order.types';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type OrderStatus = OnlineOrder['status'];
+
+const WAITING_STATUSES = ['WAITING_PAYMENT_VERIFICATION', 'WAITING_CONFIRMATION'] as const;
 
 // ── State machine (PRD §5.2) — Record exhaustif: status baru wajib didaftarkan ──
 
@@ -63,22 +67,139 @@ async function lockOrder(tx: Tx, orderId: string, ownerBuyerId?: string): Promis
   return row;
 }
 
-/** Kurangi batch aktif berurutan FEFO (sama dengan stok-adjustment). */
-async function deductBatchesFefo(tx: Tx, productId: string, qty: number, now: Date): Promise<void> {
-  let remaining = qty;
-  const active = await tx
-    .select({ id: stockBatches.id, currentQty: stockBatches.currentQty })
+/**
+ * Kurangi batch aktif berurutan FEFO dengan FOR UPDATE, tolak stok kedaluwarsa,
+ * prioritaskan batch non-diskon untuk pesanan reguler, dan sinkronkan kuota promo.
+ */
+async function deductBatchesFefo(
+  tx: Tx,
+  productId: string,
+  productName: string,
+  stockQtyBefore: number,
+  qty: number,
+  now: Date,
+): Promise<void> {
+  const todayWib = getTodayWib(now);
+  const allActiveBatches = await tx
+    .select({
+      id: stockBatches.id,
+      currentQty: stockBatches.currentQty,
+      expiryDate: stockBatches.expiryDate,
+    })
     .from(stockBatches)
     .where(and(eq(stockBatches.productId, productId), gt(stockBatches.currentQty, 0)))
-    .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt));
+    .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt), asc(stockBatches.id))
+    .for('update');
 
-  for (const b of active) {
+  const totalActiveBatchQty = allActiveBatches.reduce((sum, b) => sum + b.currentQty, 0);
+  const unbatchedQty = Math.max(0, stockQtyBefore - totalActiveBatchQty);
+  const validBatches = allActiveBatches.filter(
+    (b) => !b.expiryDate || b.expiryDate >= todayWib,
+  );
+  const validBatchQty = validBatches.reduce((sum, b) => sum + b.currentQty, 0);
+  const sellableQty = validBatchQty + unbatchedQty;
+
+  if (qty > sellableQty) {
+    throw new AppError(
+      'STOCK_EXPIRED',
+      `Stok layak jual (non-kedaluwarsa) untuk "${productName}" hanya ${sellableQty} unit (butuh ${qty}).`,
+      422,
+    );
+  }
+
+  if (validBatches.length === 0) return;
+
+  const validBatchIds = validBatches.map((b) => b.id);
+  const activeBatchPolicies = await tx
+    .select({
+      id: discountPolicies.id,
+      batchId: discountPolicies.batchId,
+      allowedQty: discountPolicies.allowedQty,
+      soldQty: discountPolicies.soldQty,
+    })
+    .from(discountPolicies)
+    .where(
+      and(
+        inArray(discountPolicies.batchId, validBatchIds),
+        eq(discountPolicies.isActive, true),
+        gte(discountPolicies.validUntil, todayWib),
+      ),
+    );
+
+  const discountedBatchIds = new Set<string>();
+  for (const row of activeBatchPolicies) {
+    if (row.soldQty < row.allowedQty) {
+      discountedBatchIds.add(row.batchId);
+    }
+  }
+
+  // Pesanan online memakai harga reguler → prioritaskan batch non-diskon lebih dulu
+  const sortedBatches = [...validBatches].sort((a, b) => {
+    const aDisc = discountedBatchIds.has(a.id) ? 1 : 0;
+    const bDisc = discountedBatchIds.has(b.id) ? 1 : 0;
+    return aDisc - bDisc;
+  });
+
+  let remaining = qty;
+  for (const b of sortedBatches) {
     if (remaining <= 0) break;
     const take = Math.min(b.currentQty, remaining);
-    await tx
+    const [updatedBatch] = await tx
       .update(stockBatches)
       .set({ currentQty: sql`${stockBatches.currentQty} - ${take}`, updatedAt: now })
-      .where(eq(stockBatches.id, b.id));
+      .where(and(eq(stockBatches.id, b.id), gte(stockBatches.currentQty, take)))
+      .returning({ id: stockBatches.id, currentQty: stockBatches.currentQty });
+
+    if (!updatedBatch) {
+      throw new AppError(
+        'INSUFFICIENT_STOCK',
+        `Stok batch "${productName}" berubah saat konfirmasi, silakan muat ulang.`,
+        409,
+      );
+    }
+
+    const linkedPolicies = activeBatchPolicies.filter((p) => p.batchId === b.id);
+    if (linkedPolicies.length > 0) {
+      const policyIdsForBatch = linkedPolicies.map((p) => p.id);
+      await tx
+        .update(discountBarcodes)
+        .set({
+          remainingQty: sql`LEAST(${discountBarcodes.remainingQty}, ${updatedBatch.currentQty})`,
+          ...(updatedBatch.currentQty <= 0 ? { isActive: false } : {}),
+        })
+        .where(
+          and(
+            inArray(discountBarcodes.policyId, policyIdsForBatch),
+            eq(discountBarcodes.isActive, true),
+          ),
+        );
+
+      if (updatedBatch.currentQty <= 0) {
+        await tx
+          .update(discountPolicies)
+          .set({ isActive: false, updatedAt: now })
+          .where(
+            and(
+              inArray(discountPolicies.id, policyIdsForBatch),
+              eq(discountPolicies.isActive, true),
+            ),
+          );
+      } else {
+        await tx
+          .update(discountPolicies)
+          .set({
+            allowedQty: sql`LEAST(${discountPolicies.allowedQty}, ${discountPolicies.soldQty} + ${updatedBatch.currentQty})`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              inArray(discountPolicies.id, policyIdsForBatch),
+              eq(discountPolicies.isActive, true),
+            ),
+          );
+      }
+    }
+
     remaining -= take;
   }
 }
@@ -91,6 +212,48 @@ async function expireIfDue(tx: Tx, order: OnlineOrder, now: Date): Promise<boole
     .set({ status: 'EXPIRED', updatedAt: now })
     .where(eq(onlineOrders.id, order.id));
   return true;
+}
+
+/**
+ * Kedaluwarsakan pesanan WAITING_* yang telah melewati `expired_at` (batch / lazy sweep).
+ * Aman dipanggil oleh cron maupun sebelum query admin/buyer agar tidak bergantung pada cron 5-menitan.
+ */
+export async function expireDueOrders(options?: {
+  buyerId?: string;
+  orderId?: string;
+  limit?: number;
+}): Promise<number> {
+  const now = new Date();
+  const cap = Math.min(Math.max(options?.limit ?? 100, 1), 100);
+  const conditions = [
+    inArray(onlineOrders.status, [...WAITING_STATUSES]),
+    lte(onlineOrders.expiredAt, now),
+    isNull(onlineOrders.deletedAt),
+  ];
+  if (options?.buyerId) conditions.push(eq(onlineOrders.buyerId, options.buyerId));
+  if (options?.orderId) conditions.push(eq(onlineOrders.id, options.orderId));
+
+  const due = await db
+    .select({ id: onlineOrders.id })
+    .from(onlineOrders)
+    .where(and(...conditions))
+    .limit(cap);
+
+  if (due.length === 0) return 0;
+
+  const updated = await db
+    .update(onlineOrders)
+    .set({ status: 'EXPIRED', updatedAt: now })
+    .where(
+      and(
+        inArray(onlineOrders.id, due.map((r) => r.id)),
+        inArray(onlineOrders.status, [...WAITING_STATUSES]),
+        lte(onlineOrders.expiredAt, now),
+      ),
+    )
+    .returning({ id: onlineOrders.id });
+
+  return updated.length;
 }
 
 // ── Transisi ──────────────────────────────────────────────────
@@ -146,7 +309,13 @@ export async function confirmOrder(orderId: string, adminId: string): Promise<On
     const ids = [...need.keys()].sort();
 
     const stockRows = await tx
-      .select({ id: products.id, name: products.name, stockQty: products.stockQty, deletedAt: products.deletedAt })
+      .select({
+        id: products.id,
+        name: products.name,
+        stockQty: products.stockQty,
+        isActive: products.isActive,
+        deletedAt: products.deletedAt,
+      })
       .from(products)
       .where(inArray(products.id, ids))
       .orderBy(asc(products.id))
@@ -157,7 +326,7 @@ export async function confirmOrder(orderId: string, adminId: string): Promise<On
     for (const id of ids) {
       const p = byId.get(id);
       const qty = need.get(id)!;
-      if (!p || p.deletedAt !== null) shortages.push('produk tidak tersedia');
+      if (!p || !p.isActive || p.deletedAt !== null) shortages.push('produk tidak tersedia');
       else if (p.stockQty < qty) shortages.push(`${p.name} (butuh ${qty}, sisa ${p.stockQty})`);
     }
     if (shortages.length > 0) {
@@ -165,12 +334,17 @@ export async function confirmOrder(orderId: string, adminId: string): Promise<On
     }
 
     for (const id of ids) {
+      const p = byId.get(id)!;
       const qty = need.get(id)!;
-      await tx
+      await deductBatchesFefo(tx, id, p.name, p.stockQty, qty, now);
+      const [updatedProd] = await tx
         .update(products)
         .set({ stockQty: sql`${products.stockQty} - ${qty}`, updatedAt: now })
-        .where(eq(products.id, id));
-      await deductBatchesFefo(tx, id, qty, now);
+        .where(and(eq(products.id, id), gte(products.stockQty, qty)))
+        .returning({ id: products.id });
+      if (!updatedProd) {
+        throw new AppError('INSUFFICIENT_STOCK', `Stok "${p.name}" tidak cukup.`, 422);
+      }
     }
 
     const [updated] = await tx
@@ -194,37 +368,45 @@ export async function confirmOrder(orderId: string, adminId: string): Promise<On
 /** Admin menolak (hanya dari WAITING_*). Stok tidak berubah. */
 export async function rejectOrder(orderId: string, adminId: string, reason: string): Promise<OnlineOrder> {
   const now = new Date();
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const order = await lockOrder(tx, orderId);
     assertTransition(order.status, 'REJECTED');
+    if (await expireIfDue(tx, order, now)) return { expired: true as const };
     const [updated] = await tx
       .update(onlineOrders)
       .set({ status: 'REJECTED', rejectedReason: reason, cancelledBy: adminId, updatedAt: now })
       .where(eq(onlineOrders.id, orderId))
       .returning();
-    return updated!;
+    return { expired: false as const, order: updated! };
   });
+
+  if (result.expired) throw new AppError('ORDER_EXPIRED', 'Pesanan sudah kedaluwarsa.', 410);
+  return result.order;
 }
 
 /** Buyer membatalkan miliknya — hanya sebelum CONFIRMED (stok belum disentuh). */
 export async function cancelByBuyer(orderId: string, buyerId: string): Promise<OnlineOrder> {
   const now = new Date();
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const order = await lockOrder(tx, orderId, buyerId);
-    if (order.status !== 'WAITING_PAYMENT_VERIFICATION' && order.status !== 'WAITING_CONFIRMATION') {
+    if (!WAITING_STATUSES.includes(order.status as typeof WAITING_STATUSES[number])) {
       throw new AppError(
         'INVALID_TRANSITION',
         'Pesanan yang sudah dikonfirmasi tidak dapat dibatalkan sendiri. Hubungi admin Wiramart.',
         409,
       );
     }
+    if (await expireIfDue(tx, order, now)) return { expired: true as const };
     const [updated] = await tx
       .update(onlineOrders)
       .set({ status: 'CANCELLED', cancelledReason: 'Dibatalkan oleh pembeli', updatedAt: now })
       .where(eq(onlineOrders.id, orderId))
       .returning();
-    return updated!;
+    return { expired: false as const, order: updated! };
   });
+
+  if (result.expired) throw new AppError('ORDER_EXPIRED', 'Pesanan sudah kedaluwarsa.', 410);
+  return result.order;
 }
 
 // ── Query admin ───────────────────────────────────────────────
@@ -239,6 +421,9 @@ export type AdminOrderRow = OnlineOrder & {
 
 /** Daftar pesanan untuk dashboard admin. Selalu dibatasi (limit ≤ 100, FinOps guard). */
 export async function listOrdersForAdmin(statuses: OrderStatus[] | null, limit = 50): Promise<AdminOrderRow[]> {
+  // Sinkronkan pesanan WAITING_* yang lewat 2 jam agar daftar admin akurat meski tanpa cron 5-menit
+  await expireDueOrders({ limit: 100 });
+
   const cap = Math.min(Math.max(limit, 1), 100);
   const where = statuses && statuses.length > 0
     ? and(isNull(onlineOrders.deletedAt), inArray(onlineOrders.status, statuses))

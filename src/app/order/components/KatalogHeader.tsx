@@ -5,7 +5,7 @@
 // Header PWA dengan info delivery kampus, search bar & user status.
 // =============================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { ShoppingBag, Search, X, User, Footprints, ArrowRight } from 'lucide-react';
 import { useCart } from '@/features/order/cart.context';
@@ -16,26 +16,44 @@ interface KatalogHeaderProps {
 }
 
 const BANNER_KEY = 'wiramart_banner_dismissed_v1';
+const BANNER_EVENT = 'wiramart-banner-visibility-change';
+
+function subscribeBanner(callback: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === null || e.key === BANNER_KEY) callback();
+  };
+  window.addEventListener('storage', onStorage);
+  window.addEventListener(BANNER_EVENT, callback);
+  return () => {
+    window.removeEventListener('storage', onStorage);
+    window.removeEventListener(BANNER_EVENT, callback);
+  };
+}
+
+function getBannerSnapshot(): boolean {
+  try {
+    return !localStorage.getItem(BANNER_KEY);
+  } catch {
+    return true;
+  }
+}
 
 export default function KatalogHeader({ searchQuery, onSearchChange }: KatalogHeaderProps) {
   const { buyer, isLoadingBuyer } = useCart();
-  const [bannerVisible, setBannerVisible] = useState(false);
-
-  // Baca dari localStorage setelah hydration
-  useEffect(() => {
-    try {
-      if (!localStorage.getItem(BANNER_KEY)) setBannerVisible(true);
-    } catch {
-      setBannerVisible(true);
-    }
-  }, []);
+  const [dismissedInSession, setDismissedInSession] = useState(false);
+  const storedBannerVisible = useSyncExternalStore(subscribeBanner, getBannerSnapshot, () => false);
+  const bannerVisible = !dismissedInSession && storedBannerVisible;
 
   const dismissBanner = () => {
-    setBannerVisible(false);
+    setDismissedInSession(true);
     try {
       localStorage.setItem(BANNER_KEY, '1');
     } catch {
       // private browsing safeguard
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(BANNER_EVENT));
     }
   };
 

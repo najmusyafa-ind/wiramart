@@ -1,5 +1,5 @@
 # 🧠 Session Memory — Smartkasir Perwira (Wiramart UNPERBA)
-_Last Updated: 2026-11-12 11:50 WIB_
+_Last Updated: 2026-11-13 09:40 WIB_
 
 ## 🧬 Stack DNA
 - **Runtime:** Next.js 16.4.3 (App Router, Node 20+, React 19.2.8) — `src/proxy.ts` menggantikan `middleware.ts`
@@ -24,8 +24,11 @@ Harmonisasi dokumentasi arsitektur penuh (Obsidian Vault 32 file, `AGENTS.md`, `
   - Seluruh 9 inkonsistensi dokumen vs kode telah diverifikasi dan diselaraskan ke `schema.ts` & `order.types.ts`.
   - `AGENTS.md` & `CLAUDE.md` telah diisi aturan arsitektur, zero-trust security, dan domain bisnis Wiramart.
   - `README.md` telah ditulis ulang sesuai kondisi produksi Next.js 16.4.3, dan `task.md` lama di root telah diarsipkan ke `_arsip/task_lama_sept2026.md`.
+- [x] **Hardening Reliabilitas Opsi A (`expire-orders` & D8 App/DDL):**
+  - Lazy expiration pesanan online kedaluwarsa lewat `expireDueOrders` pada admin list, list/detail buyer, reject/cancel, upload bukti transfer (`buyerUploadLimiter`), dan endpoint cron `/api/cron/expire-orders` (aman untuk jadwal cron Vercel Hobby tanpa interval per-menit).
+  - Hardening D8 pada `shifts`: skrip SQL idempoten `src/lib/db/migration_v3_2_shifts_active_unique.sql`, definisi `idx_shifts_one_active_per_employee` di `schema.ts`, serta guard shift `ACTIVE` milik kasir + recovery race condition `23505` di `PATCH /api/kasir/shift/buka`.
 
 ## ⏭️ Next Phases (Queued)
-- [ ] **Migrasi Fase 2 (D8):** Tambahkan partial unique index `(employee_id) WHERE status = 'ACTIVE'` pada tabel `shifts` (saat ini sudah dijaga di application layer).
+- [ ] **Eksekusi SQL Migrasi Fase 2 (D8):** Jalankan `src/lib/db/migration_v3_2_shifts_active_unique.sql` manual di Supabase SQL Editor (uji di Staging terlebih dahulu, lalu Produksi setelah deploy kode).
 - [ ] **Opsional — PRD v4.0 F2:** Implementasi endpoint `/api/auth/google/*` untuk login kasir via `@student.unperba.ac.id` bila dibutuhkan.
 - [ ] **Production Deployment Gate:** Verifikasi final environment variables di Vercel & jadwal Vercel Cron.

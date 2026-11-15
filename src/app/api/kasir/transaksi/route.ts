@@ -28,8 +28,9 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { products, transactions, transactionItems, transactionPayments, shifts, stockBatches, transactionLogs, discountPolicies, discountBarcodes } from '@/lib/db/schema';
-import { eq, and, isNull, inArray, gte, gt, lt, asc, desc, sql } from 'drizzle-orm';
+import { eq, and, isNull, inArray, gte, gt, asc, desc, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { getTodayWib } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -87,20 +88,6 @@ function generateInvoiceNumber(): string {
   return `INV${p.year}${p.month}${p.day}${p.hour}${p.minute}${p.second}${rand}`;
 }
 
-function getTodayWIB(): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Jakarta',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-
-  const y = parts.find((p) => p.type === 'year')?.value;
-  const m = parts.find((p) => p.type === 'month')?.value;
-  const d = parts.find((p) => p.type === 'day')?.value;
-  return `${y}-${m}-${d}`;
-}
-
 const MAX_INVOICE_ATTEMPTS = 3;
 
 // ─────────────────────────────────────────────────────────────
@@ -130,6 +117,8 @@ function hashRequest(
  */
 function deriveFailedStep(msg: string): string {
   if (msg.startsWith('INSUFFICIENT_STOCK')) return 'KURANGI_STOK';
+  if (msg.startsWith('EXPIRED_PRODUCT'))    return 'VALIDASI_EXPIRED';
+  if (msg.startsWith('DISCOUNT_DEPLETED'))  return 'KUOTA_DISKON';
   if (msg.startsWith('PRODUCT_NOT_FOUND'))  return 'VALIDASI_PRODUK';
   if (msg.includes('transaction_items'))     return 'INSERT_ITEM';
   if (msg.includes('transaction_payments'))  return 'INSERT_PAYMENT';
@@ -401,7 +390,7 @@ export async function POST(req: NextRequest) {
     }> = [];
 
     if (policyIds.length > 0) {
-      const todayWIB = getTodayWIB();
+      const todayWIB = getTodayWib();
       activePolicies = await db
         .select({
           id: discountPolicies.id,
@@ -463,9 +452,14 @@ export async function POST(req: NextRequest) {
       let sellingPrice = parseFloat(String(prod.sellingPrice));
       let productName = prod.name;
 
+      let hasOfficialDiscount = false;
       if (item.discountPolicyId) {
         const policy = activePolicies.find((pol) => pol.id === item.discountPolicyId);
         if (policy) {
+          hasOfficialDiscount =
+            policy.productId === prod.id &&
+            policy.isActive &&
+            policy.validUntil >= getTodayWib();
           sellingPrice = Number(policy.discountedPrice);
           const pct = Math.round(Number(policy.discountPct));
           productName = `[DISKON ${pct}%] ${prod.name}`;
@@ -475,10 +469,9 @@ export async function POST(req: NextRequest) {
       // ── GUARD: Harga jual tidak boleh di bawah HPP ─────────────────
       // Root cause nilai minus: kasir menjual produk di bawah harga modal.
       // Aturan Wiramart: sellingPrice >= costPrice (zero-loss policy per unit).
-      // Pengecualian: HPP = 0 (produk tanpa HPP terdaftar) → dilewati.
-      // Untuk clearance produk perishable yang perlu dijual rugi, dosen/manager
-      // WAJIB membuat Discount Policy resmi via menu Admin — bukan override kasir.
-      if (costPrice > 0 && sellingPrice < costPrice) {
+      // Pengecualian: HPP = 0 (produk tanpa HPP terdaftar) atau transaksi memakai
+      // Discount Policy resmi yang sudah disetujui Manager/Dosen via Approval Center.
+      if (!hasOfficialDiscount && costPrice > 0 && sellingPrice < costPrice) {
         return apiError(
           `❌ Harga jual "${prod.name}" (Rp ${Math.round(sellingPrice).toLocaleString('id-ID')}) ` +
           `di bawah HPP (Rp ${Math.round(costPrice).toLocaleString('id-ID')}). ` +
@@ -592,9 +585,15 @@ export async function POST(req: NextRequest) {
     // ─────────────────────────────────────────────────────────────
     // Urutan lock deterministik (by productId) agar 2 transaksi dengan produk
     // sama tetapi urutan scan berbeda tidak saling deadlock.
-    const itemsByLockOrder = [...items].sort((a, b) =>
-      a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0,
-    );
+    const itemsByLockOrder = [...items].sort((a, b) => {
+      if (a.productId !== b.productId) {
+        return a.productId < b.productId ? -1 : 1;
+      }
+      // Prioritaskan item berdiskon agar lebih dulu mengambil batch promonya sebelum item harga normal
+      const aDiscountRank = a.discountPolicyId ? 0 : 1;
+      const bDiscountRank = b.discountPolicyId ? 0 : 1;
+      return aDiscountRank - bDiscountRank;
+    });
 
     const runTransaction = (invoiceNumber: string) =>
       db.transaction(async (tx) => {
@@ -666,78 +665,40 @@ export async function POST(req: NextRequest) {
               throw new Error(`DISCOUNT_DEPLETED:${item.discountPolicyId}`);
             }
 
-            await tx
+            const todayWibPolicy = getTodayWib();
+            const updatedPolicy = await tx
               .update(discountPolicies)
               .set({
                 soldQty: sql`${discountPolicies.soldQty} + ${item.qty}`,
                 updatedAt: new Date(),
               })
-              .where(eq(discountPolicies.id, item.discountPolicyId));
+              .where(
+                and(
+                  eq(discountPolicies.id, item.discountPolicyId),
+                  eq(discountPolicies.isActive, true),
+                  gte(discountPolicies.validUntil, todayWibPolicy),
+                  sql`${discountPolicies.soldQty} + ${item.qty} <= ${discountPolicies.allowedQty}`,
+                ),
+              )
+              .returning({ id: discountPolicies.id });
+
+            if (updatedPolicy.length === 0) {
+              throw new Error(`DISCOUNT_DEPLETED:${item.discountPolicyId}`);
+            }
           }
         }
 
-        // Step 3: Decrement stok atomik + guard & FEFO Batch Consumption
-        const todayIsoDate = new Date().toISOString().slice(0, 10);
+        // Step 3: Lock produk & decrement stok atomik lebih dulu (urutan productId deterministik),
+        // validasi FEFO + kedaluwarsa (WIB, tanpa bypass PANJANG), lalu kurangi batch dengan FOR UPDATE
+        const todayWib = getTodayWib();
 
         for (const item of itemsByLockOrder) {
           const itemPolicy = item.discountPolicyId
             ? activePolicies.find((pol) => pol.id === item.discountPolicyId)
             : undefined;
 
-          // 3a. Ambil seluruh batch aktif produk ini (diurutkan FEFO)
-          const allActiveBatches = await tx
-            .select({
-              id: stockBatches.id,
-              currentQty: stockBatches.currentQty,
-              expiryDate: stockBatches.expiryDate,
-              expiryClass: stockBatches.expiryClass,
-            })
-            .from(stockBatches)
-            .where(
-              and(
-                eq(stockBatches.productId, item.productId),
-                gt(stockBatches.currentQty, 0),
-              ),
-            )
-            .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt));
-
-          if (allActiveBatches.length > 0) {
-            // Filter batch yang aman untuk dijual (belum lewat tanggal kedaluwarsa)
-            const validBatches = allActiveBatches
-              .filter((b) => {
-                if (!b.expiryDate) return true;
-                if (b.expiryClass === 'PANJANG') return true;
-                return b.expiryDate >= todayIsoDate;
-              })
-              .sort((a, b) => {
-                // Jika item ini dibeli via diskon darurat dari batch tertentu, prioritaskan batch tersebut
-                if (itemPolicy?.batchId) {
-                  if (a.id === itemPolicy.batchId) return -1;
-                  if (b.id === itemPolicy.batchId) return 1;
-                }
-                return 0;
-              });
-
-            // 3b. Konsumsi stok hanya dari batch-batch yang VALID (FEFO) — Cacat 5 Opsi B
-            // Jika kuantitas batch lebih sedikit dari total stok produk, kurangi batch yang ada
-            // dan sisa kekurangan dikonsumsi langsung dari products.stockQty (Step 3c) tanpa memblokir transaksi
-            let needed = item.qty;
-            for (const b of validBatches) {
-              if (needed <= 0) break;
-              const deduct = Math.min(b.currentQty, needed);
-              await tx
-                .update(stockBatches)
-                .set({
-                  currentQty: sql`${stockBatches.currentQty} - ${deduct}`,
-                  updatedAt: new Date(),
-                })
-                .where(eq(stockBatches.id, b.id));
-              needed -= deduct;
-            }
-          }
-
-          // 3c. Decrement total stok produk secara atomik dengan guard
-          const updated = await tx
+          // 3a. Lock baris produk & decrement total stok secara atomik dengan guard
+          const [updatedProd] = await tx
             .update(products)
             .set({
               stockQty: sql`${products.stockQty} - ${item.qty}`,
@@ -751,9 +712,13 @@ export async function POST(req: NextRequest) {
                 gte(products.stockQty, item.qty),
               ),
             )
-            .returning({ id: products.id });
+            .returning({
+              id: products.id,
+              name: products.name,
+              stockQty: products.stockQty,
+            });
 
-          if (updated.length === 0) {
+          if (!updatedProd) {
             // Bedakan penyebab agar pesan ke kasir akurat
             const [fresh] = await tx
               .select({ name: products.name, stockQty: products.stockQty })
@@ -768,6 +733,153 @@ export async function POST(req: NextRequest) {
               .limit(1);
             if (!fresh) throw new Error(`PRODUCT_NOT_FOUND:${item.productId}`);
             throw new Error(`INSUFFICIENT_STOCK:${fresh.name}:${fresh.stockQty}`);
+          }
+
+          // 3b. Ambil seluruh batch aktif produk ini dengan row lock FOR UPDATE (FEFO deterministik)
+          const allActiveBatches = await tx
+            .select({
+              id: stockBatches.id,
+              currentQty: stockBatches.currentQty,
+              expiryDate: stockBatches.expiryDate,
+              expiryClass: stockBatches.expiryClass,
+            })
+            .from(stockBatches)
+            .where(
+              and(
+                eq(stockBatches.productId, item.productId),
+                gt(stockBatches.currentQty, 0),
+              ),
+            )
+            .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt), asc(stockBatches.id))
+            .for('update');
+
+          const stockQtyBefore = updatedProd.stockQty + item.qty;
+          const totalActiveBatchQty = allActiveBatches.reduce((sum, b) => sum + b.currentQty, 0);
+          const unbatchedQty = Math.max(0, stockQtyBefore - totalActiveBatchQty);
+
+          // Blokir seluruh batch yang melewati expiryDate (termasuk class PANJANG tanpa bypass)
+          const validBatches = allActiveBatches.filter(
+            (b) => !b.expiryDate || b.expiryDate >= todayWib,
+          );
+          const validBatchQty = validBatches.reduce((sum, b) => sum + b.currentQty, 0);
+          const sellableQty = validBatchQty + unbatchedQty;
+
+          if (item.qty > sellableQty) {
+            throw new Error(`EXPIRED_PRODUCT:${updatedProd.name}:${sellableQty}`);
+          }
+
+          // 3c. Konsumsi stok hanya dari batch yang VALID (FEFO)
+          if (validBatches.length > 0) {
+            const validBatchIds = validBatches.map((b) => b.id);
+            const discountedBatchIds = new Set<string>();
+            const activeBatchPolicies = await tx
+              .select({
+                id: discountPolicies.id,
+                batchId: discountPolicies.batchId,
+                allowedQty: discountPolicies.allowedQty,
+                soldQty: discountPolicies.soldQty,
+              })
+              .from(discountPolicies)
+              .where(
+                and(
+                  inArray(discountPolicies.batchId, validBatchIds),
+                  eq(discountPolicies.isActive, true),
+                  gte(discountPolicies.validUntil, todayWib),
+                ),
+              );
+
+            for (const row of activeBatchPolicies) {
+              if (row.soldQty < row.allowedQty) {
+                discountedBatchIds.add(row.batchId);
+              }
+            }
+
+            const sortedBatches = [...validBatches].sort((a, b) => {
+              if (itemPolicy?.batchId) {
+                // Pembelian dengan diskon resmi memprioritaskan batch target promo tersebut
+                const aMatch = a.id === itemPolicy.batchId ? 0 : 1;
+                const bMatch = b.id === itemPolicy.batchId ? 0 : 1;
+                return aMatch - bMatch;
+              }
+              // Pembelian reguler memprioritaskan batch non-diskon lebih dulu
+              const aDisc = discountedBatchIds.has(a.id) ? 1 : 0;
+              const bDisc = discountedBatchIds.has(b.id) ? 1 : 0;
+              return aDisc - bDisc;
+            });
+
+            let needed = item.qty;
+            for (const b of sortedBatches) {
+              if (needed <= 0) break;
+              const deduct = Math.min(b.currentQty, needed);
+              const [updatedBatch] = await tx
+                .update(stockBatches)
+                .set({
+                  currentQty: sql`${stockBatches.currentQty} - ${deduct}`,
+                  updatedAt: new Date(),
+                })
+                .where(
+                  and(
+                    eq(stockBatches.id, b.id),
+                    gte(stockBatches.currentQty, deduct),
+                  ),
+                )
+                .returning({
+                  id: stockBatches.id,
+                  currentQty: stockBatches.currentQty,
+                });
+
+              if (!updatedBatch) {
+                throw new Error(`INSUFFICIENT_STOCK:${updatedProd.name}:${updatedProd.stockQty}`);
+              }
+
+              // Sinkronkan sisa kuota barcode & policy diskon jika batch terpakai
+              const linkedPolicies = activeBatchPolicies.filter((p) => p.batchId === b.id);
+              if (linkedPolicies.length > 0) {
+                const policyIdsForBatch = linkedPolicies.map((p) => p.id);
+                await tx
+                  .update(discountBarcodes)
+                  .set({
+                    remainingQty: sql`LEAST(${discountBarcodes.remainingQty}, ${updatedBatch.currentQty})`,
+                    ...(updatedBatch.currentQty <= 0 ? { isActive: false } : {}),
+                  })
+                  .where(
+                    and(
+                      inArray(discountBarcodes.policyId, policyIdsForBatch),
+                      eq(discountBarcodes.isActive, true),
+                    ),
+                  );
+
+                if (updatedBatch.currentQty <= 0) {
+                  await tx
+                    .update(discountPolicies)
+                    .set({
+                      isActive: false,
+                      updatedAt: new Date(),
+                    })
+                    .where(
+                      and(
+                        inArray(discountPolicies.id, policyIdsForBatch),
+                        eq(discountPolicies.isActive, true),
+                      ),
+                    );
+                } else if (!itemPolicy) {
+                  await tx
+                    .update(discountPolicies)
+                    .set({
+                      allowedQty: sql`LEAST(${discountPolicies.allowedQty}, ${discountPolicies.soldQty} + ${updatedBatch.currentQty})`,
+                      updatedAt: new Date(),
+                    })
+                    .where(
+                      and(
+                        inArray(discountPolicies.id, policyIdsForBatch),
+                        eq(discountPolicies.isActive, true),
+                      ),
+                    );
+                }
+              }
+
+              needed -= deduct;
+            }
           }
         }
 
@@ -938,8 +1050,13 @@ export async function POST(req: NextRequest) {
       if (message.startsWith('EXPIRED_PRODUCT')) {
         const parts = message.split(':');
         const prodName = parts[1] ?? 'produk';
+        const sellable = parts[2];
+        const detail =
+          sellable !== undefined
+            ? ` (sisa stok layak jual non-kedaluwarsa: ${sellable} unit)`
+            : '';
         return apiError(
-          `Produk "${prodName}" memiliki stok yang sudah kedaluwarsa dan diblokir untuk dijual. Segera serahkan ke Kepala Gudang untuk write-off.`,
+          `Produk "${prodName}" memiliki stok yang sudah kedaluwarsa${detail} dan diblokir untuk dijual. Segera serahkan ke Kepala Gudang untuk write-off.`,
           400,
         );
       }

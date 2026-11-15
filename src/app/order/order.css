@@ -6,12 +6,14 @@
 :root {
   --pwa-primary: hsl(145, 63%, 32%);
   --pwa-primary-hover: hsl(145, 63%, 26%);
+  --pwa-primary-text: hsl(145, 63%, 26%);
   --pwa-primary-light: hsl(145, 45%, 94%);
   --pwa-primary-subtle: hsl(145, 30%, 97%);
   --pwa-accent: hsl(40, 96%, 48%);
   --pwa-accent-light: hsl(40, 96%, 94%);
   --pwa-accent-text: hsl(32, 90%, 28%);
-  
+  --pwa-text-inverse: hsl(0, 0%, 100%);
+
   --pwa-bg: hsl(150, 18%, 97%);
   --pwa-surface: hsl(0, 0%, 100%);
   --pwa-surface-muted: hsl(145, 12%, 95%);
@@ -19,8 +21,8 @@
   --pwa-border-strong: hsl(145, 20%, 78%);
 
   --pwa-text-main: hsl(145, 20%, 12%);
-  --pwa-text-muted: hsl(145, 8%, 46%);
-  --pwa-text-light: hsl(145, 6%, 64%);
+  --pwa-text-muted: hsl(145, 8%, 40%);
+  --pwa-text-light: hsl(145, 8%, 41%);
 
   --pwa-radius-sm: 8px;
   --pwa-radius-md: 12px;
@@ -118,55 +120,94 @@
 }
 
 .pwa-user-badge {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 6px 10px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 12px;
   border-radius: var(--pwa-radius-full);
   background-color: var(--pwa-primary-light);
-  color: var(--pwa-primary);
-  font-size: 12px;
+  color: var(--pwa-primary-text);
+  font-size: 13px;
   font-weight: 600;
-  border: 1px solid rgba(27, 122, 66, 0.15);
+  border: 1px solid rgba(27, 122, 66, 0.2);
+  text-decoration: none;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s var(--pwa-ease), transform 0.15s var(--pwa-ease);
 }
 
 .pwa-user-badge:hover {
   background-color: hsl(145, 45%, 88%);
 }
 
+.pwa-user-badge:active {
+  transform: scale(0.96);
+}
+
 .pwa-login-btn {
-  padding: 6px 14px;
+  min-height: 44px;
+  padding: 8px 16px;
   border-radius: var(--pwa-radius-full);
   background-color: var(--pwa-primary);
-  color: white;
-  font-size: 12px;
+  color: var(--pwa-text-inverse);
+  font-size: 13px;
   font-weight: 600;
   text-decoration: none;
-  transition: transform 0.15s var(--pwa-ease), background-color 0.15s ease;
+  transition: transform 0.15s var(--pwa-ease), background-color 0.15s var(--pwa-ease);
   border: none;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+}
+
+.pwa-login-btn:hover {
+  background-color: var(--pwa-primary-hover);
 }
 
 .pwa-login-btn:active {
   transform: scale(0.96);
 }
 
+.pwa-user-badge:focus-visible,
+.pwa-login-btn:focus-visible,
+.pwa-search-clear:focus-visible,
+.pwa-category-pill:focus-visible,
+.pwa-drawer-close:focus-visible,
+.pwa-campus-banner button:focus-visible {
+  outline: 3px solid rgba(27, 122, 66, 0.45);
+  outline-offset: 2px;
+}
+
 /* ── Campus Delivery Notice Banner ────────────────────────── */
 
 .pwa-campus-banner {
   background: linear-gradient(135deg, hsl(145, 55%, 16%), hsl(145, 65%, 26%));
-  color: white;
-  padding: 10px 14px;
+  color: var(--pwa-text-inverse);
+  padding: 8px 10px 8px 14px;
   border-radius: var(--pwa-radius-md);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   display: flex;
   align-items: center;
   gap: 10px;
   box-shadow: 0 4px 12px rgba(10, 45, 20, 0.15);
+}
+
+.pwa-campus-banner button {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  transition: background-color 0.15s var(--pwa-ease), transform 0.15s var(--pwa-ease);
+}
+
+.pwa-campus-banner button:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+}
+
+.pwa-campus-banner button:active {
+  transform: scale(0.94);
 }
 
 .pwa-campus-banner-icon {
@@ -183,7 +224,7 @@
 
 .pwa-campus-banner-content {
   flex: 1;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -191,7 +232,7 @@
   display: block;
   font-size: 12.5px;
   font-weight: 700;
-  color: #fff;
+  color: var(--pwa-text-inverse);
   letter-spacing: -0.01em;
 }
 
@@ -205,22 +246,24 @@
 
 .pwa-search-icon {
   position: absolute;
-  left: 12px;
+  left: 14px;
   color: var(--pwa-text-muted);
   pointer-events: none;
 }
 
 .pwa-search-input {
   width: 100%;
-  height: 40px;
+  min-height: 44px;
   background-color: var(--pwa-surface-muted);
   border: 1px solid var(--pwa-border);
   border-radius: var(--pwa-radius-full);
-  padding: 0 36px 0 38px;
-  font-size: 13.5px;
+  padding: 0 44px 0 40px;
+  font-size: 16px; /* >= 16px cegah iOS Safari auto-zoom */
   color: var(--pwa-text-main);
-  outline: none;
-  transition: all 0.2s var(--pwa-ease);
+  transition:
+    background-color 0.2s var(--pwa-ease),
+    border-color 0.2s var(--pwa-ease),
+    box-shadow 0.2s var(--pwa-ease);
 }
 
 .pwa-search-input:focus {
@@ -229,17 +272,35 @@
   box-shadow: 0 0 0 3px rgba(27, 122, 66, 0.12);
 }
 
+.pwa-search-input:focus-visible {
+  outline: 2px solid var(--pwa-primary);
+  outline-offset: 2px;
+}
+
 .pwa-search-clear {
   position: absolute;
-  right: 10px;
+  right: 2px;
+  min-width: 44px;
+  min-height: 44px;
   background: none;
   border: none;
+  border-radius: var(--pwa-radius-full);
   color: var(--pwa-text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 4px;
+  transition: color 0.15s var(--pwa-ease), background-color 0.15s var(--pwa-ease);
+}
+
+.pwa-search-clear:hover {
+  background-color: var(--pwa-surface);
+  color: var(--pwa-text-main);
+}
+
+.pwa-search-clear:active {
+  transform: scale(0.94);
 }
 
 /* ── Category Pill Bar ────────────────────────────────────── */
@@ -259,25 +320,40 @@
 
 .pwa-category-pill {
   flex-shrink: 0;
-  padding: 7px 14px;
+  min-height: 44px;
+  padding: 8px 14px;
   border-radius: var(--pwa-radius-full);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   border: 1px solid var(--pwa-border);
   background-color: var(--pwa-surface);
   color: var(--pwa-text-muted);
   cursor: pointer;
-  transition: all 0.18s var(--pwa-ease);
+  transition:
+    background-color 0.18s var(--pwa-ease),
+    color 0.18s var(--pwa-ease),
+    border-color 0.18s var(--pwa-ease),
+    transform 0.18s var(--pwa-ease);
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
+.pwa-category-pill:hover {
+  border-color: var(--pwa-primary);
+  color: var(--pwa-primary-text);
+}
+
 .pwa-category-pill.active {
   background-color: var(--pwa-primary);
-  color: white;
+  color: var(--pwa-text-inverse);
   border-color: var(--pwa-primary);
   box-shadow: 0 2px 8px rgba(27, 122, 66, 0.25);
+}
+
+.pwa-category-pill.active:hover {
+  background-color: var(--pwa-primary-hover);
+  color: var(--pwa-text-inverse);
 }
 
 .pwa-category-pill:active {
@@ -288,9 +364,16 @@
 
 .pwa-product-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   padding: 0 16px 20px 16px;
+}
+
+@media (max-width: 359px) {
+  .pwa-product-grid {
+    gap: 8px;
+    padding: 0 12px 20px 12px;
+  }
 }
 
 .pwa-card {
@@ -352,20 +435,20 @@
 }
 
 .pwa-badge-available {
-  background-color: rgba(255, 255, 255, 0.9);
-  color: var(--pwa-primary);
+  background-color: rgba(255, 255, 255, 0.94);
+  color: var(--pwa-primary-text);
   border: 1px solid rgba(27, 122, 66, 0.2);
 }
 
 .pwa-badge-low {
-  background-color: rgba(254, 243, 199, 0.95);
-  color: hsl(30, 90%, 32%);
+  background-color: rgba(254, 243, 199, 0.96);
+  color: var(--pwa-accent-text);
   border: 1px solid rgba(217, 119, 6, 0.3);
 }
 
 .pwa-badge-out {
-  background-color: rgba(254, 226, 226, 0.95);
-  color: hsl(0, 72%, 40%);
+  background-color: rgba(254, 226, 226, 0.96);
+  color: hsl(0, 65%, 35%);
   border: 1px solid rgba(220, 38, 38, 0.3);
 }
 
@@ -376,8 +459,14 @@
   flex: 1;
 }
 
+@media (max-width: 359px) {
+  .pwa-card-body {
+    padding: 8px 10px 10px 10px;
+  }
+}
+
 .pwa-card-category {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--pwa-text-muted);
   text-transform: uppercase;
@@ -415,7 +504,7 @@
 }
 
 .pwa-card-unit {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--pwa-text-muted);
 }
 
@@ -423,33 +512,37 @@
 
 .pwa-btn-add {
   width: 100%;
-  height: 36px;
+  min-height: 44px;
   background-color: var(--pwa-primary-light);
-  color: var(--pwa-primary);
-  border: 1px solid rgba(27, 122, 66, 0.2);
+  color: var(--pwa-primary-text);
+  border: 1px solid rgba(27, 122, 66, 0.25);
   border-radius: var(--pwa-radius-md);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  transition: all 0.15s var(--pwa-ease);
+  transition:
+    background-color 0.15s var(--pwa-ease),
+    color 0.15s var(--pwa-ease),
+    border-color 0.15s var(--pwa-ease),
+    transform 0.15s var(--pwa-ease);
 }
 
-.pwa-btn-add:hover {
+.pwa-btn-add:hover:not(:disabled) {
   background-color: var(--pwa-primary);
-  color: white;
+  color: var(--pwa-text-inverse);
 }
 
-.pwa-btn-add:active {
+.pwa-btn-add:active:not(:disabled) {
   transform: scale(0.97);
 }
 
 .pwa-btn-add:disabled {
   background-color: var(--pwa-surface-muted);
-  color: var(--pwa-text-light);
+  color: var(--pwa-text-muted);
   border-color: var(--pwa-border);
   cursor: not-allowed;
   transform: none;
@@ -457,41 +550,46 @@
 
 .pwa-stepper {
   width: 100%;
-  height: 36px;
+  min-height: 44px;
   background-color: var(--pwa-primary);
   border-radius: var(--pwa-radius-md);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4px;
-  color: white;
+  padding: 0;
+  color: var(--pwa-text-inverse);
   box-shadow: 0 2px 8px rgba(27, 122, 66, 0.25);
 }
 
 .pwa-stepper-btn {
-  width: 28px;
-  height: 28px;
+  min-width: 44px;
+  height: 44px;
   background: rgba(255, 255, 255, 0.18);
   border: none;
-  border-radius: var(--pwa-radius-sm);
-  color: white;
+  border-radius: var(--pwa-radius-md);
+  color: var(--pwa-text-inverse);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background-color 0.15s var(--pwa-ease), transform 0.15s var(--pwa-ease);
 }
 
-.pwa-stepper-btn:hover {
+.pwa-stepper-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.28);
 }
 
-.pwa-stepper-btn:active {
+.pwa-stepper-btn:active:not(:disabled) {
   transform: scale(0.92);
 }
 
+.pwa-stepper-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .pwa-stepper-qty {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 700;
   min-width: 24px;
   text-align: center;
@@ -522,21 +620,34 @@
 }
 
 .pwa-floating-bar-inner {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  min-height: 56px;
   background: linear-gradient(135deg, hsl(145, 65%, 26%), hsl(145, 70%, 18%));
-  color: white;
+  color: var(--pwa-text-inverse);
   border-radius: var(--pwa-radius-lg);
   padding: 10px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   box-shadow: 0 10px 30px rgba(10, 45, 20, 0.35), 0 2px 6px rgba(0, 0, 0, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   cursor: pointer;
-  transition: transform 0.15s var(--pwa-ease);
+  transition: transform 0.15s var(--pwa-ease), filter 0.15s var(--pwa-ease);
+}
+
+.pwa-floating-bar-inner:hover {
+  filter: brightness(1.06);
 }
 
 .pwa-floating-bar-inner:active {
   transform: scale(0.98);
+}
+
+.pwa-floating-bar-inner:focus-visible {
+  outline: 3px solid var(--pwa-accent);
+  outline-offset: 2px;
 }
 
 .pwa-floating-bar-info {
@@ -583,7 +694,7 @@
 .pwa-floating-total {
   font-size: 15px;
   font-weight: 800;
-  color: #fff;
+  color: var(--pwa-text-inverse);
   letter-spacing: -0.01em;
 }
 
@@ -664,12 +775,25 @@
 .pwa-drawer-close {
   background: none;
   border: none;
+  border-radius: var(--pwa-radius-full);
   color: var(--pwa-text-muted);
   cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
   padding: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background-color 0.15s var(--pwa-ease), color 0.15s var(--pwa-ease);
+}
+
+.pwa-drawer-close:hover {
+  background-color: var(--pwa-surface-muted);
+  color: var(--pwa-text-main);
+}
+
+.pwa-drawer-close:active {
+  transform: scale(0.94);
 }
 
 .pwa-drawer-body {
@@ -732,9 +856,9 @@
 
 .pwa-btn-checkout {
   width: 100%;
-  height: 46px;
+  min-height: 48px;
   background: linear-gradient(135deg, var(--pwa-primary), hsl(145, 65%, 26%));
-  color: white;
+  color: var(--pwa-text-inverse);
   border-radius: var(--pwa-radius-md);
   font-size: 14px;
   font-weight: 700;
@@ -745,12 +869,21 @@
   justify-content: center;
   gap: 8px;
   box-shadow: 0 4px 14px rgba(27, 122, 66, 0.3);
-  transition: transform 0.15s var(--pwa-ease);
+  transition: transform 0.15s var(--pwa-ease), filter 0.15s var(--pwa-ease);
   text-decoration: none;
+}
+
+.pwa-btn-checkout:hover {
+  filter: brightness(1.06);
 }
 
 .pwa-btn-checkout:active {
   transform: scale(0.98);
+}
+
+.pwa-btn-checkout:focus-visible {
+  outline: 3px solid rgba(27, 122, 66, 0.45);
+  outline-offset: 2px;
 }
 
 /* ── Empty State ──────────────────────────────────────────── */
@@ -816,8 +949,9 @@
 .pwa-page-bar h1 { font-size: 16px; font-weight: 700; margin: 0; }
 
 .pwa-back-btn {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
   border-radius: var(--pwa-radius-full);
   border: 1px solid var(--pwa-border);
   background: var(--pwa-surface);
@@ -860,7 +994,7 @@
 
 .pwa-field { display: flex; flex-direction: column; gap: 5px; }
 .pwa-label { font-size: 12.5px; font-weight: 600; color: var(--pwa-text-main); }
-.pwa-hint  { font-size: 11.5px; color: var(--pwa-text-muted); }
+.pwa-hint  { font-size: 12px; color: var(--pwa-text-muted); }
 
 .pwa-input {
   width: 100%;
@@ -872,11 +1006,12 @@
   background: var(--pwa-surface);
   border: 1px solid var(--pwa-border-strong);
   border-radius: var(--pwa-radius-md);
-  outline: none;
   transition: border-color 0.18s var(--pwa-ease), box-shadow 0.18s var(--pwa-ease);
 }
 textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
 .pwa-input:focus-visible {
+  outline: 2px solid var(--pwa-primary);
+  outline-offset: 1px;
   border-color: var(--pwa-primary);
   box-shadow: 0 0 0 3px rgba(27, 122, 66, 0.15);
 }
@@ -891,7 +1026,7 @@ textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
   border-radius: var(--pwa-radius-md);
 }
 .pwa-tab {
-  min-height: 40px;
+  min-height: 44px;
   border: none;
   border-radius: var(--pwa-radius-sm);
   background: transparent;
@@ -899,11 +1034,13 @@ textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
   font-weight: 600;
   color: var(--pwa-text-muted);
   cursor: pointer;
-  transition: background-color 0.18s var(--pwa-ease), color 0.18s var(--pwa-ease);
+  transition: background-color 0.18s var(--pwa-ease), color 0.18s var(--pwa-ease), transform 0.15s var(--pwa-ease);
 }
+.pwa-tab:hover { color: var(--pwa-text-main); }
+.pwa-tab:active { transform: scale(0.98); }
 .pwa-tab[aria-selected="true"] {
   background: var(--pwa-surface);
-  color: var(--pwa-primary);
+  color: var(--pwa-primary-text);
   box-shadow: var(--pwa-shadow-sm);
 }
 
@@ -928,7 +1065,7 @@ textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
   border: none;
   border-radius: var(--pwa-radius-md);
   background: linear-gradient(135deg, var(--pwa-primary), hsl(145, 65%, 26%));
-  color: #fff;
+  color: var(--pwa-text-inverse);
   font-size: 14.5px;
   font-weight: 700;
   font-family: inherit;
@@ -939,17 +1076,134 @@ textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
   cursor: pointer;
   text-decoration: none;
   box-shadow: 0 4px 14px rgba(27, 122, 66, 0.3);
-  transition: transform 0.15s var(--pwa-ease), opacity 0.15s var(--pwa-ease);
+  transition: transform 0.15s var(--pwa-ease), opacity 0.15s var(--pwa-ease), filter 0.15s var(--pwa-ease);
 }
-.pwa-btn-primary:active { transform: scale(0.98); }
+.pwa-btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
+.pwa-btn-primary:active:not(:disabled) { transform: scale(0.98); }
 .pwa-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+
+.pwa-btn-secondary {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: var(--pwa-radius-md);
+  border: 1px solid var(--pwa-border-strong);
+  background: var(--pwa-surface);
+  color: var(--pwa-text-main);
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 0.15s var(--pwa-ease), transform 0.15s var(--pwa-ease);
+}
+.pwa-btn-secondary:hover:not(:disabled) { background: var(--pwa-surface-muted); }
+.pwa-btn-secondary:active:not(:disabled) { transform: scale(0.98); }
+.pwa-btn-secondary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.pwa-btn-danger-outline {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: var(--pwa-radius-md);
+  border: 1.5px solid hsl(0, 70%, 78%);
+  background: var(--pwa-surface);
+  color: hsl(0, 65%, 36%);
+  font-size: 13.5px;
+  font-weight: 700;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s var(--pwa-ease), border-color 0.15s var(--pwa-ease), transform 0.15s var(--pwa-ease);
+}
+.pwa-btn-danger-outline:hover:not(:disabled) {
+  background: hsl(0, 85%, 97%);
+  border-color: hsl(0, 70%, 62%);
+}
+.pwa-btn-danger-outline:active:not(:disabled) { transform: scale(0.98); }
+.pwa-btn-danger-outline:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.pwa-inline-action-btn {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border-radius: var(--pwa-radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--pwa-primary-text);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s var(--pwa-ease), transform 0.15s var(--pwa-ease);
+}
+.pwa-inline-action-btn:hover:not(:disabled) { background: var(--pwa-primary-light); }
+.pwa-inline-action-btn:active:not(:disabled) { transform: scale(0.96); }
+.pwa-inline-action-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.pwa-stepper-compact-btn,
+.pwa-icon-action-btn {
+  min-width: 44px;
+  min-height: 44px;
+  background: none;
+  border: none;
+  border-radius: var(--pwa-radius-sm);
+  color: var(--pwa-text-main);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s var(--pwa-ease), color 0.15s var(--pwa-ease), transform 0.15s var(--pwa-ease);
+}
+.pwa-stepper-compact-btn:hover:not(:disabled) { background: var(--pwa-surface); }
+.pwa-stepper-compact-btn:active:not(:disabled),
+.pwa-icon-action-btn:active:not(:disabled) { transform: scale(0.94); }
+.pwa-stepper-compact-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pwa-icon-action-btn { color: hsl(0, 60%, 42%); }
+.pwa-icon-action-btn:hover:not(:disabled) { background: hsl(0, 85%, 96%); color: hsl(0, 65%, 35%); }
+
+.pwa-order-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 44px;
+  padding: 12px;
+  border-radius: var(--pwa-radius-md);
+  border: 1px solid var(--pwa-border);
+  background: var(--pwa-surface);
+  text-decoration: none;
+  color: var(--pwa-text-main);
+  transition: border-color 0.15s var(--pwa-ease), box-shadow 0.15s var(--pwa-ease), transform 0.15s var(--pwa-ease);
+}
+.pwa-order-card:hover {
+  border-color: var(--pwa-primary);
+  box-shadow: var(--pwa-shadow-sm);
+}
+.pwa-order-card:active { transform: scale(0.99); }
+
 .pwa-btn-primary:focus-visible,
+.pwa-btn-secondary:focus-visible,
+.pwa-btn-danger-outline:focus-visible,
+.pwa-inline-action-btn:focus-visible,
+.pwa-stepper-compact-btn:focus-visible,
+.pwa-icon-action-btn:focus-visible,
+.pwa-order-card:focus-visible,
 .pwa-btn-add:focus-visible,
 .pwa-stepper-btn:focus-visible,
 .pwa-tab:focus-visible,
 .pwa-back-btn:focus-visible,
 .pwa-choice:focus-within {
-  outline: 3px solid rgba(27, 122, 66, 0.4);
+  outline: 3px solid rgba(27, 122, 66, 0.45);
   outline-offset: 2px;
 }
 
@@ -957,6 +1211,9 @@ textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
 .pwa-choice-grid { display: grid; gap: 8px; }
 .pwa-choice-grid.cols-2 { grid-template-columns: 1fr 1fr; }
 .pwa-choice-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 359px) {
+  .pwa-choice-grid.cols-3 { grid-template-columns: 1fr 1fr; }
+}
 
 .pwa-choice {
   position: relative;
@@ -977,7 +1234,7 @@ textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
   background: var(--pwa-primary-light);
 }
 .pwa-choice-title { font-size: 13.5px; font-weight: 700; }
-.pwa-choice-sub { font-size: 11.5px; color: var(--pwa-text-muted); }
+.pwa-choice-sub { font-size: 12px; color: var(--pwa-text-muted); }
 
 .pwa-sum-row { display: flex; justify-content: space-between; font-size: 13px; gap: 12px; }
 .pwa-sum-row.total {
@@ -1003,7 +1260,7 @@ textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
   padding: 16px;
   border-radius: var(--pwa-radius-lg);
   background: linear-gradient(135deg, hsl(145, 55%, 16%), hsl(145, 65%, 26%));
-  color: #fff;
+  color: var(--pwa-text-inverse);
 }
 .pwa-pin-code {
   font-size: 34px;
@@ -1024,11 +1281,22 @@ textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
   background: var(--pwa-accent-light);
   color: var(--pwa-accent-text);
 }
-.pwa-status-chip.ok  { background: var(--pwa-primary-light); color: var(--pwa-primary); }
+.pwa-status-chip.ok  { background: var(--pwa-primary-light); color: var(--pwa-primary-text); }
 .pwa-status-chip.bad { background: hsl(0, 85%, 96%); color: hsl(0, 65%, 35%); }
 
 @media (prefers-reduced-motion: reduce) {
   .pwa-floating-bar, .pwa-drawer-panel, .pwa-drawer-backdrop { animation: none; }
-  .pwa-card, .pwa-card-image, .pwa-btn-primary, .pwa-choice { transition: none; }
+  .pwa-card,
+  .pwa-card-image,
+  .pwa-btn-primary,
+  .pwa-btn-secondary,
+  .pwa-btn-danger-outline,
+  .pwa-btn-checkout,
+  .pwa-btn-add,
+  .pwa-stepper-btn,
+  .pwa-category-pill,
+  .pwa-floating-bar-inner,
+  .pwa-order-card,
+  .pwa-choice { transition: none; }
 }
 

@@ -1,11 +1,11 @@
 // =============================================================
-// Smartkasir Perwira — Drizzle ORM Schema v1.1
+// Smartkasir Perwira — Drizzle ORM Schema v4.0 (Multi-Schema + 3NF)
 // Database: PostgreSQL (Supabase)
-// Tables: 13 (ditambah shift_swap_requests, attendances)
+// Schemas (6): core (6), hr (5), gudang (11), pos (4), finance (3), delivery (4) = 33 tables
 // =============================================================
 
 import {
-  pgTable,
+  pgSchema,
   uuid,
   varchar,
   text,
@@ -15,33 +15,44 @@ import {
   decimal,
   date,
   jsonb,
-  pgEnum,
+  smallint,
   uniqueIndex,
   unique,
   index,
 } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
+import { sql, relations } from 'drizzle-orm';
 
 // =============================================================
-// ENUM TYPES
+// DOMAIN SCHEMAS (6 PostgreSQL Schemas)
 // =============================================================
 
-export const paymentMethodEnum    = pgEnum('payment_method',    ['CASH', 'QRIS']);
-export const transactionStatusEnum = pgEnum('transaction_status', ['COMPLETED', 'VOID']);
-export const shiftStatusEnum       = pgEnum('shift_status',       ['ACTIVE', 'CLOSED']);
-export const stockActionEnum       = pgEnum('stock_action',       ['INSERT', 'UPDATE', 'SOFT_DELETE']);
-export const actorTypeEnum         = pgEnum('actor_type',         ['ADMIN', 'EMPLOYEE', 'SYSTEM']);
-export const periodTypeEnum        = pgEnum('period_type',        ['DAILY', 'WEEKLY', 'MONTHLY', 'SEMI_ANNUAL']);
+export const coreSchema     = pgSchema('core');
+export const hrSchema       = pgSchema('hr');
+export const gudangSchema   = pgSchema('gudang');
+export const posSchema      = pgSchema('pos');
+export const financeSchema  = pgSchema('finance');
+export const deliverySchema = pgSchema('delivery');
+
+// =============================================================
+// ENUM TYPES (Grouped by Domain Schema)
+// =============================================================
+
+export const paymentMethodEnum     = posSchema.enum('payment_method',    ['CASH', 'QRIS']);
+export const transactionStatusEnum = posSchema.enum('transaction_status', ['COMPLETED', 'VOID']);
+export const shiftStatusEnum       = hrSchema.enum('shift_status',       ['ACTIVE', 'CLOSED']);
+export const stockActionEnum       = coreSchema.enum('stock_action',     ['INSERT', 'UPDATE', 'SOFT_DELETE']);
+export const actorTypeEnum         = coreSchema.enum('actor_type',       ['ADMIN', 'EMPLOYEE', 'SYSTEM']);
+export const periodTypeEnum        = financeSchema.enum('period_type',   ['DAILY', 'WEEKLY', 'MONTHLY', 'SEMI_ANNUAL']);
 
 // Status hasil akhir percobaan transaksi database (untuk audit trail)
 // STARTED   = log dibuat tepat sebelum BEGIN (bukti "mulai transaksi")
 // COMMITTED = transaksi berhasil (BEGIN → UPDATE stok → INSERT → COMMIT)
 // ROLLED_BACK = transaksi gagal, PostgreSQL rollback otomatis
 // REJECTED  = ditolak sebelum BEGIN (validasi, idempotency, stok 0, dll)
-export const txOutcomeEnum = pgEnum('tx_outcome', ['COMMITTED', 'ROLLED_BACK', 'STARTED', 'REJECTED']);
+export const txOutcomeEnum = posSchema.enum('tx_outcome', ['COMMITTED', 'ROLLED_BACK', 'STARTED', 'REJECTED']);
 
 // Status pengajuan pindah shift oleh mahasiswa
-export const swapStatusEnum = pgEnum('swap_status', [
+export const swapStatusEnum = hrSchema.enum('swap_status', [
   'PENDING',    // Baru diajukan, menunggu review dosen
   'APPROVED',   // Dosen approve — jadwal dipertukarkan
   'REJECTED',   // Dosen tolak — jadwal tetap
@@ -49,7 +60,7 @@ export const swapStatusEnum = pgEnum('swap_status', [
 ]);
 
 // Status kehadiran per slot jadwal
-export const attendanceStatusEnum = pgEnum('attendance_status', [
+export const attendanceStatusEnum = hrSchema.enum('attendance_status', [
   'HADIR',        // Login tepat waktu (dalam window toleransi)
   'TELAT',        // Login terlambat > toleransi (default 15 menit)
   'IJIN',         // Ijin resmi disetujui dosen
@@ -58,7 +69,7 @@ export const attendanceStatusEnum = pgEnum('attendance_status', [
 ]);
 
 // ── V3.0 ENUMS (Gudang & Logistik) ────────────────────────────
-export const stockReceiveStatusEnum = pgEnum('stock_receive_status', [
+export const stockReceiveStatusEnum = gudangSchema.enum('stock_receive_status', [
   'DRAFT',      // Petugas gudang sedang menyusun draft input
   'SUBMITTED',  // Diserahkan ke Manager, menunggu approval
   'APPROVED',   // Disetujui Manager, stok masuk atomik
@@ -66,14 +77,14 @@ export const stockReceiveStatusEnum = pgEnum('stock_receive_status', [
   'REVISED',    // Diminta revisi oleh Manager
 ]);
 
-export const alertLevelEnum = pgEnum('alert_level', [
+export const alertLevelEnum = gudangSchema.enum('alert_level', [
   'H1_KRITIS',  // <= 1 hari menuju kadaluarsa
   'H3_URGENT',  // 2-3 hari menuju kadaluarsa
   'H5_WARNING', // 4-5 hari menuju kadaluarsa
   'H7_WATCH',   // 6-7 hari menuju kadaluarsa
 ]);
 
-export const conditionReportStatusEnum = pgEnum('condition_report_status', [
+export const conditionReportStatusEnum = gudangSchema.enum('condition_report_status', [
   'ALERT_ONLY',     // Terdeteksi otomatis oleh FEFO engine
   'SUBMITTED',      // Dilaporkan petugas gudang dengan saran
   'MANAGER_REVIEW', // Sedang ditinjau Manager
@@ -83,7 +94,7 @@ export const conditionReportStatusEnum = pgEnum('condition_report_status', [
   'CLOSED',         // Selesai
 ]);
 
-export const managerDecisionEnum = pgEnum('manager_decision', [
+export const managerDecisionEnum = gudangSchema.enum('manager_decision', [
   'DISCOUNT',       // Diskon darurat (program obral FEFO)
   'DISPLAY_FRONT',  // Pindahkan display ke rak kasir utama
   'DESTROY',        // Musnahkan dari gudang & catat kerugian
@@ -95,7 +106,7 @@ export const managerDecisionEnum = pgEnum('manager_decision', [
 // 1. ADMINS
 // =============================================================
 
-export const admins = pgTable(
+export const admins = coreSchema.table(
   'admins',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -134,7 +145,7 @@ export type NewAdmin = typeof admins.$inferInsert;
 // Login via: full_name + nim + program_studi
 // =============================================================
 
-export const employees = pgTable(
+export const employees = coreSchema.table(
   'employees',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -172,7 +183,7 @@ export type NewEmployee = typeof employees.$inferInsert;
 // Clock-in: saat login. Clock-out: saat logout.
 // =============================================================
 
-export const shifts = pgTable(
+export const shifts = hrSchema.table(
   'shifts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -200,10 +211,11 @@ export const shifts = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // KOREKSI Fase 0.3: deklarasi lama `shifts_employee_one_active` UNIQUE(employee_id, status)
-    // TIDAK ada di produksi dan akan salah bila dibuat (menolak lebih dari satu shift CLOSED
-    // per karyawan). Aturan "satu shift ACTIVE" ditegakkan di application layer; index parsial
-    // yang benar akan ditambahkan lewat migrasi di Fase 2 setelah data dirapikan.
+    // D8 Hardening (migration_v3_2_shifts_active_unique.sql; menggantikan catatan Fase 0.3):
+    // Menjamin maksimal satu shift status = 'ACTIVE' per karyawan tanpa memblokir banyak shift CLOSED.
+    uniqueIndex('idx_shifts_one_active_per_employee')
+      .on(table.employeeId)
+      .where(sql`${table.status} = 'ACTIVE'`),
     index('idx_shifts_employee').on(table.employeeId, table.createdAt),
     index('idx_shifts_clock_in').on(table.clockIn.desc()),
   ],
@@ -216,7 +228,7 @@ export type NewShift = typeof shifts.$inferInsert;
 // 4. CATEGORIES (Kategori Produk)
 // =============================================================
 
-export const categories = pgTable(
+export const categories = gudangSchema.table(
   'categories',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -241,7 +253,7 @@ export type NewCategory = typeof categories.$inferInsert;
 // Hanya Admin yang bisa CRUD — karyawan READ ONLY (hanya nama + harga jual + stok)
 // =============================================================
 
-export const products = pgTable(
+export const products = gudangSchema.table(
   'products',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -294,13 +306,14 @@ export type ProductPublic = Omit<Product, 'costPrice'>;
 // 6. STOCK_ADJUSTMENTS (Koreksi Stok / Stock Opname)
 // =============================================================
 
-export const stockAdjustments = pgTable(
+export const stockAdjustments = gudangSchema.table(
   'stock_adjustments',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     productId: uuid('product_id')
       .notNull()
       .references(() => products.id),
+    batchId: uuid('batch_id').references(() => stockBatches.id, { onDelete: 'set null' }),
     qtyBefore: integer('qty_before').notNull(),
     qtyAfter: integer('qty_after').notNull(),
     // qtyDiff = qtyAfter - qtyBefore (computed in application layer)
@@ -313,6 +326,7 @@ export const stockAdjustments = pgTable(
   },
   (table) => [
     index('idx_stock_adj_product').on(table.productId, table.createdAt),
+    index('idx_stock_adj_batch').on(table.batchId),
   ],
 );
 
@@ -324,7 +338,7 @@ export type NewStockAdjustment = typeof stockAdjustments.$inferInsert;
 // TIDAK BOLEH di-hard-delete. Void only (soft cancel).
 // =============================================================
 
-export const transactions = pgTable(
+export const transactions = posSchema.table(
   'transactions',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -376,7 +390,7 @@ export type NewTransaction = typeof transactions.$inferInsert;
 // Snapshot harga — histori tidak berubah meski harga produk diupdate
 // =============================================================
 
-export const transactionItems = pgTable(
+export const transactionItems = posSchema.table(
   'transaction_items',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -395,7 +409,7 @@ export const transactionItems = pgTable(
     subtotalCost: decimal('subtotal_cost', { precision: 15, scale: 2 }).notNull(),
     subtotalSell: decimal('subtotal_sell', { precision: 15, scale: 2 }).notNull(),
     // V3.0: Kolom audit tracking diskon darurat di kasir (nullable)
-    discountPolicyId: uuid('discount_policy_id'),
+    discountPolicyId: uuid('discount_policy_id').references(() => discountPolicies.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -413,7 +427,7 @@ export type NewTransactionItem = typeof transactionItems.$inferInsert;
 // Mendukung Split Payment (Campuran CASH + QRIS dalam 1 transaksi)
 // =============================================================
 
-export const transactionPayments = pgTable(
+export const transactionPayments = posSchema.table(
   'transaction_payments',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -441,7 +455,7 @@ export type NewTransactionPayment = typeof transactionPayments.$inferInsert;
 // Singleton — satu baris, Admin upload gambar QR
 // =============================================================
 
-export const qrisSettings = pgTable('qris_settings', {
+export const qrisSettings = coreSchema.table('qris_settings', {
   id: uuid('id').primaryKey().defaultRandom(),
   qrImageUrl: text('qr_image_url'), // URL gambar QR yang diupload admin
   bankName: varchar('bank_name', { length: 100 }),
@@ -468,7 +482,7 @@ export type QrisSettings = typeof qrisSettings.$inferSelect;
 // 10. MAINTENANCE_SETTINGS (Singleton — toggle maintenance mode)
 // =============================================================
 
-export const maintenanceSettings = pgTable('maintenance_settings', {
+export const maintenanceSettings = coreSchema.table('maintenance_settings', {
   id: uuid('id').primaryKey().defaultRandom(),
   isMaintenance: boolean('is_maintenance').notNull().default(false),
   maintenanceMessage: text('maintenance_message'),
@@ -485,11 +499,11 @@ export type MaintenanceSettings = typeof maintenanceSettings.$inferSelect;
 // Template jadwal — bukan sesi aktual (itu di table shifts)
 // =============================================================
 
-export const dayOfWeekEnum = pgEnum('day_of_week', [
+export const dayOfWeekEnum = hrSchema.enum('day_of_week', [
   'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU', 'MINGGU',
 ]);
 
-export const shiftSchedules = pgTable(
+export const shiftSchedules = hrSchema.table(
   'shift_schedules',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -528,7 +542,7 @@ export type NewShiftSchedule = typeof shiftSchedules.$inferInsert;
 // Populated from application layer — never deleted
 // =============================================================
 
-export const auditLogs = pgTable(
+export const auditLogs = coreSchema.table(
   'audit_logs',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -570,7 +584,7 @@ export const EXPENSE_CATEGORIES = [
 ] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 
-export const operatingExpenses = pgTable(
+export const operatingExpenses = financeSchema.table(
   'operating_expenses',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -601,7 +615,7 @@ export type NewOperatingExpense = typeof operatingExpenses.$inferInsert;
 // 14. SHIFT_CASH_MOVEMENTS (Petty Cash: Kas Keluar & Masuk Laci per Shift)
 // =============================================================
 
-export const shiftCashMovements = pgTable(
+export const shiftCashMovements = hrSchema.table(
   'shift_cash_movements',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -641,7 +655,7 @@ export type NewShiftCashMovement = typeof shiftCashMovements.$inferInsert;
 export const RECON_STATUS = ['PENDING', 'MATCH', 'SELISIH'] as const;
 export type ReconStatus = (typeof RECON_STATUS)[number];
 
-export const qrisReconciliations = pgTable(
+export const qrisReconciliations = financeSchema.table(
   'qris_reconciliations',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -684,7 +698,7 @@ export type NewQrisReconciliation = typeof qrisReconciliations.$inferInsert;
 export const PROPOSAL_STATUS = ['PENDING', 'APPROVED', 'REJECTED'] as const;
 export type ProposalStatus = (typeof PROPOSAL_STATUS)[number];
 
-export const productProposals = pgTable(
+export const productProposals = gudangSchema.table(
   'product_proposals',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -721,13 +735,15 @@ export type NewProductProposal = typeof productProposals.$inferInsert;
 export const EXPIRY_CLASSES = ['HARIAN', 'PENDEK', 'PANJANG'] as const;
 export type ExpiryClass = (typeof EXPIRY_CLASSES)[number];
 
-export const stockBatches = pgTable(
+export const stockBatches = gudangSchema.table(
   'stock_batches',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     productId: uuid('product_id')
       .notNull()
       .references(() => products.id, { onDelete: 'cascade' }),
+    receiveItemId: uuid('receive_item_id').references(() => stockReceiveItems.id, { onDelete: 'set null' }),
+    supplierId: uuid('supplier_id').references(() => suppliers.id, { onDelete: 'set null' }),
     batchCode: varchar('batch_code', { length: 50 }).notNull(),
     costPrice: decimal('cost_price', { precision: 15, scale: 2 }).notNull().default('0'),
     initialQty: integer('initial_qty').notNull().default(0),
@@ -742,6 +758,8 @@ export const stockBatches = pgTable(
   (table) => [
     index('idx_stock_batches_fefo').on(table.productId, table.expiryDate, table.currentQty),
     index('idx_stock_batches_expiry_alert').on(table.expiryDate, table.currentQty),
+    index('idx_stock_batches_receive_item').on(table.receiveItemId),
+    index('idx_stock_batches_supplier').on(table.supplierId),
   ],
 );
 
@@ -751,8 +769,6 @@ export type NewStockBatch = typeof stockBatches.$inferInsert;
 // =============================================================
 // RELATIONS (for Drizzle query builder)
 // =============================================================
-
-import { relations } from 'drizzle-orm';
 
 export const adminsRelations = relations(admins, ({ many }) => ({
   createdEmployees: many(employees),
@@ -813,11 +829,22 @@ export const productsRelations = relations(products, ({ one, many }) => ({
   stockBatches: many(stockBatches),
 }));
 
-export const stockBatchesRelations = relations(stockBatches, ({ one }) => ({
+export const stockBatchesRelations = relations(stockBatches, ({ one, many }) => ({
   product: one(products, {
     fields: [stockBatches.productId],
     references: [products.id],
   }),
+  receiveItem: one(stockReceiveItems, {
+    fields: [stockBatches.receiveItemId],
+    references: [stockReceiveItems.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [stockBatches.supplierId],
+    references: [suppliers.id],
+  }),
+  adjustments: many(stockAdjustments),
+  conditionReports: many(productConditionReports),
+  discountPolicies: many(discountPolicies),
 }));
 
 export const transactionsRelations = relations(transactions, ({ one, many }) => ({
@@ -866,7 +893,7 @@ export const transactionItemsRelations = relations(transactionItems, ({ one }) =
 // RATE LIMIT: max 3 pengajuan per 7 hari per mahasiswa (lihat rate-limit.ts)
 // =============================================================
 
-export const shiftSwapRequests = pgTable(
+export const shiftSwapRequests = hrSchema.table(
   'shift_swap_requests',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -935,7 +962,7 @@ export const productProposalsRelations = relations(productProposals, ({ one }) =
 //   - PENGGANTI: otomatis saat swap disetujui
 // =============================================================
 
-export const attendances = pgTable(
+export const attendances = hrSchema.table(
   'attendances',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -996,7 +1023,7 @@ export const attendancesRelations = relations(attendances, ({ one }) => ({
 // 19. DAILY_CLOSINGS (Tutup Buku Finansial Harian - Locking Period)
 // =============================================================
 
-export const dailyClosings = pgTable(
+export const dailyClosings = financeSchema.table(
   'daily_closings',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -1034,6 +1061,10 @@ export const stockAdjustmentsRelations = relations(stockAdjustments, ({ one }) =
   product: one(products, {
     fields: [stockAdjustments.productId],
     references: [products.id],
+  }),
+  batch: one(stockBatches, {
+    fields: [stockAdjustments.batchId],
+    references: [stockBatches.id],
   }),
   adjustedByAdmin: one(admins, {
     fields: [stockAdjustments.adjustedByAdminId],
@@ -1089,7 +1120,7 @@ export const dailyClosingsRelations = relations(dailyClosings, ({ one }) => ({
 // bahkan ketika transaksi utama di-rollback oleh PostgreSQL.
 // =============================================================
 
-export const transactionLogs = pgTable(
+export const transactionLogs = posSchema.table(
   'transaction_logs',
   {
     id:               uuid('id').primaryKey().defaultRandom(),
@@ -1143,7 +1174,7 @@ export type NewTransactionLog = typeof transactionLogs.$inferInsert;
 // 21. STOCK_RECEIVE_DRAFTS (Penerimaan Barang Masuk Gudang)
 // =============================================================
 
-export const stockReceiveDrafts = pgTable(
+export const stockReceiveDrafts = gudangSchema.table(
   'stock_receive_drafts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -1152,7 +1183,6 @@ export const stockReceiveDrafts = pgTable(
       .notNull()
       .references(() => employees.id),
     supplierId: uuid('supplier_id').references(() => suppliers.id),
-    supplierName: varchar('supplier_name', { length: 200 }),
     deliveryNote: text('delivery_note'),
     status: stockReceiveStatusEnum('status').notNull().default('DRAFT'),
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
@@ -1179,7 +1209,7 @@ export type NewStockReceiveDraft = typeof stockReceiveDrafts.$inferInsert;
 // 22. STOCK_RECEIVE_ITEMS (Detail Barang Masuk)
 // =============================================================
 
-export const stockReceiveItems = pgTable(
+export const stockReceiveItems = gudangSchema.table(
   'stock_receive_items',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -1189,7 +1219,6 @@ export const stockReceiveItems = pgTable(
     productId: uuid('product_id')
       .notNull()
       .references(() => products.id),
-    productName: varchar('product_name', { length: 200 }).notNull(),
     batchCode: varchar('batch_code', { length: 50 }).notNull(),
     qty: integer('qty').notNull(),
     costPrice: decimal('cost_price', { precision: 15, scale: 2 }).notNull(),
@@ -1210,19 +1239,15 @@ export type NewStockReceiveItem = typeof stockReceiveItems.$inferInsert;
 // 23. PRODUCT_CONDITION_REPORTS (FEFO Action Radar)
 // =============================================================
 
-export const productConditionReports = pgTable(
+export const productConditionReports = gudangSchema.table(
   'product_condition_reports',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     batchId: uuid('batch_id')
       .notNull()
       .references(() => stockBatches.id, { onDelete: 'cascade' }),
-    productId: uuid('product_id')
-      .notNull()
-      .references(() => products.id),
     alertLevel: alertLevelEnum('alert_level').notNull(),
     qtyAtAlert: integer('qty_at_alert').notNull(),
-    expiryDate: date('expiry_date'),
     daysRemainingAtAlert: integer('days_remaining_at_alert'),
     status: conditionReportStatusEnum('status').notNull().default('ALERT_ONLY'),
 
@@ -1247,8 +1272,8 @@ export const productConditionReports = pgTable(
   },
   (table) => [
     unique('uq_condition_report_batch').on(table.batchId),
-    index('idx_cond_reports_status_alert').on(table.status, table.alertLevel, table.expiryDate),
-    index('idx_cond_reports_prod').on(table.productId, table.status),
+    index('idx_cond_reports_status_alert').on(table.status, table.alertLevel, table.daysRemainingAtAlert),
+    index('idx_cond_reports_batch_status').on(table.batchId, table.status),
   ],
 );
 
@@ -1259,7 +1284,7 @@ export type NewProductConditionReport = typeof productConditionReports.$inferIns
 // 24. DISCOUNT_POLICIES (Kebijakan Diskon Darurat FEFO)
 // =============================================================
 
-export const discountPolicies = pgTable(
+export const discountPolicies = gudangSchema.table(
   'discount_policies',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -1299,26 +1324,21 @@ export type NewDiscountPolicy = typeof discountPolicies.$inferInsert;
 // 25. DISCOUNT_BARCODES (Barcode Override Khusus Diskon)
 // =============================================================
 
-export const discountBarcodes = pgTable(
+export const discountBarcodes = gudangSchema.table(
   'discount_barcodes',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     policyId: uuid('policy_id')
       .notNull()
       .references(() => discountPolicies.id, { onDelete: 'cascade' }),
-    productId: uuid('product_id')
-      .notNull()
-      .references(() => products.id),
     barcode: varchar('barcode', { length: 40 }).notNull().unique(),
-    discountedPrice: integer('discounted_price').notNull(),
-    discountPct: decimal('discount_pct', { precision: 5, scale: 2 }).notNull(),
     remainingQty: integer('remaining_qty').notNull(),
-    validUntil: date('valid_until').notNull(),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index('idx_discount_barcodes_lookup').on(table.barcode),
+    index('idx_discount_barcodes_policy').on(table.policyId, table.isActive),
   ],
 );
 
@@ -1329,7 +1349,7 @@ export type NewDiscountBarcode = typeof discountBarcodes.$inferInsert;
 // 26. MANAGER_DUTY_LOG (Manager on Duty Check-in)
 // =============================================================
 
-export const managerDutyLog = pgTable(
+export const managerDutyLog = coreSchema.table(
   'manager_duty_log',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -1376,7 +1396,7 @@ export const stockReceiveDraftsRelations = relations(stockReceiveDrafts, ({ one,
   items: many(stockReceiveItems),
 }));
 
-export const stockReceiveItemsRelations = relations(stockReceiveItems, ({ one }) => ({
+export const stockReceiveItemsRelations = relations(stockReceiveItems, ({ one, many }) => ({
   draft: one(stockReceiveDrafts, {
     fields: [stockReceiveItems.draftId],
     references: [stockReceiveDrafts.id],
@@ -1385,16 +1405,13 @@ export const stockReceiveItemsRelations = relations(stockReceiveItems, ({ one })
     fields: [stockReceiveItems.productId],
     references: [products.id],
   }),
+  stockBatches: many(stockBatches),
 }));
 
 export const productConditionReportsRelations = relations(productConditionReports, ({ one, many }) => ({
   batch: one(stockBatches, {
     fields: [productConditionReports.batchId],
     references: [stockBatches.id],
-  }),
-  product: one(products, {
-    fields: [productConditionReports.productId],
-    references: [products.id],
   }),
   submittedByEmployee: one(employees, {
     fields: [productConditionReports.submittedByEmployeeId],
@@ -1439,10 +1456,6 @@ export const discountBarcodesRelations = relations(discountBarcodes, ({ one }) =
     fields: [discountBarcodes.policyId],
     references: [discountPolicies.id],
   }),
-  product: one(products, {
-    fields: [discountBarcodes.productId],
-    references: [products.id],
-  }),
 }));
 
 export const managerDutyLogRelations = relations(managerDutyLog, ({ one }) => ({
@@ -1457,7 +1470,7 @@ export const managerDutyLogRelations = relations(managerDutyLog, ({ one }) => ({
 // PRD Wiramart v3.0 — Fase 5.2 & 5.4
 // =============================================================
 
-export const suppliers = pgTable(
+export const suppliers = gudangSchema.table(
   'suppliers',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -1487,6 +1500,7 @@ export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
     references: [admins.id],
   }),
   receiveDrafts: many(stockReceiveDrafts),
+  stockBatches: many(stockBatches),
 }));
 
 // =============================================================
@@ -1499,17 +1513,14 @@ export const suppliersRelations = relations(suppliers, ({ one, many }) => ({
 //
 // WIRAMART DELIVERY v2.0 — ADDITIVE EXTENSION
 // Tabel baru: buyers, online_orders, online_order_items, notification_logs
-// Tidak menyentuh satu pun tabel existing di atas.
+// Schema: delivery
 // =============================================================
-
-// ── Import tambahan (smallint belum dipakai di schema existing) ──
-import { smallint } from 'drizzle-orm/pg-core';
 
 // =============================================================
 // WIRAMART ENUMS
 // =============================================================
 
-export const onlineOrderStatusEnum = pgEnum('online_order_status', [
+export const onlineOrderStatusEnum = deliverySchema.enum('online_order_status', [
   'WAITING_PAYMENT_VERIFICATION',
   'WAITING_CONFIRMATION',
   'CONFIRMED',
@@ -1521,12 +1532,12 @@ export const onlineOrderStatusEnum = pgEnum('online_order_status', [
   'EXPIRED',
 ]);
 
-export const onlineDeliveryTypeEnum = pgEnum('online_delivery_type', [
+export const onlineDeliveryTypeEnum = deliverySchema.enum('online_delivery_type', [
   'PICKUP',
   'DELIVERY',
 ]);
 
-export const onlinePaymentMethodEnum = pgEnum('online_payment_method', [
+export const onlinePaymentMethodEnum = deliverySchema.enum('online_payment_method', [
   'QRIS',
   'TRANSFER',
 ]);
@@ -1535,7 +1546,7 @@ export const onlinePaymentMethodEnum = pgEnum('online_payment_method', [
 // 28. BUYERS (Pembeli Online — Mahasiswa / Dosen)
 // =============================================================
 
-export const buyers = pgTable(
+export const buyers = deliverySchema.table(
   'buyers',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -1565,7 +1576,7 @@ export type NewBuyer = typeof buyers.$inferInsert;
 // 29. ONLINE_ORDERS (Pesanan Online)
 // =============================================================
 
-export const onlineOrders = pgTable(
+export const onlineOrders = deliverySchema.table(
   'online_orders',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -1636,7 +1647,7 @@ export type NewOnlineOrder = typeof onlineOrders.$inferInsert;
 // SNAPSHOT harga saat order — tidak berubah meski produk diedit
 // =============================================================
 
-export const onlineOrderItems = pgTable(
+export const onlineOrderItems = deliverySchema.table(
   'online_order_items',
   {
     id: uuid('id').primaryKey().defaultRandom(),
@@ -1662,7 +1673,7 @@ export type NewOnlineOrderItem = typeof onlineOrderItems.$inferInsert;
 // Fire-and-forget — tidak blocking alur order utama
 // =============================================================
 
-export const notificationLogs = pgTable(
+export const notificationLogs = deliverySchema.table(
   'notification_logs',
   {
     id: uuid('id').primaryKey().defaultRandom(),

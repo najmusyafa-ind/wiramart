@@ -207,4 +207,38 @@ export function cx(...classes: (string | boolean | undefined | null)[]): string 
   return classes.filter(Boolean).join(' ');
 }
 
+// --- WIB (Asia/Jakarta) Date & FEFO Helpers (Client & Server Safe) ---
+/** Mengembalikan tanggal kalender saat ini di zona waktu WIB (YYYY-MM-DD). */
+export function getTodayWib(now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(now);
+}
+
+/** Mengembalikan tanggal WIB bergeser `offsetDays` hari dari `now` (YYYY-MM-DD). */
+export function getOffsetDateWib(offsetDays: number, now = new Date()): string {
+  const shifted = new Date(now.getTime() + offsetDays * 24 * 60 * 60 * 1000);
+  return getTodayWib(shifted);
+}
+
+/** Mengembalikan jam (0-23) di zona waktu WIB (Asia/Jakarta). */
+export function getHourWib(now = new Date()): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Jakarta',
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+  const hourStr = parts.find((p) => p.type === 'hour')?.value ?? '0';
+  return Number.parseInt(hourStr, 10) % 24;
+}
+
+/**
+ * Menghitung harga diskon darurat FEFO secara seragam di backend & UI
+ * agar preview Admin/Gudang selalu identik dengan nominal di kasir.
+ */
+export function computeFefoDiscountedPrice(originalPrice: number, discountPct: number): number {
+  const safePrice = Number.isFinite(originalPrice) ? Math.max(0, originalPrice) : 0;
+  const safePct = Number.isFinite(discountPct) ? Math.min(100, Math.max(0, discountPct)) : 0;
+  return Math.max(0, Math.round(safePrice * (1 - safePct / 100)));
+}
+
+
 

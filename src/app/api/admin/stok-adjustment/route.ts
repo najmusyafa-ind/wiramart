@@ -7,54 +7,102 @@
 // dalam satu db.transaction() — rollback jika ada error.
 // =============================================================
 
+import { randomInt } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq, and, gt, asc, desc, sql } from 'drizzle-orm';
+import { eq, and, gt, gte, asc, desc, ilike, or, inArray, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { products, stockAdjustments, stockBatches, admins } from '@/lib/db/schema';
+import {
+  products,
+  stockAdjustments,
+  stockBatches,
+  admins,
+  discountPolicies,
+  discountBarcodes,
+} from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/utils/auth';
-import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
+import { apiOk, apiError, AppError, getTodayWib } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
 
 // =============================================================
 // GET — Riwayat Audit Koreksi Stok (Kapan, Oleh Siapa, Berapa ke Berapa)
+// Mendukung paginasi & pencarian agar data histori dapat ditelusuri lengkap.
 // =============================================================
 export async function GET(req: NextRequest): Promise<Response> {
   try {
     await requireAdmin();
     const { searchParams } = new URL(req.url);
     const productId = searchParams.get('productId');
-    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50', 10)));
+    const q = searchParams.get('q')?.trim() ?? '';
+    const page = Math.max(1, Number.parseInt(searchParams.get('page') || '1', 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(searchParams.get('limit') || '50', 10) || 50));
+    const offset = (page - 1) * limit;
+
+    if (productId && !z.string().uuid().safeParse(productId).success) {
+      return apiError('Parameter productId tidak valid.', 'BAD_REQUEST', 400);
+    }
 
     const conditions = [];
     if (productId) {
       conditions.push(eq(stockAdjustments.productId, productId));
     }
+    if (q) {
+      conditions.push(
+        or(
+          ilike(products.name, `%${q}%`),
+          ilike(stockAdjustments.reason, `%${q}%`),
+          ilike(admins.fullName, `%${q}%`),
+        ),
+      );
+    }
 
-    const rows = await db
-      .select({
-        id: stockAdjustments.id,
-        productId: stockAdjustments.productId,
-        productName: products.name,
-        unit: products.unit,
-        qtyBefore: stockAdjustments.qtyBefore,
-        qtyAfter: stockAdjustments.qtyAfter,
-        qtyDiff: stockAdjustments.qtyDiff,
-        reason: stockAdjustments.reason,
-        createdAt: stockAdjustments.createdAt,
-        adminName: admins.fullName,
-        adminNidn: admins.nidn,
-        adminRole: admins.role,
-      })
-      .from(stockAdjustments)
-      .innerJoin(products, eq(stockAdjustments.productId, products.id))
-      .leftJoin(admins, eq(stockAdjustments.adjustedByAdminId, admins.id))
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(stockAdjustments.createdAt))
-      .limit(limit);
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return apiOk({ items: rows, total: rows.length });
+    const [rows, [countRow]] = await Promise.all([
+      db
+        .select({
+          id: stockAdjustments.id,
+          productId: stockAdjustments.productId,
+          productName: products.name,
+          unit: products.unit,
+          qtyBefore: stockAdjustments.qtyBefore,
+          qtyAfter: stockAdjustments.qtyAfter,
+          qtyDiff: stockAdjustments.qtyDiff,
+          reason: stockAdjustments.reason,
+          createdAt: stockAdjustments.createdAt,
+          adminName: admins.fullName,
+          adminNidn: admins.nidn,
+          adminRole: admins.role,
+        })
+        .from(stockAdjustments)
+        .innerJoin(products, eq(stockAdjustments.productId, products.id))
+        .leftJoin(admins, eq(stockAdjustments.adjustedByAdminId, admins.id))
+        .where(whereClause)
+        .orderBy(desc(stockAdjustments.createdAt), desc(stockAdjustments.id))
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ total: sql<number>`COUNT(*)::int` })
+        .from(stockAdjustments)
+        .innerJoin(products, eq(stockAdjustments.productId, products.id))
+        .leftJoin(admins, eq(stockAdjustments.adjustedByAdminId, admins.id))
+        .where(whereClause),
+    ]);
+
+    const total = countRow?.total ?? 0;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    return apiOk({
+      items: rows,
+      total,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+    });
   } catch (err) {
     if (err instanceof AppError) {
       return apiError(err.message, err.code, err.statusCode);
@@ -148,8 +196,8 @@ export async function POST(req: NextRequest): Promise<Response> {
 
       // Step 2: Sinkronisasi stockBatches (Invarian: stock_qty = sum(stockBatches.currentQty))
       if (qtyDiff > 0) {
-        // Opname menemukan kelebihan fisik: buat batch penyesuaian baru
-        const batchCode = `OPNAME-${now.toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+        // Opname menemukan kelebihan fisik: buat batch penyesuaian baru memakai tanggal WIB
+        const batchCode = `OPNAME-${getTodayWib(now).replace(/-/g, '')}-${randomInt(1000, 10000)}`;
         await tx.insert(stockBatches).values({
           productId,
           batchCode,
@@ -161,7 +209,7 @@ export async function POST(req: NextRequest): Promise<Response> {
         });
       } else if (qtyDiff < 0) {
         // Opname menemukan kekurangan fisik (kehilangan / kerusakan / susut):
-        // Kurangi batch-batch aktif secara berurutan menurut FEFO
+        // Kurangi batch-batch aktif berurutan FEFO dengan FOR UPDATE & sinkronkan promo diskon
         let neededDeduct = Math.abs(qtyDiff);
         const activeBatches = await tx
           .select({
@@ -175,18 +223,67 @@ export async function POST(req: NextRequest): Promise<Response> {
               gt(stockBatches.currentQty, 0),
             ),
           )
-          .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt));
+          .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt), asc(stockBatches.id))
+          .for('update');
 
         for (const b of activeBatches) {
           if (neededDeduct <= 0) break;
           const deduct = Math.min(b.currentQty, neededDeduct);
-          await tx
+          const [updatedBatch] = await tx
             .update(stockBatches)
             .set({
               currentQty: sql`${stockBatches.currentQty} - ${deduct}`,
               updatedAt: now,
             })
-            .where(eq(stockBatches.id, b.id));
+            .where(and(eq(stockBatches.id, b.id), gte(stockBatches.currentQty, deduct)))
+            .returning({
+              id: stockBatches.id,
+              currentQty: stockBatches.currentQty,
+            });
+
+          if (updatedBatch) {
+            const linkedPolicies = await tx
+              .select({ id: discountPolicies.id })
+              .from(discountPolicies)
+              .where(
+                and(
+                  eq(discountPolicies.batchId, b.id),
+                  eq(discountPolicies.isActive, true),
+                ),
+              );
+
+            if (linkedPolicies.length > 0) {
+              const policyIds = linkedPolicies.map((p) => p.id);
+              await tx
+                .update(discountBarcodes)
+                .set({
+                  remainingQty: sql`LEAST(${discountBarcodes.remainingQty}, ${updatedBatch.currentQty})`,
+                  ...(updatedBatch.currentQty <= 0 ? { isActive: false } : {}),
+                })
+                .where(
+                  and(
+                    inArray(discountBarcodes.policyId, policyIds),
+                    eq(discountBarcodes.isActive, true),
+                  ),
+                );
+
+              if (updatedBatch.currentQty <= 0) {
+                await tx
+                  .update(discountPolicies)
+                  .set({ isActive: false, updatedAt: now })
+                  .where(and(inArray(discountPolicies.id, policyIds), eq(discountPolicies.isActive, true)));
+              } else {
+                await tx
+                  .update(discountPolicies)
+                  .set({
+                    allowedQty: sql`LEAST(${discountPolicies.allowedQty}, ${discountPolicies.soldQty} + ${updatedBatch.currentQty})`,
+                    updatedAt: now,
+                  })
+                  .where(and(inArray(discountPolicies.id, policyIds), eq(discountPolicies.isActive, true)));
+              }
+            }
+          }
+
           neededDeduct -= deduct;
         }
       }

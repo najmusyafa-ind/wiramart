@@ -62,13 +62,16 @@ export async function GET(req: NextRequest): Promise<Response> {
   const todayWib = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
 
   // Ambil daftar bulan yang tersedia dari database untuk tombol navigasi UI
+  // CATATAN: attendances.attendanceDate bertipe PostgreSQL DATE, bukan TEXT,
+  // sehingga wajib TO_CHAR(..., 'YYYY-MM') agar tidak gagal SUBSTRING(date, ...).
+  const monthExpr = sql<string>`TO_CHAR(${attendances.attendanceDate}, 'YYYY-MM')`;
   const availableMonthsRaw = await db
     .select({
-      month: sql<string>`SUBSTRING(${attendances.attendanceDate}, 1, 7)`,
+      month: monthExpr,
     })
     .from(attendances)
-    .groupBy(sql`SUBSTRING(${attendances.attendanceDate}, 1, 7)`)
-    .orderBy(sql`SUBSTRING(${attendances.attendanceDate}, 1, 7) DESC`);
+    .groupBy(monthExpr)
+    .orderBy(desc(monthExpr));
   const availableMonths = availableMonthsRaw.map((m) => m.month).filter(Boolean);
 
   // Tentukan rentang tanggal
@@ -88,13 +91,17 @@ export async function GET(req: NextRequest): Promise<Response> {
   } else if (periodParam === 'last_month') {
     activePeriod = 'last_month';
     const [currY, currM] = todayWib.split('-').map(Number);
-    const lastMonthDate = new Date(Date.UTC(currY ?? 2026, (currM ?? 11) - 2, 1));
+    const lastMonthDate = new Date(Date.UTC(currY ?? 2026, (currM ?? 11) - 2, 1, 12, 0, 0));
     const ly = lastMonthDate.getUTCFullYear();
     const lm = String(lastMonthDate.getUTCMonth() + 1).padStart(2, '0');
     const lastDay = new Date(Date.UTC(ly, lastMonthDate.getUTCMonth() + 1, 0)).getUTCDate();
     effectiveStart = `${ly}-${lm}-01`;
     effectiveEnd = `${ly}-${lm}-${String(lastDay).padStart(2, '0')}`;
-    const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(lastMonthDate);
+    const monthName = new Intl.DateTimeFormat('id-ID', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'Asia/Jakarta',
+    }).format(lastMonthDate);
     rangeLabel = `Bulan Lalu (${monthName})`;
     conditions.push(gte(attendances.attendanceDate, effectiveStart));
     conditions.push(lte(attendances.attendanceDate, effectiveEnd));
@@ -105,8 +112,12 @@ export async function GET(req: NextRequest): Promise<Response> {
     const lastDay = new Date(Date.UTC(y ?? 2026, m ?? 1, 0)).getUTCDate();
     effectiveStart = `${targetMonth}-01`;
     effectiveEnd = `${targetMonth}-${String(lastDay).padStart(2, '0')}`;
-    const monthObj = new Date(Date.UTC(y ?? 2026, (m ?? 1) - 1, 1));
-    const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(monthObj);
+    const monthObj = new Date(Date.UTC(y ?? 2026, (m ?? 1) - 1, 1, 12, 0, 0));
+    const monthName = new Intl.DateTimeFormat('id-ID', {
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'Asia/Jakarta',
+    }).format(monthObj);
     rangeLabel = `Bulan ${monthName}`;
     conditions.push(gte(attendances.attendanceDate, effectiveStart));
     conditions.push(lte(attendances.attendanceDate, effectiveEnd));
@@ -123,12 +134,13 @@ export async function GET(req: NextRequest): Promise<Response> {
     const targetDate = dateParam ?? todayWib;
     effectiveStart = targetDate;
     effectiveEnd = targetDate;
-    const dateObj = new Date(`${targetDate}T00:00:00+07:00`);
+    const dateObj = new Date(`${targetDate}T12:00:00+07:00`);
     rangeLabel = new Intl.DateTimeFormat('id-ID', {
       weekday: 'long',
       day: 'numeric',
       month: 'long',
       year: 'numeric',
+      timeZone: 'Asia/Jakarta',
     }).format(dateObj);
     conditions.push(eq(attendances.attendanceDate, targetDate));
   }

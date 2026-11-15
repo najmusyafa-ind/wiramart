@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useId, useEffect, useMemo } from 'react';
+import { useState, useId, useEffect, useMemo, useSyncExternalStore } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   LogIn, AlertCircle, User, Hash, GraduationCap, CheckCircle2,
-  Clock, Calendar, UserCheck, ChevronRight, RefreshCw, Sparkles,
-  ShoppingBag, Package, ShieldCheck, HeartHandshake, ShoppingCart, Boxes
+  Clock, Calendar, UserCheck, ChevronRight, RefreshCw,
+  ShoppingBag, Package, ShieldCheck, HeartHandshake, ShoppingCart, Boxes,
+  Lock, KeyRound, Eye, EyeOff
 } from 'lucide-react';
 
 type ShiftPersonnel = {
@@ -18,6 +19,7 @@ type ShiftPersonnel = {
   nim: string | null;
   programStudi: string | null;
   defaultJabatan: string | null;
+  hasPin?: boolean;
   attendance: {
     isAttended: boolean;
     isClockedOut?: boolean;
@@ -38,27 +40,113 @@ type ShiftGroup = {
   personnel: ShiftPersonnel[];
 };
 
+type EmployeeDirectoryItem = {
+  id: string;
+  fullName: string;
+  nim: string;
+  programStudi: string;
+  jabatan: string;
+  hasPin: boolean;
+};
+
 type PresensiData = {
   hari: string;
   tanggal: string;
   jamSekarang: string;
   toleransiMenit: number;
   shifts: ShiftGroup[];
+  allEmployees?: EmployeeDirectoryItem[];
 };
 
 type RoleOption = 'Kasir' | 'Gudang' | 'CS Pelayan' | 'Admin Shift';
+
+const PIN_DIGIT_REGEX = /^\d{6,8}$/;
+
+function normalizeNim(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
+function sanitizePinInput(value: string): string {
+  return value.replace(/\D/g, '').slice(0, 8);
+}
+
+type MatchedEmployeeProfile = {
+  fullName: string;
+  nim: string;
+  programStudi: string;
+  hasPin: boolean;
+};
+
+function findEmployeeByNormalizedNim(
+  presensiData: PresensiData | null,
+  normalizedNim: string,
+): MatchedEmployeeProfile | null {
+  if (!normalizedNim || !presensiData) return null;
+
+  const fromAll = presensiData.allEmployees?.find(
+    (emp) => normalizeNim(emp.nim) === normalizedNim,
+  );
+  if (fromAll) {
+    return {
+      fullName: fromAll.fullName,
+      nim: fromAll.nim,
+      programStudi: fromAll.programStudi,
+      hasPin: fromAll.hasPin,
+    };
+  }
+
+  for (const shiftGroup of presensiData.shifts) {
+    const fromShift = shiftGroup.personnel.find(
+      (person) => person.nim && normalizeNim(person.nim) === normalizedNim,
+    );
+    if (fromShift && fromShift.nim) {
+      return {
+        fullName: fromShift.fullName ?? '',
+        nim: fromShift.nim,
+        programStudi: fromShift.programStudi ?? '',
+        hasPin: Boolean(fromShift.hasPin),
+      };
+    }
+  }
+
+  return null;
+}
+
+const subscribeNoop = () => () => {};
+
+function getIsDemoSnapshot(): boolean {
+  if (typeof window === 'undefined') return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.get('demo') === '1' || params.get('demo') === 'true';
+}
+
+async function requestPresensi(signal?: AbortSignal) {
+  const res = await fetch('/api/kasir/presensi-hari-ini', { signal });
+  return (await res.json()) as { success: boolean; data?: PresensiData; error?: string };
+}
 
 export default function KasirLoginPage() {
   const router = useRouter();
   const nameId = useId();
   const nimId = useId();
   const prodiId = useId();
+  const pinId = useId();
+  const newPinId = useId();
+  const confirmPinId = useId();
 
   // Tab State: 'presensi' = Kiosk Presensi Semua Orang, 'pos' = Login Kasir POS
   const [activeTab, setActiveTab] = useState<'presensi' | 'pos'>('presensi');
 
-  // Form State (POS Login)
+  // Form State (POS Login — Adaptif Opsi B1: NIM+PIN vs Soft Transition)
   const [form, setForm] = useState({ fullName: '', nim: '', programStudi: '' });
+  const [pin, setPin] = useState('');
+  const [showPin, setShowPin] = useState(false);
+  const [wantSetupPin, setWantSetupPin] = useState(false);
+  const [newPin, setNewPin] = useState('');
+  const [confirmNewPin, setConfirmNewPin] = useState('');
+  const [showNewPin, setShowNewPin] = useState(false);
+  const [forcedPinRequiredNim, setForcedPinRequiredNim] = useState<string | null>(null);
+  const [forcedNoPinNim, setForcedNoPinNim] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -96,13 +184,12 @@ export default function KasirLoginPage() {
     return { kasirOccupant, adminOccupant };
   }, [selectedShiftGroup, selectedPerson]);
 
-  // Fetch presensi hari ini
+  // Fetch presensi hari ini (untuk refresh manual pasca-aksi)
   async function loadPresensi() {
     setLoadingPresensi(true);
     setPresensiError(null);
     try {
-      const res = await fetch('/api/kasir/presensi-hari-ini');
-      const json = await res.json() as { success: boolean; data?: PresensiData; error?: string };
+      const json = await requestPresensi();
       if (json.success && json.data) {
         setPresensiData(json.data);
       } else {
@@ -115,33 +202,88 @@ export default function KasirLoginPage() {
     }
   }
 
-  // Demo Mode State (Hanya aktif jika URL menyertakan ?demo=1 / ?demo=true)
-  const [isDemoMode, setIsDemoMode] = useState(false);
+  // Demo Mode State (SSR-safe via useSyncExternalStore; aktif hanya dengan ?demo=1 / ?demo=true)
+  const isDemoMode = useSyncExternalStore(subscribeNoop, getIsDemoSnapshot, () => false);
 
   useEffect(() => {
-    loadPresensi();
+    const controller = new AbortController();
+
+    requestPresensi(controller.signal)
+      .then((json) => {
+        if (controller.signal.aborted) return;
+        setPresensiError(null);
+        if (json.success && json.data) {
+          setPresensiData(json.data);
+        } else {
+          setPresensiError(json.error ?? 'Gagal memuat jadwal hari ini.');
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setPresensiError('Koneksi terputus. Pastikan server aktif.');
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoadingPresensi(false);
+        }
+      });
+
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      const isDemo = params.get('demo') === '1' || params.get('demo') === 'true';
-      setIsDemoMode(isDemo);
-
       const fromParam = params.get('from');
       if (fromParam && fromParam.includes('gudang')) {
-        setActiveTab('pos');
-        if (isDemo) {
-          setForm({
-            fullName: 'Khalila Sevina Nurani',
-            nim: '02601011',
-            programStudi: 'Manajemen',
-          });
-        }
+        const isDemo = getIsDemoSnapshot();
+        Promise.resolve().then(() => {
+          if (controller.signal.aborted) return;
+          setActiveTab('pos');
+          if (isDemo) {
+            setForm({
+              fullName: 'Khalila Sevina Nurani',
+              nim: '02601011',
+              programStudi: 'Manajemen',
+            });
+          }
+        });
       }
     }
+
+    return () => controller.abort();
   }, []);
+
+  const normalizedInputNim = normalizeNim(form.nim);
+  const matchedEmployeeByNim = findEmployeeByNormalizedNim(presensiData, normalizedInputNim);
+  const isPinLoginMode =
+    normalizedInputNim && forcedNoPinNim === normalizedInputNim
+      ? false
+      : normalizedInputNim && forcedPinRequiredNim === normalizedInputNim
+        ? true
+        : Boolean(matchedEmployeeByNim?.hasPin);
+
+  function resetPinUiState() {
+    setPin('');
+    setNewPin('');
+    setConfirmNewPin('');
+    setWantSetupPin(false);
+    setForcedPinRequiredNim(null);
+    setForcedNoPinNim(null);
+    setShowPin(false);
+    setShowNewPin(false);
+  }
 
   function handleFormChange(field: keyof typeof form) {
     return (e: React.ChangeEvent<HTMLInputElement>) => {
-      setForm((prev) => ({ ...prev, [field]: e.target.value }));
+      const nextVal = e.target.value;
+      setForm((prev) => ({ ...prev, [field]: nextVal }));
+      if (field === 'nim') {
+        const nextNorm = normalizeNim(nextVal);
+        if (nextNorm !== normalizedInputNim) {
+          setPin('');
+          setNewPin('');
+          setConfirmNewPin('');
+          setWantSetupPin(false);
+        }
+      }
       if (error) setError(null);
     };
   }
@@ -176,7 +318,7 @@ export default function KasirLoginPage() {
       
       // Khusus Petugas Gudang: Langsung arahkan ke Portal Keamanan Gudang (NIM + PIN)
       if (selectedRole === 'Gudang') {
-        router.push('/kasir/gudang/login');
+        router.push('/gudang/login');
         return;
       }
 
@@ -187,6 +329,8 @@ export default function KasirLoginPage() {
           nim:          selectedPerson.nim ?? '',
           programStudi: selectedPerson.programStudi ?? '',
         });
+        resetPinUiState();
+        setError(null);
       }
 
       setSelectedPerson(null);
@@ -229,15 +373,59 @@ export default function KasirLoginPage() {
     }
   }
 
-  // Handle Login Kasir ke POS
+  // Handle Login Kasir ke POS (Opsi B1: PIN jika sudah punya, atau Transisi Lunak)
   async function handlePosLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
 
-    const { fullName, nim, programStudi } = form;
-    if (!fullName.trim() || !nim.trim() || !programStudi.trim()) {
-      setError('Semua kolom wajib diisi: Nama Lengkap, NIM, dan Program Studi.');
+    const trimmedNim = form.nim.trim();
+    const normalizedNim = normalizeNim(trimmedNim);
+
+    if (!trimmedNim) {
+      setError('NIM wajib diisi terlebih dahulu.');
       return;
+    }
+
+    let requestBody: Record<string, string>;
+
+    if (isPinLoginMode) {
+      const cleanPin = pin.trim();
+      if (!PIN_DIGIT_REGEX.test(cleanPin)) {
+        setError('Masukkan PIN keamanan yang terdiri dari 6 sampai 8 angka.');
+        return;
+      }
+      requestBody = {
+        nim: trimmedNim,
+        pin: cleanPin,
+      };
+    } else {
+      const trimmedName = form.fullName.trim();
+      const trimmedProdi = form.programStudi.trim();
+      if (!trimmedName || !trimmedProdi) {
+        setError('Semua kolom wajib diisi: NIM, Nama Lengkap, dan Program Studi.');
+        return;
+      }
+
+      requestBody = {
+        fullName: trimmedName,
+        nim: trimmedNim,
+        programStudi: trimmedProdi,
+      };
+
+      if (wantSetupPin) {
+        const cleanNewPin = newPin.trim();
+        const cleanConfirm = confirmNewPin.trim();
+        if (!PIN_DIGIT_REGEX.test(cleanNewPin)) {
+          setError('PIN baru harus terdiri dari 6 sampai 8 angka.');
+          return;
+        }
+        if (cleanNewPin !== cleanConfirm) {
+          setError('Konfirmasi PIN baru tidak cocok. Pastikan kedua kolom sama.');
+          return;
+        }
+        requestBody.newPin = cleanNewPin;
+        requestBody.confirmNewPin = cleanConfirm;
+      }
     }
 
     setIsLoading(true);
@@ -246,22 +434,33 @@ export default function KasirLoginPage() {
       const res = await fetch('/api/auth/kasir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName:     fullName.trim(),
-          nim:          nim.trim(),
-          programStudi: programStudi.trim(),
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const json = await res.json() as {
         success: boolean;
-        data?: { redirect?: string; name?: string; shiftId?: string };
+        data?: { redirect?: string; name?: string; shiftId?: string; hasPin?: boolean };
         error?: string;
         code?: string;
       };
 
       if (!res.ok || !json.success || !json.data) {
-        setError(json.error ?? 'Data tidak ditemukan. Periksa kembali Nama, NIM, dan Program Studi Anda.');
+        if (json.code === 'PIN_REQUIRED' && normalizedNim) {
+          setForcedNoPinNim(null);
+          setForcedPinRequiredNim(normalizedNim);
+          setWantSetupPin(false);
+        } else if (json.code === 'PIN_NOT_SET' && normalizedNim) {
+          setForcedPinRequiredNim(null);
+          setForcedNoPinNim(normalizedNim);
+          setPin('');
+        }
+
+        setError(
+          json.error ??
+            (isPinLoginMode
+              ? 'NIM atau PIN tidak sesuai. Periksa kembali atau hubungi Pengelola jika lupa PIN.'
+              : 'Data tidak ditemukan. Periksa kembali Nama, NIM, dan Program Studi Anda.'),
+        );
         return;
       }
 
@@ -919,7 +1118,7 @@ export default function KasirLoginPage() {
               <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
                 <button
                   type="button"
-                  onClick={() => router.push('/kasir/gudang/login')}
+                  onClick={() => router.push('/gudang/login')}
                   className="btn btn-secondary"
                   style={{
                     display: 'inline-flex',
@@ -1170,6 +1369,7 @@ export default function KasirLoginPage() {
                           nim: item.nim,
                           programStudi: item.prodi,
                         });
+                        resetPinUiState();
                         if (error) setError(null);
                       }}
                       style={{
@@ -1223,45 +1423,6 @@ export default function KasirLoginPage() {
 
             <form className="auth-form" onSubmit={handlePosLogin} noValidate>
               <div className="form-group">
-                <label className="form-label" htmlFor={nameId}>
-                  Nama Lengkap <span className="required" aria-hidden="true">*</span>
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <User
-                    size={16}
-                    aria-hidden="true"
-                    style={{
-                      position: 'absolute',
-                      left: 'var(--space-3)',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: 'var(--color-text-muted)',
-                      pointerEvents: 'none',
-                    }}
-                  />
-                  <input
-                    id={nameId}
-                    name="kasir_fullname_no_autofill"
-                    type="text"
-                    className="form-input"
-                    placeholder="Nama lengkap sesuai jadwal"
-                    value={form.fullName}
-                    onChange={handleFormChange('fullName')}
-                    autoComplete="off"
-                    autoCapitalize="words"
-                    autoCorrect="off"
-                    spellCheck="false"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-form-type="other"
-                    required
-                    disabled={isLoading}
-                    style={{ paddingLeft: 'calc(var(--space-3) + 16px + var(--space-2))' }}
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
                 <label className="form-label" htmlFor={nimId}>
                   NIM <span className="required" aria-hidden="true">*</span>
                 </label>
@@ -1293,37 +1454,342 @@ export default function KasirLoginPage() {
                 </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label" htmlFor={prodiId}>
-                  Program Studi <span className="required" aria-hidden="true">*</span>
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <GraduationCap
-                    size={16}
-                    aria-hidden="true"
-                    style={{
-                      position: 'absolute',
-                      left: 'var(--space-3)',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: 'var(--color-text-muted)',
-                      pointerEvents: 'none',
-                    }}
-                  />
-                  <input
-                    id={prodiId}
-                    type="text"
-                    className="form-input"
-                    placeholder="Contoh: Manajemen"
-                    value={form.programStudi}
-                    onChange={handleFormChange('programStudi')}
-                    autoComplete="off"
-                    required
-                    disabled={isLoading}
-                    style={{ paddingLeft: 'calc(var(--space-3) + 16px + var(--space-2))' }}
-                  />
+              {(matchedEmployeeByNim || isPinLoginMode) && normalizedInputNim.length > 0 && (
+                <div
+                  role="status"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 'var(--space-2)',
+                    padding: 'var(--space-3)',
+                    marginBottom: 'var(--space-4)',
+                    borderRadius: 'var(--radius-md)',
+                    border: isPinLoginMode
+                      ? '1px solid hsl(142 71% 45% / 0.3)'
+                      : '1px solid hsl(217 91% 60% / 0.25)',
+                    backgroundColor: isPinLoginMode
+                      ? 'hsl(142 71% 45% / 0.08)'
+                      : 'hsl(217 91% 60% / 0.07)',
+                    fontSize: 'var(--text-xs)',
+                    color: isPinLoginMode ? 'hsl(142 64% 26%)' : 'var(--color-primary)',
+                  }}
+                >
+                  {isPinLoginMode ? (
+                    <Lock size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                  ) : (
+                    <KeyRound size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+                  )}
+                  <div style={{ lineHeight: 1.45 }}>
+                    <div style={{ fontWeight: 'var(--weight-semibold)' }}>
+                      {isPinLoginMode
+                        ? `${matchedEmployeeByNim?.fullName ?? `NIM ${form.nim.trim()}`} — PIN Keamanan Aktif`
+                        : `Halo ${matchedEmployeeByNim?.fullName ?? ''} — Mode Transisi Lunak`}
+                    </div>
+                    <div style={{ color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                      {isPinLoginMode
+                        ? 'Cukup masukkan NIM dan PIN pribadi (6–8 angka) Anda.'
+                        : 'Akun belum memiliki PIN. Verifikasi Nama & Prodi untuk masuk, atau sekalian buat PIN di bawah.'}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {isPinLoginMode ? (
+                <div className="form-group">
+                  <label className="form-label" htmlFor={pinId}>
+                    PIN Keamanan (6–8 Angka) <span className="required" aria-hidden="true">*</span>
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <Lock
+                      size={16}
+                      aria-hidden="true"
+                      style={{
+                        position: 'absolute',
+                        left: 'var(--space-3)',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        color: 'var(--color-text-muted)',
+                        pointerEvents: 'none',
+                      }}
+                    />
+                    <input
+                      id={pinId}
+                      name="kasir_pin_no_autofill"
+                      type={showPin ? 'text' : 'password'}
+                      inputMode="numeric"
+                      maxLength={8}
+                      className="form-input"
+                      placeholder="Masukkan 6–8 digit PIN"
+                      value={pin}
+                      onChange={(e) => {
+                        setPin(sanitizePinInput(e.target.value));
+                        if (error) setError(null);
+                      }}
+                      autoComplete="off"
+                      required
+                      disabled={isLoading}
+                      style={{
+                        paddingLeft: 'calc(var(--space-3) + 16px + var(--space-2))',
+                        paddingRight: '42px',
+                        fontFamily: 'var(--font-mono)',
+                        letterSpacing: showPin ? '0.15em' : '0.25em',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPin((prev) => !prev)}
+                      aria-label={showPin ? 'Sembunyikan PIN' : 'Tampilkan PIN'}
+                      style={{
+                        position: 'absolute',
+                        right: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        border: 'none',
+                        background: 'transparent',
+                        color: 'var(--color-text-muted)',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      {showPin ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+                    </button>
+                  </div>
+                  <p style={{ marginTop: 6, marginBottom: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                    Lupa PIN? Minta Dosen / Pengelola untuk reset PIN di menu Karyawan.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor={nameId}>
+                      Nama Lengkap <span className="required" aria-hidden="true">*</span>
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <User
+                        size={16}
+                        aria-hidden="true"
+                        style={{
+                          position: 'absolute',
+                          left: 'var(--space-3)',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          color: 'var(--color-text-muted)',
+                          pointerEvents: 'none',
+                        }}
+                      />
+                      <input
+                        id={nameId}
+                        name="kasir_fullname_no_autofill"
+                        type="text"
+                        className="form-input"
+                        placeholder="Nama lengkap sesuai jadwal"
+                        value={form.fullName}
+                        onChange={handleFormChange('fullName')}
+                        autoComplete="off"
+                        autoCapitalize="words"
+                        autoCorrect="off"
+                        spellCheck="false"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-form-type="other"
+                        required
+                        disabled={isLoading}
+                        style={{ paddingLeft: 'calc(var(--space-3) + 16px + var(--space-2))' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor={prodiId}>
+                      Program Studi <span className="required" aria-hidden="true">*</span>
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <GraduationCap
+                        size={16}
+                        aria-hidden="true"
+                        style={{
+                          position: 'absolute',
+                          left: 'var(--space-3)',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          color: 'var(--color-text-muted)',
+                          pointerEvents: 'none',
+                        }}
+                      />
+                      <input
+                        id={prodiId}
+                        type="text"
+                        className="form-input"
+                        placeholder="Contoh: Manajemen"
+                        value={form.programStudi}
+                        onChange={handleFormChange('programStudi')}
+                        autoComplete="off"
+                        required
+                        disabled={isLoading}
+                        style={{ paddingLeft: 'calc(var(--space-3) + 16px + var(--space-2))' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      marginBottom: 'var(--space-4)',
+                      padding: 'var(--space-3)',
+                      borderRadius: 'var(--radius-md)',
+                      border: wantSetupPin
+                        ? '1px solid var(--color-primary)'
+                        : '1px dashed var(--color-border)',
+                      backgroundColor: wantSetupPin
+                        ? 'hsl(217 91% 60% / 0.05)'
+                        : 'var(--color-surface, #fff)',
+                      transition: 'border-color 0.15s ease, background-color 0.15s ease',
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 'var(--space-2)',
+                        cursor: 'pointer',
+                        fontSize: 'var(--text-xs)',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={wantSetupPin}
+                        onChange={(e) => {
+                          setWantSetupPin(e.target.checked);
+                          if (!e.target.checked) {
+                            setNewPin('');
+                            setConfirmNewPin('');
+                          }
+                          if (error) setError(null);
+                        }}
+                        disabled={isLoading}
+                        style={{ marginTop: 2 }}
+                      />
+                      <span>
+                        <strong style={{ display: 'block', color: 'var(--color-text)' }}>
+                          Sekaligus buat PIN pribadi (6–8 angka)
+                        </strong>
+                        <span style={{ color: 'var(--color-text-muted)' }}>
+                          Opsional (masa transisi). Setelah dibuat, login berikutnya cukup NIM + PIN.
+                        </span>
+                      </span>
+                    </label>
+
+                    {wantSetupPin && (
+                      <div style={{ marginTop: 'var(--space-3)', display: 'grid', gap: 'var(--space-3)' }}>
+                        <div>
+                          <label className="form-label" htmlFor={newPinId} style={{ fontSize: 'var(--text-xs)' }}>
+                            PIN Baru (6–8 Angka) <span className="required" aria-hidden="true">*</span>
+                          </label>
+                          <div style={{ position: 'relative' }}>
+                            <Lock
+                              size={15}
+                              aria-hidden="true"
+                              style={{
+                                position: 'absolute',
+                                left: 'var(--space-3)',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                color: 'var(--color-text-muted)',
+                                pointerEvents: 'none',
+                              }}
+                            />
+                            <input
+                              id={newPinId}
+                              name="kasir_new_pin_no_autofill"
+                              type={showNewPin ? 'text' : 'password'}
+                              inputMode="numeric"
+                              maxLength={8}
+                              className="form-input"
+                              placeholder="Minimal 6 digit angka"
+                              value={newPin}
+                              onChange={(e) => {
+                                setNewPin(sanitizePinInput(e.target.value));
+                                if (error) setError(null);
+                              }}
+                              autoComplete="new-password"
+                              disabled={isLoading}
+                              style={{
+                                paddingLeft: 'calc(var(--space-3) + 16px + var(--space-2))',
+                                paddingRight: '42px',
+                                fontFamily: 'var(--font-mono)',
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowNewPin((prev) => !prev)}
+                              aria-label={showNewPin ? 'Sembunyikan PIN baru' : 'Tampilkan PIN baru'}
+                              style={{
+                                position: 'absolute',
+                                right: '8px',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                border: 'none',
+                                background: 'transparent',
+                                color: 'var(--color-text-muted)',
+                                cursor: 'pointer',
+                                padding: '4px',
+                                display: 'flex',
+                                alignItems: 'center',
+                              }}
+                            >
+                              {showNewPin ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="form-label" htmlFor={confirmPinId} style={{ fontSize: 'var(--text-xs)' }}>
+                            Ulangi PIN Baru <span className="required" aria-hidden="true">*</span>
+                          </label>
+                          <div style={{ position: 'relative' }}>
+                            <KeyRound
+                              size={15}
+                              aria-hidden="true"
+                              style={{
+                                position: 'absolute',
+                                left: 'var(--space-3)',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                color: 'var(--color-text-muted)',
+                                pointerEvents: 'none',
+                              }}
+                            />
+                            <input
+                              id={confirmPinId}
+                              name="kasir_confirm_pin_no_autofill"
+                              type={showNewPin ? 'text' : 'password'}
+                              inputMode="numeric"
+                              maxLength={8}
+                              className="form-input"
+                              placeholder="Ketik ulang 6–8 digit PIN"
+                              value={confirmNewPin}
+                              onChange={(e) => {
+                                setConfirmNewPin(sanitizePinInput(e.target.value));
+                                if (error) setError(null);
+                              }}
+                              autoComplete="new-password"
+                              disabled={isLoading}
+                              style={{
+                                paddingLeft: 'calc(var(--space-3) + 16px + var(--space-2))',
+                                fontFamily: 'var(--font-mono)',
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <p style={{ margin: 0, fontSize: 11, color: 'var(--color-text-muted)' }}>
+                          Hindari PIN yang sama dengan NIM atau urutan mudah ditebak.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
 
               <button
                 type="submit"
@@ -1335,7 +1801,11 @@ export default function KasirLoginPage() {
                 {!isLoading && (
                   <>
                     <LogIn size={20} aria-hidden="true" />
-                    Buka Sistem Kasir (POS)
+                    {isPinLoginMode
+                      ? 'Masuk POS dengan PIN'
+                      : wantSetupPin
+                        ? 'Masuk & Simpan PIN Baru'
+                        : 'Buka Sistem Kasir (POS)'}
                   </>
                 )}
               </button>
@@ -1381,7 +1851,7 @@ export default function KasirLoginPage() {
                 </div>
               </div>
               <Link
-                href="/kasir/gudang/login"
+                href="/gudang/login"
                 className="btn btn-sm btn-primary"
                 style={{ fontSize: '0.72rem', fontWeight: 700, whiteSpace: 'nowrap', padding: '6px 12px' }}
               >

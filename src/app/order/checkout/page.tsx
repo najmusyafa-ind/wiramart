@@ -6,13 +6,14 @@
 // Harga & ongkir di sini HANYA tampilan; server menghitung ulang (anti-manipulasi).
 // =============================================================
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Loader2, ShoppingBag } from 'lucide-react';
 import { useCart } from '@/features/order/cart.context';
 import { calculateDeliveryFee } from '@/features/order/order.types';
 
+const subscribeNoop = () => () => {};
 const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
 // Lantai 1 = lokasi Wiramart → tidak ditawarkan sebagai tujuan antar (pakai Ambil Sendiri).
@@ -30,7 +31,7 @@ export default function CheckoutPage() {
   const router = useRouter();
   const { items, subtotal, clearCart, buyer, isLoadingBuyer } = useCart();
 
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(subscribeNoop, () => true, () => false);
   const [deliveryType, setDeliveryType] = useState<DeliveryType>('DELIVERY');
   const [floor, setFloor] = useState<number | null>(null);
   const [roomDetail, setRoomDetail] = useState('');
@@ -39,8 +40,6 @@ export default function CheckoutPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const lock = useRef(false); // guard sinkron double-tap (state async)
-
-  useEffect(() => setMounted(true), []);
 
   // Belum login → ke halaman masuk, kembali ke sini setelahnya
   useEffect(() => {

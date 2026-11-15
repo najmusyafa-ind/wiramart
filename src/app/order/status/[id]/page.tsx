@@ -8,6 +8,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -77,6 +78,7 @@ export default function OrderStatusPage() {
   const [order, setOrder] = useState<OrderView | null>(null);
   const [items, setItems] = useState<ItemView[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -88,6 +90,25 @@ export default function OrderStatusPage() {
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
   const [isChangingProof, setIsChangingProof] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
+
+  const updatePreviewSrc = useCallback((nextUrl: string | null) => {
+    if (previewUrlRef.current && previewUrlRef.current !== nextUrl) {
+      URL.revokeObjectURL(previewUrlRef.current);
+    }
+    previewUrlRef.current = nextUrl;
+    setPreviewSrc(nextUrl);
+  }, []);
+
+  // Pastikan objectURL dilepas saat komponen unmount
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
+    };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -110,11 +131,17 @@ export default function OrderStatusPage() {
   }, [id, router]);
 
   useEffect(() => {
-    load();
+    let active = true;
+    Promise.resolve().then(() => {
+      if (active) void load();
+    });
+    return () => {
+      active = false;
+    };
   }, [load]);
 
   async function cancel() {
-    if (cancelling || !window.confirm('Batalkan pesanan ini?')) return;
+    if (cancelling) return;
     setCancelling(true);
     setActionError(null);
     try {
@@ -123,6 +150,7 @@ export default function OrderStatusPage() {
       if (!res.ok || !json?.success) {
         setActionError(typeof json?.error === 'string' ? json.error : 'Gagal membatalkan pesanan.');
       }
+      setConfirmCancel(false);
       await load(); // status terbaru (bisa jadi sudah dikonfirmasi admin)
     } finally {
       setCancelling(false);
@@ -145,8 +173,7 @@ export default function OrderStatusPage() {
     }
 
     setUploadFile(file);
-    const objectUrl = URL.createObjectURL(file);
-    setPreviewSrc(objectUrl);
+    updatePreviewSrc(URL.createObjectURL(file));
   }
 
   async function submitBuktiTransfer() {
@@ -173,7 +200,7 @@ export default function OrderStatusPage() {
 
       setUploadSuccess('Bukti transfer berhasil dikirim. Menunggu verifikasi admin.');
       setUploadFile(null);
-      setPreviewSrc(null);
+      updatePreviewSrc(null);
       setIsChangingProof(false);
       await load();
     } catch {
@@ -195,7 +222,7 @@ export default function OrderStatusPage() {
   const header = (
     <div className="pwa-page-bar">
       <Link href="/order" className="pwa-back-btn" aria-label="Kembali ke katalog">
-        <ArrowLeft size={18} />
+        <ArrowLeft size={18} aria-hidden="true" />
       </Link>
       <h1>Status Pesanan</h1>
     </div>
@@ -218,7 +245,7 @@ export default function OrderStatusPage() {
       <main style={{ flex: 1 }} aria-busy="true">
         {header}
         <div style={{ display: 'grid', placeItems: 'center', padding: 48 }}>
-          <Loader2 size={26} style={{ animation: 'spin 1s linear infinite', color: 'var(--pwa-primary)' }} />
+          <Loader2 size={26} aria-hidden="true" style={{ animation: 'spin 1s linear infinite', color: 'var(--pwa-primary)' }} />
         </div>
       </main>
     );
@@ -233,7 +260,7 @@ export default function OrderStatusPage() {
       {header}
       <div className="pwa-page-body">
         <section className="pwa-section" aria-live="polite">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <strong style={{ fontSize: 15 }}>#{order.orderNumber}</strong>
             <span className={`pwa-status-chip ${ui.tone}`}>{ui.label}</span>
           </div>
@@ -242,11 +269,11 @@ export default function OrderStatusPage() {
 
         {order.handoverPin && PIN_VISIBLE.has(order.status) && (
           <section className="pwa-pin-box" aria-label="PIN serah terima">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, opacity: 0.85 }}>
-              <ShieldCheck size={14} /> PIN Serah Terima
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 12, opacity: 0.9 }}>
+              <ShieldCheck size={14} aria-hidden="true" /> PIN Serah Terima
             </div>
             <div className="pwa-pin-code">{order.handoverPin}</div>
-            <div style={{ fontSize: 11.5, opacity: 0.85 }}>
+            <div style={{ fontSize: 12, opacity: 0.9 }}>
               {order.deliveryType === 'DELIVERY'
                 ? 'Tunjukkan PIN ini ke runner saat pesanan tiba. Jangan dibagikan sebelumnya.'
                 : 'Tunjukkan PIN ini ke petugas saat mengambil pesanan.'}
@@ -270,14 +297,17 @@ export default function OrderStatusPage() {
             {order.paymentProofUrl && !isChangingProof ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--pwa-primary)', fontSize: 13, fontWeight: 600 }}>
-                  <CheckCircle2 size={16} />
+                  <CheckCircle2 size={16} aria-hidden="true" />
                   <span>Bukti transfer sudah terkirim</span>
                 </div>
                 <div style={{ borderRadius: 'var(--pwa-radius-md)', overflow: 'hidden', border: '1px solid var(--pwa-border)', maxHeight: 180, display: 'flex', justifyContent: 'center', background: 'var(--pwa-surface-muted)' }}>
-                  <img
+                  <Image
                     src={order.paymentProofUrl}
                     alt="Bukti Transfer"
-                    style={{ maxHeight: 180, width: 'auto', objectFit: 'contain' }}
+                    width={360}
+                    height={180}
+                    unoptimized
+                    style={{ maxHeight: 180, width: 'auto', height: 'auto', objectFit: 'contain' }}
                   />
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -285,20 +315,25 @@ export default function OrderStatusPage() {
                     href={order.paymentProofUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="pwa-btn-primary"
-                    style={{ flex: 1, minHeight: 38, fontSize: 12.5, background: 'var(--pwa-surface)', color: 'var(--pwa-text-main)', border: '1px solid var(--pwa-border)', boxShadow: 'none' }}
+                    className="pwa-btn-secondary"
+                    style={{ flex: 1, fontSize: 13 }}
                   >
-                    <ExternalLink size={13} /> Lihat Foto
+                    <ExternalLink size={14} aria-hidden="true" /> Lihat Foto
                   </a>
                   <button
                     type="button"
                     onClick={() => {
                       setIsChangingProof(true);
                       setUploadFile(null);
-                      setPreviewSrc(null);
+                      updatePreviewSrc(null);
                     }}
-                    className="pwa-btn-primary"
-                    style={{ flex: 1, minHeight: 38, fontSize: 12.5, background: 'var(--pwa-surface)', color: 'var(--pwa-primary)', border: '1px solid var(--pwa-primary)', boxShadow: 'none' }}
+                    className="pwa-btn-secondary"
+                    style={{
+                      flex: 1,
+                      fontSize: 13,
+                      color: 'var(--pwa-primary-text)',
+                      borderColor: 'var(--pwa-primary)',
+                    }}
                   >
                     Ganti Foto
                   </button>
@@ -321,10 +356,13 @@ export default function OrderStatusPage() {
                 {previewSrc ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ borderRadius: 'var(--pwa-radius-md)', overflow: 'hidden', border: '1px solid var(--pwa-border)', maxHeight: 180, display: 'flex', justifyContent: 'center', background: 'var(--pwa-surface-muted)' }}>
-                      <img
+                      <Image
                         src={previewSrc}
                         alt="Preview Bukti"
-                        style={{ maxHeight: 180, width: 'auto', objectFit: 'contain' }}
+                        width={360}
+                        height={180}
+                        unoptimized
+                        style={{ maxHeight: 180, width: 'auto', height: 'auto', objectFit: 'contain' }}
                       />
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
@@ -332,12 +370,12 @@ export default function OrderStatusPage() {
                         type="button"
                         onClick={() => {
                           setUploadFile(null);
-                          setPreviewSrc(null);
+                          updatePreviewSrc(null);
                           if (order.paymentProofUrl) setIsChangingProof(false);
                         }}
                         disabled={uploading}
-                        className="pwa-btn-primary"
-                        style={{ flex: 1, minHeight: 40, fontSize: 13, background: 'var(--pwa-surface)', color: 'var(--pwa-text-muted)', border: '1px solid var(--pwa-border)', boxShadow: 'none' }}
+                        className="pwa-btn-secondary"
+                        style={{ flex: 1, fontSize: 13 }}
                       >
                         Batal
                       </button>
@@ -346,9 +384,9 @@ export default function OrderStatusPage() {
                         onClick={submitBuktiTransfer}
                         disabled={uploading}
                         className="pwa-btn-primary"
-                        style={{ flex: 2, minHeight: 40, fontSize: 13 }}
+                        style={{ flex: 2, minHeight: 44, fontSize: 13.5 }}
                       >
-                        {uploading ? <Loader2 size={15} className="spin-icon" /> : <UploadCloud size={15} />}
+                        {uploading ? <Loader2 size={15} aria-hidden="true" className="spin-icon" /> : <UploadCloud size={15} aria-hidden="true" />}
                         <span>{uploading ? 'Mengunggah...' : 'Kirim Bukti'}</span>
                       </button>
                     </div>
@@ -357,24 +395,23 @@ export default function OrderStatusPage() {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="pwa-btn-primary"
+                    className="pwa-btn-secondary"
                     style={{
+                      width: '100%',
                       background: 'var(--pwa-surface-muted)',
-                      color: 'var(--pwa-text-main)',
                       border: '1.5px dashed var(--pwa-border-strong)',
-                      boxShadow: 'none',
                       minHeight: 48,
-                      fontSize: 13,
+                      fontSize: 13.5,
                     }}
                   >
-                    <ImageIcon size={18} style={{ color: 'var(--pwa-primary)' }} />
+                    <ImageIcon size={18} aria-hidden="true" style={{ color: 'var(--pwa-primary)' }} />
                     <span>Pilih Foto Bukti Transfer</span>
                   </button>
                 )}
 
                 {uploadError && <div className="pwa-alert" role="alert">{uploadError}</div>}
                 {uploadSuccess && (
-                  <div className="pwa-alert" style={{ background: 'var(--pwa-primary-light)', color: 'var(--pwa-primary)', borderColor: 'var(--pwa-primary)' }}>
+                  <div className="pwa-alert" style={{ background: 'var(--pwa-primary-light)', color: 'var(--pwa-primary-text)', borderColor: 'var(--pwa-primary)' }}>
                     {uploadSuccess}
                   </div>
                 )}
@@ -413,18 +450,53 @@ export default function OrderStatusPage() {
         {waitingPay && (
           <>
             {actionError && <div className="pwa-alert" role="alert">{actionError}</div>}
-            <button
-              type="button"
-              onClick={cancel}
-              disabled={cancelling}
-              className="pwa-btn-primary"
-              style={{ background: 'var(--pwa-surface)', color: 'hsl(0, 65%, 40%)', border: '1.5px solid hsl(0, 70%, 80%)', boxShadow: 'none' }}
-            >
-              {cancelling ? 'Membatalkan...' : 'Batalkan Pesanan'}
-            </button>
+            {confirmCancel ? (
+              <section
+                className="pwa-section"
+                role="region"
+                aria-label="Konfirmasi pembatalan pesanan"
+                style={{ borderColor: 'hsl(0, 70%, 80%)', background: 'hsl(0, 85%, 97%)' }}
+              >
+                <strong style={{ fontSize: 13.5, color: 'hsl(0, 65%, 32%)' }}>
+                  Yakin batalkan pesanan #{order.orderNumber}?
+                </strong>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCancel(false)}
+                    disabled={cancelling}
+                    className="pwa-btn-secondary"
+                    style={{ flex: 1 }}
+                  >
+                    Kembali
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cancel}
+                    disabled={cancelling}
+                    className="pwa-btn-danger-outline"
+                    style={{ flex: 1 }}
+                  >
+                    {cancelling ? 'Membatalkan...' : 'Ya, Batalkan'}
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmCancel(true)}
+                disabled={cancelling}
+                className="pwa-btn-danger-outline"
+              >
+                Batalkan Pesanan
+              </button>
+            )}
           </>
         )}
 
+        <Link href="/order/profile" className="pwa-btn-secondary">
+          Lihat Riwayat Pesanan
+        </Link>
         <Link href="/order" className="pwa-btn-primary">Belanja Lagi</Link>
       </div>
     </main>

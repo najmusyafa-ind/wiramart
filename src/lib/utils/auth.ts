@@ -51,6 +51,7 @@ export type AdminTokenPayload = {
   role: 'admin';
   adminRole?: AdminRole;
   username: string;
+  iat?: number;   // JWT Issued-At (Unix seconds) untuk binding idle timeout ke sesi aktif
 };
 
 export type EmployeeTokenPayload = {
@@ -58,6 +59,7 @@ export type EmployeeTokenPayload = {
   role: 'employee';
   shiftId?: string;
   name: string;
+  iat?: number;   // JWT Issued-At (Unix seconds) untuk binding idle timeout ke sesi aktif
 };
 
 /** Buyer session — login via NIM + Nama (tanpa password) */
@@ -148,12 +150,12 @@ export async function clearAuthCookies(role?: 'admin' | 'employee'): Promise<voi
   const cookieStore = await cookies();
 
   if (!role || role === 'admin') {
-    cookieStore.delete(ADMIN_ACCESS_COOKIE);
-    cookieStore.delete(ADMIN_REFRESH_COOKIE);
+    cookieStore.delete({ name: ADMIN_ACCESS_COOKIE, path: '/' });
+    cookieStore.delete({ name: ADMIN_REFRESH_COOKIE, path: '/' });
   }
   if (!role || role === 'employee') {
-    cookieStore.delete(KASIR_ACCESS_COOKIE);
-    cookieStore.delete(KASIR_REFRESH_COOKIE);
+    cookieStore.delete({ name: KASIR_ACCESS_COOKIE, path: '/' });
+    cookieStore.delete({ name: KASIR_REFRESH_COOKIE, path: '/' });
   }
 }
 

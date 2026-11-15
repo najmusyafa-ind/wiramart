@@ -17,8 +17,13 @@ import {
   employees,
   auditLogs,
 } from '@/lib/db/schema';
-import { eq, and, gt, lte, isNull, sql, desc, asc, count, or, ilike } from 'drizzle-orm';
-import { AppError } from '@/lib/utils/helpers';
+import { eq, and, gt, lte, isNull, desc, asc, count, or, ilike, inArray } from 'drizzle-orm';
+import {
+  AppError,
+  getTodayWib,
+  getOffsetDateWib,
+  computeFefoDiscountedPrice,
+} from '@/lib/utils/helpers';
 
 // ── TIPE DOMAIN STATUS & ENUMS ─────────────────────────────────
 
@@ -85,10 +90,6 @@ export function classifyAlertLevel(daysRemaining: number): AlertLevel {
   return 'H7_WATCH';
 }
 
-function getTodayWIB(): string {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-}
-
 function calculateDaysDifference(expiryDateStr: string, todayStr: string): number {
   const exp = new Date(expiryDateStr);
   const now = new Date(todayStr);
@@ -105,10 +106,8 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
   newAlerts: number;
   updatedAlerts: number;
 }> {
-  const todayStr = getTodayWIB();
-  const todayDate = new Date(todayStr);
-  const in7Days = new Date(todayDate.getTime() + 7 * 24 * 60 * 60 * 1000)
-    .toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+  const todayStr = getTodayWib();
+  const in7Days = getOffsetDateWib(7);
 
   // Cari seluruh batch aktif dengan sisa stok > 0 yang expired dalam <= 7 hari (atau sudah lewat)
   const expiringBatches = await db
@@ -151,10 +150,8 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
       // Buat alert baru status ALERT_ONLY
       await db.insert(productConditionReports).values({
         batchId: b.batchId,
-        productId: b.productId,
         alertLevel,
         qtyAtAlert: b.currentQty,
-        expiryDate: b.expiryDate,
         daysRemainingAtAlert: daysRemaining,
         status: 'ALERT_ONLY',
       });
@@ -235,15 +232,15 @@ export async function getConditionReports(options: {
   const [totalRow] = await db
     .select({ count: count() })
     .from(productConditionReports)
-    .innerJoin(products, eq(productConditionReports.productId, products.id))
     .innerJoin(stockBatches, eq(productConditionReports.batchId, stockBatches.id))
+    .innerJoin(products, eq(stockBatches.productId, products.id))
     .where(whereClause);
 
   const rows = await db
     .select({
       id: productConditionReports.id,
       batchId: productConditionReports.batchId,
-      productId: productConditionReports.productId,
+      productId: stockBatches.productId,
       productName: products.name,
       productUnit: products.unit,
       sellingPrice: products.sellingPrice,
@@ -251,7 +248,7 @@ export async function getConditionReports(options: {
       currentBatchQty: stockBatches.currentQty,
       alertLevel: productConditionReports.alertLevel,
       qtyAtAlert: productConditionReports.qtyAtAlert,
-      expiryDate: productConditionReports.expiryDate,
+      expiryDate: stockBatches.expiryDate,
       daysRemainingAtAlert: productConditionReports.daysRemainingAtAlert,
       status: productConditionReports.status,
       physicalCondition: productConditionReports.physicalCondition,
@@ -267,12 +264,12 @@ export async function getConditionReports(options: {
       createdAt: productConditionReports.createdAt,
     })
     .from(productConditionReports)
-    .innerJoin(products, eq(productConditionReports.productId, products.id))
     .innerJoin(stockBatches, eq(productConditionReports.batchId, stockBatches.id))
+    .innerJoin(products, eq(stockBatches.productId, products.id))
     .where(whereClause)
     .orderBy(
       // Prioritaskan alert terparah H1 -> H3 -> H5 -> H7
-      asc(productConditionReports.expiryDate),
+      asc(stockBatches.expiryDate),
       desc(productConditionReports.createdAt),
     )
     .limit(limit)
@@ -389,12 +386,15 @@ export async function decideConditionReport(
       );
     }
 
-    // Ambil data produk & batch
-    const [prod] = await tx.select().from(products).where(eq(products.id, report.productId)).limit(1);
+    // Ambil data batch dulu lalu produk (3NF: productId & expiryDate berasal dari stock_batches)
     const [batch] = await tx.select().from(stockBatches).where(eq(stockBatches.id, report.batchId)).limit(1);
+    if (!batch) {
+      throw new AppError('NOT_FOUND', 'Batch terkait tidak ditemukan.', 404);
+    }
 
-    if (!prod || !batch) {
-      throw new AppError('NOT_FOUND', 'Produk atau batch terkait tidak ditemukan.', 404);
+    const [prod] = await tx.select().from(products).where(eq(products.id, batch.productId)).limit(1);
+    if (!prod) {
+      throw new AppError('NOT_FOUND', 'Produk terkait tidak ditemukan.', 404);
     }
 
     let createdPolicyId: string | undefined;
@@ -402,12 +402,26 @@ export async function decideConditionReport(
 
     // JIKA KEPUTUSAN ADALAH DISCOUNT (Obral Darurat FEFO)
     if (input.decision === 'DISCOUNT' && input.approvedDiscountPct) {
+      const todayStr = getTodayWib();
+      if (batch.currentQty <= 0) {
+        throw new AppError(
+          'BAD_REQUEST',
+          'Stok batch sudah habis (0 unit) sehingga tidak dapat dibuat kebijakan diskon.',
+          400,
+        );
+      }
+      if (batch.expiryDate && batch.expiryDate < todayStr) {
+        throw new AppError(
+          'BAD_REQUEST',
+          'Batch sudah melewati tanggal kedaluwarsa dan diblokir untuk dijual diskon. Pilih DESTROY atau RETURN_SUPPLIER.',
+          400,
+        );
+      }
+
       const discountPct = input.approvedDiscountPct;
       const originalPrice = Math.round(Number(prod.sellingPrice));
-      const discountedPrice = Math.round(Math.floor(originalPrice * (1 - discountPct / 100)));
-
-      const todayStr = getTodayWIB();
-      const validUntil = report.expiryDate || todayStr;
+      const discountedPrice = computeFefoDiscountedPrice(originalPrice, discountPct);
+      const validUntil = batch.expiryDate || todayStr;
 
       // 1. Buat Kebijakan Diskon
       const [policy] = await tx
@@ -437,12 +451,8 @@ export async function decideConditionReport(
 
       await tx.insert(discountBarcodes).values({
         policyId: policy.id,
-        productId: prod.id,
         barcode: discountBarcodeStr,
-        discountedPrice,
-        discountPct: discountPct.toString(),
         remainingQty: batch.currentQty,
-        validUntil,
         isActive: true,
       });
 
@@ -529,49 +539,92 @@ export async function executeConditionReport(
       );
     }
 
-    // JIKA KEPUTUSAN ADALAH DESTROY (Pemusnahan Barang Kedaluwarsa)
-    if (report.managerDecision === 'DESTROY') {
-      const [batch] = await tx
-        .select()
+    // JIKA KEPUTUSAN ADALAH DESTROY (Pemusnahan) ATAU RETURN_SUPPLIER (Retur ke Supplier)
+    if (report.managerDecision === 'DESTROY' || report.managerDecision === 'RETURN_SUPPLIER') {
+      const [batchMeta] = await tx
+        .select({ productId: stockBatches.productId })
         .from(stockBatches)
         .where(eq(stockBatches.id, report.batchId))
         .limit(1);
 
-      const [prod] = await tx
-        .select({ stockQty: products.stockQty })
-        .from(products)
-        .where(eq(products.id, report.productId))
-        .limit(1);
+      if (batchMeta) {
+        // Kunci urut deterministik: products -> stock_batches (anti-deadlock)
+        const [prod] = await tx
+          .select({ stockQty: products.stockQty })
+          .from(products)
+          .where(eq(products.id, batchMeta.productId))
+          .for('update')
+          .limit(1);
 
-      if (batch && batch.currentQty > 0 && prod) {
-        const qtyToDestroy = batch.currentQty;
-        const qtyBefore = prod.stockQty;
-        const qtyAfter = Math.max(0, qtyBefore - qtyToDestroy);
+        const [batch] = await tx
+          .select()
+          .from(stockBatches)
+          .where(eq(stockBatches.id, report.batchId))
+          .for('update')
+          .limit(1);
 
-        // Nolkan batch di stock_batches
-        await tx
-          .update(stockBatches)
-          .set({ currentQty: 0, updatedAt: new Date() })
-          .where(eq(stockBatches.id, batch.id));
+        if (batch && batch.currentQty > 0 && prod) {
+          const now = new Date();
+          const qtyToRemove = batch.currentQty;
+          const qtyBefore = prod.stockQty;
+          const actualDeducted = Math.min(qtyBefore, qtyToRemove);
+          const qtyAfter = qtyBefore - actualDeducted;
 
-        // Kurangi total stok produk di products
-        await tx
-          .update(products)
-          .set({
-            stockQty: qtyAfter,
-            updatedAt: new Date(),
-          })
-          .where(eq(products.id, report.productId));
+          // Nolkan batch di stock_batches
+          await tx
+            .update(stockBatches)
+            .set({ currentQty: 0, updatedAt: now })
+            .where(eq(stockBatches.id, batch.id));
 
-        // Catat ke stock_adjustments (audit kerugian)
-        await tx.insert(stockAdjustments).values({
-          productId: report.productId,
-          qtyBefore,
-          qtyAfter,
-          qtyDiff: -qtyToDestroy,
-          reason: `PEMUSNAHAN FEFO (${report.alertLevel}): ${input.executionNote}`,
-          adjustedByAdminId: report.decidedByAdminId!,
-        });
+          // Nonaktifkan seluruh kebijakan diskon & barcode diskon yang menempel pada batch ini
+          const deactivatedPolicies = await tx
+            .update(discountPolicies)
+            .set({ isActive: false, updatedAt: now })
+            .where(and(eq(discountPolicies.batchId, batch.id), eq(discountPolicies.isActive, true)))
+            .returning({ id: discountPolicies.id });
+
+          if (deactivatedPolicies.length > 0) {
+            await tx
+              .update(discountBarcodes)
+              .set({ isActive: false, remainingQty: 0 })
+              .where(
+                and(
+                  inArray(
+                    discountBarcodes.policyId,
+                    deactivatedPolicies.map((p) => p.id),
+                  ),
+                  eq(discountBarcodes.isActive, true),
+                ),
+              );
+          }
+
+          // Kurangi total stok produk di products
+          await tx
+            .update(products)
+            .set({
+              stockQty: qtyAfter,
+              updatedAt: now,
+            })
+            .where(eq(products.id, batch.productId));
+
+          if (!report.decidedByAdminId) {
+            throw new AppError('BAD_REQUEST', 'Admin pemberi keputusan tidak tercatat pada laporan ini.', 400);
+          }
+
+          const actionLabel =
+            report.managerDecision === 'DESTROY' ? 'PEMUSNAHAN FEFO' : 'RETUR SUPPLIER FEFO';
+
+          // Catat ke stock_adjustments lengkap dengan batchId FK, pelaksana gudang & alasan
+          await tx.insert(stockAdjustments).values({
+            productId: batch.productId,
+            batchId: batch.id,
+            qtyBefore,
+            qtyAfter,
+            qtyDiff: -actualDeducted,
+            reason: `${actionLabel} (${report.alertLevel}) [Pelaksana Gudang: ${emp.fullName}]: ${input.executionNote.trim()}`,
+            adjustedByAdminId: report.decidedByAdminId,
+          });
+        }
       }
     }
 

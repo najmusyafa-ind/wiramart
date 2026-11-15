@@ -10,6 +10,7 @@ import {
   stockReceiveDrafts,
   stockReceiveItems,
   stockBatches,
+  suppliers,
   products,
   employees,
   admins,
@@ -21,13 +22,14 @@ import {
 import { eq, and, desc, isNull, inArray, sql, count } from 'drizzle-orm';
 import { AppError } from '@/lib/utils/helpers';
 import { ManagerDutyService } from '@/lib/services/managerDutyService';
+import { resolveNormalizedSupplierId } from '@/lib/services/supplierResolver';
 
 
 // ── ZOD SCHEMAS (100% Runtime Validation) ──────────────────────
 
 export const StockReceiveItemInputSchema = z.object({
   productId: z.string().uuid('ID produk tidak valid'),
-  productName: z.string().trim().min(1, 'Nama produk wajib diisi').max(200),
+  productName: z.string().trim().max(200).optional(),
   batchCode: z.string().trim().min(1, 'Kode batch wajib diisi').max(50),
   qty: z.number().int('Jumlah harus bulat').min(1, 'Jumlah minimal 1').max(100_000, 'Jumlah maksimal 100.000'),
   costPrice: z.number().min(0, 'HPP tidak boleh negatif'),
@@ -146,11 +148,12 @@ export async function createStockReceiveDraft(
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
   for (const item of input.items) {
     const prodMeta = foundProducts.find((p) => p.id === item.productId);
+    const prodLabel = prodMeta?.name || item.productName || item.productId;
     if (prodMeta?.isPerishable && !item.expiryDate) {
-      throw new AppError('BAD_REQUEST', `Produk basah/perishable "${item.productName}" wajib memiliki tanggal kadaluarsa.`, 400);
+      throw new AppError('BAD_REQUEST', `Produk basah/perishable "${prodLabel}" wajib memiliki tanggal kadaluarsa.`, 400);
     }
     if (item.expiryDate && item.expiryDate < todayStr) {
-      throw new AppError('BAD_REQUEST', `Tanggal kadaluarsa "${item.productName}" (${item.expiryDate}) sudah terlewat. Tidak bisa menerima barang expired.`, 400);
+      throw new AppError('BAD_REQUEST', `Tanggal kadaluarsa "${prodLabel}" (${item.expiryDate}) sudah terlewat. Tidak bisa menerima barang expired.`, 400);
     }
   }
 
@@ -158,13 +161,17 @@ export async function createStockReceiveDraft(
 
   // Insert Draft Header + Items Atomik
   const createdDraft = await db.transaction(async (tx) => {
+    const resolvedSupplierId = await resolveNormalizedSupplierId(tx, {
+      supplierId: input.supplierId,
+      supplierName: input.supplierName,
+    });
+
     const [draft] = await tx
       .insert(stockReceiveDrafts)
       .values({
         receiveNumber,
         createdByEmployeeId: employeeId,
-        supplierId: input.supplierId || null,
-        supplierName: input.supplierName?.trim() || null,
+        supplierId: resolvedSupplierId,
         deliveryNote: input.deliveryNote?.trim() || null,
         status: 'DRAFT',
       })
@@ -173,7 +180,6 @@ export async function createStockReceiveDraft(
     const itemValues = input.items.map((it) => ({
       draftId: draft.id,
       productId: it.productId,
-      productName: it.productName.trim(),
       batchCode: it.batchCode.trim(),
       qty: it.qty,
       costPrice: it.costPrice.toString(),
@@ -223,16 +229,23 @@ export async function updateStockReceiveDraft(
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
   for (const item of input.items) {
     if (item.expiryDate && item.expiryDate < todayStr) {
-      throw new AppError('BAD_REQUEST', `Tanggal kadaluarsa "${item.productName}" sudah lewat.`, 400);
+      throw new AppError('BAD_REQUEST', `Tanggal kadaluarsa "${item.productName || item.productId}" sudah lewat.`, 400);
     }
   }
 
   await db.transaction(async (tx) => {
+    const resolvedSupplierId =
+      input.supplierId !== undefined || input.supplierName !== undefined
+        ? await resolveNormalizedSupplierId(tx, {
+            supplierId: input.supplierId,
+            supplierName: input.supplierName,
+          })
+        : existing.supplierId;
+
     await tx
       .update(stockReceiveDrafts)
       .set({
-        supplierId: input.supplierId !== undefined ? input.supplierId : undefined,
-        supplierName: input.supplierName?.trim() || null,
+        supplierId: resolvedSupplierId,
         deliveryNote: input.deliveryNote?.trim() || null,
         status: 'DRAFT', // Reset ke DRAFT jika sebelumnya REVISED
         updatedAt: new Date(),
@@ -245,7 +258,6 @@ export async function updateStockReceiveDraft(
     const itemValues = input.items.map((it) => ({
       draftId,
       productId: it.productId,
-      productName: it.productName.trim(),
       batchCode: it.batchCode.trim(),
       qty: it.qty,
       costPrice: it.costPrice.toString(),
@@ -369,9 +381,11 @@ export async function approveStockReceiveDraft(draftId: string, managerAdminId: 
     for (const item of items) {
       const expClass = computeExpiryClass(item.expiryDate);
 
-      // Insert baris batch baru
+      // Insert baris batch baru terhubung ke receive_item_id & supplier_id (3NF)
       await tx.insert(stockBatches).values({
         productId: item.productId,
+        receiveItemId: item.id,
+        supplierId: draft.supplierId ?? null,
         batchCode: item.batchCode,
         costPrice: item.costPrice,
         initialQty: item.qty,
@@ -555,7 +569,7 @@ export async function getStockReceiveDrafts(options: {
       id: stockReceiveDrafts.id,
       receiveNumber: stockReceiveDrafts.receiveNumber,
       supplierId: stockReceiveDrafts.supplierId,
-      supplierName: stockReceiveDrafts.supplierName,
+      supplierName: suppliers.name,
       deliveryNote: stockReceiveDrafts.deliveryNote,
       status: stockReceiveDrafts.status,
       submittedAt: stockReceiveDrafts.submittedAt,
@@ -568,6 +582,7 @@ export async function getStockReceiveDrafts(options: {
     })
     .from(stockReceiveDrafts)
     .innerJoin(employees, eq(stockReceiveDrafts.createdByEmployeeId, employees.id))
+    .leftJoin(suppliers, eq(stockReceiveDrafts.supplierId, suppliers.id))
     .where(and(...conditions))
     .orderBy(desc(stockReceiveDrafts.createdAt))
     .limit(limit)
@@ -596,7 +611,7 @@ export async function getStockReceiveDraftDetail(
       receiveNumber: stockReceiveDrafts.receiveNumber,
       createdByEmployeeId: stockReceiveDrafts.createdByEmployeeId,
       supplierId: stockReceiveDrafts.supplierId,
-      supplierName: stockReceiveDrafts.supplierName,
+      supplierName: suppliers.name,
       deliveryNote: stockReceiveDrafts.deliveryNote,
       status: stockReceiveDrafts.status,
       submittedAt: stockReceiveDrafts.submittedAt,
@@ -612,6 +627,7 @@ export async function getStockReceiveDraftDetail(
     })
     .from(stockReceiveDrafts)
     .innerJoin(employees, eq(stockReceiveDrafts.createdByEmployeeId, employees.id))
+    .leftJoin(suppliers, eq(stockReceiveDrafts.supplierId, suppliers.id))
     .where(and(eq(stockReceiveDrafts.id, draftId), isNull(stockReceiveDrafts.deletedAt)))
     .limit(1);
 
@@ -628,7 +644,7 @@ export async function getStockReceiveDraftDetail(
     .select({
       id: stockReceiveItems.id,
       productId: stockReceiveItems.productId,
-      productName: stockReceiveItems.productName,
+      productName: products.name,
       batchCode: stockReceiveItems.batchCode,
       qty: stockReceiveItems.qty,
       costPrice: stockReceiveItems.costPrice,
@@ -637,6 +653,7 @@ export async function getStockReceiveDraftDetail(
       createdAt: stockReceiveItems.createdAt,
     })
     .from(stockReceiveItems)
+    .innerJoin(products, eq(stockReceiveItems.productId, products.id))
     .where(eq(stockReceiveItems.draftId, draftId))
     .orderBy(stockReceiveItems.createdAt);
 

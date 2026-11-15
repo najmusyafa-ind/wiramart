@@ -57,6 +57,18 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
   REJECTED: { bg: 'hsl(0 72% 51% / 0.12)',   color: 'hsl(0 65% 42%)',   label: 'Ditolak' },
 };
 
+async function requestSwapPortalData(signal?: AbortSignal) {
+  const [jadwalRes, historyRes] = await Promise.all([
+    fetch('/api/kasir/jadwal-saya', { signal }),
+    fetch('/api/kasir/swap-request', { signal }),
+  ]);
+  const jadwalJson = await jadwalRes.json() as { data?: { jadwalSaya: JadwalSaya[]; slotTersedia: SlotTersedia[] } };
+  const historyJson = await historyRes.json() as {
+    data?: SwapRequest[] | { history?: SwapRequest[]; incoming?: IncomingSwapRequest[] };
+  };
+  return { jadwalJson, historyJson };
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────
 export default function TukarShiftPage() {
   const [jadwalSaya, setJadwalSaya] = useState<JadwalSaya[]>([]);
@@ -73,16 +85,8 @@ export default function TukarShiftPage() {
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [jadwalRes, historyRes] = await Promise.all([
-        fetch('/api/kasir/jadwal-saya'),
-        fetch('/api/kasir/swap-request'),
-      ]);
-      const jadwalJson = await jadwalRes.json() as { data?: { jadwalSaya: JadwalSaya[]; slotTersedia: SlotTersedia[] } };
-      const historyJson = await historyRes.json() as { data?: SwapRequest[] | { history?: SwapRequest[]; incoming?: IncomingSwapRequest[] } };
-
+  const applySwapPortalData = useCallback(
+    ({ jadwalJson, historyJson }: Awaited<ReturnType<typeof requestSwapPortalData>>) => {
       if (jadwalJson.data) {
         const sorted = [...jadwalJson.data.jadwalSaya].sort(
           (a, b) => (HARI_ORDER[a.dayOfWeek] ?? 9) - (HARI_ORDER[b.dayOfWeek] ?? 9),
@@ -99,12 +103,21 @@ export default function TukarShiftPage() {
           setIncoming(historyJson.data.incoming ?? []);
         }
       }
+    },
+    [],
+  );
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const payload = await requestSwapPortalData();
+      applySwapPortalData(payload);
     } catch {
       // Gagal load
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applySwapPortalData]);
 
   async function handlePeerAction(id: string, action: 'APPROVE' | 'REJECT') {
     setActionLoadingId(id);
@@ -128,7 +141,26 @@ export default function TukarShiftPage() {
     }
   }
 
-  useEffect(() => { void fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    const controller = new AbortController();
+
+    requestSwapPortalData(controller.signal)
+      .then((payload) => {
+        if (!controller.signal.aborted) {
+          applySwapPortalData(payload);
+        }
+      })
+      .catch(() => {
+        // Gagal load atau dibatalkan saat unmount
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [applySwapPortalData]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

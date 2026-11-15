@@ -11,6 +11,8 @@ import {
   Trash2,
   Check,
   Coffee,
+  Tag,
+  Package,
 } from 'lucide-react';
 
 interface FoodItem {
@@ -31,91 +33,208 @@ interface SisaMakananModalProps {
   onSuccess?: () => void;
 }
 
+type CutOffDisposition =
+  | 'RETUR'
+  | 'BUANG_BASI'
+  | 'HABIS'
+  | 'SIMPAN'
+  | 'MAKAN_PETUGAS'
+  | 'OBRAL';
+
 type ItemState = {
   qtySisa: number;
-  disposition: 'RETUR' | 'BUANG_BASI' | 'HABIS' | 'SIMPAN' | 'MAKAN_PETUGAS' | 'OBRAL';
+  disposition: CutOffDisposition;
   notes: string;
 };
+
+type DispositionOption = {
+  value: CutOffDisposition;
+  label: string;
+  icon: React.ReactNode;
+  activeBorder: string;
+  activeBg: string;
+  activeColor: string;
+};
+
+const DISPOSITION_OPTIONS: DispositionOption[] = [
+  {
+    value: 'RETUR',
+    label: 'Retur Mitra',
+    icon: <RotateCcw size={11} aria-hidden="true" />,
+    activeBorder: '1.5px solid hsl(217 91% 60%)',
+    activeBg: 'hsl(217 91% 95%)',
+    activeColor: 'hsl(217 91% 35%)',
+  },
+  {
+    value: 'OBRAL',
+    label: 'Obral Sore',
+    icon: <Tag size={11} aria-hidden="true" />,
+    activeBorder: '1.5px solid hsl(28 92% 50%)',
+    activeBg: 'hsl(28 92% 94%)',
+    activeColor: 'hsl(28 92% 35%)',
+  },
+  {
+    value: 'SIMPAN',
+    label: 'Simpan Chiller',
+    icon: <Package size={11} aria-hidden="true" />,
+    activeBorder: '1.5px solid hsl(199 89% 45%)',
+    activeBg: 'hsl(199 89% 94%)',
+    activeColor: 'hsl(199 89% 32%)',
+  },
+  {
+    value: 'MAKAN_PETUGAS',
+    label: 'Konsumsi',
+    icon: <Coffee size={11} aria-hidden="true" />,
+    activeBorder: '1.5px solid hsl(142 76% 40%)',
+    activeBg: 'hsl(142 76% 94%)',
+    activeColor: 'hsl(142 76% 30%)',
+  },
+  {
+    value: 'BUANG_BASI',
+    label: 'Basi/Buang',
+    icon: <Trash2 size={11} aria-hidden="true" />,
+    activeBorder: '1.5px solid var(--color-error)',
+    activeBg: 'var(--color-error-light)',
+    activeColor: 'var(--color-error)',
+  },
+  {
+    value: 'HABIS',
+    label: 'Habis Laku',
+    icon: <Check size={11} aria-hidden="true" />,
+    activeBorder: '1.5px solid var(--color-success)',
+    activeBg: 'var(--color-success-light)',
+    activeColor: 'var(--color-success)',
+  },
+];
+
+function getDefaultDisposition(item: FoodItem): CutOffDisposition {
+  if (item.stockQty <= 0) return 'HABIS';
+  if (item.perishableType === 'BELI_LEPAS') return 'OBRAL';
+  return 'RETUR';
+}
+
+function getDefaultItemState(item: FoodItem): ItemState {
+  return {
+    qtySisa: Math.max(0, item.stockQty),
+    disposition: getDefaultDisposition(item),
+    notes: '',
+  };
+}
 
 export default function SisaMakananModal({
   isOpen,
   onClose,
   onSuccess,
 }: SisaMakananModalProps) {
+  if (!isOpen) return null;
+  return <SisaMakananModalBody onClose={onClose} onSuccess={onSuccess} />;
+}
+
+function SisaMakananModalBody({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess?: () => void;
+}) {
   const [items, setItems] = useState<FoodItem[]>([]);
   const [stateMap, setStateMap] = useState<Record<string, ItemState>>({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
-    if (isOpen) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLoading(true);
-      setError(null);
-      setSuccessMsg(null);
-      fetch('/api/kasir/makanan-sisa')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((json) => {
-          if (ignore) return;
-          if (json?.data?.items) {
-            const list: FoodItem[] = json.data.items;
-            setItems(list);
-            const initial: Record<string, ItemState> = {};
-            for (const item of list) {
-              initial[item.id] = {
-                qtySisa: item.stockQty,
-                disposition: 'RETUR', // default sop wiramart: retur ke penitip
-                notes: '',
-              };
-            }
-            setStateMap(initial);
-          } else {
-            setError('Gagal memuat daftar makanan harian.');
-          }
-        })
-        .catch(() => {
-          if (!ignore) {
-            setError('Koneksi terputus. Coba lagi.');
-          }
-        })
-        .finally(() => {
-          if (!ignore) {
-            setLoading(false);
-          }
-        });
-    }
+    const controller = new AbortController();
+
+    fetch('/api/kasir/makanan-sisa', { signal: controller.signal })
+      .then(async (res) => {
+        const json = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(json?.error ?? 'Gagal memuat daftar makanan harian.');
+        }
+        return json;
+      })
+      .then((json) => {
+        if (ignore) return;
+        const list: FoodItem[] = json?.data?.items ?? [];
+        setItems(list);
+        const initial: Record<string, ItemState> = {};
+        for (const item of list) {
+          initial[item.id] = getDefaultItemState(item);
+        }
+        setStateMap(initial);
+      })
+      .catch((err: unknown) => {
+        if (ignore) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setError(
+          err instanceof Error ? err.message : 'Koneksi terputus. Coba lagi.',
+        );
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoading(false);
+        }
+      });
+
     return () => {
       ignore = true;
+      controller.abort();
     };
-  }, [isOpen]);
+  }, []);
 
-  function handleQtyChange(id: string, delta: number) {
+  function handleQtyChange(item: FoodItem, delta: number) {
     setStateMap((prev) => {
-      const current = prev[id] ?? { qtySisa: 0, disposition: 'RETUR', notes: '' };
+      const current = prev[item.id] ?? getDefaultItemState(item);
       const nextQty = Math.max(0, current.qtySisa + delta);
+      const fallbackNonZeroDisp =
+        item.perishableType === 'BELI_LEPAS' ? 'OBRAL' : 'RETUR';
       return {
         ...prev,
-        [id]: {
+        [item.id]: {
           ...current,
           qtySisa: nextQty,
-          disposition: nextQty === 0 ? 'HABIS' : current.disposition === 'HABIS' ? 'RETUR' : current.disposition,
+          disposition:
+            nextQty === 0
+              ? 'HABIS'
+              : current.disposition === 'HABIS'
+              ? fallbackNonZeroDisp
+              : current.disposition,
         },
       };
     });
   }
 
-  function handleDispositionChange(id: string, disp: ItemState['disposition']) {
+  function handleDispositionChange(item: FoodItem, disp: CutOffDisposition) {
     setStateMap((prev) => {
-      const current = prev[id] ?? { qtySisa: 0, disposition: 'RETUR', notes: '' };
+      const current = prev[item.id] ?? getDefaultItemState(item);
+      const nextQty =
+        disp === 'HABIS'
+          ? 0
+          : current.qtySisa === 0 && item.stockQty > 0
+          ? item.stockQty
+          : current.qtySisa;
       return {
         ...prev,
-        [id]: {
+        [item.id]: {
           ...current,
           disposition: disp,
-          qtySisa: disp === 'HABIS' ? 0 : current.qtySisa,
+          qtySisa: nextQty,
+        },
+      };
+    });
+  }
+
+  function handleNotesChange(item: FoodItem, notes: string) {
+    setStateMap((prev) => {
+      const current = prev[item.id] ?? getDefaultItemState(item);
+      return {
+        ...prev,
+        [item.id]: {
+          ...current,
+          notes,
         },
       };
     });
@@ -130,7 +249,7 @@ export default function SisaMakananModal({
     setSuccessMsg(null);
 
     const payloadItems = items.map((item) => {
-      const st = stateMap[item.id] ?? { qtySisa: item.stockQty, disposition: 'RETUR', notes: '' };
+      const st = stateMap[item.id] ?? getDefaultItemState(item);
       return {
         productId: item.id,
         qtySisaFisik: st.qtySisa,
@@ -164,8 +283,6 @@ export default function SisaMakananModal({
     }
   }
 
-  if (!isOpen) return null;
-
   return (
     <div
       role="dialog"
@@ -188,8 +305,8 @@ export default function SisaMakananModal({
         className="card"
         style={{
           width: '100%',
-          maxWidth: 540,
-          maxHeight: '90vh',
+          maxWidth: 560,
+          maxHeight: '90dvh',
           display: 'flex',
           flexDirection: 'column',
           boxShadow: 'var(--shadow-xl)',
@@ -208,7 +325,7 @@ export default function SisaMakananModal({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Utensils size={20} style={{ color: 'hsl(32, 95%, 44%)' }} />
+            <Utensils size={20} aria-hidden="true" style={{ color: 'hsl(32, 95%, 44%)' }} />
             <div>
               <h2
                 id="cutoff-makanan-title"
@@ -218,10 +335,10 @@ export default function SisaMakananModal({
                   margin: 0,
                 }}
               >
-                🍱 Opname Sisa Makanan Jam 15:00
+                🍱 Opname Sisa Makanan Jam 15:00 WIB
               </h2>
               <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-                Catat sisa makanan cepat basi / non-barcode sebelum toko tutup
+                Catat sisa makanan cepat basi / non-barcode sebelum tutup shift sore
               </div>
             </div>
           </div>
@@ -232,7 +349,13 @@ export default function SisaMakananModal({
             style={{
               background: 'none',
               border: 'none',
-              padding: 4,
+              minWidth: 44,
+              minHeight: 44,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 'var(--radius-md)',
+              flexShrink: 0,
               cursor: 'pointer',
               color: 'var(--color-text-muted)',
             }}
@@ -245,6 +368,7 @@ export default function SisaMakananModal({
         <div
           style={{
             padding: 'var(--space-4)',
+            paddingBottom: 'calc(var(--space-4) + env(safe-area-inset-bottom, 0px))',
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
@@ -253,6 +377,7 @@ export default function SisaMakananModal({
         >
           {error && (
             <div
+              role="alert"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -264,7 +389,7 @@ export default function SisaMakananModal({
                 fontSize: '0.8rem',
               }}
             >
-              <AlertTriangle size={16} />
+              <AlertTriangle size={16} aria-hidden="true" />
               {error}
             </div>
           )}
@@ -282,7 +407,7 @@ export default function SisaMakananModal({
                 fontSize: '0.8rem',
               }}
             >
-              <CheckCircle2 size={16} />
+              <CheckCircle2 size={16} aria-hidden="true" />
               {successMsg}
             </div>
           )}
@@ -299,7 +424,7 @@ export default function SisaMakananModal({
           ) : (
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {/* Tombol Aksi Cepat Massal */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 2 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', gap: 6, marginBottom: 2 }}>
                 <button
                   type="button"
                   onClick={() => {
@@ -307,18 +432,18 @@ export default function SisaMakananModal({
                       const updated = { ...prev };
                       for (const it of items) {
                         updated[it.id] = {
-                          qtySisa: it.stockQty,
+                          qtySisa: Math.max(0, it.stockQty),
                           disposition: it.stockQty > 0 ? 'RETUR' : 'HABIS',
-                          notes: '',
+                          notes: prev[it.id]?.notes ?? '',
                         };
                       }
                       return updated;
                     });
                   }}
                   className="btn btn-secondary"
-                  style={{ fontSize: '0.72rem', padding: '6px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 600 }}
+                  style={{ minHeight: 44, fontSize: '0.8rem', padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontWeight: 600 }}
                 >
-                  <RotateCcw size={12} /> Set Semua Diretur
+                  <RotateCcw size={14} aria-hidden="true" /> Set Semua Diretur
                 </button>
                 <button
                   type="button"
@@ -329,22 +454,22 @@ export default function SisaMakananModal({
                         updated[it.id] = {
                           qtySisa: 0,
                           disposition: 'HABIS',
-                          notes: '',
+                          notes: prev[it.id]?.notes ?? '',
                         };
                       }
                       return updated;
                     });
                   }}
                   className="btn btn-secondary"
-                  style={{ fontSize: '0.72rem', padding: '6px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 600 }}
+                  style={{ minHeight: 44, fontSize: '0.8rem', padding: '8px 12px', borderRadius: 'var(--radius-sm)', fontWeight: 600 }}
                 >
-                  <Check size={12} /> Set Semua Habis Laku
+                  <Check size={14} aria-hidden="true" /> Set Semua Habis Laku
                 </button>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '55vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '55dvh', overflowY: 'auto' }}>
                 {items.map((item) => {
-                  const st = stateMap[item.id] ?? { qtySisa: item.stockQty, disposition: 'RETUR', notes: '' };
+                  const st = stateMap[item.id] ?? getDefaultItemState(item);
                   return (
                     <div
                       key={item.id}
@@ -358,19 +483,19 @@ export default function SisaMakananModal({
                         gap: 8,
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                        <div style={{ minWidth: 0, flex: '1 1 180px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                             <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{item.name}</span>
                             {item.perishableType && (
                               <span
                                 style={{
-                                  fontSize: '0.62rem',
-                                  padding: '1px 5px',
+                                  fontSize: '0.6875rem',
+                                  padding: '1px 6px',
                                   borderRadius: 4,
                                   fontWeight: 700,
                                   background: item.perishableType === 'BELI_LEPAS' ? 'hsl(38 92% 92%)' : 'hsl(217 91% 95%)',
-                                  color: item.perishableType === 'BELI_LEPAS' ? 'hsl(38 92% 35%)' : 'hsl(217 91% 40%)',
+                                  color: item.perishableType === 'BELI_LEPAS' ? 'hsl(38 92% 30%)' : 'hsl(217 91% 38%)',
                                   border: `1px solid ${item.perishableType === 'BELI_LEPAS' ? 'hsl(38 92% 75%)' : 'hsl(217 91% 80%)'}`,
                                 }}
                               >
@@ -378,45 +503,55 @@ export default function SisaMakananModal({
                               </span>
                             )}
                           </div>
-                          <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
                             Stok sistem: {item.stockQty} {item.unit} &bull; Rp {Number(item.sellingPrice).toLocaleString('id-ID')}
                           </div>
                         </div>
 
                         {/* Stepper Sisa Fisik */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginRight: 4 }}>Sisa:</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginRight: 2 }}>Sisa:</span>
                           <button
                             type="button"
-                            onClick={() => handleQtyChange(item.id, -1)}
+                            onClick={() => handleQtyChange(item, -1)}
                             disabled={st.qtySisa <= 0}
+                            aria-label={`Kurangi sisa ${item.name}`}
                             style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 4,
+                              minWidth: 44,
+                              minHeight: 44,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              borderRadius: 'var(--radius-sm)',
                               border: '1px solid var(--color-border)',
                               background: 'var(--color-surface)',
                               cursor: st.qtySisa <= 0 ? 'not-allowed' : 'pointer',
                               fontWeight: 700,
+                              fontSize: '1rem',
                               opacity: st.qtySisa <= 0 ? 0.4 : 1,
                             }}
                           >
                             -
                           </button>
-                          <span style={{ minWidth: 28, textAlign: 'center', fontWeight: 800, fontSize: '0.9rem' }}>
+                          <span style={{ minWidth: 28, textAlign: 'center', fontWeight: 800, fontSize: '0.95rem' }}>
                             {st.qtySisa}
                           </span>
                           <button
                             type="button"
-                            onClick={() => handleQtyChange(item.id, 1)}
+                            onClick={() => handleQtyChange(item, 1)}
+                            aria-label={`Tambah sisa ${item.name}`}
                             style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 4,
+                              minWidth: 44,
+                              minHeight: 44,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              borderRadius: 'var(--radius-sm)',
                               border: '1px solid var(--color-border)',
                               background: 'var(--color-surface)',
                               cursor: 'pointer',
                               fontWeight: 700,
+                              fontSize: '1rem',
                             }}
                           >
                             +
@@ -424,77 +559,48 @@ export default function SisaMakananModal({
                         </div>
                       </div>
 
-                      {/* Tombol Pilihan Disposisi */}
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4 }}>
-                        <button
-                          type="button"
-                          onClick={() => handleDispositionChange(item.id, 'RETUR')}
-                          style={{
-                            padding: '4px 4px',
-                            borderRadius: 4,
-                            fontSize: '0.65rem',
-                            fontWeight: 700,
-                            border: st.disposition === 'RETUR' ? '1.5px solid hsl(217 91% 60%)' : '1px solid var(--color-border)',
-                            background: st.disposition === 'RETUR' ? 'hsl(217 91% 95%)' : 'var(--color-surface)',
-                            color: st.disposition === 'RETUR' ? 'hsl(217 91% 35%)' : 'var(--color-text-secondary)',
-                            cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
-                          }}
-                        >
-                          <RotateCcw size={11} /> Retur Mitra
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDispositionChange(item.id, 'MAKAN_PETUGAS')}
-                          style={{
-                            padding: '4px 4px',
-                            borderRadius: 4,
-                            fontSize: '0.65rem',
-                            fontWeight: 700,
-                            border: st.disposition === 'MAKAN_PETUGAS' ? '1.5px solid hsl(142 76% 40%)' : '1px solid var(--color-border)',
-                            background: st.disposition === 'MAKAN_PETUGAS' ? 'hsl(142 76% 94%)' : 'var(--color-surface)',
-                            color: st.disposition === 'MAKAN_PETUGAS' ? 'hsl(142 76% 30%)' : 'var(--color-text-secondary)',
-                            cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
-                          }}
-                        >
-                          <Coffee size={11} /> Konsumsi
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDispositionChange(item.id, 'BUANG_BASI')}
-                          style={{
-                            padding: '4px 4px',
-                            borderRadius: 4,
-                            fontSize: '0.65rem',
-                            fontWeight: 700,
-                            border: st.disposition === 'BUANG_BASI' ? '1.5px solid var(--color-error)' : '1px solid var(--color-border)',
-                            background: st.disposition === 'BUANG_BASI' ? 'var(--color-error-light)' : 'var(--color-surface)',
-                            color: st.disposition === 'BUANG_BASI' ? 'var(--color-error)' : 'var(--color-text-secondary)',
-                            cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
-                          }}
-                        >
-                          <Trash2 size={11} /> Basi/Buang
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDispositionChange(item.id, 'HABIS')}
-                          style={{
-                            padding: '4px 4px',
-                            borderRadius: 4,
-                            fontSize: '0.65rem',
-                            fontWeight: 700,
-                            border: st.disposition === 'HABIS' ? '1.5px solid var(--color-success)' : '1px solid var(--color-border)',
-                            background: st.disposition === 'HABIS' ? 'var(--color-success-light)' : 'var(--color-surface)',
-                            color: st.disposition === 'HABIS' ? 'var(--color-success)' : 'var(--color-text-secondary)',
-                            cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
-                          }}
-                        >
-                          <Check size={11} /> Habis Laku
-                        </button>
+                      {/* Tombol Pilihan Disposisi (6 Opsi Seragam) */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 130px), 1fr))', gap: 6 }}>
+                        {DISPOSITION_OPTIONS.map((opt) => {
+                          const isSelected = st.disposition === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => handleDispositionChange(item, opt.value)}
+                              style={{
+                                minHeight: 44,
+                                padding: '8px 6px',
+                                borderRadius: 'var(--radius-sm)',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                border: isSelected ? opt.activeBorder : '1px solid var(--color-border)',
+                                background: isSelected ? opt.activeBg : 'var(--color-surface)',
+                                color: isSelected ? opt.activeColor : 'var(--color-text-secondary)',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 4,
+                              }}
+                            >
+                              {opt.icon} {opt.label}
+                            </button>
+                          );
+                        })}
                       </div>
+
+                      {/* Catatan Opsional Per Item */}
+                      <input
+                        type="text"
+                        value={st.notes}
+                        onChange={(e) => handleNotesChange(item, e.target.value)}
+                        maxLength={200}
+                        placeholder="Catatan opsional (misal: sisa layak masuk chiller / obral 50%)"
+                        aria-label={`Catatan ${item.name}`}
+                        className="form-input"
+                        style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
+                      />
                     </div>
                   );
                 })}
@@ -518,7 +624,7 @@ export default function SisaMakananModal({
                     Menyimpan Cut-Off...
                   </>
                 ) : (
-                  'Simpan Opname Makanan Jam 15:00'
+                  'Simpan Opname Makanan Jam 15:00 WIB'
                 )}
               </button>
             </form>

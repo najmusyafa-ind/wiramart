@@ -5,13 +5,14 @@
 // Setelah admin pertama dibuat → halaman ini dikunci selamanya
 // =============================================================
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
 import { useRouter } from 'next/navigation';
 import { CheckCircle, AlertCircle, Loader2, Lock, ShieldCheck } from 'lucide-react';
 
 type SetupStatus = 'checking' | 'available' | 'locked' | 'done';
 
 export default function SetupPage() {
+  const uid = useId();
   const router = useRouter();
   const [status, setStatus] = useState<SetupStatus>('checking');
   const [nidn, setNidn]         = useState('');
@@ -62,8 +63,9 @@ export default function SetupPage() {
 
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'var(--color-bg)', padding: 'var(--space-5)',
+      minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--color-bg)',
+      padding: 'calc(var(--space-5) + env(safe-area-inset-top, 0px)) var(--space-4) calc(var(--space-5) + env(safe-area-inset-bottom, 0px))',
     }}>
       <div style={{ width: '100%', maxWidth: 460 }}>
 
@@ -104,7 +106,7 @@ export default function SetupPage() {
                     Halaman ini dikunci secara otomatis.
                   </div>
                 </div>
-                <a href="/login" className="btn btn-primary" style={{ marginTop: 'var(--space-2)' }}>
+                <a href="/login" className="btn btn-primary" style={{ marginTop: 'var(--space-2)', minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                   Ke Halaman Login →
                 </a>
               </div>
@@ -125,32 +127,37 @@ export default function SetupPage() {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">NIDN / NIDK <span style={{ color: 'var(--color-error)' }}>*</span></label>
+                  <label htmlFor={`${uid}-nidn`} className="form-label">NIDN / NIDK <span style={{ color: 'var(--color-error)' }}>*</span></label>
                   <input
+                    id={`${uid}-nidn`}
                     className="form-input"
+                    inputMode="numeric"
                     placeholder="Contoh: 0412345678"
                     value={nidn}
                     onChange={e => setNidn(e.target.value)}
                     required
-                    style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}
+                    style={{ fontFamily: 'var(--font-mono)', letterSpacing: '0.05em', fontSize: 'var(--text-base)', minHeight: 44 }}
                   />
                   <p className="form-hint">Nomor Induk Dosen Nasional atau Nomor Induk Dosen Khusus.</p>
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Nama Lengkap <span style={{ color: 'var(--color-error)' }}>*</span></label>
+                  <label htmlFor={`${uid}-nama`} className="form-label">Nama Lengkap <span style={{ color: 'var(--color-error)' }}>*</span></label>
                   <input
+                    id={`${uid}-nama`}
                     className="form-input"
                     placeholder="Nama sesuai dokumen resmi"
                     value={nama}
                     onChange={e => setNama(e.target.value)}
                     required
+                    style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
                   />
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Buat Password <span style={{ color: 'var(--color-error)' }}>*</span></label>
+                  <label htmlFor={`${uid}-pass`} className="form-label">Buat Password <span style={{ color: 'var(--color-error)' }}>*</span></label>
                   <input
+                    id={`${uid}-pass`}
                     className="form-input"
                     type="password"
                     placeholder="Minimal 6 karakter"
@@ -158,23 +165,26 @@ export default function SetupPage() {
                     onChange={e => setPassword(e.target.value)}
                     required
                     minLength={6}
+                    style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
                   />
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Konfirmasi Password <span style={{ color: 'var(--color-error)' }}>*</span></label>
+                  <label htmlFor={`${uid}-conf`} className="form-label">Konfirmasi Password <span style={{ color: 'var(--color-error)' }}>*</span></label>
                   <input
+                    id={`${uid}-conf`}
                     className="form-input"
                     type="password"
                     placeholder="Ulangi password"
                     value={konfirm}
                     onChange={e => setKonfirm(e.target.value)}
                     required
+                    style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
                   />
                 </div>
 
                 {error && (
-                  <div style={{ padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--color-error-light)', display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 'var(--text-sm)', color: 'var(--color-error)' }}>
+                  <div role="alert" style={{ padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--color-error-light)', display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 'var(--text-sm)', color: 'var(--color-error)' }}>
                     <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
                     {error}
                   </div>
@@ -184,7 +194,7 @@ export default function SetupPage() {
                   type="submit"
                   className="btn btn-primary btn-lg"
                   disabled={loading || !nidn || !nama || !password || !konfirm}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 'var(--space-2)' }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 'var(--space-2)', minHeight: 48 }}
                 >
                   {loading
                     ? <><Loader2 size={16} className="spin-icon" /> Membuat Akun...</>
@@ -223,9 +233,9 @@ export default function SetupPage() {
           </div>
         </div>
 
-        <p style={{ textAlign: 'center', marginTop: 'var(--space-4)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+        <p style={{ textAlign: 'center', marginTop: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
           Sudah punya akun?{' '}
-          <a href="/login" style={{ color: 'var(--color-primary)' }}>Login di sini</a>
+          <a href="/login" style={{ color: 'var(--color-primary)', display: 'inline-flex', alignItems: 'center', minHeight: 44, padding: '0 8px' }}>Login di sini</a>
         </p>
       </div>
     </div>

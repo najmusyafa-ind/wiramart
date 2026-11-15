@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
       name: employee.fullName,
       nim: employee.nim,
       jabatan: employee.jabatan,
-      redirect: '/kasir/gudang',
+      redirect: '/gudang',
     },
   });
 

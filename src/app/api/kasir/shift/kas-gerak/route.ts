@@ -8,14 +8,16 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, isNull } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { shifts, shiftCashMovements } from '@/lib/db/schema';
+import { employees, shifts, shiftCashMovements } from '@/lib/db/schema';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
+import { resolveActiveDrawerShift } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const kasGerakSchema = z.object({
   movementType: z.enum(['CASH_OUT', 'CASH_IN'], {
@@ -24,6 +26,7 @@ const kasGerakSchema = z.object({
   category: z.string().min(2, 'Kategori wajib diisi').max(50),
   amount: z
     .number()
+    .finite('Nominal tidak valid')
     .min(100, 'Nominal minimal Rp 100')
     .max(5_000_000, 'Nominal kas kecil maksimal Rp 5.000.000'),
   notes: z
@@ -32,23 +35,66 @@ const kasGerakSchema = z.object({
     .max(500, 'Keterangan maksimal 500 karakter'),
 });
 
-// GET: Ambil riwayat kas keluar/masuk untuk shift aktif saat ini
-export async function GET(req: NextRequest): Promise<Response> {
+type KasGerakContextResult =
+  | {
+      ok: true;
+      employee: { id: string; fullName: string };
+      shiftId: string;
+      isPeerShared: boolean;
+    }
+  | {
+      ok: false;
+      response: Response;
+    };
+
+async function resolveKasGerakContext(req: NextRequest): Promise<KasGerakContextResult> {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'employee') {
-    return apiError('Unauthorized', 'UNAUTHORIZED', 401);
+    return { ok: false, response: apiError('Unauthorized', 'UNAUTHORIZED', 401) };
   }
 
-  const employeeId = payload.sub as string;
-
-  const activeShift = await db.query.shifts.findFirst({
-    where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
-    columns: { id: true },
+  const employee = await db.query.employees.findFirst({
+    where: and(
+      eq(employees.id, payload.sub as string),
+      eq(employees.isActive, true),
+      isNull(employees.deletedAt),
+    ),
+    columns: { id: true, fullName: true },
   });
 
-  if (!activeShift) {
-    return apiError('Tidak ada shift aktif', 'NO_ACTIVE_SHIFT', 404);
+  if (!employee) {
+    return {
+      ok: false,
+      response: apiError('Akun kasir tidak aktif atau tidak ditemukan', 'FORBIDDEN', 403),
+    };
   }
+
+  const resolution = await resolveActiveDrawerShift({
+    employeeId: employee.id,
+    employeeName: employee.fullName,
+    host: req.headers.get('host'),
+  });
+
+  if (!resolution.activeShift) {
+    const msg =
+      resolution.otherActiveShifts.length > 0
+        ? 'Shift sebelumnya menunggu serah terima. Buka shift baru terlebih dahulu sebelum mencatat kas gerak.'
+        : 'Tidak ada shift aktif yang berjalan';
+    return { ok: false, response: apiError(msg, 'NO_ACTIVE_SHIFT', 404) };
+  }
+
+  return {
+    ok: true,
+    employee,
+    shiftId: resolution.activeShift.id,
+    isPeerShared: resolution.activeShift.isPeerShared,
+  };
+}
+
+// GET: Ambil riwayat kas keluar/masuk untuk shift laci aktif saat ini
+export async function GET(req: NextRequest): Promise<Response> {
+  const ctx = await resolveKasGerakContext(req);
+  if (!ctx.ok) return ctx.response;
 
   const movements = await db
     .select({
@@ -58,9 +104,12 @@ export async function GET(req: NextRequest): Promise<Response> {
       amount: shiftCashMovements.amount,
       notes: shiftCashMovements.notes,
       createdAt: shiftCashMovements.createdAt,
+      employeeId: shiftCashMovements.employeeId,
+      employeeName: employees.fullName,
     })
     .from(shiftCashMovements)
-    .where(eq(shiftCashMovements.shiftId, activeShift.id))
+    .leftJoin(employees, eq(shiftCashMovements.employeeId, employees.id))
+    .where(eq(shiftCashMovements.shiftId, ctx.shiftId))
     .orderBy(desc(shiftCashMovements.createdAt));
 
   let totalCashOut = 0;
@@ -76,7 +125,8 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   return apiOk({
-    shiftId: activeShift.id,
+    shiftId: ctx.shiftId,
+    isPeerShared: ctx.isPeerShared,
     movements,
     totalCashOut,
     totalCashIn,
@@ -86,12 +136,8 @@ export async function GET(req: NextRequest): Promise<Response> {
 
 // POST: Tambah kas keluar / kas masuk laci
 export async function POST(req: NextRequest): Promise<Response> {
-  const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'employee') {
-    return apiError('Unauthorized', 'UNAUTHORIZED', 401);
-  }
-
-  const employeeId = payload.sub as string;
+  const ctx = await resolveKasGerakContext(req);
+  if (!ctx.ok) return ctx.response;
 
   let body: unknown;
   try {
@@ -111,39 +157,59 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const { movementType, category, amount, notes } = parsed.data;
 
-  // Pastikan ada shift aktif
-  const activeShift = await db.query.shifts.findFirst({
-    where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
-    columns: { id: true },
+  // Kunci baris shift di transaksi ACID untuk mencegah insert ke shift yang baru ditutup
+  const inserted = await db.transaction(async (tx) => {
+    const [lockedShift] = await tx
+      .select({ id: shifts.id, status: shifts.status })
+      .from(shifts)
+      .where(and(eq(shifts.id, ctx.shiftId), eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut)))
+      .limit(1)
+      .for('update');
+
+    if (!lockedShift) return null;
+
+    const [created] = await tx
+      .insert(shiftCashMovements)
+      .values({
+        shiftId: lockedShift.id,
+        employeeId: ctx.employee.id,
+        movementType,
+        category: category.trim().toUpperCase(),
+        amount: amount.toString(),
+        notes: notes.trim(),
+      })
+      .returning({
+        id: shiftCashMovements.id,
+        movementType: shiftCashMovements.movementType,
+        category: shiftCashMovements.category,
+        amount: shiftCashMovements.amount,
+        notes: shiftCashMovements.notes,
+        createdAt: shiftCashMovements.createdAt,
+        employeeId: shiftCashMovements.employeeId,
+      });
+
+    return created;
   });
 
-  if (!activeShift) {
-    return apiError('Tidak ada shift aktif yang berjalan', 'NO_ACTIVE_SHIFT', 404);
+  if (!inserted) {
+    return apiError(
+      'Shift aktif sudah ditutup sebelum kas gerak dicatat.',
+      'SHIFT_ALREADY_CLOSED',
+      409,
+    );
   }
-
-  const [inserted] = await db
-    .insert(shiftCashMovements)
-    .values({
-      shiftId: activeShift.id,
-      employeeId,
-      movementType,
-      category: category.trim().toUpperCase(),
-      amount: amount.toString(),
-      notes: notes.trim(),
-    })
-    .returning({
-      id: shiftCashMovements.id,
-      movementType: shiftCashMovements.movementType,
-      category: shiftCashMovements.category,
-      amount: shiftCashMovements.amount,
-      notes: shiftCashMovements.notes,
-      createdAt: shiftCashMovements.createdAt,
-    });
 
   const label = movementType === 'CASH_OUT' ? 'Kas keluar' : 'Kas masuk';
 
-  return apiOk({
-    message: `${label} Rp ${amount.toLocaleString('id-ID')} berhasil dicatat.`,
-    movement: inserted,
-  }, 201);
+  return apiOk(
+    {
+      message: `${label} Rp ${amount.toLocaleString('id-ID')} berhasil dicatat.`,
+      movement: {
+        ...inserted,
+        employeeName: ctx.employee.fullName,
+      },
+    },
+    undefined,
+    201,
+  );
 }

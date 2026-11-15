@@ -6,7 +6,7 @@ import {
   ChevronLeft, Calculator, Banknote, QrCode, AlertTriangle,
   Receipt, Calendar, Loader2, ArrowLeft, ArrowRight,
   Printer, RefreshCw, CheckCircle2, XCircle, Clock,
-  Coins, Sparkles, TrendingDown, TrendingUp, HandCoins,
+  Coins, TrendingDown, TrendingUp, HandCoins,
 } from 'lucide-react';
 import type {
   CashierRecapResponseDTO,
@@ -43,6 +43,21 @@ const fmtTanggalPanjang = (tgl: string) => {
   }
 };
 
+async function requestRecap(targetDate: string, shiftId: string, targetPage: number, signal?: AbortSignal) {
+  const shiftQuery = shiftId ? `&shiftId=${shiftId}` : '';
+  const res = await fetch(`/api/kasir/rekap-harian?tanggal=${targetDate}${shiftQuery}&page=${targetPage}&limit=15`, {
+    signal,
+  });
+  if (res.status === 401 || res.status === 403) {
+    return { status: 'unauthorized' as const };
+  }
+  const json = await res.json();
+  if (!res.ok || !json.success) {
+    return { status: 'error' as const, error: (json.error as string | undefined) ?? 'Gagal memuat rekap kasir.' };
+  }
+  return { status: 'ok' as const, data: json.data as CashierRecapResponseDTO };
+}
+
 export default function CashierRecapPage() {
   const router = useRouter();
 
@@ -58,39 +73,57 @@ export default function CashierRecapPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const applyRecapResult = useCallback(
+    (result: Awaited<ReturnType<typeof requestRecap>>) => {
+      if (result.status === 'unauthorized') {
+        router.push('/kasir/login');
+        return;
+      }
+      if (result.status === 'error') {
+        setError(result.error);
+        return;
+      }
+      setError(null);
+      setData(result.data);
+    },
+    [router],
+  );
+
   const fetchRecap = useCallback(async (targetDate: string, shiftId: string, targetPage: number) => {
     setLoading(true);
     setError(null);
     try {
-      const shiftQuery = shiftId ? `&shiftId=${shiftId}` : '';
-      const res = await fetch(`/api/kasir/rekap-harian?tanggal=${targetDate}${shiftQuery}&page=${targetPage}&limit=15`);
-      
-      if (res.status === 401 || res.status === 403) {
-        router.push('/kasir/login');
-        return;
-      }
-      
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        setError(json.error ?? 'Gagal memuat rekap kasir.');
-        return;
-      }
-      
-      setData(json.data);
-      // Sinkronisasi active shift id jika belum dipilih
-      if (!shiftId && json.data.activeShiftId) {
-        setSelectedShiftId(json.data.activeShiftId);
-      }
+      const result = await requestRecap(targetDate, shiftId, targetPage);
+      applyRecapResult(result);
     } catch {
       setError('Terjadi kendala jaringan saat memuat rekap kasir.');
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [applyRecapResult]);
 
   useEffect(() => {
-    fetchRecap(tanggal, selectedShiftId, page);
-  }, [tanggal, selectedShiftId, page, fetchRecap]);
+    const controller = new AbortController();
+
+    requestRecap(tanggal, selectedShiftId, page, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) {
+          applyRecapResult(result);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setError('Terjadi kendala jaringan saat memuat rekap kasir.');
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [tanggal, selectedShiftId, page, applyRecapResult]);
 
   const handleDateChange = (newDate: string) => {
     setTanggal(newDate);
@@ -104,10 +137,11 @@ export default function CashierRecapPage() {
   };
 
   const s = data?.summary;
-  const activeShift = data?.shiftsSaya?.find((sh) => sh.id === selectedShiftId) ?? data?.shiftsSaya?.[0];
+  const effectiveShiftId = selectedShiftId || data?.activeShiftId || '';
+  const activeShift = data?.shiftsSaya?.find((sh) => sh.id === effectiveShiftId) ?? data?.shiftsSaya?.[0];
 
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--color-bg, #0f172a)', color: 'var(--color-text, #f8fafc)', paddingBottom: 48 }}>
+    <div style={{ minHeight: '100svh', background: 'var(--color-bg)', color: 'var(--color-text)', paddingBottom: 48 }}>
       
       {/* ── CSS Khusus Print (Slip Kasir Thermal & A4) ── */}
       <style jsx global>{`
@@ -138,28 +172,32 @@ export default function CashierRecapPage() {
 
       {/* ── Top Header Bar ── */}
       <header className="no-print" style={{
-        background: 'var(--color-surface, #1e293b)',
-        borderBottom: '1px solid var(--color-border, #334155)',
-        padding: '14px 20px',
+        background: 'var(--color-surface)',
+        borderBottom: '1px solid var(--color-border)',
+        padding: '12px 16px',
         position: 'sticky',
         top: 0,
         zIndex: 20,
         display: 'flex',
+        flexWrap: 'wrap',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: 12,
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        gap: 10,
+        boxShadow: 'var(--shadow-sm)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: '1 1 auto' }}>
           <button
             type="button"
             onClick={() => router.push('/kasir/pos')}
             style={{
-              background: 'hsl(220 15% 25% / 0.8)',
-              border: '1px solid var(--color-border, #334155)',
-              borderRadius: 8,
-              padding: 8,
-              color: 'var(--color-text, #f8fafc)',
+              background: 'var(--color-surface-muted)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 10,
+              minWidth: 44,
+              minHeight: 44,
+              padding: 0,
+              flexShrink: 0,
+              color: 'var(--color-text)',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -169,39 +207,43 @@ export default function CashierRecapPage() {
           >
             <ChevronLeft size={20} />
           </button>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Calculator size={18} style={{ color: 'hsl(150, 80%, 45%)' }} />
-              Rekapitulasi Shift Saya
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Calculator size={18} style={{ color: 'hsl(150 75% 32%)', flexShrink: 0 }} />
+              <span>Rekapitulasi Shift Saya</span>
             </div>
             {data && (
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted, #94a3b8)' }}>
-                Kasir: <strong style={{ color: 'var(--color-text, #f8fafc)' }}>{data.kasir.fullName}</strong> ({data.kasir.nim})
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                Kasir: <strong style={{ color: 'var(--color-text)' }}>{data.kasir.fullName}</strong> ({data.kasir.nim})
               </div>
             )}
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <button
             type="button"
             onClick={() => fetchRecap(tanggal, selectedShiftId, page)}
             disabled={loading}
+            aria-label="Segarkan Data Rekap"
             style={{
-              background: 'hsl(220 15% 25% / 0.8)',
-              border: '1px solid var(--color-border, #334155)',
-              borderRadius: 8,
+              background: 'var(--color-surface-muted)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 10,
+              minWidth: 44,
+              minHeight: 44,
               padding: '8px 12px',
               fontSize: 13,
               fontWeight: 600,
-              color: 'var(--color-text, #f8fafc)',
-              cursor: 'pointer',
+              color: 'var(--color-text)',
+              cursor: loading ? 'wait' : 'pointer',
               display: 'flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: 6,
             }}
           >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             <span className="hidden sm:inline">Segarkan</span>
           </button>
 
@@ -209,18 +251,19 @@ export default function CashierRecapPage() {
             type="button"
             onClick={() => window.print()}
             style={{
-              background: 'hsl(150 80% 40%)',
+              background: 'hsl(150 75% 32%)',
               border: 'none',
-              borderRadius: 8,
+              borderRadius: 10,
+              minHeight: 44,
               padding: '8px 14px',
               fontSize: 13,
-              fontWeight: 600,
+              fontWeight: 700,
               color: '#ffffff',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+              boxShadow: '0 2px 8px hsl(150 75% 32% / 0.25)',
             }}
           >
             <Printer size={15} />
@@ -291,14 +334,15 @@ export default function CashierRecapPage() {
 
         {/* ── Filter Tanggal & Pilihan Shift Saya ── */}
         <section className="no-print" style={{
-          background: 'var(--color-surface, #1e293b)',
-          border: '1px solid var(--color-border, #334155)',
+          background: 'var(--color-surface)',
+          border: '1px solid var(--color-border)',
           borderRadius: 16,
           padding: '16px 20px',
           marginBottom: 20,
           display: 'flex',
           flexDirection: 'column',
           gap: 14,
+          boxShadow: 'var(--shadow-sm)',
         }}>
           <div style={{
             display: 'flex',
@@ -308,39 +352,43 @@ export default function CashierRecapPage() {
             gap: 12,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Calendar size={18} style={{ color: 'hsl(150, 80%, 45%)' }} />
+              <Calendar size={18} style={{ color: 'hsl(150 75% 32%)' }} />
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted, #94a3b8)', textTransform: 'uppercase' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
                   Tanggal Transaksi Kasir
                 </div>
                 <input
                   type="date"
+                  aria-label="Tanggal Transaksi Kasir"
                   value={tanggal}
                   max={todayWIB}
                   onChange={(e) => handleDateChange(e.target.value)}
                   style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--color-text, #f8fafc)',
-                    fontSize: 15,
+                    background: 'var(--color-surface)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 8,
+                    color: 'var(--color-text)',
+                    fontSize: '1rem',
                     fontWeight: 700,
+                    minHeight: 44,
+                    padding: '6px 10px',
+                    marginTop: 4,
                     outline: 'none',
                     cursor: 'pointer',
-                    padding: 0,
                   }}
                 />
               </div>
             </div>
 
-            <div style={{ fontSize: 12, color: 'var(--color-text-secondary, #cbd5e1)', background: 'hsl(220 15% 25% / 0.5)', padding: '6px 12px', borderRadius: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', background: 'var(--color-surface-muted)', border: '1px solid var(--color-border)', padding: '8px 12px', borderRadius: 8 }}>
               {fmtTanggalPanjang(tanggal)}
             </div>
           </div>
 
           {/* ── Selector Shift Milik Kasir Ini (Jika ada lebih dari 1 shift) ── */}
           {data?.shiftsSaya && data.shiftsSaya.length > 0 && (
-            <div style={{ borderTop: '1px solid var(--color-border, #334155)', paddingTop: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted, #94a3b8)', marginBottom: 8, textTransform: 'uppercase' }}>
+            <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>
                 Sesi Shift Kerja Saya:
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -352,28 +400,31 @@ export default function CashierRecapPage() {
                       type="button"
                       onClick={() => handleShiftChange(sh.id)}
                       style={{
-                        background: isSelected ? 'hsl(150 80% 40% / 0.2)' : 'hsl(220 15% 22% / 0.6)',
-                        border: isSelected ? '1px solid hsl(150 80% 45%)' : '1px solid var(--color-border, #334155)',
-                        color: isSelected ? 'hsl(150 80% 55%)' : 'var(--color-text-secondary, #cbd5e1)',
+                        background: isSelected ? 'hsl(150 60% 94%)' : 'var(--color-surface-muted)',
+                        border: isSelected ? '1.5px solid hsl(150 75% 32%)' : '1px solid var(--color-border)',
+                        color: isSelected ? 'hsl(150 80% 22%)' : 'var(--color-text)',
+                        minHeight: 44,
                         padding: '8px 14px',
                         borderRadius: 10,
-                        fontSize: 12,
+                        fontSize: 13,
                         fontWeight: 600,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         gap: 8,
-                        transition: 'all 0.2s',
+                        transition: 'background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s cubic-bezier(0.16, 1, 0.3, 1), color 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
                       }}
                     >
                       <Clock size={14} />
                       <span>{sh.shiftName}</span>
                       <span style={{
-                        fontSize: 10,
-                        padding: '2px 6px',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: '2px 8px',
                         borderRadius: 6,
-                        background: sh.status === 'ACTIVE' ? 'hsl(150 80% 40% / 0.3)' : 'hsl(220 15% 35% / 0.5)',
-                        color: sh.status === 'ACTIVE' ? 'hsl(150 80% 65%)' : '#cbd5e1',
+                        background: sh.status === 'ACTIVE' ? 'hsl(150 65% 86%)' : 'var(--color-surface)',
+                        border: sh.status === 'ACTIVE' ? '1px solid hsl(150 60% 65%)' : '1px solid var(--color-border)',
+                        color: sh.status === 'ACTIVE' ? 'hsl(150 80% 22%)' : 'var(--color-text-secondary)',
                       }}>
                         {sh.status === 'ACTIVE' ? 'Sedang Aktif' : 'Selesai'}
                       </span>
@@ -387,7 +438,7 @@ export default function CashierRecapPage() {
 
         {/* ── Status Loading & Error Alert ── */}
         {loading && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '40px 0', color: 'var(--color-text-muted, #94a3b8)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '40px 0', color: 'var(--color-text-muted)' }}>
             <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} />
             <span style={{ fontSize: 14 }}>Mengkalkulasi transaksi & uang laci...</span>
           </div>
@@ -395,18 +446,18 @@ export default function CashierRecapPage() {
 
         {error && (
           <div style={{
-            background: 'hsl(0 80% 50% / 0.15)',
-            border: '1px solid hsl(0 80% 60% / 0.3)',
+            background: 'hsl(0 84% 96%)',
+            border: '1px solid hsl(0 75% 80%)',
             borderRadius: 12,
             padding: '14px 18px',
-            color: 'hsl(0 100% 75%)',
+            color: 'hsl(0 75% 32%)',
             display: 'flex',
             alignItems: 'center',
             gap: 10,
             marginBottom: 20,
           }}>
-            <AlertTriangle size={20} />
-            <span style={{ fontSize: 13, fontWeight: 500 }}>{error}</span>
+            <AlertTriangle size={20} style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{error}</span>
           </div>
         )}
 
@@ -415,79 +466,79 @@ export default function CashierRecapPage() {
           <>
             {/* ── ALFA / INDOMARET HANDOVER ALLOCATION BANNER ── */}
             <div className="rekap-card no-print" style={{
-              background: 'linear-gradient(135deg, hsl(220 30% 16%) 0%, hsl(220 25% 12%) 100%)',
-              border: '1px solid hsl(150 80% 40% / 0.5)',
+              background: 'hsl(150 45% 96%)',
+              border: '1.5px solid hsl(150 55% 68%)',
               borderRadius: 16,
               padding: '20px 24px',
               marginBottom: 20,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+              boxShadow: 'var(--shadow-sm)',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16, borderBottom: '1px solid hsl(220 20% 25%)', paddingBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16, borderBottom: '1px solid hsl(150 35% 84%)', paddingBottom: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ background: 'hsl(150 80% 45% / 0.2)', padding: 8, borderRadius: 10, color: 'hsl(150 80% 55%)' }}>
+                  <div style={{ background: 'hsl(150 60% 88%)', padding: 8, borderRadius: 10, color: 'hsl(150 80% 26%)', flexShrink: 0 }}>
                     <HandCoins size={22} />
                   </div>
                   <div>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--color-text, #f8fafc)' }}>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--color-text)' }}>
                       Instruksi Serah Terima Shift (Standar Alfa / Indomaret)
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--color-text-muted, #94a3b8)' }}>
+                    <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
                       Pisahkan uang fisik laci kasir menjadi 2 pos sebelum diserahkan ke kasir shift berikutnya
                     </div>
                   </div>
                 </div>
                 <div style={{
-                  background: 'hsl(150 80% 40% / 0.15)',
-                  border: '1px solid hsl(150 80% 45% / 0.4)',
+                  background: 'hsl(150 65% 88%)',
+                  border: '1px solid hsl(150 60% 62%)',
                   padding: '6px 14px',
                   borderRadius: 20,
                   fontSize: 12,
                   fontWeight: 700,
-                  color: 'hsl(150 80% 60%)',
+                  color: 'hsl(150 85% 20%)',
                 }}>
                   Total Fisik Seharusnya: {rp(s.totalFisikLaci)}
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: 14 }}>
                 {/* Pos 1: Tinggalkan di Laci */}
                 <div style={{
-                  background: 'hsl(220 25% 20% / 0.7)',
-                  border: '1px solid hsl(45 90% 50% / 0.4)',
+                  background: 'hsl(45 95% 94%)',
+                  border: '1px solid hsl(42 85% 65%)',
                   borderRadius: 12,
                   padding: '16px 18px',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: 'hsl(45 95% 65%)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: 'hsl(35 90% 26%)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       1. Tinggalkan di Laci Kasir
                     </span>
-                    <Coins size={16} style={{ color: 'hsl(45 95% 65%)' }} />
+                    <Coins size={16} style={{ color: 'hsl(35 90% 28%)' }} />
                   </div>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: '#fef08a', marginBottom: 4 }}>
+                  <div style={{ fontSize: 24, fontWeight: 900, color: 'hsl(30 95% 22%)', marginBottom: 4 }}>
                     {rp(s.uangTinggalDiLaci)}
                   </div>
-                  <div style={{ fontSize: 11, color: 'hsl(220 15% 75%)', lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>
                     Modal paten uang kembalian untuk <strong>Kasir Shift Berikutnya</strong> (Jangan diambil).
                   </div>
                 </div>
 
                 {/* Pos 2: Setoran Tunai Toko */}
                 <div style={{
-                  background: 'hsl(150 80% 12% / 0.7)',
-                  border: '1px solid hsl(150 80% 45% / 0.5)',
+                  background: 'hsl(150 60% 92%)',
+                  border: '1px solid hsl(150 55% 62%)',
                   borderRadius: 12,
                   padding: '16px 18px',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: 'hsl(150 80% 65%)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: 'hsl(150 80% 22%)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       2. Uang Setoran Tunai Toko
                     </span>
-                    <Banknote size={16} style={{ color: 'hsl(150 80% 65%)' }} />
+                    <Banknote size={16} style={{ color: 'hsl(150 80% 24%)' }} />
                   </div>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: '#a7f3d0', marginBottom: 4 }}>
+                  <div style={{ fontSize: 24, fontWeight: 900, color: 'hsl(150 85% 18%)', marginBottom: 4 }}>
                     {rp(s.uangSetoranToko)}
                   </div>
-                  <div style={{ fontSize: 11, color: 'hsl(150 40% 85%)', lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>
                     Masukkan amplop setoran shift beserta struk rekap untuk <strong>Manajer / Brankas</strong>.
                   </div>
                 </div>
@@ -497,125 +548,131 @@ export default function CashierRecapPage() {
             {/* ── GRID RINCIAN ARUS KAS SHIFT ── */}
             <div className="no-print" style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
               gap: 14,
               marginBottom: 24,
             }}>
               {/* Card 1: Modal Awal Kasir */}
               <div className="rekap-card" style={{
-                background: 'var(--color-surface, #1e293b)',
-                border: '1px solid var(--color-border, #334155)',
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
                 borderRadius: 16,
                 padding: '16px 18px',
+                boxShadow: 'var(--shadow-sm)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(45 95% 65%)', textTransform: 'uppercase' }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(38 92% 30%)', textTransform: 'uppercase' }}>
                     Modal Awal Laci
                   </span>
-                  <Coins size={16} style={{ color: 'hsl(45 95% 65%)' }} />
+                  <Coins size={16} style={{ color: 'hsl(38 92% 32%)' }} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text, #f8fafc)', marginBottom: 4 }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text)', marginBottom: 4 }}>
                   {rp(s.modalAwal)}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted, #94a3b8)' }}>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                   Paten uang receh buka shift
                 </div>
               </div>
 
               {/* Card 2: Penjualan Tunai Bersih */}
               <div className="rekap-card" style={{
-                background: 'var(--color-surface, #1e293b)',
-                border: '1px solid var(--color-border, #334155)',
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
                 borderRadius: 16,
                 padding: '16px 18px',
+                boxShadow: 'var(--shadow-sm)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(150 80% 65%)', textTransform: 'uppercase' }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(150 75% 28%)', textTransform: 'uppercase' }}>
                     Penjualan Tunai (+)
                   </span>
-                  <TrendingUp size={16} style={{ color: 'hsl(150 80% 65%)' }} />
+                  <TrendingUp size={16} style={{ color: 'hsl(150 75% 30%)' }} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text, #f8fafc)', marginBottom: 4 }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text)', marginBottom: 4 }}>
                   {rp(s.netCashSales)}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted, #94a3b8)' }}>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                   Total {s.totalTransaksi} transaksi belanja
                 </div>
               </div>
 
               {/* Card 3: Kas Keluar (Titipan Makanan, Beli Lepas, Galon) */}
               <div className="rekap-card" style={{
-                background: 'var(--color-surface, #1e293b)',
-                border: '1px solid var(--color-border, #334155)',
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
                 borderRadius: 16,
                 padding: '16px 18px',
+                boxShadow: 'var(--shadow-sm)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(0 90% 70%)', textTransform: 'uppercase' }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(0 72% 38%)', textTransform: 'uppercase' }}>
                     Kas Keluar Laci (-)
                   </span>
-                  <TrendingDown size={16} style={{ color: 'hsl(0 90% 70%)' }} />
+                  <TrendingDown size={16} style={{ color: 'hsl(0 72% 40%)' }} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: s.totalCashOut > 0 ? 'hsl(0 90% 70%)' : 'var(--color-text, #f8fafc)', marginBottom: 4 }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: s.totalCashOut > 0 ? 'hsl(0 72% 38%)' : 'var(--color-text)', marginBottom: 4 }}>
                   {s.totalCashOut > 0 ? `-${rp(s.totalCashOut)}` : 'Rp 0'}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted, #94a3b8)' }}>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                   Titipan makanan, beli lepas, galon
                 </div>
               </div>
 
               {/* Card 4: Penjualan QRIS */}
               <div className="rekap-card" style={{
-                background: 'var(--color-surface, #1e293b)',
-                border: '1px solid var(--color-border, #334155)',
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
                 borderRadius: 16,
                 padding: '16px 18px',
+                boxShadow: 'var(--shadow-sm)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(200 90% 65%)', textTransform: 'uppercase' }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(200 85% 32%)', textTransform: 'uppercase' }}>
                     Penjualan QRIS
                   </span>
-                  <QrCode size={16} style={{ color: 'hsl(200 90% 65%)' }} />
+                  <QrCode size={16} style={{ color: 'hsl(200 85% 34%)' }} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text, #f8fafc)', marginBottom: 4 }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text)', marginBottom: 4 }}>
                   {rp(s.totalAmountQris)}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted, #94a3b8)' }}>
-                  Total Omzet Kasir: <strong style={{ color: 'var(--color-text, #f8fafc)' }}>{rp(s.totalOmzet)}</strong>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  Total Omzet Kasir: <strong style={{ color: 'var(--color-text)' }}>{rp(s.totalOmzet)}</strong>
                 </div>
               </div>
             </div>
 
             {/* ── Tabel Riwayat Transaksi Kasir ── */}
             <div style={{
-              background: 'var(--color-surface, #1e293b)',
-              border: '1px solid var(--color-border, #334155)',
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
               borderRadius: 16,
               overflow: 'hidden',
-              boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+              boxShadow: 'var(--shadow-sm)',
             }}>
               <div style={{
                 padding: '16px 20px',
-                borderBottom: '1px solid var(--color-border, #334155)',
+                borderBottom: '1px solid var(--color-border)',
                 display: 'flex',
+                flexWrap: 'wrap',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                gap: 8,
               }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-text, #f8fafc)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Receipt size={18} style={{ color: 'hsl(150 80% 45%)' }} />
-                  Riwayat Struk Transaksi ({data.pagination.total} Transaksi)
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Receipt size={18} style={{ color: 'hsl(150 75% 32%)' }} />
+                  <span>Riwayat Struk Transaksi ({data.pagination.total} Transaksi)</span>
                 </div>
                 {activeShift && (
-                  <div style={{ fontSize: 12, color: 'var(--color-text-muted, #94a3b8)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
                     {activeShift.shiftName}
                   </div>
                 )}
               </div>
 
               {data.transaksi.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--color-text-muted, #94a3b8)' }}>
+                <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--color-text-muted)' }}>
                   <Receipt size={36} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
-                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-text, #f8fafc)', marginBottom: 4 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-text)', marginBottom: 4 }}>
                     Belum Ada Riwayat Transaksi
                   </div>
                   <div style={{ fontSize: 13 }}>
@@ -623,10 +680,10 @@ export default function CashierRecapPage() {
                   </div>
                 </div>
               ) : (
-                <div style={{ overflowX: 'auto' }}>
+                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
                     <thead>
-                      <tr style={{ background: 'hsl(220 15% 18% / 0.5)', borderBottom: '1px solid var(--color-border, #334155)', color: 'var(--color-text-muted, #94a3b8)' }}>
+                      <tr style={{ background: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
                         <th style={{ padding: '12px 18px', fontWeight: 600 }}>No. Struk (Invoice)</th>
                         <th style={{ padding: '12px 16px', fontWeight: 600 }}>Waktu</th>
                         <th style={{ padding: '12px 16px', fontWeight: 600 }}>Metode</th>
@@ -643,20 +700,20 @@ export default function CashierRecapPage() {
                           <tr
                             key={t.id}
                             style={{
-                              borderBottom: '1px solid var(--color-border, #334155)',
-                              background: t.isVoid ? 'hsl(0 80% 50% / 0.05)' : 'transparent',
+                              borderBottom: '1px solid var(--color-border)',
+                              background: t.isVoid ? 'hsl(0 84% 97%)' : 'transparent',
                             }}
                           >
                             <td style={{ padding: '14px 18px' }}>
-                              <div style={{ fontWeight: 700, color: t.isVoid ? 'hsl(0 100% 75%)' : 'var(--color-text, #f8fafc)' }}>
+                              <div style={{ fontWeight: 700, color: t.isVoid ? 'hsl(0 72% 38%)' : 'var(--color-text)' }}>
                                 {t.invoiceNumber}
                               </div>
-                              <div style={{ fontSize: 11, color: 'var(--color-text-muted, #94a3b8)' }}>
+                              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                                 {t.itemCount} jenis produk
                               </div>
                             </td>
 
-                            <td style={{ padding: '14px 16px', color: 'var(--color-text-secondary, #cbd5e1)' }}>
+                            <td style={{ padding: '14px 16px', color: 'var(--color-text-secondary)' }}>
                               {fmtWaktu(t.createdAt)} WIB
                             </td>
 
@@ -670,25 +727,25 @@ export default function CashierRecapPage() {
                                 fontSize: 11,
                                 fontWeight: 700,
                                 background: isSplit
-                                  ? 'hsl(260 80% 50% / 0.2)'
+                                  ? 'hsl(260 70% 94%)'
                                   : t.paymentMethod === 'CASH'
-                                  ? 'hsl(150 80% 40% / 0.2)'
-                                  : 'hsl(200 90% 50% / 0.2)',
+                                  ? 'hsl(150 65% 92%)'
+                                  : 'hsl(200 80% 92%)',
                                 color: isSplit
-                                  ? 'hsl(260 80% 75%)'
+                                  ? 'hsl(260 65% 35%)'
                                   : t.paymentMethod === 'CASH'
-                                  ? 'hsl(150 80% 65%)'
-                                  : 'hsl(200 90% 70%)',
+                                  ? 'hsl(150 75% 24%)'
+                                  : 'hsl(200 85% 28%)',
                               }}>
                                 {isSplit ? 'SPLIT' : t.paymentMethod}
                               </span>
                             </td>
 
-                            <td style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--color-text, #f8fafc)' }}>
+                            <td style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--color-text)' }}>
                               {rp(t.grossAmount)}
                             </td>
 
-                            <td style={{ padding: '14px 16px', color: 'var(--color-text-muted, #94a3b8)' }}>
+                            <td style={{ padding: '14px 16px', color: 'var(--color-text-muted)' }}>
                               {t.changeAmount ? rp(t.changeAmount) : '-'}
                             </td>
 
@@ -698,7 +755,7 @@ export default function CashierRecapPage() {
                                   display: 'inline-flex',
                                   alignItems: 'center',
                                   gap: 4,
-                                  color: 'hsl(150 80% 65%)',
+                                  color: 'hsl(150 75% 28%)',
                                   fontSize: 12,
                                   fontWeight: 600,
                                 }}>
@@ -710,7 +767,7 @@ export default function CashierRecapPage() {
                                   display: 'inline-flex',
                                   alignItems: 'center',
                                   gap: 4,
-                                  color: 'hsl(0 100% 75%)',
+                                  color: 'hsl(0 75% 38%)',
                                   fontSize: 12,
                                   fontWeight: 600,
                                 }}>
@@ -731,8 +788,9 @@ export default function CashierRecapPage() {
               {data.pagination.totalPages > 1 && (
                 <div className="no-print" style={{
                   padding: '14px 20px',
-                  borderTop: '1px solid var(--color-border, #334155)',
+                  borderTop: '1px solid var(--color-border)',
                   display: 'flex',
+                  flexWrap: 'wrap',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: 12,
@@ -742,13 +800,15 @@ export default function CashierRecapPage() {
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     disabled={data.pagination.page <= 1 || loading}
                     style={{
-                      background: 'hsl(220 15% 25% / 0.8)',
-                      border: '1px solid var(--color-border, #334155)',
-                      borderRadius: 8,
-                      padding: '6px 14px',
-                      fontSize: 12,
+                      background: 'var(--color-surface-muted)',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 10,
+                      minHeight: 44,
+                      padding: '8px 16px',
+                      fontSize: 13,
                       fontWeight: 600,
-                      color: data.pagination.page <= 1 ? 'var(--color-text-muted, #64748b)' : 'var(--color-text, #f8fafc)',
+                      color: data.pagination.page <= 1 ? 'var(--color-text-muted)' : 'var(--color-text)',
+                      opacity: data.pagination.page <= 1 ? 0.55 : 1,
                       cursor: data.pagination.page <= 1 ? 'not-allowed' : 'pointer',
                       display: 'flex',
                       alignItems: 'center',
@@ -759,7 +819,7 @@ export default function CashierRecapPage() {
                     <span>Sebelumnya</span>
                   </button>
 
-                  <span style={{ fontSize: 12, color: 'var(--color-text-muted, #94a3b8)' }}>
+                  <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
                     Halaman <strong>{data.pagination.page}</strong> dari <strong>{data.pagination.totalPages}</strong>
                   </span>
 
@@ -768,13 +828,15 @@ export default function CashierRecapPage() {
                     onClick={() => setPage((p) => Math.min(data.pagination.totalPages, p + 1))}
                     disabled={data.pagination.page >= data.pagination.totalPages || loading}
                     style={{
-                      background: 'hsl(220 15% 25% / 0.8)',
-                      border: '1px solid var(--color-border, #334155)',
-                      borderRadius: 8,
-                      padding: '6px 14px',
-                      fontSize: 12,
+                      background: 'var(--color-surface-muted)',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 10,
+                      minHeight: 44,
+                      padding: '8px 16px',
+                      fontSize: 13,
                       fontWeight: 600,
-                      color: data.pagination.page >= data.pagination.totalPages ? 'var(--color-text-muted, #64748b)' : 'var(--color-text, #f8fafc)',
+                      color: data.pagination.page >= data.pagination.totalPages ? 'var(--color-text-muted)' : 'var(--color-text)',
+                      opacity: data.pagination.page >= data.pagination.totalPages ? 0.55 : 1,
                       cursor: data.pagination.page >= data.pagination.totalPages ? 'not-allowed' : 'pointer',
                       display: 'flex',
                       alignItems: 'center',

@@ -1,26 +1,72 @@
 // =============================================================
-// POST /api/auth/kasir — Employee Login
-// Body: { fullName: string, nim: string, programStudi: string }
-// Login via kombinasi Nama + NIM + Program Studi (no password)
+// POST /api/auth/kasir — Employee Login (Opsi B1: Progressive Soft Migration NIM + PIN)
+// Aturan:
+//   - Jika employee.pinHash SUDAH ADA: Wajib login dengan NIM + PIN (bcrypt + lockout 5x/15m).
+//   - Jika employee.pinHash MASIH NULL: Diizinkan masuk via mode transisi (NIM + Nama/Prodi),
+//     atau sekaligus menyetel PIN pribadi baru (newPin + confirmNewPin + verifikasi Nama + Prodi).
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, isNull } from 'drizzle-orm';
+import bcrypt from 'bcryptjs';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { employees, shifts, shiftSchedules, attendances, qrisSettings } from '@/lib/db/schema';
 import { NextResponse } from 'next/server';
 import { signAccessToken, signRefreshToken } from '@/lib/utils/auth';
 import { apiError } from '@/lib/utils/helpers';
-import { sql } from 'drizzle-orm';
 import { kasirAuthLimiter } from '@/lib/utils/rate-limit';
 
 export const runtime = 'nodejs';
 
-const kasirLoginSchema = z.object({
-  nim: z.string().min(1, 'NIM wajib diisi').max(20).trim(),
-  fullName: z.string().max(200).trim().optional(),
-  programStudi: z.string().max(100).trim().optional(),
-});
+const PIN_REGEX = /^\d{6,8}$/;
+const MAX_PIN_ATTEMPTS = 5;
+const PIN_LOCK_MINUTES = 15;
+
+function normalizeIdentityText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function isIdentityMatch(inputValue: string, dbValue: string): boolean {
+  const cleanIn = normalizeIdentityText(inputValue);
+  const cleanDb = normalizeIdentityText(dbValue);
+  if (!cleanIn || !cleanDb) return false;
+  return cleanDb.includes(cleanIn) || cleanIn.includes(cleanDb);
+}
+
+const kasirLoginSchema = z
+  .object({
+    nim: z.string().min(1, 'NIM wajib diisi').max(20).trim(),
+    pin: z.string().trim().optional(),
+    newPin: z.string().trim().optional(),
+    confirmNewPin: z.string().trim().optional(),
+    fullName: z.string().max(200).trim().optional(),
+    programStudi: z.string().max(100).trim().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.pin && !PIN_REGEX.test(data.pin)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['pin'],
+        message: 'PIN harus berupa 6 hingga 8 digit angka',
+      });
+    }
+    if (data.newPin) {
+      if (!PIN_REGEX.test(data.newPin)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['newPin'],
+          message: 'PIN baru harus berupa 6 hingga 8 digit angka',
+        });
+      }
+      if (data.newPin !== (data.confirmNewPin ?? '')) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['confirmNewPin'],
+          message: 'Konfirmasi PIN tidak cocok dengan PIN baru',
+        });
+      }
+    }
+  });
 
 export async function POST(request: Request): Promise<Response> {
   // 1. Parse + validate
@@ -33,10 +79,17 @@ export async function POST(request: Request): Promise<Response> {
 
   const parsed = kasirLoginSchema.safeParse(body);
   if (!parsed.success) {
-    return apiError('NIM wajib diisi', 'VALIDATION_ERROR', 422, parsed.error.format());
+    return apiError(
+      parsed.error.issues[0]?.message ?? 'NIM atau PIN tidak valid',
+      'VALIDATION_ERROR',
+      422,
+      parsed.error.format(),
+    );
   }
 
-  const { fullName, nim } = parsed.data;
+  const { fullName, nim, programStudi } = parsed.data;
+  const pin = parsed.data.pin || undefined;
+  const newPin = parsed.data.newPin || undefined;
 
   // Rate limit per NIM — via centralized sliding window limiter (25x / 30 menit)
   const rateKey = `kasir:${nim}`;
@@ -50,26 +103,36 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  // 3. Find employee — fleksibel & aman:
-  // Prioritas 1: Cari berdasarkan NIM (ID resmi unik mahasiswa UNPERBA)
+  // 3. Find employee — Prioritas 1: NIM (ID resmi unik mahasiswa UNPERBA)
+  const employeeColumns = {
+    id: true,
+    fullName: true,
+    jabatan: true,
+    nim: true,
+    programStudi: true,
+    pinHash: true,
+    pinFailedAttempts: true,
+    pinLockedUntil: true,
+  } as const;
+
   let employee = await db.query.employees.findFirst({
     where: and(
       eq(employees.nim, nim),
       eq(employees.isActive, true),
       isNull(employees.deletedAt),
     ),
-    columns: { id: true, fullName: true, jabatan: true, nim: true, programStudi: true },
+    columns: employeeColumns,
   });
 
-  // Prioritas 2 (Fallback): Jika NIM tidak ditemukan namun ada Nama
-  if (!employee && fullName && fullName.length >= 3) {
+  // Prioritas 2 (Fallback hanya jika mode tanpa PIN dan Nama diberikan)
+  if (!employee && !pin && fullName && fullName.length >= 3) {
     employee = await db.query.employees.findFirst({
       where: and(
         sql`LOWER(${employees.fullName}) = LOWER(${fullName})`,
         eq(employees.isActive, true),
         isNull(employees.deletedAt),
       ),
-      columns: { id: true, fullName: true, jabatan: true, nim: true, programStudi: true },
+      columns: employeeColumns,
     });
   }
 
@@ -91,6 +154,129 @@ export async function POST(request: Request): Promise<Response> {
       'GUDANG_PIN_AUTH_REQUIRED',
       403,
     );
+  }
+
+  // 3c. Opsi B1 Progressive Soft Migration: Verifikasi PIN jika sudah terdaftar, atau masa transisi jika belum
+  let hasPinAfterLogin = Boolean(employee.pinHash);
+  const now = new Date();
+
+  if (employee.pinHash) {
+    if (employee.pinLockedUntil && new Date(employee.pinLockedUntil) > now) {
+      const diffMs = new Date(employee.pinLockedUntil).getTime() - now.getTime();
+      const remainingMins = Math.max(1, Math.ceil(diffMs / 60000));
+      return apiError(
+        `Akun terkunci sementara karena salah PIN ${MAX_PIN_ATTEMPTS} kali. Coba lagi dalam ${remainingMins} menit atau minta Dosen/Pengelola mereset PIN.`,
+        'PIN_LOCKED',
+        423,
+      );
+    }
+
+    if (!pin) {
+      return apiError(
+        `Akun ${employee.fullName} sudah menggunakan PIN Keamanan. Masukkan PIN 6–8 digit Anda.`,
+        'PIN_REQUIRED',
+        401,
+      );
+    }
+
+    const isPinMatch = await bcrypt.compare(pin, employee.pinHash);
+    if (!isPinMatch) {
+      const nextFailed = (employee.pinFailedAttempts || 0) + 1;
+      const shouldLock = nextFailed >= MAX_PIN_ATTEMPTS;
+      const lockUntil = shouldLock ? new Date(now.getTime() + PIN_LOCK_MINUTES * 60 * 1000) : null;
+
+      await db
+        .update(employees)
+        .set({
+          pinFailedAttempts: shouldLock ? MAX_PIN_ATTEMPTS : nextFailed,
+          pinLockedUntil: lockUntil,
+          updatedAt: now,
+        })
+        .where(eq(employees.id, employee.id));
+
+      kasirAuthLimiter.check(rateKey, true);
+
+      if (shouldLock) {
+        return apiError(
+          `PIN salah ${MAX_PIN_ATTEMPTS} kali berturut-turut. Akses dikunci ${PIN_LOCK_MINUTES} menit demi keamanan. Hubungi Dosen/Pengelola jika lupa PIN.`,
+          'PIN_LOCKED',
+          423,
+        );
+      }
+
+      return apiError(
+        `PIN salah. Sisa ${MAX_PIN_ATTEMPTS - nextFailed} kesempatan sebelum terkunci sementara.`,
+        'INVALID_PIN',
+        401,
+      );
+    }
+
+    if (employee.pinFailedAttempts > 0 || employee.pinLockedUntil) {
+      await db
+        .update(employees)
+        .set({ pinFailedAttempts: 0, pinLockedUntil: null, updatedAt: now })
+        .where(eq(employees.id, employee.id));
+    }
+  } else {
+    // Belum memiliki PIN (Masa Transisi Lunak Opsi B1)
+    if (pin && !newPin) {
+      return apiError(
+        'Akun Anda belum memiliki PIN. Silakan masuk dengan mode transisi (Nama + NIM + Prodi) atau buat PIN baru.',
+        'PIN_NOT_SET',
+        401,
+      );
+    }
+
+    if (fullName && !isIdentityMatch(fullName, employee.fullName)) {
+      kasirAuthLimiter.check(rateKey, true);
+      return apiError(
+        'Nama Lengkap tidak cocok dengan NIM yang terdaftar. Periksa kembali ejaan nama Anda.',
+        'INVALID_CREDENTIALS',
+        401,
+      );
+    }
+
+    if (programStudi && !isIdentityMatch(programStudi, employee.programStudi)) {
+      kasirAuthLimiter.check(rateKey, true);
+      return apiError(
+        'Program Studi tidak cocok dengan data pendaftaran NIM ini.',
+        'INVALID_CREDENTIALS',
+        401,
+      );
+    }
+
+    // Jika kasir sekalian memilih membuat PIN pribadi saat login perdana
+    if (newPin) {
+      if (!fullName || !programStudi) {
+        return apiError(
+          'Untuk membuat PIN pribadi baru, lengkapi Nama Lengkap dan Program Studi terlebih dahulu.',
+          'IDENTITY_VERIFICATION_REQUIRED',
+          422,
+        );
+      }
+
+      const hashedPin = await bcrypt.hash(newPin, 12);
+      const [boundPin] = await db
+        .update(employees)
+        .set({
+          pinHash: hashedPin,
+          pinFailedAttempts: 0,
+          pinLockedUntil: null,
+          updatedAt: now,
+        })
+        .where(and(eq(employees.id, employee.id), isNull(employees.pinHash)))
+        .returning({ id: employees.id });
+
+      if (!boundPin) {
+        return apiError(
+          'PIN baru saja disetel pada sesi lain. Silakan login menggunakan NIM dan PIN tersebut.',
+          'PIN_ALREADY_SET',
+          409,
+        );
+      }
+
+      hasPinAfterLogin = true;
+    }
   }
 
   // 4. Periksa shift aktif karyawan (dukung resume sesi aktif <12 jam)
@@ -222,6 +408,7 @@ export async function POST(request: Request): Promise<Response> {
       name: employee.fullName,
       jabatan: employee.jabatan,
       shiftId: shiftToUseId,
+      hasPin: hasPinAfterLogin,
       redirect: redirectUrl,
     },
   });

@@ -1,6 +1,6 @@
 // =============================================================
 // /api/admin/biaya — Biaya operasional (pengurang Laba Bersih)
-//   GET  ?period=daily|weekly|monthly|semi_annual | ?dateFrom=&dateTo=   → daftar biaya
+//   GET  ?period=daily|weekly|monthly|semi_annual|october|november|oct_nov|all | ?dateFrom=&dateTo=   → daftar biaya
 //   POST { expenseDate, category, description, amount }                  → catat biaya
 // Auth: Admin only. Semua mutasi tercatat di audit_logs (atomik dengan insert).
 // =============================================================
@@ -16,15 +16,14 @@ import {
   wibToday,
   resolveReportRange,
   InvalidRangeError,
-  type PeriodKey,
+  isPeriodKey,
 } from '@/lib/finance/report';
 
 export const runtime = 'nodejs';
 
-const LIST_LIMIT = 200;
+const LIST_LIMIT = 1_000;
 const MAX_BACKDATE_DAYS = 120;
 const DUPLICATE_WINDOW_SECONDS = 60;
-const PERIODS: readonly PeriodKey[] = ['daily', 'weekly', 'monthly', 'semi_annual'];
 
 const CreateSchema = z.object({
   expenseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD'),
@@ -42,14 +41,19 @@ export async function GET(req: NextRequest) {
 
   const sp = new URL(req.url).searchParams;
   const rawPeriod = sp.get('period');
-  const period = PERIODS.find((p) => p === rawPeriod) ?? null;
+  const dateFrom = sp.get('dateFrom');
+  const dateTo = sp.get('dateTo');
+  if (rawPeriod && !dateFrom && !dateTo && !isPeriodKey(rawPeriod)) {
+    return apiError('Parameter period tidak valid', 400);
+  }
+  const period = isPeriodKey(rawPeriod) ? rawPeriod : null;
 
   let range;
   try {
     range = resolveReportRange({
       period,
-      dateFrom: sp.get('dateFrom'),
-      dateTo: sp.get('dateTo'),
+      dateFrom,
+      dateTo,
     });
   } catch (err) {
     if (err instanceof InvalidRangeError) return apiError(err.message, 400);

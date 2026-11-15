@@ -4,6 +4,7 @@
 // STANDAR: Zero-Trust Security (No HPP/costPrice leak), ACID Transaction
 // =============================================================
 
+import { randomInt } from 'crypto';
 import { db } from '@/lib/db/client';
 import {
   products,
@@ -15,7 +16,24 @@ import {
   shifts,
   shiftSchedules,
 } from '@/lib/db/schema';
-import { eq, and, isNull, or, ilike, desc, asc, lte, gt, inArray, sql, type SQL } from 'drizzle-orm';
+import {
+  eq,
+  and,
+  isNull,
+  isNotNull,
+  or,
+  ilike,
+  desc,
+  asc,
+  lte,
+  gt,
+  inArray,
+  exists,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
+import { getTodayWib, getOffsetDateWib } from '@/lib/utils/helpers';
+import { getLowStockThreshold } from '@/lib/services/operationalSettingsService';
 
 // ── Tipe Data DTO (Clean Architecture) ─────────────────────────
 
@@ -23,6 +41,7 @@ export interface WarehouseSummaryDto {
   totalSku: number;
   outOfStockSku: number;
   lowStockSku: number;
+  lowStockThreshold: number;
   expiringSoonSku: number;
   todayRestockCount: number;
   perishableSku: number;
@@ -82,28 +101,53 @@ export interface WarehouseActivityDto {
   formattedTime?: string;
 }
 
-// Batas minimum stok dianggap kritis (bisa disesuaikan per kategori di masa depan)
-const LOW_STOCK_THRESHOLD = 5;
-
 // =============================================================
 // 1. Ringkasan Kesehatan Stok (Dashboard KPI Gudang)
 // =============================================================
 export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
   const nowWib = new Date();
-  const tanggalHari = nowWib.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-  const in30Days = new Date(nowWib.getTime() + 30 * 24 * 60 * 60 * 1000)
-    .toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+  const todayStr = getTodayWib(nowWib);
+  const in30Days = getOffsetDateWib(30, nowWib);
+  const lowStockThreshold = await getLowStockThreshold();
 
-  // 1. Total SKU aktif & stok
-  const activeProducts = await db
-    .select({
-      id: products.id,
-      stockQty: products.stockQty,
-      isPerishable: products.isPerishable,
-      barcode: products.barcode,
-    })
-    .from(products)
-    .where(and(eq(products.isActive, true), isNull(products.deletedAt)));
+  // 1. Total SKU aktif & stok + batch FEFO + restock hari ini secara paralel
+  const [activeProducts, expiringBatches, [todayAdjustmentStats]] = await Promise.all([
+    db
+      .select({
+        id: products.id,
+        stockQty: products.stockQty,
+        isPerishable: products.isPerishable,
+        barcode: products.barcode,
+      })
+      .from(products)
+      .where(and(eq(products.isActive, true), isNull(products.deletedAt))),
+    db
+      .select({
+        productId: stockBatches.productId,
+      })
+      .from(stockBatches)
+      .innerJoin(products, eq(stockBatches.productId, products.id))
+      .where(
+        and(
+          eq(products.isActive, true),
+          isNull(products.deletedAt),
+          isNotNull(stockBatches.expiryDate),
+          gt(stockBatches.currentQty, 0),
+          lte(stockBatches.expiryDate, in30Days),
+        ),
+      ),
+    db
+      .select({
+        count: sql<number>`COALESCE(COUNT(*), 0)::int`,
+      })
+      .from(stockAdjustments)
+      .where(
+        and(
+          ilike(stockAdjustments.reason, '%RESTOCK GUDANG%'),
+          sql`DATE(${stockAdjustments.createdAt} AT TIME ZONE 'Asia/Jakarta') = ${todayStr}::date`,
+        ),
+      ),
+  ]);
 
   let outOfStockSku = 0;
   let lowStockSku = 0;
@@ -115,43 +159,20 @@ export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
     }
     if (p.stockQty <= 0) {
       outOfStockSku++;
-    } else if (p.stockQty <= LOW_STOCK_THRESHOLD) {
+    } else if (p.stockQty <= lowStockThreshold) {
       lowStockSku++;
     }
   }
 
-  // 2. Batch kedaluwarsa mendekati (< 30 hari atau sudah lewat) dengan sisa stok > 0
-  const expiringBatches = await db
-    .select({
-      productId: stockBatches.productId,
-    })
-    .from(stockBatches)
-    .where(
-      and(
-        gt(stockBatches.currentQty, 0),
-        lte(stockBatches.expiryDate, in30Days),
-      ),
-    );
-
   const uniqueExpiringProductIds = new Set(expiringBatches.map((b) => b.productId));
-
-  // 3. Restock hari ini oleh gudang
-  const todayAdjustments = await db
-    .select({ id: stockAdjustments.id })
-    .from(stockAdjustments)
-    .where(
-      and(
-        ilike(stockAdjustments.reason, '%RESTOCK GUDANG%'),
-        sql`DATE(${stockAdjustments.createdAt} AT TIME ZONE 'Asia/Jakarta') = ${tanggalHari}::date`,
-      ),
-    );
 
   return {
     totalSku: activeProducts.length,
     outOfStockSku,
     lowStockSku,
+    lowStockThreshold,
     expiringSoonSku: uniqueExpiringProductIds.size,
-    todayRestockCount: todayAdjustments.length,
+    todayRestockCount: todayAdjustmentStats?.count ?? 0,
     perishableSku,
   };
 }
@@ -164,15 +185,14 @@ export async function getWarehouseProducts(options: {
   filter?: 'semua' | 'kritis' | 'habis' | 'fefo' | 'perishable';
   limit?: number;
   offset?: number;
-}): Promise<{ items: WarehouseProductDto[]; total: number }> {
+}): Promise<{ items: WarehouseProductDto[]; total: number; lowStockThreshold: number }> {
   const { search, filter = 'semua', limit = 100, offset = 0 } = options;
 
   const nowWib = new Date();
-  const todayStr = nowWib.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-  const in7DaysStr = new Date(nowWib.getTime() + 7 * 24 * 60 * 60 * 1000)
-    .toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-  const in30DaysStr = new Date(nowWib.getTime() + 30 * 24 * 60 * 60 * 1000)
-    .toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+  const todayStr = getTodayWib(nowWib);
+  const in7DaysStr = getOffsetDateWib(7, nowWib);
+  const in30DaysStr = getOffsetDateWib(30, nowWib);
+  const lowStockThreshold = await getLowStockThreshold();
 
   const conditions: SQL[] = [
     eq(products.isActive, true),
@@ -197,10 +217,27 @@ export async function getWarehouseProducts(options: {
   } else if (filter === 'kritis') {
     conditions.push(
       gt(products.stockQty, 0),
-      lte(products.stockQty, LOW_STOCK_THRESHOLD),
+      lte(products.stockQty, lowStockThreshold),
     );
   } else if (filter === 'perishable') {
     conditions.push(or(eq(products.isPerishable, true), isNull(products.barcode), eq(products.barcode, ''))!);
+  } else if (filter === 'fefo') {
+    // Dorong filter FEFO ke SQL agar tidak terpotong LIMIT/OFFSET produk abjad awal
+    conditions.push(
+      exists(
+        db
+          .select({ id: stockBatches.id })
+          .from(stockBatches)
+          .where(
+            and(
+              eq(stockBatches.productId, products.id),
+              gt(stockBatches.currentQty, 0),
+              isNotNull(stockBatches.expiryDate),
+              lte(stockBatches.expiryDate, in30DaysStr),
+            ),
+          ),
+      ),
+    );
   }
 
   const rows = await db
@@ -275,7 +312,7 @@ export async function getWarehouseProducts(options: {
     let stockStatus: WarehouseProductDto['stockStatus'] = 'SAFE';
     if (r.stockQty <= 0) {
       stockStatus = 'OUT_OF_STOCK';
-    } else if (r.stockQty <= LOW_STOCK_THRESHOLD) {
+    } else if (r.stockQty <= lowStockThreshold) {
       stockStatus = 'LOW_STOCK';
     }
 
@@ -296,7 +333,7 @@ export async function getWarehouseProducts(options: {
     };
   });
 
-  // Jika filter FEFO: hanya tampilkan yang punya expired date mendesak (EXPIRED, CRITICAL, WARNING)
+  // Urutkan filter FEFO dari yang paling cepat kedaluwarsa
   let filteredItems = items;
   if (filter === 'fefo') {
     filteredItems = items
@@ -311,6 +348,7 @@ export async function getWarehouseProducts(options: {
   return {
     items: filteredItems,
     total: filteredItems.length,
+    lowStockThreshold,
   };
 }
 
@@ -322,16 +360,21 @@ export async function restockProductByWarehouse(
 ): Promise<RestockResultDto> {
   const { productId, qtyAdd, expiryDate, batchCode, notes, employeeId } = input;
 
-  if (qtyAdd <= 0) {
-    throw new Error('Jumlah restock harus lebih dari 0.');
+  if (!Number.isInteger(qtyAdd) || qtyAdd <= 0) {
+    throw new Error('Jumlah restock harus berupa bilangan bulat positif.');
   }
 
-  // 1. Verifikasi Petugas (Karyawan Gudang atau Admin)
+  // 1. Verifikasi Petugas (Karyawan Gudang atau Manager aktif)
   let actorName = '';
   let actorNim = '';
+  let callerManagerId: string | null = null;
 
   const emp = await db.query.employees.findFirst({
-    where: and(eq(employees.id, employeeId), eq(employees.isActive, true)),
+    where: and(
+      eq(employees.id, employeeId),
+      eq(employees.isActive, true),
+      isNull(employees.deletedAt),
+    ),
     columns: { id: true, fullName: true, nim: true, jabatan: true },
   });
 
@@ -340,76 +383,117 @@ export async function restockProductByWarehouse(
     actorNim = `NIM ${emp.nim}`;
   } else {
     const adm = await db.query.admins.findFirst({
-      where: and(eq(admins.id, employeeId), eq(admins.isActive, true)),
-      columns: { id: true, fullName: true, nidn: true },
+      where: and(
+        eq(admins.id, employeeId),
+        eq(admins.isActive, true),
+        isNull(admins.deletedAt),
+      ),
+      columns: { id: true, fullName: true, nidn: true, role: true },
     });
     if (adm) {
+      if (adm.role !== 'MANAGER') {
+        throw new Error('Admin Shift tidak memiliki izin melakukan restock stok langsung.');
+      }
       actorName = adm.fullName;
-      actorNim = adm.nidn ? `ID ${adm.nidn}` : 'ADMIN';
+      actorNim = adm.nidn ? `ID ${adm.nidn}` : 'MANAGER';
+      callerManagerId = adm.id;
     } else {
       throw new Error('Petugas tidak terdaftar atau tidak aktif.');
     }
   }
 
-  // 2. Verifikasi Produk
-  const prod = await db.query.products.findFirst({
-    where: and(eq(products.id, productId), isNull(products.deletedAt)),
-  });
+  // 2. Cari Admin Aktif untuk FK Audit Trail stockAdjustments
+  const auditAdminId =
+    callerManagerId ??
+    (
+      await db.query.admins.findFirst({
+        where: and(
+          eq(admins.isActive, true),
+          isNull(admins.deletedAt),
+          eq(admins.role, 'MANAGER'),
+        ),
+        columns: { id: true },
+      })
+    )?.id ??
+    (
+      await db.query.admins.findFirst({
+        where: and(eq(admins.isActive, true), isNull(admins.deletedAt)),
+        columns: { id: true },
+      })
+    )?.id;
 
-  if (!prod) {
-    throw new Error('Produk tidak ditemukan atau telah dihapus.');
-  }
-
-  // 3. Cari Admin Aktif untuk Audit Trail
-  const adminRow = await db.query.admins.findFirst({
-    where: eq(admins.isActive, true),
-    columns: { id: true },
-  });
-
-  if (!adminRow) {
+  if (!auditAdminId) {
     throw new Error('Sistem audit admin tidak tersedia.');
   }
 
   const nowWib = new Date();
-  const timeStr = nowWib.toLocaleTimeString('en-GB', {
-    timeZone: 'Asia/Jakarta',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const todayCompact = getTodayWib(nowWib).replace(/-/g, '');
+  const wibShifted = new Date(nowWib.getTime() + 7 * 60 * 60 * 1000);
+  const dayNames = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU'] as const;
+  const currentDay = dayNames[wibShifted.getUTCDay()];
+  const hour = String(wibShifted.getUTCHours()).padStart(2, '0');
+  const min = String(wibShifted.getUTCMinutes()).padStart(2, '0');
+  const timeStr = `${hour}:${min}`;
 
-  const qtyBefore = prod.stockQty;
-  const qtyAfter = qtyBefore + qtyAdd;
   const autoBatchCode =
-    batchCode?.trim() ||
-    `IN-${nowWib.getFullYear()}${String(nowWib.getMonth() + 1).padStart(2, '0')}${String(nowWib.getDate()).padStart(2, '0')}-${String(Math.floor(1000 + Math.random() * 9000))}`;
+    batchCode?.trim() || `IN-${todayCompact}-${randomInt(1000, 10000)}`;
+  const cleanExpiryDate = expiryDate?.trim() || null;
 
+  let productName = '';
+  let qtyBefore = 0;
+  let qtyAfter = 0;
   let createdBatchId: string | undefined;
   let createdAdjId = '';
 
-  // Transaksi ACID: Update Master Stok + Insert/Update Batch + Insert Audit Log
+  // 3. Transaksi ACID: Lock Produk -> Update Stok -> Insert Batch -> Audit Log
   await db.transaction(async (tx) => {
-    // A. Update Master Stok Produk
+    const [lockedProduct] = await tx
+      .select({
+        id: products.id,
+        name: products.name,
+        stockQty: products.stockQty,
+        costPrice: products.costPrice,
+        unit: products.unit,
+        isActive: products.isActive,
+        deletedAt: products.deletedAt,
+      })
+      .from(products)
+      .where(eq(products.id, productId))
+      .for('update')
+      .limit(1);
+
+    if (!lockedProduct || !lockedProduct.isActive || lockedProduct.deletedAt) {
+      throw new Error('Produk tidak ditemukan, nonaktif, atau telah dihapus.');
+    }
+
+    productName = lockedProduct.name;
+    qtyBefore = lockedProduct.stockQty;
+    qtyAfter = qtyBefore + qtyAdd;
+
+    // A. Update Master Stok Produk secara atomik pada baris terkunci
     await tx
       .update(products)
       .set({
-        stockQty: qtyAfter,
+        stockQty: sql`${products.stockQty} + ${qtyAdd}`,
         updatedAt: nowWib,
       })
       .where(eq(products.id, productId));
 
-    // B. Buat / Update Stock Batch jika ada tanggal kadaluarsa atau batch code
+    // B. Buat Stock Batch baru (FEFO/FIFO tracking)
     const [batchRecord] = await tx
       .insert(stockBatches)
       .values({
         productId,
         batchCode: autoBatchCode,
-        costPrice: prod.costPrice, // Menggunakan HPP internal produk
+        costPrice: lockedProduct.costPrice, // Menggunakan HPP internal produk
         initialQty: qtyAdd,
         currentQty: qtyAdd,
-        expiryDate: expiryDate ? expiryDate.trim() : null,
-        expiryClass: expiryDate ? 'PENDEK' : 'PANJANG',
+        expiryDate: cleanExpiryDate,
+        expiryClass: cleanExpiryDate ? 'PENDEK' : 'PANJANG',
         receivedAt: nowWib,
-        notes: notes ? `Diterima oleh ${actorName} (${actorNim}): ${notes}` : `Restock gudang oleh ${actorName} (${actorNim})`,
+        notes: notes
+          ? `Diterima oleh ${actorName} (${actorNim}): ${notes}`
+          : `Restock gudang oleh ${actorName} (${actorNim})`,
         createdAt: nowWib,
         updatedAt: nowWib,
       })
@@ -417,10 +501,10 @@ export async function restockProductByWarehouse(
 
     createdBatchId = batchRecord?.id;
 
-    // 3b. Deteksi Sesi Shift yang sedang aktif atau jadwal piket saat restock
+    // C. Deteksi Sesi Shift aktif atau jadwal piket WIB saat restock
     let shiftLabel = '';
     try {
-      const activeShift = await db.query.shifts.findFirst({
+      const activeShift = await tx.query.shifts.findFirst({
         where: and(eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut)),
         orderBy: [desc(shifts.clockIn)],
         with: {
@@ -433,36 +517,30 @@ export async function restockProductByWarehouse(
       if (activeShift?.employee) {
         shiftLabel = `Shift Kasir Aktif: ${activeShift.employee.fullName} (NIM ${activeShift.employee.nim})`;
       } else {
-        const dayNames = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU'] as const;
-        const currentDay = dayNames[nowWib.getDay()];
-        const hour = String(nowWib.getHours()).padStart(2, '0');
-        const min = String(nowWib.getMinutes()).padStart(2, '0');
-        const timeHm = `${hour}:${min}`;
-
-        const sched = await db.query.shiftSchedules.findFirst({
+        const sched = await tx.query.shiftSchedules.findFirst({
           where: and(
             eq(shiftSchedules.dayOfWeek, currentDay),
             eq(shiftSchedules.isActive, true),
-            lte(shiftSchedules.slotStart, timeHm),
-            gt(shiftSchedules.slotEnd, timeHm),
+            lte(shiftSchedules.slotStart, timeStr),
+            gt(shiftSchedules.slotEnd, timeStr),
           ),
         });
 
         if (sched) {
           let assignedEmployeeName = '';
           if (sched.employeeId) {
-            const emp = await db.query.employees.findFirst({
+            const empSched = await tx.query.employees.findFirst({
               where: eq(employees.id, sched.employeeId),
               columns: { fullName: true, nim: true },
             });
-            if (emp) {
-              assignedEmployeeName = ` (${emp.fullName})`;
+            if (empSched) {
+              assignedEmployeeName = ` (${empSched.fullName})`;
             }
           }
           const koord = sched.coordinatorName ? ` • Koordinator: ${sched.coordinatorName}` : '';
           shiftLabel = `Jadwal ${currentDay} (${sched.slotStart}–${sched.slotEnd} WIB)${assignedEmployeeName}${koord}`;
         } else {
-          shiftLabel = `Shift ${currentDay} (${timeHm} WIB)`;
+          shiftLabel = `Shift ${currentDay} (${timeStr} WIB)`;
         }
       }
     } catch (err) {
@@ -471,20 +549,21 @@ export async function restockProductByWarehouse(
 
     const shiftInfoText = shiftLabel ? ` • ${shiftLabel}` : '';
 
-    // C. Insert ke Audit Log Stock Adjustments
-    const expInfo = expiryDate ? ` Exp: ${expiryDate}` : '';
+    // D. Insert ke Audit Log Stock Adjustments
+    const expInfo = cleanExpiryDate ? ` Exp: ${cleanExpiryDate}` : '';
     const noteInfo = notes ? ` Catatan: ${notes}` : '';
-    const reasonText = `[RESTOCK GUDANG${shiftInfoText} • Petugas: ${actorName} (${actorNim}) • ${timeStr} WIB] Masuk +${qtyAdd} ${prod.unit} (Batch: ${autoBatchCode}${expInfo}).${noteInfo}`.trim();
+    const reasonText = `[RESTOCK GUDANG${shiftInfoText} • Petugas: ${actorName} (${actorNim}) • ${timeStr} WIB] Masuk +${qtyAdd} ${lockedProduct.unit} (Batch: ${autoBatchCode}${expInfo}).${noteInfo}`.trim();
 
     const [adjRecord] = await tx
       .insert(stockAdjustments)
       .values({
         productId,
+        batchId: createdBatchId ?? null,
         qtyBefore,
         qtyAfter,
         qtyDiff: qtyAdd,
         reason: reasonText,
-        adjustedByAdminId: adminRow.id,
+        adjustedByAdminId: auditAdminId,
         createdAt: nowWib,
       })
       .returning({ id: stockAdjustments.id });
@@ -494,7 +573,7 @@ export async function restockProductByWarehouse(
 
   return {
     productId,
-    productName: prod.name,
+    productName,
     qtyBefore,
     qtyAfter,
     qtyDiff: qtyAdd,
@@ -505,7 +584,7 @@ export async function restockProductByWarehouse(
 }
 
 // =============================================================
-// 4. Log Aktivitas Restock Gudang Hari Ini
+// 4. Log Aktivitas Restock Gudang Terbaru
 // =============================================================
 export async function getWarehouseActivityLogs(limit = 30): Promise<WarehouseActivityDto[]> {
   const rows = await db

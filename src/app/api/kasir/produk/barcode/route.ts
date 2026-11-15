@@ -61,12 +61,12 @@ export async function GET(req: NextRequest): Promise<Response> {
     .select({
       id:              discountBarcodes.id,
       policyId:        discountBarcodes.policyId,
-      productId:       discountBarcodes.productId,
+      productId:       discountPolicies.productId,
       barcode:         discountBarcodes.barcode,
-      discountedPrice: discountBarcodes.discountedPrice,
-      discountPct:     discountBarcodes.discountPct,
+      discountedPrice: discountPolicies.discountedPrice,
+      discountPct:     discountPolicies.discountPct,
       remainingQty:    discountBarcodes.remainingQty,
-      validUntil:      discountBarcodes.validUntil,
+      validUntil:      discountPolicies.validUntil,
       isActive:        discountBarcodes.isActive,
       // Data Produk
       productName:     products.name,
@@ -81,7 +81,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     })
     .from(discountBarcodes)
     .innerJoin(discountPolicies, eq(discountBarcodes.policyId, discountPolicies.id))
-    .innerJoin(products, eq(discountBarcodes.productId, products.id))
+    .innerJoin(products, eq(discountPolicies.productId, products.id))
     .innerJoin(categories, eq(products.categoryId, categories.id))
     .where(
       and(

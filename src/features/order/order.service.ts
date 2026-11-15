@@ -20,6 +20,7 @@ import {
   type CreateOrderInput,
 } from './order.types';
 import { validateStockForOrder } from './katalog.service';
+import { expireDueOrders } from './pesanan.service';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -205,12 +206,15 @@ export async function getOrdersByBuyerId(
   buyerId: string,
   limit = 10,
 ): Promise<OnlineOrder[]> {
+  const cap = Math.min(Math.max(limit, 1), 50);
+  await expireDueOrders({ buyerId, limit: cap });
+
   const rows = await db
     .select()
     .from(onlineOrders)
     .where(and(eq(onlineOrders.buyerId, buyerId), isNull(onlineOrders.deletedAt)))
     .orderBy(desc(onlineOrders.createdAt))
-    .limit(limit);
+    .limit(cap);
   return rows; // newest first
 }
 
@@ -224,5 +228,23 @@ export async function getOrderDetail(orderId: string): Promise<OnlineOrder | nul
     .from(onlineOrders)
     .where(and(eq(onlineOrders.id, orderId), isNull(onlineOrders.deletedAt)))
     .limit(1);
-  return row ?? null;
+  if (!row) return null;
+
+  const isWaiting =
+    row.status === 'WAITING_PAYMENT_VERIFICATION' || row.status === 'WAITING_CONFIRMATION';
+  if (isWaiting && row.expiredAt && row.expiredAt <= new Date()) {
+    const updated = await expireDueOrders({ orderId: row.id, limit: 1 });
+    if (updated > 0) {
+      return { ...row, status: 'EXPIRED', updatedAt: new Date() };
+    }
+    // Status berubah bersamaan (misal baru dikonfirmasi admin) — baca ulang keadaan terbaru
+    const [fresh] = await db
+      .select()
+      .from(onlineOrders)
+      .where(and(eq(onlineOrders.id, orderId), isNull(onlineOrders.deletedAt)))
+      .limit(1);
+    return fresh ?? null;
+  }
+
+  return row;
 }

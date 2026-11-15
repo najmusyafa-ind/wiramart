@@ -5,7 +5,7 @@
 // STANDAR: NASA-Grade Decoupling, Vectorized Aggregation, Zero Defect
 // =============================================================
 
-import { eq, and, gte, lt, sql, ilike, isNull, desc } from 'drizzle-orm';
+import { eq, and, gte, lt, sql, ilike, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   products,
@@ -179,7 +179,7 @@ export class StockMutationReportService {
     // 4. Agregasi FEFO Tindakan: Write-off (Pemusnahan) & Retur Supplier
     const fefoData = await db
       .select({
-        productId: productConditionReports.productId,
+        productId: stockBatches.productId,
         decision: productConditionReports.managerDecision,
         qty: sql<string>`COALESCE(SUM(${productConditionReports.qtyAtAlert}), 0)`,
         lossAmount: sql<string>`COALESCE(SUM(${productConditionReports.qtyAtAlert} * CAST(${stockBatches.costPrice} AS NUMERIC)), 0)`,
@@ -192,7 +192,7 @@ export class StockMutationReportService {
           lt(productConditionReports.decidedAt, endExclusive),
         ),
       )
-      .groupBy(productConditionReports.productId, productConditionReports.managerDecision);
+      .groupBy(stockBatches.productId, productConditionReports.managerDecision);
 
     const fefoMap = new Map<
       string,

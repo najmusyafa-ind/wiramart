@@ -19,24 +19,62 @@ import { requireManager } from '@/lib/utils/auth';
 import { AppError } from '@/lib/utils/helpers';
 import {
   getFinancialReport,
+  InvalidRangeError,
+  isPeriodKey,
   resolveReportRange,
   type PeriodKey,
 } from '@/lib/finance/report';
+import { EXPORT_MAX_ROWS } from '@/lib/services/exportWorkbookService';
 
 export const runtime = 'nodejs';
 
-function fmtRupiah(num: number): string {
-  return 'Rp ' + Math.round(num).toLocaleString('id-ID');
-}
+const SQL_IN_CHUNK_SIZE = 1_500;
 
 // Netralisasi sel teks agar kebal terhadap Formula Injection (Celah I3)
 function sanitizeExcelText(val: string | null | undefined): string {
   if (!val) return '';
   const str = String(val).trim();
-  if (/^[=+@\-]/.test(str)) {
+  if (/^[=+\-@\t\r]/.test(str)) {
     return `'${str}`;
   }
   return str;
+}
+
+function isExcludedTestAccount(name?: string | null, nim?: string | null): boolean {
+  const lname = (name ?? '').toLowerCase();
+  const lnim = (nim ?? '').toLowerCase();
+  return (
+    lname.includes('testing') ||
+    lname.includes('dede') ||
+    lnim === '02405013' ||
+    lnim === '00000000'
+  );
+}
+
+function chunkArray<T>(items: readonly T[], size = SQL_IN_CHUNK_SIZE): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function fmtWibDateCompact(d: Date): string {
+  return new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+  }).format(d);
+}
+
+function fmtWibTimeCompact(d: Date): string {
+  return new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
 }
 
 // Label shift toko berdasarkan jam buka (08:00 - 11:30 vs 11:30 - 15:00 WIB)
@@ -56,7 +94,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     await requireManager();
 
     const { searchParams } = new URL(req.url);
-    const period = (searchParams.get('period') as PeriodKey) ?? 'daily';
+    const rawPeriod = searchParams.get('period');
+    if (rawPeriod !== null && rawPeriod !== '' && !isPeriodKey(rawPeriod)) {
+      return NextResponse.json(
+        { success: false, error: `Parameter period '${rawPeriod}' tidak valid` },
+        { status: 400 },
+      );
+    }
+    const period: PeriodKey = rawPeriod && isPeriodKey(rawPeriod) ? rawPeriod : 'daily';
     const dateFrom = searchParams.get('dateFrom') ?? undefined;
     const dateTo = searchParams.get('dateTo') ?? undefined;
 
@@ -64,8 +109,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const report = await getFinancialReport(range);
     const s = report.summary;
 
-    // Ambil data shift untuk periode ini
-    const shiftList = await db
+    // Ambil data shift untuk periode ini (limit + 1 untuk deteksi truncasi di atas 10.000 baris)
+    const rawShiftList = await db
       .select({
         shiftId:            shifts.id,
         clockIn:            shifts.clockIn,
@@ -81,14 +126,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .innerJoin(employees, eq(shifts.employeeId, employees.id))
       .where(and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)))
       .orderBy(sql`${shifts.clockIn} ASC`)
-      .limit(100);
+      .limit(EXPORT_MAX_ROWS + 1);
+
+    const isShiftTruncated = rawShiftList.length > EXPORT_MAX_ROWS;
+    const shiftList = rawShiftList
+      .slice(0, EXPORT_MAX_ROWS)
+      .filter((sh) => !isExcludedTestAccount(sh.kasirName, sh.kasirNim));
 
     const shiftIds = shiftList.map((x) => x.shiftId);
     const shiftCashOutMap = new Map<string, number>();
     const shiftCashInMap  = new Map<string, number>();
     const shiftSalesMap   = new Map<string, number>();
 
-    if (shiftIds.length > 0) {
+    for (const idChunk of chunkArray(shiftIds)) {
       const movements = await db
         .select({
           shiftId: shiftCashMovements.shiftId,
@@ -96,15 +146,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           total: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}), 0)`,
         })
         .from(shiftCashMovements)
-        .where(inArray(shiftCashMovements.shiftId, shiftIds))
+        .where(inArray(shiftCashMovements.shiftId, idChunk))
         .groupBy(shiftCashMovements.shiftId, shiftCashMovements.movementType);
 
       for (const m of movements) {
         const val = parseFloat(m.total || '0');
         if (m.movementType === 'CASH_OUT') {
-          shiftCashOutMap.set(m.shiftId, val);
+          shiftCashOutMap.set(m.shiftId, (shiftCashOutMap.get(m.shiftId) ?? 0) + val);
         } else if (m.movementType === 'CASH_IN') {
-          shiftCashInMap.set(m.shiftId, val);
+          shiftCashInMap.set(m.shiftId, (shiftCashInMap.get(m.shiftId) ?? 0) + val);
         }
       }
 
@@ -116,7 +166,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         .from(transactionPayments)
         .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
         .where(and(
-          inArray(transactions.shiftId, shiftIds),
+          inArray(transactions.shiftId, idChunk),
           eq(transactions.status, 'COMPLETED'),
           eq(transactionPayments.paymentMethod, 'CASH'),
           eq(transactions.isTest, false),
@@ -134,7 +184,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         })
         .from(transactions)
         .where(and(
-          inArray(transactions.shiftId, shiftIds),
+          inArray(transactions.shiftId, idChunk),
           eq(transactions.status, 'COMPLETED'),
           eq(transactions.paymentMethod, 'CASH'),
           eq(transactions.isTest, false),
@@ -158,9 +208,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Kolom lebar (A sampai L)
     ws.columns = [
       { width: 4 },  // A (padding)
-      { width: 18 }, // B Sesi Shift
-      { width: 24 }, // C Kasir (Nama / NIM)
-      { width: 18 }, // D Waktu Shift
+      { width: 20 }, // B Sesi Shift / Tanggal
+      { width: 28 }, // C Kasir (Nama / NIM)
+      { width: 26 }, // D Waktu Shift (Tanggal + Jam WIB)
       { width: 16 }, // E Modal Awal
       { width: 16 }, // F Omzet Tunai
       { width: 16 }, // G Kas Keluar (-)
@@ -168,7 +218,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       { width: 18 }, // I Expected Kas
       { width: 16 }, // J Fisik Laci
       { width: 16 }, // K Selisih
-      { width: 14 }, // L Status Audit
+      { width: 16 }, // L Status Audit
     ];
 
     // Title Block
@@ -264,27 +314,92 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ws.getRow(curRow).height = 20;
 
     curRow++;
-    for (const d of report.daily) {
-      const row = ws.getRow(curRow);
-      row.getCell(2).value = d.date;
-      row.getCell(3).value = d.txCount;
-      row.getCell(4).value = d.voidCount;
-      row.getCell(5).value = d.omzet;
-      row.getCell(6).value = d.omzetCash;
-      row.getCell(7).value = d.omzetQris;
-      row.getCell(8).value = d.hppTerjual;
-      row.getCell(9).value = d.labaKotor;
-      row.getCell(10).value = d.biayaOperasional;
-      row.getCell(11).value = d.alokasiGajiKaryawan;
-      row.getCell(12).value = d.labaBersih;
+    if (report.daily.length === 0) {
+      ws.mergeCells(`B${curRow}:L${curRow}`);
+      ws.getCell(`B${curRow}`).value = 'Tidak ada data harian tercatat pada rentang tanggal ini.';
+      ws.getCell(`B${curRow}`).font = { italic: true, color: { argb: 'FF64748B' } };
+      curRow++;
+    } else {
+      const dailyStartRow = curRow;
+      let sumTxCount = 0;
+      let sumVoidCount = 0;
+      let sumOmzet = 0;
+      let sumCash = 0;
+      let sumQris = 0;
+      let sumHpp = 0;
+      let sumLabaKotor = 0;
+      let sumBiaya = 0;
+      let sumAlokasi = 0;
+      let sumLabaBersih = 0;
 
-      for (let c = 5; c <= 12; c++) {
-        row.getCell(c).numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0';
-        row.getCell(c).alignment = { horizontal: 'right' };
+      for (const d of report.daily) {
+        const row = ws.getRow(curRow);
+        row.getCell(2).value = d.date;
+        row.getCell(3).value = d.txCount;
+        row.getCell(4).value = d.voidCount;
+        row.getCell(5).value = d.omzet;
+        row.getCell(6).value = d.omzetCash;
+        row.getCell(7).value = d.omzetQris;
+        row.getCell(8).value = d.hppTerjual;
+        row.getCell(9).value = d.labaKotor;
+        row.getCell(10).value = d.biayaOperasional;
+        row.getCell(11).value = d.alokasiGajiKaryawan;
+        row.getCell(12).value = d.labaBersih;
+
+        sumTxCount += d.txCount;
+        sumVoidCount += d.voidCount;
+        sumOmzet += d.omzet;
+        sumCash += d.omzetCash;
+        sumQris += d.omzetQris;
+        sumHpp += d.hppTerjual;
+        sumLabaKotor += d.labaKotor;
+        sumBiaya += d.biayaOperasional;
+        sumAlokasi += d.alokasiGajiKaryawan;
+        sumLabaBersih += d.labaBersih;
+
+        row.getCell(3).numFmt = '#,##0';
+        row.getCell(3).alignment = { horizontal: 'center' };
+        row.getCell(4).numFmt = '#,##0';
+        row.getCell(4).alignment = { horizontal: 'center' };
+        for (let c = 5; c <= 12; c++) {
+          row.getCell(c).numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0';
+          row.getCell(c).alignment = { horizontal: 'right' };
+        }
+
+        curRow++;
       }
-      row.getCell(3).alignment = { horizontal: 'center' };
-      row.getCell(4).alignment = { horizontal: 'center' };
 
+      const dailyEndRow = curRow - 1;
+      const totDailyRow = ws.getRow(curRow);
+      totDailyRow.getCell(2).value = `TOTAL (${report.daily.length} Hari)`;
+      const dailyTotals: ReadonlyArray<{ col: number; letter: string; sum: number; isCount?: boolean }> = [
+        { col: 3, letter: 'C', sum: sumTxCount, isCount: true },
+        { col: 4, letter: 'D', sum: sumVoidCount, isCount: true },
+        { col: 5, letter: 'E', sum: sumOmzet },
+        { col: 6, letter: 'F', sum: sumCash },
+        { col: 7, letter: 'G', sum: sumQris },
+        { col: 8, letter: 'H', sum: sumHpp },
+        { col: 9, letter: 'I', sum: sumLabaKotor },
+        { col: 10, letter: 'J', sum: sumBiaya },
+        { col: 11, letter: 'K', sum: sumAlokasi },
+        { col: 12, letter: 'L', sum: sumLabaBersih },
+      ];
+      for (const dt of dailyTotals) {
+        const cell = totDailyRow.getCell(dt.col);
+        cell.value = { formula: `SUM(${dt.letter}${dailyStartRow}:${dt.letter}${dailyEndRow})`, result: dt.sum };
+        if (dt.isCount) {
+          cell.numFmt = '#,##0';
+          cell.alignment = { horizontal: 'center' };
+        } else {
+          cell.numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0';
+          cell.alignment = { horizontal: 'right' };
+        }
+      }
+      for (let c = 2; c <= 12; c++) {
+        totDailyRow.getCell(c).font = { bold: true, size: 9 };
+        totDailyRow.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFBF1' } };
+      }
+      totDailyRow.getCell(2).alignment = { horizontal: 'left' };
       curRow++;
     }
 
@@ -292,7 +407,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     curRow += 2;
     ws.mergeCells(`B${curRow}:L${curRow}`);
     const sec3 = ws.getCell(`B${curRow}`);
-    sec3.value = '3. AUDIT LACI & REKAP KAS SHIFT (SHIFT 1 PAGI & SHIFT 2 SIANG — MODAL RP 100.000)';
+    sec3.value = isShiftTruncated
+      ? `3. AUDIT LACI & REKAP KAS SHIFT KASIR (DIBATASI ${EXPORT_MAX_ROWS.toLocaleString('id-ID')} SHIFT PERTAMA)`
+      : '3. AUDIT LACI & REKAP KAS SHIFT KASIR';
     sec3.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
     sec3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7C3AED' } };
     ws.getRow(curRow).height = 24;
@@ -301,7 +418,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const headers3 = [
       'Sesi Shift',
       'Kasir (Nama / NIM)',
-      'Waktu Shift',
+      'Waktu Shift (WIB)',
       'Modal Awal',
       'Omzet Tunai',
       'Kas Keluar (-)',
@@ -327,17 +444,28 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ws.getCell(`B${curRow}`).font = { italic: true, color: { argb: 'FF64748B' } };
       curRow++;
     } else {
+      const shiftStartRow = curRow;
       let totModalAwal = 0;
       let totCashSales = 0;
       let totCashOut = 0;
       let totCashIn = 0;
       let totExpected = 0;
+      let totExpectedClosed = 0;
       let totActual = 0;
       let hasClosedShift = false;
+      let hasActiveShift = false;
 
       for (const sh of shiftList) {
-        const modalAwal = sh.modalAwal ? parseFloat(sh.modalAwal) : 100_000;
-        const actualCash = sh.actualCash ? parseFloat(sh.actualCash) : null;
+        const parsedModal = sh.modalAwal !== null && sh.modalAwal !== undefined && sh.modalAwal !== ''
+          ? parseFloat(sh.modalAwal)
+          : NaN;
+        const modalAwal = Number.isFinite(parsedModal) ? parsedModal : 100_000;
+
+        const parsedActual = sh.actualCash !== null && sh.actualCash !== undefined && sh.actualCash !== ''
+          ? parseFloat(sh.actualCash)
+          : NaN;
+        const actualCash = Number.isFinite(parsedActual) ? parsedActual : null;
+
         const cashSales = shiftSalesMap.get(sh.shiftId) ?? 0;
         const cashOut = shiftCashOutMap.get(sh.shiftId) ?? 0;
         const cashIn = shiftCashInMap.get(sh.shiftId) ?? 0;
@@ -351,25 +479,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         totExpected += expectedCash;
         if (actualCash !== null) {
           totActual += actualCash;
+          totExpectedClosed += expectedCash;
           hasClosedShift = true;
+        } else {
+          hasActiveShift = true;
         }
 
         const shiftBadge = getShiftLabel(sh.clockIn);
         const kasirLabel = sanitizeExcelText(`${sh.kasirName} (${sh.kasirNim})`);
-        const clockInStr = new Date(sh.clockIn).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
-        const clockOutStr = sh.clockOut ? new Date(sh.clockOut).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : 'Aktif';
+        const clockInDate = fmtWibDateCompact(sh.clockIn);
+        const clockInTime = fmtWibTimeCompact(sh.clockIn);
+        const clockOutText = sh.clockOut ? fmtWibTimeCompact(sh.clockOut) : 'Aktif';
 
         const row = ws.getRow(curRow);
         row.getCell(2).value = shiftBadge;
         row.getCell(3).value = kasirLabel;
-        row.getCell(4).value = `${clockInStr} s/d ${clockOutStr}`;
+        row.getCell(4).value = `${clockInDate} ${clockInTime} - ${clockOutText}`;
         row.getCell(5).value = modalAwal;
         row.getCell(6).value = cashSales;
         row.getCell(7).value = cashOut;
         row.getCell(8).value = cashIn;
-        row.getCell(9).value = expectedCash;
+        row.getCell(9).value = { formula: `E${curRow}+F${curRow}-G${curRow}+H${curRow}`, result: expectedCash };
         row.getCell(10).value = actualCash !== null ? actualCash : 'Belum tutup';
-        row.getCell(11).value = discrepancy !== null ? discrepancy : '-';
+        row.getCell(11).value = discrepancy !== null
+          ? { formula: `J${curRow}-I${curRow}`, result: discrepancy }
+          : '-';
 
         let auditText = 'AKTIF';
         if (sh.status === 'CLOSED') {
@@ -383,13 +517,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           row.getCell(c).numFmt = '"Rp "#,##0';
           row.getCell(c).alignment = { horizontal: 'right' };
         }
-        if (typeof row.getCell(10).value === 'number') {
+        if (actualCash !== null) {
           row.getCell(10).numFmt = '"Rp "#,##0';
           row.getCell(10).alignment = { horizontal: 'right' };
-        }
-        if (typeof row.getCell(11).value === 'number') {
           row.getCell(11).numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0';
           row.getCell(11).alignment = { horizontal: 'right' };
+        } else {
+          row.getCell(10).alignment = { horizontal: 'center' };
+          row.getCell(11).alignment = { horizontal: 'center' };
         }
         row.getCell(2).alignment = { horizontal: 'center' };
         row.getCell(12).alignment = { horizontal: 'center' };
@@ -397,20 +532,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         curRow++;
       }
 
-      // Baris Total Konsolidasi Toko Jam 15:00 WIB
-      const totDiscrepancy = hasClosedShift ? totActual - totExpected : null;
+      const shiftEndRow = curRow - 1;
+      // Hanya bandingkan fisik laci terhadap expected shift yang sudah ditutup agar shift aktif tidak terbaca "TEKOR"
+      const totDiscrepancy = hasClosedShift ? totActual - totExpectedClosed : null;
       const totRow = ws.getRow(curRow);
-      totRow.getCell(2).value = 'TOTAL KONSOLIDASI (15:00 WIB)';
-      totRow.getCell(3).value = 'Semua Sesi Shift';
-      totRow.getCell(4).value = '08:00 - 15:00 WIB';
-      totRow.getCell(5).value = totModalAwal;
-      totRow.getCell(6).value = totCashSales;
-      totRow.getCell(7).value = totCashOut;
-      totRow.getCell(8).value = totCashIn;
-      totRow.getCell(9).value = totExpected;
+      totRow.getCell(2).value = `TOTAL KONSOLIDASI (${shiftList.length} Shift)`;
+      totRow.getCell(3).value = hasActiveShift && hasClosedShift ? 'Termasuk shift aktif (selisih dihitung dari shift tutup)' : 'Semua Sesi Shift';
+      totRow.getCell(4).value = range.startDate === range.endDate ? range.startDate : `${range.startDate} s/d ${range.endDate}`;
+      totRow.getCell(5).value = { formula: `SUM(E${shiftStartRow}:E${shiftEndRow})`, result: totModalAwal };
+      totRow.getCell(6).value = { formula: `SUM(F${shiftStartRow}:F${shiftEndRow})`, result: totCashSales };
+      totRow.getCell(7).value = { formula: `SUM(G${shiftStartRow}:G${shiftEndRow})`, result: totCashOut };
+      totRow.getCell(8).value = { formula: `SUM(H${shiftStartRow}:H${shiftEndRow})`, result: totCashIn };
+      totRow.getCell(9).value = { formula: `SUM(I${shiftStartRow}:I${shiftEndRow})`, result: totExpected };
       totRow.getCell(10).value = hasClosedShift ? totActual : 'Belum tutup';
       totRow.getCell(11).value = totDiscrepancy !== null ? totDiscrepancy : '-';
-      totRow.getCell(12).value = hasClosedShift ? (Math.abs(totDiscrepancy ?? 0) < 1 ? 'PAS' : (totDiscrepancy ?? 0) < 0 ? 'TEKOR' : 'LEBIH') : 'SEBAGIAN';
+      totRow.getCell(12).value = !hasClosedShift
+        ? 'BELUM TUTUP'
+        : hasActiveShift
+          ? 'SEBAGIAN AKTIF'
+          : Math.abs(totDiscrepancy ?? 0) < 1
+            ? 'PAS'
+            : (totDiscrepancy ?? 0) < 0
+              ? 'TEKOR'
+              : 'LEBIH';
 
       for (let c = 2; c <= 12; c++) {
         const cell = totRow.getCell(c);
@@ -421,11 +565,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         totRow.getCell(c).numFmt = '"Rp "#,##0';
         totRow.getCell(c).alignment = { horizontal: 'right' };
       }
-      if (typeof totRow.getCell(10).value === 'number') {
+      if (hasClosedShift) {
         totRow.getCell(10).numFmt = '"Rp "#,##0';
         totRow.getCell(10).alignment = { horizontal: 'right' };
-      }
-      if (typeof totRow.getCell(11).value === 'number') {
         totRow.getCell(11).numFmt = '"Rp "#,##0;[Red]-"Rp "#,##0';
         totRow.getCell(11).alignment = { horizontal: 'right' };
       }
@@ -453,7 +595,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     // Stream Excel Buffer
     const buffer = await wb.xlsx.writeBuffer();
-    const filename = `skema-harian-wiramart-${period}-${range.startDate}.xlsx`;
+    const dateSlug = range.startDate === range.endDate
+      ? range.startDate
+      : `${range.startDate}_sd_${range.endDate}`;
+    const periodSlug = dateFrom || dateTo ? 'custom' : range.period;
+    const filename = `skema-harian-wiramart-${periodSlug}-${dateSlug}.xlsx`;
 
     return new NextResponse(buffer, {
       status: 200,
@@ -461,12 +607,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Content-Length': String(buffer.byteLength),
+        'X-Export-Max-Rows': String(EXPORT_MAX_ROWS),
+        'X-Export-Truncated': isShiftTruncated ? 'Shift' : '',
         'Cache-Control': 'no-store',
       },
     });
   } catch (err: unknown) {
     if (err instanceof AppError) {
       return NextResponse.json({ success: false, error: err.message }, { status: err.statusCode });
+    }
+    if (err instanceof InvalidRangeError) {
+      return NextResponse.json({ success: false, error: err.message }, { status: 400 });
     }
     const errorMsg = err instanceof Error ? err.message : 'Gagal ekspor laporan skema harian';
     return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });

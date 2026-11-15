@@ -1,65 +1,101 @@
 // =============================================================
 // Smartkasir Perwira — Next.js Proxy (Middleware)
 // Next.js 16+ menggunakan konvensi "proxy.ts" (bukan middleware.ts)
-// Tanggung jawab:
-// 1. Proteksi route admin → redirect ke /login jika bukan admin
-// 2. Proteksi route kasir → redirect ke /kasir/login jika bukan employee
-// 3. Redirect jika sudah login tapi akses halaman auth
-// 4. Cek maintenance mode → redirect ke /maintenance
+// Pemisahan Namespace Per Role:
+//   - MANAGER     → /manager/* (+ akses monitor /gudang & /kasir)
+//   - ADMIN_SHIFT → /admin/* (+ akses monitor /gudang & /kasir)
+//   - GUDANG      → /gudang/* (login /gudang/login)
+//   - KASIR / CS  → /kasir/*  (login /kasir/login)
 // =============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
+import {
+  ADMIN_DASHBOARD_PATH,
+  ADMIN_LOGIN_PATH,
+  GUDANG_LOGIN_PATH,
+  KASIR_LOGIN_PATH,
+  MANAGER_DASHBOARD_PATH,
+  getDashboardPathForRole,
+  type PortalAdminRole,
+} from '@/lib/utils/routes';
 
 // Cookie names — WAJIB sinkron dengan lib/utils/auth.ts
 const ADMIN_ACCESS_COOKIE = 'sk_admin';
 const KASIR_ACCESS_COOKIE = 'sk_kasir';
+const STATIC_ASSET_REGEX = /\.(?:ico|png|jpg|jpeg|svg|webp|gif|css|js|map|txt|xml|webmanifest|woff2?)$/i;
 
-function getJwtSecret(): Uint8Array {
-  return new TextEncoder().encode(process.env.JWT_SECRET ?? '');
+function getJwtSecret(): Uint8Array | null {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    return null;
+  }
+  return new TextEncoder().encode(secret);
 }
 
-type SessionPayload = { sub: string; role: string } | null;
+type AdminSessionPayload = {
+  sub: string;
+  role: 'admin';
+  adminRole?: PortalAdminRole;
+} | null;
 
-async function getAdminPayload(request: NextRequest): Promise<SessionPayload> {
+type KasirSessionPayload = {
+  sub: string;
+  role: 'employee';
+} | null;
+
+async function getAdminPayload(request: NextRequest): Promise<AdminSessionPayload> {
   const token = request.cookies.get(ADMIN_ACCESS_COOKIE)?.value;
-  if (!token) return null;
+  const secret = getJwtSecret();
+  if (!token || !secret) return null;
   try {
-    const { payload } = await jwtVerify(token, getJwtSecret(), {
+    const { payload } = await jwtVerify(token, secret, {
       issuer: 'smartkasir-perwira',
+      algorithms: ['HS256'],
     });
-    const role = payload['role'] as string;
-    if (role !== 'admin') return null;
-    return { sub: payload.sub as string, role };
+    if (payload['role'] !== 'admin' || typeof payload.sub !== 'string' || payload.sub.length === 0) {
+      return null;
+    }
+    const rawAdminRole = payload['adminRole'];
+    const adminRole: PortalAdminRole | undefined =
+      rawAdminRole === 'MANAGER'
+        ? 'MANAGER'
+        : rawAdminRole === 'ADMIN_SHIFT'
+        ? 'ADMIN_SHIFT'
+        : undefined;
+    return { sub: payload.sub, role: 'admin', adminRole };
   } catch {
     return null;
   }
 }
 
-async function getKasirPayload(request: NextRequest): Promise<SessionPayload> {
+async function getKasirPayload(request: NextRequest): Promise<KasirSessionPayload> {
   const token = request.cookies.get(KASIR_ACCESS_COOKIE)?.value;
-  if (!token) return null;
+  const secret = getJwtSecret();
+  if (!token || !secret) return null;
   try {
-    const { payload } = await jwtVerify(token, getJwtSecret(), {
+    const { payload } = await jwtVerify(token, secret, {
       issuer: 'smartkasir-perwira',
+      algorithms: ['HS256'],
     });
-    const role = payload['role'] as string;
-    if (role !== 'employee') return null;
-    return { sub: payload.sub as string, role };
+    if (payload['role'] !== 'employee' || typeof payload.sub !== 'string' || payload.sub.length === 0) {
+      return null;
+    }
+    return { sub: payload.sub, role: 'employee' };
   } catch {
     return null;
   }
 }
 
 export async function proxy(request: NextRequest): Promise<NextResponse> {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
 
   // --- Skip static files and API routes ---
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
     pathname.startsWith('/favicon') ||
-    pathname.includes('.')
+    STATIC_ASSET_REGEX.test(pathname)
   ) {
     return NextResponse.next();
   }
@@ -73,18 +109,19 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   const kasirSession = await getKasirPayload(request);
 
   // --- Check Maintenance Mode ---
-  // CATATAN: fetch internal di Edge middleware (proxy.ts) menyebabkan "Failed to fetch".
-  // Maintenance check dilakukan via cookie 'sk_maintenance' yang di-set oleh admin,
-  // sehingga tidak perlu HTTP round-trip ke API route internal.
-  // BUG-2 FIX: Kasir juga harus diblokir saat maintenance — bukan hanya publik.
   if (!adminSession) {
     const isMaintenance = request.cookies.get('sk_maintenance')?.value === '1';
 
-    // Halaman yang tetap accessible saat maintenance (untuk semua role)
-    const maintenanceExempt = ['/maintenance', '/login', '/kasir/login', '/kasir/gudang/login', '/daftar', '/setup'];
-    const isExempt = maintenanceExempt.includes(pathname);
-
-    if (isMaintenance && !isExempt) {
+    const maintenanceExempt = [
+      '/maintenance',
+      ADMIN_LOGIN_PATH,
+      KASIR_LOGIN_PATH,
+      GUDANG_LOGIN_PATH,
+      '/kasir/gudang/login',
+      '/daftar',
+      '/setup',
+    ];
+    if (isMaintenance && !maintenanceExempt.includes(pathname)) {
       return NextResponse.redirect(new URL('/maintenance', request.url));
     }
   }
@@ -94,37 +131,70 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     return NextResponse.next();
   }
 
-  // --- Auth routes (login pages): redirect jika sudah login ---
-  if (pathname === '/login') {
-    if (adminSession) return NextResponse.redirect(new URL('/admin/dashboard', request.url));
+  // --- Transisi URL lama Gudang (/kasir/gudang/*) → (/gudang/*) ---
+  if (pathname === '/kasir/gudang' || pathname.startsWith('/kasir/gudang/')) {
+    const mappedPath = pathname.replace(/^\/kasir\/gudang/, '/gudang');
+    return NextResponse.redirect(new URL(`${mappedPath}${search}`, request.url));
+  }
+
+  // --- Auth routes (login pages): redirect jika admin sudah login ---
+  if (pathname === ADMIN_LOGIN_PATH) {
+    if (adminSession) {
+      return NextResponse.redirect(
+        new URL(getDashboardPathForRole(adminSession.adminRole), request.url),
+      );
+    }
     return NextResponse.next();
   }
 
-  if (pathname === '/kasir/login' || pathname === '/kasir/gudang/login') {
+  if (pathname === KASIR_LOGIN_PATH || pathname === GUDANG_LOGIN_PATH) {
     return NextResponse.next();
   }
 
-  // --- Admin routes (/admin/**) ---
-  if (pathname.startsWith('/admin')) {
-    if (!adminSession) {
-      const url = new URL('/login', request.url);
+  // --- Gudang routes (/gudang & /gudang/**) ---
+  if (pathname === '/gudang' || pathname.startsWith('/gudang/')) {
+    if (!kasirSession && !adminSession) {
+      const url = new URL(GUDANG_LOGIN_PATH, request.url);
       url.searchParams.set('from', pathname);
       return NextResponse.redirect(url);
     }
     return NextResponse.next();
   }
 
+  // --- Manager routes (/manager & /manager/**) ---
+  if (pathname === '/manager' || pathname.startsWith('/manager/')) {
+    if (!adminSession) {
+      const url = new URL(ADMIN_LOGIN_PATH, request.url);
+      url.searchParams.set('from', pathname);
+      return NextResponse.redirect(url);
+    }
+    if (adminSession.adminRole !== 'MANAGER') {
+      return NextResponse.redirect(new URL(ADMIN_DASHBOARD_PATH, request.url));
+    }
+    return NextResponse.next();
+  }
+
+  // --- Admin Shift routes (/admin & /admin/**) ---
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+    if (!adminSession) {
+      const url = new URL(ADMIN_LOGIN_PATH, request.url);
+      url.searchParams.set('from', pathname);
+      return NextResponse.redirect(url);
+    }
+    if (adminSession.adminRole === 'MANAGER') {
+      const target =
+        pathname === '/admin'
+          ? MANAGER_DASHBOARD_PATH
+          : `${pathname.replace(/^\/admin/, '/manager')}${search}`;
+      return NextResponse.redirect(new URL(target, request.url));
+    }
+    return NextResponse.next();
+  }
+
   // --- Kasir routes (/kasir/**) ---
   if (pathname.startsWith('/kasir')) {
-    // Kecualikan halaman login kasir dan login gudang
-    if (pathname === '/kasir/login' || pathname === '/kasir/gudang/login') {
-      return NextResponse.next();
-    }
-
-    // Izinkan jika memiliki sesi kasir ATAU sesi admin (Admin berhak memantau portal gudang & POS)
     if (!kasirSession && !adminSession) {
-      const targetLogin = pathname.startsWith('/kasir/gudang') ? '/kasir/gudang/login' : '/kasir/login';
-      const url = new URL(targetLogin, request.url);
+      const url = new URL(KASIR_LOGIN_PATH, request.url);
       url.searchParams.set('from', pathname);
       return NextResponse.redirect(url);
     }

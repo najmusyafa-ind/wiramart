@@ -1,29 +1,66 @@
 // =============================================================
 // Smartkasir Perwira — Cashier Recap Service (PRD 4.0 Fitur 1)
-// Domain: Rekapitulasi Riwayat Transaksi Kasir Per-Shift & Balancing Laci
-// STANDAR: Zero-Trust Aerospace Grade, Strict Shift Isolation, Zero HPP Leak
+// Domain: Rekapitulasi Riwayat Transaksi Kasir Per-Shift & Per-Jam (WIB)
+// STANDAR: Zero-Trust Aerospace Grade, Shared Drawer Aware, Zero HPP Leak
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, desc, gte, lte, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { employees, shifts, shiftCashMovements, transactions, transactionItems, transactionPayments } from '@/lib/db/schema';
+import {
+  attendances,
+  employees,
+  shifts,
+  shiftCashMovements,
+  transactions,
+  transactionItems,
+  transactionPayments,
+} from '@/lib/db/schema';
 import { AppError } from '@/lib/utils/helpers';
 
 // ─────────────────────────────────────────────────────────────
 // 1. Zod Validation Schemas
 // ─────────────────────────────────────────────────────────────
 
-export const CashierRecapQuerySchema = z.object({
-  employeeId: z.string().uuid('ID Karyawan tidak valid'),
-  tanggal: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD')
-    .optional(),
-  shiftId: z.string().uuid('ID Shift tidak valid').optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(50).default(20),
-});
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_CASHIER_RANGE_DAYS = 1_100;
+
+export const CashierRecapQuerySchema = z
+  .object({
+    employeeId: z.string().uuid('ID Karyawan tidak valid'),
+    tanggal: z
+      .string()
+      .regex(ISO_DATE_RE, 'Format tanggal harus YYYY-MM-DD')
+      .optional(),
+    dateTo: z
+      .string()
+      .regex(ISO_DATE_RE, 'Format dateTo harus YYYY-MM-DD')
+      .optional(),
+    shiftId: z.string().uuid('ID Shift tidak valid').optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+  })
+  .superRefine((val, ctx) => {
+    if (val.tanggal && val.dateTo) {
+      if (val.dateTo < val.tanggal) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['dateTo'],
+          message: 'Tanggal akhir tidak boleh lebih kecil dari tanggal awal',
+        });
+      }
+      const startMs = new Date(`${val.tanggal}T00:00:00+07:00`).getTime();
+      const endMs = new Date(`${val.dateTo}T00:00:00+07:00`).getTime();
+      const diffDays = Math.round((endMs - startMs) / 86_400_000) + 1;
+      if (diffDays > MAX_CASHIER_RANGE_DAYS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['dateTo'],
+          message: `Rentang tanggal kasir maksimal ${MAX_CASHIER_RANGE_DAYS} hari`,
+        });
+      }
+    }
+  });
 
 export type CashierRecapQueryParams = z.infer<typeof CashierRecapQuerySchema>;
 
@@ -33,29 +70,44 @@ export type CashierRecapQueryParams = z.infer<typeof CashierRecapQuerySchema>;
 
 export type CashierShiftInfoDTO = {
   id: string;
-  shiftName: string;         // 'Shift 1 (Pagi 07:30 - 11:30)' | 'Shift 2 (Siang 11:30 - 15:00)'
+  shiftName: string; // 'Shift 1 (Pagi 07:30 - 11:30)' | 'Shift 2 (Siang 11:30 - 15:00)'
   clockIn: string;
   clockOut: string | null;
   status: 'ACTIVE' | 'CLOSED';
   modalAwal: number;
+  isSharedDrawer?: boolean;
+  drawerOwnerName?: string;
+};
+
+export type CashierHourlyBucketDTO = {
+  hour: number;       // 0..23 WIB
+  label: string;      // e.g. '08:00 - 08:59 WIB'
+  txCount: number;
+  voidCount: number;
+  omzetCash: number;
+  omzetQris: number;
+  omzetTotal: number;
 };
 
 export type CashierRecapSummaryDTO = {
   modalAwal: number;           // Modal awal laci kasir (default: Rp 100.000 atau dari shift)
-  totalTransaksi: number;      // Total struk berhasil (COMPLETED)
-  totalVoid: number;           // Total struk dibatalkan (VOID)
-  totalAmountCash: number;     // Total uang tunai dari penjualan
-  totalKembalian: number;      // Total uang kembalian yang diserahkan ke pelanggan
-  netCashSales: number;        // Penjualan tunai bersih kasir
-  totalCashOut: number;        // Kas Keluar Laci (Bayar titipan makanan, beli lepas, galon, dll)
+  totalTransaksi: number;      // Total struk berhasil (COMPLETED) oleh kasir ini
+  totalVoid: number;           // Total struk dibatalkan (VOID) oleh kasir ini
+  totalAmountCash: number;     // Total uang tunai dari penjualan kasir ini
+  totalKembalian: number;      // Total uang kembalian transaksi kasir ini
+  netCashSales: number;        // Penjualan tunai bersih kasir ini
+  drawerCashSales: number;     // Total penjualan tunai pada laci shift (termasuk co-cashier)
+  totalCashOut: number;        // Kas Keluar Laci (Titipan makanan, beli lepas, galon, dll)
   totalCashIn: number;         // Kas Masuk Laci (Tukar receh, dll)
-  totalFisikLaci: number;      // Uang fisik yang WAJIB ada di laci = Modal Awal + Tunai - Kas Keluar + Kas Masuk
+  totalFisikLaci: number;      // Uang fisik wajib di laci = Modal Awal + Cash Laci - Kas Keluar + Kas Masuk
   uangTinggalDiLaci: number;   // Modal Shift Berikutnya (Paten Rp 100.000)
   uangSetoranToko: number;     // Uang yang harus disetor ke amplop = max(0, totalFisikLaci - 100.000)
-  totalAmountQris: number;     // Total mutasi digital QRIS masuk
-  totalOmzet: number;          // Total omzet kasir (Net Cash Sales + Total QRIS)
-  totalAmountSplit: number;    // Total transaksi kombinasi CASH+QRIS
-  totalVoidAmount: number;     // Total rupiah struk yang dibatalkan
+  totalAmountQris: number;     // Total mutasi digital QRIS masuk milik kasir ini
+  totalOmzet: number;          // Total omzet kasir ini (Net Cash Sales + Total QRIS)
+  totalAmountSplit: number;    // Total transaksi kombinasi CASH+QRIS kasir ini
+  totalVoidAmount: number;     // Total rupiah struk yang dibatalkan kasir ini
+  isSharedShift: boolean;      // True jika shift dikerjakan bersama rekan (teamShift)
+  rekanKasir: string[];        // Nama rekan kasir lain pada shift yang sama
 };
 
 export type CashierRecapItemDTO = {
@@ -85,11 +137,13 @@ export type CashierRecapResponseDTO = {
     nim: string;
     jabatan: string;
   };
-  tanggal: string;              // YYYY-MM-DD (WIB)
+  tanggal: string;              // YYYY-MM-DD (WIB, tanggal awal)
+  dateTo: string;               // YYYY-MM-DD (WIB, tanggal akhir)
   activeShiftId: string | null; // ID shift yang sedang aktif/difilter
   activeShiftName: string | null;
-  shiftsSaya: CashierShiftInfoDTO[]; // HANYA shift milik kasir ini (kasir lain terisolasi mutlak)
+  shiftsSaya: CashierShiftInfoDTO[];
   summary: CashierRecapSummaryDTO;
+  hourlyBreakdown: CashierHourlyBucketDTO[];
   transaksi: CashierRecapItemDTO[];
   pagination: {
     page: number;
@@ -100,8 +154,10 @@ export type CashierRecapResponseDTO = {
 };
 
 // ─────────────────────────────────────────────────────────────
-// 3. Date & Timezone Helpers (Asia/Jakarta = UTC+7)
+// 3. Date, Timezone & Payment Calculation Helpers (Asia/Jakarta)
 // ─────────────────────────────────────────────────────────────
+
+const SQL_IN_CHUNK_SIZE = 1_500;
 
 export function getTodayWIB(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
@@ -109,21 +165,98 @@ export function getTodayWIB(): string {
 
 export function getWIBDayBounds(dateStr: string): { startUtc: Date; endUtc: Date } {
   const startUtc = new Date(`${dateStr}T00:00:00+07:00`);
-  const endUtc   = new Date(`${dateStr}T23:59:59.999+07:00`);
+  const endUtc = new Date(`${dateStr}T23:59:59.999+07:00`);
   return { startUtc, endUtc };
 }
 
-function getShiftNameFromDate(clockIn: Date): string {
-  const hourWib = parseInt(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jakarta', hour: 'numeric', hour12: false }).format(clockIn),
+function getWibHour(date: Date): number {
+  const raw = parseInt(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Jakarta',
+      hour: '2-digit',
+      hour12: false,
+    }).format(date),
     10,
   );
+  return Number.isFinite(raw) ? raw % 24 : 0;
+}
+
+function fmtHourRangeWib(hour: number): string {
+  const h = String(hour).padStart(2, '0');
+  return `${h}:00 - ${h}:59 WIB`;
+}
+
+function getShiftNameFromDate(clockIn: Date): string {
+  const hourWib = getWibHour(clockIn);
   const minuteWib = parseInt(
     new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jakarta', minute: 'numeric' }).format(clockIn),
     10,
   );
   const isPagi = hourWib < 11 || (hourWib === 11 && minuteWib < 30);
   return isPagi ? 'Shift 1 (Pagi 07:30 - 11:30)' : 'Shift 2 (Siang 11:30 - 15:00)';
+}
+
+function chunkArray<T>(items: readonly T[], size = SQL_IN_CHUNK_SIZE): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+type PaymentRecord = {
+  transactionId: string;
+  paymentMethod: string;
+  amount: string;
+  cashReceived: string | null;
+  changeAmount: string | null;
+};
+
+function allocateTransactionBreakdown(
+  grossNum: number,
+  fallbackMethod: string,
+  trxPays: readonly PaymentRecord[] | undefined,
+): { cash: number; qris: number; isSplit: boolean } {
+  if (trxPays && trxPays.length > 0) {
+    let cash = 0;
+    let qris = 0;
+    for (const p of trxPays) {
+      const amt = parseFloat(p.amount ?? '0') || 0;
+      if (p.paymentMethod === 'CASH') cash += amt;
+      else if (p.paymentMethod === 'QRIS') qris += amt;
+    }
+    return { cash, qris, isSplit: cash > 0 && qris > 0 };
+  }
+  return {
+    cash: fallbackMethod === 'CASH' ? grossNum : 0,
+    qris: fallbackMethod === 'QRIS' ? grossNum : 0,
+    isSplit: false,
+  };
+}
+
+async function fetchPaymentsByTransactionIds(
+  trxIds: readonly string[],
+): Promise<Map<string, PaymentRecord[]>> {
+  const map = new Map<string, PaymentRecord[]>();
+  for (const idChunk of chunkArray(trxIds)) {
+    const rows = await db
+      .select({
+        transactionId: transactionPayments.transactionId,
+        paymentMethod: transactionPayments.paymentMethod,
+        amount: transactionPayments.amount,
+        cashReceived: transactionPayments.cashReceived,
+        changeAmount: transactionPayments.changeAmount,
+      })
+      .from(transactionPayments)
+      .where(inArray(transactionPayments.transactionId, idChunk));
+
+    for (const pay of rows) {
+      const arr = map.get(pay.transactionId) ?? [];
+      arr.push(pay);
+      map.set(pay.transactionId, arr);
+    }
+  }
+  return map;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -144,7 +277,11 @@ export async function getCashierDailyRecap(
 
   const { employeeId, shiftId, page, limit } = parsed.data;
   const tanggalWIB = parsed.data.tanggal ?? getTodayWIB();
-  const { startUtc, endUtc } = getWIBDayBounds(tanggalWIB);
+  const dateToWIB = parsed.data.dateTo ?? tanggalWIB;
+  const isMultiDayRange = dateToWIB !== tanggalWIB;
+
+  const { startUtc } = getWIBDayBounds(tanggalWIB);
+  const { endUtc } = getWIBDayBounds(dateToWIB);
 
   // 1. Verifikasi identitas kasir
   const cashier = await db.query.employees.findFirst({
@@ -162,29 +299,80 @@ export async function getCashierDailyRecap(
     throw new AppError('NOT_FOUND', 'Data kasir tidak ditemukan atau akun dinonaktifkan.', 404);
   }
 
-  // 2. Fetch HANYA sesi shift milik kasir ini pada tanggal tersebut
-  // ISOLASI MUTLAK: Kasir DILARANG melihat atau mengakses shift kasir lain!
-  const myShiftsRows = await db
-    .select({
-      id: shifts.id,
-      clockIn: shifts.clockIn,
-      clockOut: shifts.clockOut,
-      status: shifts.status,
-      modalAwal: shifts.modalAwal,
-    })
-    .from(shifts)
-    .where(
-      and(
-        eq(shifts.employeeId, employeeId), // ← Filter Kunci: HANYA MILIK KASIR INI
-        gte(shifts.clockIn, startUtc),
-        lte(shifts.clockIn, endUtc),
+  // 2. Kumpulkan seluruh Shift di mana kasir ini menjadi Pembuka Shift ATAU Kasir Pendamping (teamShift)
+  // Sumber keikutsertaan yang sah: shifts.employeeId, attendances.shiftId, atau transactions.shiftId milik kasir ini.
+  const [ownedShiftRows, trxShiftRows, attShiftRows] = await Promise.all([
+    db
+      .select({ id: shifts.id })
+      .from(shifts)
+      .where(and(eq(shifts.employeeId, employeeId), gte(shifts.clockIn, startUtc), lte(shifts.clockIn, endUtc))),
+    db
+      .selectDistinct({ shiftId: transactions.shiftId })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.employeeId, employeeId),
+          eq(transactions.isTest, false),
+          gte(transactions.createdAt, startUtc),
+          lte(transactions.createdAt, endUtc),
+        ),
       ),
-    )
-    .orderBy(desc(shifts.clockIn));
+    db
+      .selectDistinct({ shiftId: attendances.shiftId })
+      .from(attendances)
+      .where(
+        and(
+          eq(attendances.employeeId, employeeId),
+          isNotNull(attendances.shiftId),
+          gte(attendances.attendanceDate, tanggalWIB),
+          lte(attendances.attendanceDate, dateToWIB),
+        ),
+      ),
+  ]);
+
+  const participatedShiftIdSet = new Set<string>();
+  for (const r of ownedShiftRows) participatedShiftIdSet.add(r.id);
+  for (const r of trxShiftRows) if (r.shiftId) participatedShiftIdSet.add(r.shiftId);
+  for (const r of attShiftRows) if (r.shiftId) participatedShiftIdSet.add(r.shiftId);
+
+  const participatedShiftIds = [...participatedShiftIdSet];
+  const myShiftsRows: Array<{
+    id: string;
+    employeeId: string;
+    clockIn: Date;
+    clockOut: Date | null;
+    status: string;
+    modalAwal: string | null;
+    ownerName: string;
+  }> = [];
+
+  for (const idChunk of chunkArray(participatedShiftIds)) {
+    const chunkRows = await db
+      .select({
+        id: shifts.id,
+        employeeId: shifts.employeeId,
+        clockIn: shifts.clockIn,
+        clockOut: shifts.clockOut,
+        status: shifts.status,
+        modalAwal: shifts.modalAwal,
+        ownerName: employees.fullName,
+      })
+      .from(shifts)
+      .innerJoin(employees, eq(shifts.employeeId, employees.id))
+      .where(inArray(shifts.id, idChunk));
+    myShiftsRows.push(...chunkRows);
+  }
+
+  myShiftsRows.sort((a, b) => new Date(b.clockIn).getTime() - new Date(a.clockIn).getTime());
 
   const shiftsSaya: CashierShiftInfoDTO[] = myShiftsRows.map((s) => {
-    const rawModal = s.modalAwal ? parseFloat(s.modalAwal) : 100000;
-    const modalAwal = rawModal > 150000 ? 100000 : (rawModal <= 0 ? 100000 : Math.round(rawModal));
+    const parsedModal = s.modalAwal !== null && s.modalAwal !== undefined && s.modalAwal !== ''
+      ? parseFloat(s.modalAwal)
+      : NaN;
+    const modalAwal = Number.isFinite(parsedModal) && parsedModal >= 0
+      ? Math.round(parsedModal)
+      : 100_000;
+    const isSharedDrawer = s.employeeId !== employeeId;
     return {
       id: s.id,
       shiftName: getShiftNameFromDate(new Date(s.clockIn)),
@@ -192,16 +380,17 @@ export async function getCashierDailyRecap(
       clockOut: s.clockOut ? s.clockOut.toISOString() : null,
       status: s.status as 'ACTIVE' | 'CLOSED',
       modalAwal,
+      isSharedDrawer,
+      ...(isSharedDrawer ? { drawerOwnerName: s.ownerName } : {}),
     };
   });
 
-  // 3. Tentukan shift target yang difilter
+  // 3. Tentukan shift target yang difilter (IDOR-Proof)
   let targetShiftId: string | null = null;
-  let targetShiftModalAwal = 100000; // Default paten UNPERBA: Rp 100.000
+  let targetShiftModalAwal = 0;
   let targetShiftName: string | null = null;
 
   if (shiftId) {
-    // Validasi shiftId wajib milik kasir yang sedang login (IDOR-Proof)
     const matchingShift = shiftsSaya.find((s) => s.id === shiftId);
     if (!matchingShift) {
       throw new AppError('FORBIDDEN', 'Akses ditolak. Anda tidak memiliki akses ke sesi shift ini.', 403);
@@ -209,16 +398,16 @@ export async function getCashierDailyRecap(
     targetShiftId = matchingShift.id;
     targetShiftModalAwal = matchingShift.modalAwal;
     targetShiftName = matchingShift.shiftName;
-  } else if (shiftsSaya.length > 0) {
-    // Default: gunakan shift aktif atau shift terbaru milik kasir hari ini
+  } else if (!isMultiDayRange && shiftsSaya.length > 0) {
     const activeOrLatest = shiftsSaya.find((s) => s.status === 'ACTIVE') ?? shiftsSaya[0];
     targetShiftId = activeOrLatest.id;
     targetShiftModalAwal = activeOrLatest.modalAwal;
     targetShiftName = activeOrLatest.shiftName;
+  } else if (isMultiDayRange && shiftsSaya.length > 0) {
+    targetShiftModalAwal = shiftsSaya.reduce((sum, sh) => sum + sh.modalAwal, 0);
   }
 
-  // 4. Bangun kondisi filter query transaksi kasir
-  // Aturan: HANYA transaksi milik kasir ini (employeeId) DAN shift terkait (jika ada)
+  // 4. Query transaksi pribadi kasir pada shift target atau rentang tanggal
   const trxConditions = [
     eq(transactions.employeeId, employeeId),
     eq(transactions.isTest, false),
@@ -227,16 +416,15 @@ export async function getCashierDailyRecap(
   if (targetShiftId) {
     trxConditions.push(eq(transactions.shiftId, targetShiftId));
   } else {
-    // Jika kasir belum punya shift di hari itu, gunakan filter tanggal
     trxConditions.push(gte(transactions.createdAt, startUtc));
     trxConditions.push(lte(transactions.createdAt, endUtc));
   }
 
-  // 5. Query seluruh transaksi kasir pada sesi shift ini
-  const allShiftTrx = await db
+  const allPersonalTrx = await db
     .select({
       id: transactions.id,
       status: transactions.status,
+      createdAt: transactions.createdAt,
       grossAmount: transactions.grossAmount,
       cashReceived: transactions.cashReceived,
       changeAmount: transactions.changeAmount,
@@ -245,39 +433,10 @@ export async function getCashierDailyRecap(
     .from(transactions)
     .where(and(...trxConditions));
 
-  const shiftTrxIds = allShiftTrx.map((t) => t.id);
+  const personalTrxIds = allPersonalTrx.map((t) => t.id);
+  const paymentsByTrx = await fetchPaymentsByTransactionIds(personalTrxIds);
 
-  // 6. Fetch data pecahan pembayaran (Split Payment)
-  type PaymentRecord = {
-    transactionId: string;
-    paymentMethod: string;
-    amount: string;
-    cashReceived: string | null;
-    changeAmount: string | null;
-  };
-
-  let allShiftPayments: PaymentRecord[] = [];
-  if (shiftTrxIds.length > 0) {
-    allShiftPayments = await db
-      .select({
-        transactionId: transactionPayments.transactionId,
-        paymentMethod: transactionPayments.paymentMethod,
-        amount: transactionPayments.amount,
-        cashReceived: transactionPayments.cashReceived,
-        changeAmount: transactionPayments.changeAmount,
-      })
-      .from(transactionPayments)
-      .where(inArray(transactionPayments.transactionId, shiftTrxIds));
-  }
-
-  const paymentsByTrx = new Map<string, PaymentRecord[]>();
-  for (const pay of allShiftPayments) {
-    const arr = paymentsByTrx.get(pay.transactionId) ?? [];
-    arr.push(pay);
-    paymentsByTrx.set(pay.transactionId, arr);
-  }
-
-  // 7. Kalkulasi Penjumlahan Cash, QRIS, & Modal Awal
+  // 5. Kalkulasi penjualan pribadi kasir + agregasi Per-Jam (WIB)
   let totalTransaksi = 0;
   let totalVoid = 0;
   let totalAmountCash = 0;
@@ -286,80 +445,165 @@ export async function getCashierDailyRecap(
   let totalKembalian = 0;
   let totalVoidAmount = 0;
 
-  for (const t of allShiftTrx) {
+  const hourlyMap = new Map<number, CashierHourlyBucketDTO>();
+  const getOrCreateHourBucket = (hour: number): CashierHourlyBucketDTO => {
+    const existing = hourlyMap.get(hour);
+    if (existing) return existing;
+    const created: CashierHourlyBucketDTO = {
+      hour,
+      label: fmtHourRangeWib(hour),
+      txCount: 0,
+      voidCount: 0,
+      omzetCash: 0,
+      omzetQris: 0,
+      omzetTotal: 0,
+    };
+    hourlyMap.set(hour, created);
+    return created;
+  };
+
+  for (const t of allPersonalTrx) {
     const grossNum = parseFloat(t.grossAmount ?? '0') || 0;
     const changeNum = parseFloat(t.changeAmount ?? '0') || 0;
+    const hourWib = getWibHour(new Date(t.createdAt));
+    const bucket = getOrCreateHourBucket(hourWib);
 
     if (t.status === 'VOID') {
       totalVoid++;
       totalVoidAmount += grossNum;
+      bucket.voidCount += 1;
       continue;
     }
 
-    // Transaksi Sukses (COMPLETED)
     totalTransaksi++;
     totalKembalian += changeNum;
 
-    const trxPays = paymentsByTrx.get(t.id);
-    if (trxPays && trxPays.length > 0) {
-      const hasCash = trxPays.some((p) => p.paymentMethod === 'CASH');
-      const hasQris = trxPays.some((p) => p.paymentMethod === 'QRIS');
+    const { cash, qris, isSplit } = allocateTransactionBreakdown(
+      grossNum,
+      t.paymentMethod,
+      paymentsByTrx.get(t.id),
+    );
+    if (isSplit) totalAmountSplit += grossNum;
 
-      if (hasCash && hasQris) {
-        totalAmountSplit += grossNum;
-      }
+    totalAmountCash += cash;
+    totalAmountQris += qris;
 
-      for (const p of trxPays) {
-        const amt = parseFloat(p.amount ?? '0') || 0;
-        if (p.paymentMethod === 'CASH') {
-          totalAmountCash += amt;
-        } else if (p.paymentMethod === 'QRIS') {
-          totalAmountQris += amt;
-        }
-      }
-    } else {
-      if (t.paymentMethod === 'CASH') {
-        totalAmountCash += grossNum;
-      } else if (t.paymentMethod === 'QRIS') {
-        totalAmountQris += grossNum;
-      }
-    }
+    bucket.txCount += 1;
+    bucket.omzetCash += cash;
+    bucket.omzetQris += qris;
+    bucket.omzetTotal += cash + qris;
   }
 
-  // 6b. Ambil mutasi Kas Keluar & Kas Masuk Laci (Petty Cash: Titipan Makanan, Beli Lepas, Galon, dll)
+  const hourlyBreakdown = [...hourlyMap.values()]
+    .map((h) => ({
+      ...h,
+      omzetCash: Math.round(h.omzetCash),
+      omzetQris: Math.round(h.omzetQris),
+      omzetTotal: Math.round(h.omzetTotal),
+    }))
+    .sort((a, b) => a.hour - b.hour);
+
+  // 6. Balancing laci fisik shift (mengikutsertakan seluruh kasir di laci yang sama / teamShift)
+  const shiftIdsForDrawer = targetShiftId
+    ? [targetShiftId]
+    : shiftsSaya.map((s) => s.id);
+
+  let drawerCashSales = 0;
   let totalCashOut = 0;
   let totalCashIn = 0;
-  if (targetShiftId) {
-    const movements = await db
-      .select({
-        movementType: shiftCashMovements.movementType,
-        amount: shiftCashMovements.amount,
-      })
-      .from(shiftCashMovements)
-      .where(eq(shiftCashMovements.shiftId, targetShiftId));
+  const peerNames = new Set<string>();
 
-    for (const m of movements) {
-      const val = parseFloat(m.amount ?? '0') || 0;
-      if (m.movementType === 'CASH_OUT') {
-        totalCashOut += val;
-      } else if (m.movementType === 'CASH_IN') {
-        totalCashIn += val;
+  if (shiftIdsForDrawer.length > 0) {
+    const drawerTrx: Array<{
+      id: string;
+      employeeId: string;
+      grossAmount: string;
+      paymentMethod: string;
+    }> = [];
+
+    for (const idChunk of chunkArray(shiftIdsForDrawer)) {
+      const [chunkDrawerTrx, chunkMovements, chunkPeers] = await Promise.all([
+        db
+          .select({
+            id: transactions.id,
+            employeeId: transactions.employeeId,
+            grossAmount: transactions.grossAmount,
+            paymentMethod: transactions.paymentMethod,
+          })
+          .from(transactions)
+          .where(
+            and(
+              inArray(transactions.shiftId, idChunk),
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.isTest, false),
+            ),
+          ),
+        db
+          .select({
+            movementType: shiftCashMovements.movementType,
+            amount: shiftCashMovements.amount,
+          })
+          .from(shiftCashMovements)
+          .where(inArray(shiftCashMovements.shiftId, idChunk)),
+        db
+          .selectDistinct({ fullName: employees.fullName, empId: employees.id })
+          .from(transactions)
+          .innerJoin(employees, eq(transactions.employeeId, employees.id))
+          .where(
+            and(
+              inArray(transactions.shiftId, idChunk),
+              eq(transactions.isTest, false),
+            ),
+          ),
+      ]);
+
+      drawerTrx.push(...chunkDrawerTrx);
+      for (const m of chunkMovements) {
+        const val = parseFloat(m.amount ?? '0') || 0;
+        if (m.movementType === 'CASH_OUT') totalCashOut += val;
+        else if (m.movementType === 'CASH_IN') totalCashIn += val;
+      }
+      for (const p of chunkPeers) {
+        if (p.empId !== employeeId) peerNames.add(p.fullName);
       }
     }
+
+    // Pastikan pemilik pembuka shift juga terdaftar sebagai rekan jika co-cashier melihat shift ini
+    for (const sh of myShiftsRows) {
+      if (shiftIdsForDrawer.includes(sh.id) && sh.employeeId !== employeeId) {
+        peerNames.add(sh.ownerName);
+      }
+    }
+
+    const missingPaymentIds = drawerTrx
+      .map((t) => t.id)
+      .filter((id) => !paymentsByTrx.has(id));
+    if (missingPaymentIds.length > 0) {
+      const extraPayments = await fetchPaymentsByTransactionIds(missingPaymentIds);
+      for (const [trxId, pays] of extraPayments.entries()) {
+        paymentsByTrx.set(trxId, pays);
+      }
+    }
+
+    for (const dt of drawerTrx) {
+      const grossNum = parseFloat(dt.grossAmount ?? '0') || 0;
+      const { cash } = allocateTransactionBreakdown(
+        grossNum,
+        dt.paymentMethod,
+        paymentsByTrx.get(dt.id),
+      );
+      drawerCashSales += cash;
+    }
+  } else {
+    drawerCashSales = totalAmountCash;
   }
 
-  // Penjualan tunai bersih kasir (p.amount sudah merupakan porsi tunai bersih belanja)
   const netCashSales = totalAmountCash;
-  // Total Uang Fisik yang WAJIB ada di laci saat kasir tutup shift:
-  // Modal Awal (Rp 100.000) + Penjualan Tunai Bersih - Kas Keluar (Titipan Makanan, Galon, dll) + Kas Masuk
-  const totalFisikLaci = targetShiftModalAwal + netCashSales - totalCashOut + totalCashIn;
-  // Alokasi Serah Terima Kasir Ala Ritel Modern (Alfamart / Indomaret):
-  // 1. Uang tinggal di laci kasir untuk modal awal shift siang: Paten Rp 100.000
-  // 2. Uang setoran toko: Sisanya yang dimasukkan amplop dan diserahkan ke brankas/manajer
-  const uangTinggalDiLaci = 100_000;
+  const totalFisikLaci = targetShiftModalAwal + drawerCashSales - totalCashOut + totalCashIn;
+  const uangTinggalDiLaci = targetShiftId || shiftsSaya.length > 0 ? 100_000 : 0;
   const uangSetoranToko = Math.max(0, totalFisikLaci - uangTinggalDiLaci);
-  // Total Omzet Bersih Kasir (Tunai + QRIS)
   const totalOmzet = netCashSales + totalAmountQris;
+  const isSharedShift = peerNames.size > 0 || shiftsSaya.some((s) => s.isSharedDrawer);
 
   const summary: CashierRecapSummaryDTO = {
     modalAwal: Math.round(targetShiftModalAwal),
@@ -368,6 +612,7 @@ export async function getCashierDailyRecap(
     totalAmountCash: Math.round(totalAmountCash),
     totalKembalian: Math.round(totalKembalian),
     netCashSales: Math.round(netCashSales),
+    drawerCashSales: Math.round(drawerCashSales),
     totalCashOut: Math.round(totalCashOut),
     totalCashIn: Math.round(totalCashIn),
     totalFisikLaci: Math.round(totalFisikLaci),
@@ -377,10 +622,12 @@ export async function getCashierDailyRecap(
     totalOmzet: Math.round(totalOmzet),
     totalAmountSplit: Math.round(totalAmountSplit),
     totalVoidAmount: Math.round(totalVoidAmount),
+    isSharedShift,
+    rekanKasir: [...peerNames],
   };
 
-  // 8. Query Paged Transactions (Hanya Milik Kasir Ini)
-  const totalTrxCount = allShiftTrx.length;
+  // 7. Query Paged Transactions (Milik Kasir Ini)
+  const totalTrxCount = allPersonalTrx.length;
   const totalPages = Math.ceil(totalTrxCount / limit) || 1;
   const offset = (page - 1) * limit;
 
@@ -404,16 +651,16 @@ export async function getCashierDailyRecap(
 
   const pagedIds = pagedTrx.map((t) => t.id);
 
-  // Item counts
+  // Item counts (guarded)
   const itemCountsMap = new Map<string, number>();
-  if (pagedIds.length > 0) {
+  for (const idChunk of chunkArray(pagedIds)) {
     const itemCounts = await db
       .select({
         transactionId: transactionItems.transactionId,
         count: sql<number>`cast(count(${transactionItems.id}) as int)`,
       })
       .from(transactionItems)
-      .where(inArray(transactionItems.transactionId, pagedIds))
+      .where(inArray(transactionItems.transactionId, idChunk))
       .groupBy(transactionItems.transactionId);
 
     for (const row of itemCounts) {
@@ -452,10 +699,12 @@ export async function getCashierDailyRecap(
       jabatan: cashier.jabatan,
     },
     tanggal: tanggalWIB,
+    dateTo: dateToWIB,
     activeShiftId: targetShiftId,
     activeShiftName: targetShiftName,
     shiftsSaya,
     summary,
+    hourlyBreakdown,
     transaksi: transaksiDTO,
     pagination: {
       page,

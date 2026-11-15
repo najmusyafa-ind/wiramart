@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useId, useEffect, useRef } from 'react';
+import { useState, useId, useEffect } from 'react';
 import Image from 'next/image';
 import {
   Eye, EyeOff, LogIn, AlertCircle, CheckCircle2,
   ShieldCheck, Hash, KeyRound, Building2,
 } from 'lucide-react';
+import { clearIdleStorage } from '@/lib/utils/idle-timeout';
 
 // ─────────────────────────────────────────────────────────────
 // Portal Login Pengelola Wiramart UNPERBA:
@@ -47,33 +48,34 @@ export default function LoginPage() {
   const [setupPinLoading, setSetupPinLoading] = useState(false);
   const [setupPinError, setSetupPinError] = useState<string | null>(null);
 
-  // Deteksi logout otomatis akibat idle / close timeout
-  const isFirstMount = useRef(true);
+  // Deteksi logout otomatis akibat idle / close timeout saat halaman dimuat
   useEffect(() => {
-    if (isFirstMount.current) {
-      isFirstMount.current = false;
-      if (typeof window !== 'undefined') {
-        const sp = new URLSearchParams(window.location.search);
-        const reason = sp.get('reason');
-        const timeout = sp.get('timeout');
-        const timedOutRole = sp.get('role');
+    const sp = new URLSearchParams(window.location.search);
+    const reason = sp.get('reason');
+    const timeout = sp.get('timeout');
+    const timedOutRole = sp.get('role');
 
-        if (reason === 'idle') {
-          if (timedOutRole === 'MANAGER') {
-            setRole('manager');
-          } else if (timedOutRole === 'ADMIN_SHIFT') {
-            setRole('admin_shift');
-          }
-          setError(
-            `Sesi Anda berakhir demi keamanan (tidak aktif / browser ditutup lebih dari ${timeout ?? 'beberapa menit'}). Silakan login kembali.`
-          );
-        }
+    if (reason !== 'idle') return;
+
+    const timerId = window.setTimeout(() => {
+      if (timedOutRole === 'MANAGER') {
+        setRole('manager');
+      } else if (timedOutRole === 'ADMIN_SHIFT') {
+        setRole('admin_shift');
       }
-      return;
-    }
+      setError(
+        `Sesi Anda berakhir demi keamanan (tidak aktif / browser ditutup lebih dari ${timeout ?? 'batas waktu'}). Silakan login kembali.`
+      );
+    }, 0);
+
+    return () => window.clearTimeout(timerId);
+  }, []);
+
+  function handleSelectRole(nextRole: Role) {
+    setRole(nextRole);
     setError(null);
     setSuccessMsg(null);
-  }, [role]);
+  }
 
   // Handle Login
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -125,6 +127,7 @@ export default function LoginPage() {
           return;
         }
 
+        clearIdleStorage('admin');
         window.location.href = json.data?.redirect ?? '/admin/dashboard';
       } catch {
         setError('Koneksi gagal. Periksa jaringan Anda.');
@@ -158,7 +161,8 @@ export default function LoginPage() {
           setError(json.error ?? 'NIDN atau password Manager salah.');
           return;
         }
-        window.location.href = json.data?.redirect ?? '/admin/dashboard';
+        clearIdleStorage('admin');
+        window.location.href = json.data?.redirect ?? '/manager/dashboard';
       } catch {
         setError('Koneksi gagal. Periksa jaringan Anda.');
       } finally {
@@ -208,6 +212,7 @@ export default function LoginPage() {
 
       setSuccessMsg(json.message ?? 'PIN berhasil dibuat! Mengalihkan ke dashboard...');
       setSetupPinData(null);
+      clearIdleStorage('admin');
       setTimeout(() => {
         window.location.href = json.data?.redirect ?? '/admin/dashboard';
       }, 700);
@@ -224,12 +229,12 @@ export default function LoginPage() {
 
         {/* ── Logo ─────────────────────────────────────────── */}
         <div className="auth-logo">
-          <div style={{ width: 68, height: 68, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <div style={{ position: 'relative', width: 68, height: 68, flexShrink: 0 }}>
             <Image
               src="/logo.png"
               alt="Logo Wiramart UNPERBA"
-              width={68}
-              height={68}
+              fill
+              sizes="68px"
               style={{ objectFit: 'contain' }}
               priority
             />
@@ -263,7 +268,7 @@ export default function LoginPage() {
               role="tab"
               aria-selected={role === tab.id}
               type="button"
-              onClick={() => setRole(tab.id)}
+              onClick={() => handleSelectRole(tab.id)}
               disabled={isLoading}
               style={{
                 display: 'flex',

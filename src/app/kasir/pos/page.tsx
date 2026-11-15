@@ -1,17 +1,18 @@
 'use client';
 
-import { useState, useEffect, useCallback, useId, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useId, useRef } from 'react';
 import Image from 'next/image';
 import {
   ShoppingCart, Search, Plus, Minus, Trash2, Banknote,
   CheckCircle, X, Loader2, Package, LogOut, ArrowLeftRight,
-  User, Clock, AlertTriangle, ScanLine, MoreVertical, ChevronRight,
-  Receipt, Calculator, Coins, Utensils, KeyRound, Zap, Send,
+  User, AlertTriangle, ScanLine, ChevronRight,
+  Receipt, Calculator, Utensils, KeyRound, Zap, Send, Lock, Eye, EyeOff,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import KalkulatorPecahan, { type DenominasiMap } from './KalkulatorPecahan';
 import KasGerakModal from './KasGerakModal';
 import SisaMakananModal from './SisaMakananModal';
+import { getHourWib, getTodayWib } from '@/lib/utils/helpers';
 
 // BarcodeDetector Type — Shape Detection API (belum di TS stdlib)
 declare class BarcodeDetector {
@@ -50,12 +51,17 @@ type SplitPaymentDetail = {
 };
 
 type SessionInfo = {
-  employee: { id: string; fullName: string; jabatan: string; nim: string };
-  shift: { id: string; clockIn: string; modalAwal: string | null } | null;
+  employee: { id: string; fullName: string; jabatan: string; nim: string; hasPin?: boolean };
+  shift: { id: string; clockIn: string; modalAwal: string | null; isPeerShared?: boolean } | null;
   qris: { qrImageUrl: string | null; bankName: string | null; accountName: string | null; isActive: boolean } | null;
   store: { name: string; address: string; phone: string };
   otherActiveShifts: { kasirName: string; kasirNim: string; clockIn: string; shiftId: string }[];
 };
+
+const POS_PIN_DIGIT_REGEX = /^\d{6,8}$/;
+function sanitizePosPinInput(value: string): string {
+  return value.replace(/\D/g, '').slice(0, 8);
+}
 
 // ── Helpers ────────────────────────────────────────────────────
 const rp = (n: number) => 'Rp ' + n.toLocaleString('id-ID');
@@ -71,25 +77,40 @@ function formatShiftDuration(clockIn: string): string {
 
 function formatTimeShort(dateStr: string): string {
   return new Date(dateStr).toLocaleTimeString('id-ID', {
-    hour: '2-digit', minute: '2-digit', hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Jakarta',
   });
 }
 
-function getProductEmoji(name: string): string {
-  const n = name.toLowerCase();
-  if (n.includes('cilok') || n.includes('sate')) return '🍢';
-  if (n.includes('sando') || n.includes('roti') || n.includes('burger')) return '🥪';
-  if (n.includes('nasi') || n.includes('kebuli') || n.includes('uduk') || n.includes('cokot') || n.includes('krawu') || n.includes('jinggo')) return '🍙';
-  if (n.includes('tahu') || n.includes('bakso')) return '🥟';
-  if (n.includes('pentol')) return '🧆';
-  if (n.includes('ades') || n.includes('air') || n.includes('mineral') || n.includes('aqua')) return '💧';
-  if (n.includes('teh') || n.includes('frestea') || n.includes('tea')) return '🍵';
-  if (n.includes('kopi')) return '☕';
-  if (n.includes('susu') || n.includes('yakult') || n.includes('nutri') || n.includes('power ade') || n.includes('fanta') || n.includes('coca') || n.includes('pulpy')) return '🥤';
-  if (n.includes('ayam') || n.includes('geprek')) return '🍗';
-  if (n.includes('klepon') || n.includes('kue') || n.includes('cake') || n.includes('bagelen')) return '🧁';
-  if (n.includes('basreng') || n.includes('macaroni') || n.includes('pangsit') || n.includes('kripik') || n.includes('klanting') || n.includes('kongstik') || n.includes('snack') || n.includes('rosta') || n.includes('duosus')) return '🍿';
-  return '🍱';
+function getEpochMs(): number {
+  return Date.now();
+}
+
+async function requestSessionData(signal?: AbortSignal) {
+  const res = await fetch(`/api/kasir/sesi?_t=${Date.now()}`, {
+    cache: 'no-store',
+    signal,
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+    },
+  });
+  if (res.status === 401) {
+    return { status: 'unauthorized' as const };
+  }
+  if (!res.ok) {
+    return { status: 'http_error' as const, httpStatus: res.status };
+  }
+  const json = await res.json();
+  if (json.success && json.data) {
+    return { status: 'ok' as const, data: json.data as SessionInfo };
+  }
+  if (json.code === 'UNAUTHORIZED') {
+    return { status: 'unauthorized' as const };
+  }
+  return { status: 'invalid' as const };
 }
 
 // ── QrCode SVG ────────────────────────────────────────────────
@@ -106,9 +127,17 @@ function QrCodeIcon({ size, style }: { size: number; style?: React.CSSProperties
 }
 
 // ── Product Card ──────────────────────────────────────────────
-function ProductCard({ product, onAdd }: { product: Product; onAdd: (p: Product) => void }) {
-  const isOut = product.stockQty === 0;
-  const isLow = !isOut && product.stockQty <= 5;
+function ProductCard({
+  product,
+  onAdd,
+  lowStockThreshold = 5,
+}: {
+  product: Product;
+  onAdd: (p: Product) => void;
+  lowStockThreshold?: number;
+}) {
+  const isOut = product.stockQty <= 0;
+  const isLow = !isOut && product.stockQty <= lowStockThreshold;
   return (
     <button
       onClick={() => !isOut && onAdd(product)}
@@ -354,7 +383,7 @@ function BukaShiftOverlay({
                   type="button"
                   onClick={onLogout}
                   className="btn btn-secondary"
-                  style={{ width: '100%', minHeight: 40, fontSize: '0.8rem', gap: 6, marginTop: 'var(--space-2)' }}
+                  style={{ width: '100%', minHeight: 44, fontSize: '0.8rem', gap: 6, marginTop: 'var(--space-2)' }}
                 >
                   <LogOut size={14} /> Ganti Akun Kasir / Keluar
                 </button>
@@ -513,7 +542,7 @@ function BukaShiftOverlay({
                     type="button"
                     onClick={onLogout}
                     className="btn btn-secondary"
-                    style={{ width: '100%', minHeight: 40, fontSize: '0.8rem', gap: 6 }}
+                    style={{ width: '100%', minHeight: 44, fontSize: '0.8rem', gap: 6 }}
                   >
                     <LogOut size={14} /> Ganti Akun Kasir / Keluar
                   </button>
@@ -629,7 +658,7 @@ function PaymentModal({
         animation: 'fade-in 0.15s ease',
       }}
     >
-      <div className="card" style={{ width: '100%', maxWidth: 460, maxHeight: '92vh', overflowY: 'auto', margin: 0, boxShadow: 'var(--shadow-xl)' }}>
+      <div className="card" style={{ width: '100%', maxWidth: 460, maxHeight: '92dvh', overflowY: 'auto', margin: 0, boxShadow: 'var(--shadow-xl)' }}>
         <div className="card-header" style={{ paddingBottom: 'var(--space-2)' }}>
           <h2 id={`${uid}-title`} className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
             {selectedMethod === 'CASH' && <><Banknote size={18} style={{ color: 'var(--color-accent)' }} /> Pembayaran Tunai</>}
@@ -637,9 +666,22 @@ function PaymentModal({
             {selectedMethod === 'SPLIT' && <><ArrowLeftRight size={18} style={{ color: 'var(--color-primary)' }} /> Pembayaran Campuran (Split)</>}
           </h2>
           <button
+            type="button"
             onClick={onClose}
             aria-label="Tutup"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'flex', padding: 'var(--space-1)', borderRadius: 'var(--radius-sm)' }}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--color-text-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: 44,
+              minHeight: 44,
+              borderRadius: 'var(--radius-sm)',
+              flexShrink: 0,
+            }}
           >
             <X size={20} />
           </button>
@@ -655,7 +697,8 @@ function PaymentModal({
               className={`pos-method-btn${selectedMethod === m ? ' active' : ''}`}
               style={{
                 flex: 1,
-                padding: '6px 8px',
+                minHeight: 44,
+                padding: '8px 10px',
                 fontSize: 'var(--text-xs)',
                 borderRadius: 'var(--radius-md)',
               }}
@@ -667,7 +710,7 @@ function PaymentModal({
           ))}
         </div>
 
-        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', marginTop: 'var(--space-2)' }}>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', marginTop: 'var(--space-2)', paddingBottom: 'calc(var(--space-4) + env(safe-area-inset-bottom, 0px))' }}>
           {/* Total Tagihan */}
           <div style={{
             textAlign: 'center', padding: 'var(--space-3) var(--space-4)',
@@ -700,7 +743,7 @@ function PaymentModal({
               {/* Quick amounts */}
               <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
                 {quickAmountsCash.map((a) => (
-                  <button key={a} onClick={() => setCashInput(a.toString())} className="btn btn-secondary" style={{ flex: 1, minWidth: 80, padding: 'var(--space-2) var(--space-3)', fontSize: 'var(--text-sm)' }}>
+                  <button key={a} type="button" onClick={() => setCashInput(a.toString())} className="btn btn-secondary" style={{ flex: 1, minWidth: 80, minHeight: 44, padding: 'var(--space-2) var(--space-3)', fontSize: 'var(--text-sm)' }}>
                     {rp(a)}
                   </button>
                 ))}
@@ -814,14 +857,14 @@ function PaymentModal({
                 </div>
                 {/* Quick pills QRIS */}
                 {quickQrisSplit.length > 0 && (
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 'var(--space-2)' }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 'var(--space-2)' }}>
                     {quickQrisSplit.map((a) => (
                       <button
                         key={a}
                         type="button"
                         onClick={() => setSplitQrisInput(a.toString())}
                         className="btn btn-secondary"
-                        style={{ flex: 1, minWidth: 60, padding: '3px 6px', fontSize: 'var(--text-xs)' }}
+                        style={{ flex: 1, minWidth: 72, minHeight: 44, padding: '8px 10px', fontSize: 'var(--text-sm)' }}
                       >
                         {rp(a)}
                       </button>
@@ -872,14 +915,14 @@ function PaymentModal({
                 </div>
                 {/* Quick pills Cash */}
                 {isSplitQrisValid && quickCashSplit.length > 0 && (
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 'var(--space-2)' }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 'var(--space-2)' }}>
                     {quickCashSplit.map((a) => (
                       <button
                         key={a}
                         type="button"
                         onClick={() => setSplitCashReceivedInput(a.toString())}
                         className="btn btn-secondary"
-                        style={{ flex: 1, minWidth: 60, padding: '3px 6px', fontSize: 'var(--text-xs)' }}
+                        style={{ flex: 1, minWidth: 72, minHeight: 44, padding: '8px 10px', fontSize: 'var(--text-sm)' }}
                       >
                         {rp(a)}
                       </button>
@@ -916,15 +959,16 @@ function PaymentModal({
           )}
 
           {/* Actions */}
-          <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
-            <button onClick={onClose} className="btn btn-secondary" style={{ flex: 1 }} disabled={loading}>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <button type="button" onClick={onClose} className="btn btn-secondary" style={{ flex: 1, minHeight: 48 }} disabled={loading}>
               Batal
             </button>
             <button
+              type="button"
               id={`${uid}-confirm`}
               onClick={handleTriggerConfirm}
               className="btn btn-primary"
-              style={{ flex: 2 }}
+              style={{ flex: 2, minHeight: 48 }}
               disabled={
                 loading ||
                 (selectedMethod === 'CASH' && (!cashInput || cashAmount < total)) ||
@@ -1011,7 +1055,7 @@ function SuccessModal({
         animation: 'fade-in 0.15s ease',
       }}
     >
-      <div className="card" style={{ width: '100%', maxWidth: 400, margin: 0, boxShadow: 'var(--shadow-xl)', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div className="card" style={{ width: '100%', maxWidth: 400, margin: 0, boxShadow: 'var(--shadow-xl)', maxHeight: '90dvh', overflowY: 'auto' }}>
         <div className="card-body" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
 
           {/* Sukses badge */}
@@ -1171,6 +1215,319 @@ function SuccessModal({
   );
 }
 
+// ── Modal Pengaturan / Ganti PIN Kasir ─────────────────────────
+function PinSecurityModal({
+  hasPin,
+  employeeName,
+  employeeNim,
+  onClose,
+  onSuccess,
+}: {
+  hasPin: boolean;
+  employeeName: string;
+  employeeNim: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const modalUid = useId();
+  const [currentPin, setCurrentPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [doneMsg, setDoneMsg] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (submitting) return;
+    setErrorMsg(null);
+
+    if (hasPin && !POS_PIN_DIGIT_REGEX.test(currentPin.trim())) {
+      setErrorMsg('Masukkan PIN saat ini (6 sampai 8 angka).');
+      return;
+    }
+
+    const cleanNew = newPin.trim();
+    const cleanConfirm = confirmPin.trim();
+    if (!POS_PIN_DIGIT_REGEX.test(cleanNew)) {
+      setErrorMsg('PIN baru harus terdiri dari 6 sampai 8 angka.');
+      return;
+    }
+    if (cleanNew !== cleanConfirm) {
+      setErrorMsg('Konfirmasi PIN baru tidak cocok.');
+      return;
+    }
+    if (hasPin && cleanNew === currentPin.trim()) {
+      setErrorMsg('PIN baru tidak boleh sama dengan PIN saat ini.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/kasir/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(hasPin ? { currentPin: currentPin.trim() } : {}),
+          newPin: cleanNew,
+          confirmPin: cleanConfirm,
+        }),
+      });
+      const json = await res.json() as {
+        success: boolean;
+        data?: { message?: string; hasPin?: boolean };
+        error?: string;
+      };
+
+      if (!res.ok || !json.success) {
+        setErrorMsg(json.error ?? 'Gagal menyimpan PIN keamanan.');
+        return;
+      }
+
+      setDoneMsg(
+        json.data?.message ??
+          (hasPin ? 'PIN keamanan berhasil diperbarui.' : 'PIN keamanan berhasil dibuat!'),
+      );
+      onSuccess();
+    } catch {
+      setErrorMsg('Koneksi gagal saat menyimpan PIN. Coba beberapa saat lagi.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`${modalUid}-pin-title`}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 'var(--space-4)',
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        backdropFilter: 'blur(8px)',
+        animation: 'fade-in 0.15s ease',
+      }}
+      onClick={() => {
+        if (!submitting) onClose();
+      }}
+    >
+      <div
+        className="card"
+        style={{ width: '100%', maxWidth: 420, margin: 0, boxShadow: 'var(--shadow-xl)', maxHeight: '90dvh', overflowY: 'auto' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="card-body" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 'var(--radius-md)',
+                  background: 'hsl(217 91% 60% / 0.12)',
+                  color: 'var(--color-primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <KeyRound size={20} />
+              </div>
+              <div>
+                <h2 id={`${modalUid}-pin-title`} style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-bold)', margin: 0 }}>
+                  {hasPin ? 'Ganti PIN Keamanan Login' : 'Atur PIN Keamanan Login'}
+                </h2>
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '2px 0 0' }}>
+                  {employeeName} &bull; NIM {employeeNim}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              aria-label="Tutup modal PIN"
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--color-text-muted)',
+                cursor: 'pointer',
+                padding: 4,
+              }}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          {doneMsg ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              <div
+                role="status"
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 'var(--space-2)',
+                  padding: 'var(--space-3)',
+                  borderRadius: 'var(--radius-md)',
+                  background: 'var(--color-success-light)',
+                  border: '1px solid var(--color-success)',
+                  color: 'hsl(142 64% 24%)',
+                  fontSize: 'var(--text-sm)',
+                }}
+              >
+                <CheckCircle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>{doneMsg} Mulai login berikutnya Anda cukup memasukkan NIM &amp; PIN.</span>
+              </div>
+              <button type="button" className="btn btn-primary btn-full" onClick={onClose}>
+                Selesai
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }} noValidate>
+              {errorMsg && (
+                <div
+                  role="alert"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 'var(--space-2)',
+                    padding: 'var(--space-3)',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'var(--color-error-light)',
+                    border: '1px solid var(--color-error)',
+                    color: 'var(--color-error)',
+                    fontSize: 'var(--text-xs)',
+                  }}
+                >
+                  <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
+
+              {hasPin && (
+                <div>
+                  <label className="form-label" htmlFor={`${modalUid}-current-pin`} style={{ fontSize: 'var(--text-xs)' }}>
+                    PIN Saat Ini <span className="required">*</span>
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <Lock size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
+                    <input
+                      id={`${modalUid}-current-pin`}
+                      type={showCurrent ? 'text' : 'password'}
+                      inputMode="numeric"
+                      maxLength={8}
+                      className="form-input"
+                      placeholder="Masukkan PIN lama"
+                      value={currentPin}
+                      onChange={(e) => {
+                        setCurrentPin(sanitizePosPinInput(e.target.value));
+                        if (errorMsg) setErrorMsg(null);
+                      }}
+                      autoComplete="current-password"
+                      disabled={submitting}
+                      style={{ paddingLeft: 32, paddingRight: 38, fontFamily: 'var(--font-mono)' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrent((prev) => !prev)}
+                      aria-label={showCurrent ? 'Sembunyikan PIN saat ini' : 'Tampilkan PIN saat ini'}
+                      style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', padding: 4, display: 'flex' }}
+                    >
+                      {showCurrent ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="form-label" htmlFor={`${modalUid}-new-pin`} style={{ fontSize: 'var(--text-xs)' }}>
+                  PIN Baru (6–8 Angka) <span className="required">*</span>
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <Lock size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
+                  <input
+                    id={`${modalUid}-new-pin`}
+                    type={showNew ? 'text' : 'password'}
+                    inputMode="numeric"
+                    maxLength={8}
+                    className="form-input"
+                    placeholder="Minimal 6 digit angka"
+                    value={newPin}
+                    onChange={(e) => {
+                      setNewPin(sanitizePosPinInput(e.target.value));
+                      if (errorMsg) setErrorMsg(null);
+                    }}
+                    autoComplete="new-password"
+                    disabled={submitting}
+                    style={{ paddingLeft: 32, paddingRight: 38, fontFamily: 'var(--font-mono)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNew((prev) => !prev)}
+                    aria-label={showNew ? 'Sembunyikan PIN baru' : 'Tampilkan PIN baru'}
+                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', padding: 4, display: 'flex' }}
+                  >
+                    {showNew ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="form-label" htmlFor={`${modalUid}-confirm-pin`} style={{ fontSize: 'var(--text-xs)' }}>
+                  Ulangi PIN Baru <span className="required">*</span>
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <KeyRound size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
+                  <input
+                    id={`${modalUid}-confirm-pin`}
+                    type={showNew ? 'text' : 'password'}
+                    inputMode="numeric"
+                    maxLength={8}
+                    className="form-input"
+                    placeholder="Ketik ulang 6–8 digit PIN baru"
+                    value={confirmPin}
+                    onChange={(e) => {
+                      setConfirmPin(sanitizePosPinInput(e.target.value));
+                      if (errorMsg) setErrorMsg(null);
+                    }}
+                    autoComplete="new-password"
+                    disabled={submitting}
+                    style={{ paddingLeft: 32, fontFamily: 'var(--font-mono)' }}
+                  />
+                </div>
+              </div>
+
+              <p style={{ margin: 0, fontSize: 11, color: 'var(--color-text-muted)', lineHeight: 1.45 }}>
+                {hasPin
+                  ? 'Lupa PIN saat ini? Minta Dosen / Pengelola untuk reset PIN di menu Karyawan.'
+                  : 'Gunakan 6–8 angka yang mudah diingat namun hindari NIM atau tanggal lahir.'}
+              </p>
+
+              <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+                <button type="button" className="btn btn-secondary" onClick={onClose} disabled={submitting} style={{ flex: 1 }}>
+                  Batal
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={submitting} style={{ flex: 1 }}>
+                  {submitting ? 'Menyimpan...' : hasPin ? 'Simpan PIN Baru' : 'Aktifkan PIN'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Halaman POS ───────────────────────────────────────────────
 export default function PosPage() {
   const uid = useId();
@@ -1183,6 +1540,11 @@ export default function PosPage() {
   const [forceShowBukaShift, setForceShowBukaShift] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [lowStockThreshold, setLowStockThreshold] = useState<number>(5);
+  const [wibTimeInfo, setWibTimeInfo] = useState<{ hour: number; today: string } | null>(null);
+  const [perishableRemainingCount, setPerishableRemainingCount] = useState<number>(0);
+  const [dismissedCutOffDate, setDismissedCutOffDate] = useState<string | null>(null);
+  const [completedCutOffDate, setCompletedCutOffDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('');
@@ -1204,6 +1566,8 @@ export default function PosPage() {
   const [showTutupConfirm, setShowTutupConfirm] = useState(false);
   const [showKasGerak, setShowKasGerak] = useState(false);
   const [showSisaMakanan, setShowSisaMakanan] = useState(false);
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinBannerDismissed, setPinBannerDismissed] = useState(false);
   const [tutupActualCash, setTutupActualCash] = useState<string>('');
   const [tutupBreakdown, setTutupBreakdown]   = useState<DenominasiMap>({});
   const [tutupNotes, setTutupNotes]           = useState<string>('');
@@ -1229,44 +1593,33 @@ export default function PosPage() {
   const [unknownBarcodePrompt, setUnknownBarcodePrompt] = useState<string | null>(null);
   const posCamRef = useRef<HTMLVideoElement>(null);
   const posScanInterval = useRef<ReturnType<typeof setInterval> | null>(null);
-  // mounted: mencegah hydration mismatch untuk elemen client-only di header
-  const [mounted, setMounted] = useState(false);
 
-  // Client-side mount flag — prevents hydration mismatch
-  useEffect(() => { setMounted(true); }, []);
 
-  // Fetch session info dengan anti-cache & timestamp unik
-  const fetchSession = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/kasir/sesi?_t=${Date.now()}`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-        },
-      });
-      // 401 Unauthorized: sesi habis atau memang belum login secara sah
-      if (res.status === 401) {
+  const applySessionResult = useCallback(
+    (result: Awaited<ReturnType<typeof requestSessionData>>): SessionInfo | null => {
+      if (result.status === 'unauthorized') {
         router.push('/kasir/login');
         return null;
       }
-
-      if (!res.ok) {
+      if (result.status === 'http_error') {
         // HTTP 500 / 503 / Blip jaringan server: Jangan tendang kasir yang sedang aktif!
-        console.warn('[POS] Gagal menyinkronkan sesi (Server/Network blip):', res.status);
+        console.warn('[POS] Gagal menyinkronkan sesi (Server/Network blip):', result.httpStatus);
         return null;
       }
+      if (result.status === 'ok') {
+        setSession(result.data);
+        return result.data;
+      }
+      return null;
+    },
+    [router],
+  );
 
-      const json = await res.json();
-      if (json.success && json.data) {
-        setSession(json.data);
-        return json.data as SessionInfo;
-      } else {
-        if (json.code === 'UNAUTHORIZED' || res.status === 401) {
-          router.push('/kasir/login');
-        }
-        return null;
-      }
+  // Fetch session info dengan anti-cache & timestamp unik (dipakai event/focus/refresh)
+  const fetchSession = useCallback(async () => {
+    try {
+      const result = await requestSessionData();
+      return applySessionResult(result);
     } catch (err) {
       // Offline / Wi-Fi terputus di tengah jalan:
       // JANGAN redirect ke login! Tetap di halaman POS agar transaksi & keranjang belanja tidak hilang!
@@ -1275,29 +1628,135 @@ export default function PosPage() {
     } finally {
       setSessionLoading(false);
     }
-  }, [router]);
+  }, [applySessionResult]);
 
   useEffect(() => {
-    fetchSession();
-  }, [fetchSession]);
+    const controller = new AbortController();
+
+    requestSessionData(controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) {
+          applySessionResult(result);
+        }
+      })
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        console.warn('[POS] Koneksi jaringan terputus saat memeriksa sesi:', err);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setSessionLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [applySessionResult]);
+
+  const refreshPerishableCount = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const res = await fetch('/api/kasir/makanan-sisa', {
+        cache: 'no-store',
+        signal,
+      });
+      if (!res.ok) return;
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: { items?: { stockQty: number }[] };
+      };
+      if (json.success && Array.isArray(json.data?.items)) {
+        const remaining = json.data.items.filter((item) => item.stockQty > 0).length;
+        setPerishableRemainingCount(remaining);
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+    }
+  }, []);
+
+  const handleDismissCutOffBanner = useCallback(() => {
+    const today = wibTimeInfo?.today ?? getTodayWib();
+    setDismissedCutOffDate(today);
+    try {
+      window.sessionStorage.setItem('pos_sisa_makanan_dismissed_date', today);
+    } catch {
+      // Abaikan error sessionStorage di browser private mode
+    }
+  }, [wibTimeInfo?.today]);
+
+  function handleDismissPinBanner() {
+    setPinBannerDismissed(true);
+    try {
+      window.sessionStorage.setItem('pos_pin_nudge_dismissed', '1');
+    } catch {
+      // Abaikan error sessionStorage di browser private mode
+    }
+  }
+
+  // Sinkronkan jam WIB (deteksi cut-off >= 15:00) & status dismiss harian di browser
+  useEffect(() => {
+    const syncClockAndCutOffStorage = () => {
+      const today = getTodayWib();
+      const hour = getHourWib();
+      setWibTimeInfo({ hour, today });
+      try {
+        if (window.sessionStorage.getItem('pos_sisa_makanan_dismissed_date') === today) {
+          setDismissedCutOffDate(today);
+        }
+        if (window.sessionStorage.getItem('pos_sisa_makanan_completed_date') === today) {
+          setCompletedCutOffDate(today);
+        }
+        if (window.sessionStorage.getItem('pos_pin_nudge_dismissed') === '1') {
+          setPinBannerDismissed(true);
+        }
+      } catch {
+        // Abaikan error sessionStorage di browser private mode
+      }
+    };
+    const bootTimer = setTimeout(syncClockAndCutOffStorage, 0);
+    const intervalId = setInterval(syncClockAndCutOffStorage, 60000);
+    return () => {
+      clearTimeout(bootTimer);
+      clearInterval(intervalId);
+    };
+  }, []);
 
   // Re-check shift saat window kembali fokus (mencegah desinkronisasi saat pergantian shift)
   useEffect(() => {
     const onFocus = () => {
       fetchSession();
+      if (session?.shift?.id) {
+        void refreshPerishableCount();
+      }
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [fetchSession]);
+  }, [fetchSession, refreshPerishableCount, session?.shift?.id]);
+
+  // Cek sisa item makanan harian/perishable saat shift aktif
+  useEffect(() => {
+    if (!session?.shift?.id) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void refreshPerishableCount(controller.signal);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [session?.shift?.id, refreshPerishableCount]);
+
+  const shiftClockIn = session?.shift?.clockIn;
 
   // Update shift duration setiap menit
   useEffect(() => {
-    if (!session?.shift?.clockIn) return;
-    const update = () => setShiftDuration(formatShiftDuration(session.shift!.clockIn));
-    update();
+    if (!shiftClockIn) return;
+    const update = () => setShiftDuration(formatShiftDuration(shiftClockIn));
+    const initId = setTimeout(update, 0);
     const id = setInterval(update, 60000);
-    return () => clearInterval(id);
-  }, [session?.shift?.clockIn]);
+    return () => {
+      clearTimeout(initId);
+      clearInterval(id);
+    };
+  }, [shiftClockIn]);
 
   // Keyboard shortcut Ctrl+K → focus search
   useEffect(() => {
@@ -1331,6 +1790,12 @@ export default function PosPage() {
       if (json.success) {
         setProducts(json.data?.products ?? []);
         setCategories(json.data?.categories ?? []);
+        if (
+          typeof json.data?.lowStockThreshold === 'number' &&
+          Number.isFinite(json.data.lowStockThreshold)
+        ) {
+          setLowStockThreshold(json.data.lowStockThreshold);
+        }
       }
     } catch (err) {
       console.warn('[POS] Gagal mengambil produk saat offline:', err);
@@ -1424,7 +1889,7 @@ export default function PosPage() {
     const cleanCode = barcode.trim();
     if (!cleanCode) return;
 
-    const now = Date.now();
+    const now = getEpochMs();
     if (lastScanRef.current.code === cleanCode && now - lastScanRef.current.time < 400) {
       return; // abaikan duplicate event
     }
@@ -1460,6 +1925,11 @@ export default function PosPage() {
     setTimeout(() => setScanToast(null), 3000);
   }
 
+  const handleBarcodeScannedRef = useRef(handleBarcodeScanned);
+  useEffect(() => {
+    handleBarcodeScannedRef.current = handleBarcodeScanned;
+  });
+
   // ── Hardware USB Barcode Scanner Listener (HID Keyboard Mode) ─────────
   // Clabel T27H mengirim digit sangat cepat lalu diakhiri Enter.
   // Kasir bisa langsung scan produk kapan saja tanpa harus klik kolom cari.
@@ -1493,7 +1963,7 @@ export default function PosPage() {
         if (trimmed.length >= 3) {
           e.preventDefault();
           buffer = '';
-          handleBarcodeScanned(trimmed);
+          handleBarcodeScannedRef.current(trimmed);
           setSearch('');
           if (searchRef.current) searchRef.current.blur();
         }
@@ -1656,6 +2126,7 @@ export default function PosPage() {
       setShowCart(false);
       clearCart();
       fetchProducts(search, activeCategory);
+      void refreshPerishableCount();
     } catch {
       alert('Koneksi internet terputus (Network Error). Transaksi otomatis dibatalkan dan stok tidak berkurang. Silakan periksa jaringan Wi-Fi Anda.');
     } finally {
@@ -1714,6 +2185,21 @@ export default function PosPage() {
   }
 
   const kasirName = session?.employee?.fullName ?? '...';
+  const isAfterCutOff15Wib = wibTimeInfo !== null && wibTimeInfo.hour >= 15;
+  const isBannerDismissedToday =
+    wibTimeInfo !== null && dismissedCutOffDate === wibTimeInfo.today;
+  const isCutOffCompletedToday =
+    wibTimeInfo !== null && completedCutOffDate === wibTimeInfo.today;
+  const shouldRemindSisaMakananBanner =
+    Boolean(session?.shift) &&
+    isAfterCutOff15Wib &&
+    perishableRemainingCount > 0 &&
+    !isBannerDismissedToday &&
+    !isCutOffCompletedToday;
+  const shouldRemindTutupShift =
+    isAfterCutOff15Wib &&
+    perishableRemainingCount > 0 &&
+    !isCutOffCompletedToday;
   // True jika belum ada shift aktif ATAU modal awal belum diisi → tampilkan overlay Buka Shift
   const shiftPerluModal = session !== null && (session.shift === null || session.shift.modalAwal === null);
   const isShiftModalOpen = forceShowBukaShift || shiftPerluModal;
@@ -1754,7 +2240,7 @@ export default function PosPage() {
   // Blocking loading screen saat pertama kali memuat sesi (mencegah interaksi prematur)
   if (sessionLoading) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-subtle, #f8fafc)' }}>
+      <div style={{ minHeight: '100svh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-subtle, #f8fafc)' }}>
         <Loader2 size={36} style={{ animation: 'spin 1s linear infinite', color: 'var(--color-primary, #2563eb)' }} />
         <p style={{ marginTop: 16, fontWeight: 600, color: 'var(--color-text-muted, #64748b)', fontSize: '0.9rem' }}>
           Menghubungkan Sesi &amp; Laci Kasir...
@@ -1789,7 +2275,7 @@ export default function PosPage() {
             overflowY: 'auto',
           }}
         >
-          <div className="card" style={{ width: '100%', maxWidth: 440, margin: 'auto', maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-xl)' }}>
+          <div className="card" style={{ width: '100%', maxWidth: 440, margin: 'auto', maxHeight: '90dvh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-xl)' }}>
             <div className="card-body" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', overflowY: 'auto' }}>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 32, marginBottom: 4 }}>🔐</div>
@@ -1890,47 +2376,52 @@ export default function PosPage() {
                   value={tutupNotes}
                   onChange={(e) => setTutupNotes(e.target.value)}
                   maxLength={300}
-                  style={{ fontSize: '0.8rem', resize: 'none' }}
+                  style={{ fontSize: 'var(--text-base)', resize: 'none' }}
                 />
               </div>
 
-              {/* Reminder Sisa Makanan Sore */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '8px 10px',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'hsl(38 92% 95%)',
-                  border: '1px solid hsl(38 92% 80%)',
-                  fontSize: '0.75rem',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'hsl(38 92% 30%)' }}>
-                  <Utensils size={15} />
-                  <span>Ada sisa makanan basah sore?</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowTutupConfirm(false);
-                    setShowSisaMakanan(true);
-                  }}
-                  className="btn btn-secondary"
+              {/* Reminder Sisa Makanan Sore (aktif hanya >= 15:00 WIB & stok sisa > 0) */}
+              {shouldRemindTutupShift && (
+                <div
                   style={{
-                    padding: '3px 8px',
-                    fontSize: '0.7rem',
-                    height: 'auto',
-                    minHeight: 'unset',
-                    fontWeight: 700,
-                    color: 'hsl(38 92% 25%)',
-                    background: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'hsl(38 92% 95%)',
+                    border: '1px solid hsl(38 92% 80%)',
+                    fontSize: '0.75rem',
                   }}
                 >
-                  Catat Sisa Makanan
-                </button>
-              </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'hsl(38 92% 30%)' }}>
+                    <Utensils size={15} style={{ flexShrink: 0 }} />
+                    <span>
+                      {perishableRemainingCount} item makanan basah/konsinyasi masih tersisa (&gt; 0) setelah jam 15:00 WIB.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTutupConfirm(false);
+                      setShowSisaMakanan(true);
+                    }}
+                    className="btn btn-secondary"
+                    style={{
+                      padding: '8px 12px',
+                      minHeight: 44,
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      color: 'hsl(38 92% 25%)',
+                      background: '#fff',
+                      flexShrink: 0,
+                    }}
+                  >
+                    Catat Sisa Makanan
+                  </button>
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 4 }}>
                 <button
@@ -2053,7 +2544,6 @@ export default function PosPage() {
             Arahkan kamera ke barcode produk
           </p>
           <div style={{ position: 'relative', width: 300, height: 220, borderRadius: 'var(--radius-xl)', overflow: 'hidden' }}>
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
             <video ref={posCamRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} playsInline />
             <div style={{ position: 'absolute', inset: 0, border: '3px solid var(--color-primary)', borderRadius: 'var(--radius-xl)', pointerEvents: 'none' }} />
             {/* Animated scan line */}
@@ -2318,15 +2808,101 @@ export default function PosPage() {
               type="button"
               onClick={() => setForceShowBukaShift(true)}
               className="btn btn-primary"
-              style={{ padding: '6px 14px', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}
+              style={{ padding: '10px 14px', minHeight: 44, fontSize: '0.8rem', fontWeight: 700, flexShrink: 0 }}
             >
               Buka Shift
             </button>
           </div>
         )}
+        {/* Reminder Proaktif Cut-Off Makanan Sore (>= 15:00 WIB & stok makanan harian > 0) */}
+        {shouldRemindSisaMakananBanner && (
+          <div
+            role="status"
+            style={{
+              margin: 'var(--space-2) var(--space-3)',
+              padding: '10px 14px',
+              background: 'hsl(32 95% 94%)',
+              border: '1.5px solid hsl(32 90% 52%)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'hsl(32 90% 24%)', fontWeight: 600 }}>
+              <Utensils size={16} style={{ color: 'hsl(32 90% 42%)', flexShrink: 0 }} />
+              <span>
+                Cut-off 15:00 WIB: {perishableRemainingCount} item makanan basah/konsinyasi masih memiliki stok sisa.
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={handleDismissCutOffBanner}
+                className="btn btn-secondary"
+                style={{ padding: '8px 12px', minHeight: 44, fontSize: '0.8rem' }}
+              >
+                Nanti
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSisaMakanan(true)}
+                className="btn btn-primary"
+                style={{ padding: '8px 14px', minHeight: 44, fontSize: '0.8rem', fontWeight: 700 }}
+              >
+                Catat Cut-Off 15:00
+              </button>
+            </div>
+          </div>
+        )}
+        {/* Banner Halus Edukasi Opsi B1: Pengingat Buat PIN Pribadi (Non-Blocking) */}
+        {session?.employee?.hasPin === false && !pinBannerDismissed && (
+          <div
+            role="status"
+            style={{
+              margin: 'var(--space-2) var(--space-3)',
+              padding: '9px 14px',
+              background: 'hsl(217 95% 96%)',
+              border: '1px solid hsl(217 91% 60% / 0.35)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem', color: 'hsl(217 70% 28%)', fontWeight: 600 }}>
+              <KeyRound size={16} style={{ color: 'hsl(217 91% 50%)', flexShrink: 0 }} />
+              <span>
+                Keamanan Akun: Buat PIN login pribadi (6–8 angka) agar besok masuk POS cukup NIM + PIN.
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={handleDismissPinBanner}
+                className="btn btn-secondary"
+                style={{ padding: '8px 12px', minHeight: 44, fontSize: '0.8rem' }}
+              >
+                Nanti
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPinModal(true)}
+                className="btn btn-primary"
+                style={{ padding: '8px 14px', minHeight: 44, fontSize: '0.8rem', fontWeight: 700 }}
+              >
+                Buat PIN Sekarang
+              </button>
+            </div>
+          </div>
+        )}
         {/* Search mobile */}
         <div className="pos-mobile-search">
-          <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
+          <Search size={15} style={{ position: 'absolute', left: 24, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)', pointerEvents: 'none' }} />
           <input
             type="search"
             placeholder="Cari produk..."
@@ -2335,10 +2911,11 @@ export default function PosPage() {
             aria-label="Cari produk (mobile)"
             style={{
               width: '100%',
+              minHeight: 44,
               border: '1px solid var(--color-border)',
               borderRadius: 'var(--radius-full)',
-              padding: '7px 12px 7px 32px',
-              fontSize: 'var(--text-sm)',
+              padding: '10px 14px 10px 38px',
+              fontSize: 'var(--text-base)',
               outline: 'none',
               background: 'var(--color-surface)',
             }}
@@ -2410,7 +2987,7 @@ export default function PosPage() {
                     className="btn btn-primary btn-sm"
                     style={{ fontSize: 'var(--text-sm)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
                   >
-                    <Plus size={14} /> + Tambah Produk "{search}"
+                    <Plus size={14} /> + Tambah Produk &ldquo;{search}&rdquo;
                   </a>
                 </div>
               )}
@@ -2418,7 +2995,11 @@ export default function PosPage() {
           ) : (
             displayedProducts.map((p) => (
               <div key={p.id} role="listitem">
-                <ProductCard product={p} onAdd={addToCart} />
+                <ProductCard
+                  product={p}
+                  onAdd={addToCart}
+                  lowStockThreshold={lowStockThreshold}
+                />
               </div>
             ))
           )}
@@ -2861,7 +3442,7 @@ export default function PosPage() {
                 className="pos-drawer-link"
                 onClick={() => {
                   setShowKasirMenu(false);
-                  router.push('/kasir/gudang');
+                  router.push('/gudang');
                 }}
                 style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
               >
@@ -2871,6 +3452,38 @@ export default function PosPage() {
                 <div style={{ flex: 1 }}>
                   <div className="pos-drawer-link-title">Operasional Gudang</div>
                   <div className="pos-drawer-link-sub">Penerimaan barang & radar FEFO fisik</div>
+                </div>
+                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+              </button>
+
+              {/* ── Pengaturan PIN Keamanan Login (Opsi B1) ── */}
+              <button
+                type="button"
+                className="pos-drawer-link"
+                onClick={() => {
+                  setShowKasirMenu(false);
+                  setShowPinModal(true);
+                }}
+                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+              >
+                <div
+                  className="pos-drawer-icon-box"
+                  style={{
+                    background: session?.employee?.hasPin ? 'hsl(142 71% 45% / 0.14)' : 'hsl(217 91% 60% / 0.14)',
+                    color: session?.employee?.hasPin ? 'hsl(142 64% 32%)' : 'hsl(217 91% 45%)',
+                  }}
+                >
+                  <KeyRound size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="pos-drawer-link-title">
+                    {session?.employee?.hasPin ? 'Ganti PIN Login POS' : 'Atur PIN Login POS'}
+                  </div>
+                  <div className="pos-drawer-link-sub">
+                    {session?.employee?.hasPin
+                      ? 'Ubah PIN pribadi 6–8 angka akun Anda'
+                      : 'Belum diatur — buat PIN agar login cukup NIM + PIN'}
+                  </div>
                 </div>
                 <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
               </button>
@@ -2942,8 +3555,37 @@ export default function PosPage() {
       <SisaMakananModal
         isOpen={showSisaMakanan}
         onClose={() => setShowSisaMakanan(false)}
-        onSuccess={() => fetchProducts(search, activeCategory)}
+        onSuccess={() => {
+          const today = wibTimeInfo?.today ?? getTodayWib();
+          setCompletedCutOffDate(today);
+          try {
+            window.sessionStorage.setItem('pos_sisa_makanan_completed_date', today);
+          } catch {
+            // Abaikan error sessionStorage di browser private mode
+          }
+          fetchProducts(search, activeCategory);
+          void refreshPerishableCount();
+        }}
       />
+
+      {/* ── Modal Pengaturan / Ganti PIN Login Kasir (Opsi B1) ──── */}
+      {showPinModal && session?.employee && (
+        <PinSecurityModal
+          hasPin={Boolean(session.employee.hasPin)}
+          employeeName={session.employee.fullName}
+          employeeNim={session.employee.nim}
+          onClose={() => setShowPinModal(false)}
+          onSuccess={() => {
+            setSession((prev) =>
+              prev
+                ? { ...prev, employee: { ...prev.employee, hasPin: true } }
+                : prev,
+            );
+            setPinBannerDismissed(true);
+            void fetchSession();
+          }}
+        />
+      )}
     </div>
   );
 }

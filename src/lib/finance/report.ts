@@ -31,7 +31,30 @@ import type { ExpenseCategory } from '@/lib/db/schema';
 // ─────────────────────────────────────────────────────────────
 // Rentang periode (WIB)
 // ─────────────────────────────────────────────────────────────
-export type PeriodKey = 'daily' | 'weekly' | 'monthly' | 'semi_annual';
+export type PeriodKey =
+  | 'daily'
+  | 'weekly'
+  | 'monthly'
+  | 'semi_annual'
+  | 'october'
+  | 'november'
+  | 'oct_nov'
+  | 'all';
+
+export const VALID_PERIOD_KEYS: readonly PeriodKey[] = [
+  'daily',
+  'weekly',
+  'monthly',
+  'semi_annual',
+  'october',
+  'november',
+  'oct_nov',
+  'all',
+] as const;
+
+export function isPeriodKey(value: unknown): value is PeriodKey {
+  return typeof value === 'string' && (VALID_PERIOD_KEYS as readonly string[]).includes(value);
+}
 
 export type ReportRange = {
   /** 'YYYY-MM-DD' WIB, inklusif */
@@ -47,7 +70,8 @@ export type ReportRange = {
 };
 
 const DAY_MS = 86_400_000;
-const MAX_RANGE_DAYS = 400; // FinOps guard: batasi rentang kustom
+export const MAX_RANGE_DAYS = 1_100; // FinOps guard: mendukung laporan keseluruhan ~3 tahun
+export const ALL_TIME_START_DATE = '2025-01-01';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function utcMs(dateStr: string): number {
@@ -96,27 +120,38 @@ export function resolveReportRange(input: {
   dateTo?: string | null;
   now?: Date;
 }): ReportRange {
+  const today = wibToday(input.now);
+  const rawFrom = input.dateFrom?.trim() || null;
+  const rawTo = input.dateTo?.trim() || null;
+
   let startDate: string;
   let endDate: string;
   let label: string;
 
-  if (input.dateFrom && input.dateTo) {
-    if (!isRealDate(input.dateFrom) || !isRealDate(input.dateTo)) {
-      throw new InvalidRangeError('Format tanggal harus YYYY-MM-DD.');
+  if (rawFrom || rawTo) {
+    if (rawFrom && !isRealDate(rawFrom)) {
+      throw new InvalidRangeError('Format tanggal awal harus YYYY-MM-DD.');
     }
-    if (input.dateFrom > input.dateTo) {
+    if (rawTo && !isRealDate(rawTo)) {
+      throw new InvalidRangeError('Format tanggal akhir harus YYYY-MM-DD.');
+    }
+
+    startDate = rawFrom ?? rawTo!;
+    endDate = rawTo ?? (startDate <= today ? today : startDate);
+
+    if (startDate > endDate) {
       throw new InvalidRangeError('Tanggal awal tidak boleh setelah tanggal akhir.');
     }
-    const span = (utcMs(input.dateTo) - utcMs(input.dateFrom)) / DAY_MS + 1;
+    const span = (utcMs(endDate) - utcMs(startDate)) / DAY_MS + 1;
     if (span > MAX_RANGE_DAYS) {
       throw new InvalidRangeError(`Rentang maksimal ${MAX_RANGE_DAYS} hari.`);
     }
-    startDate = input.dateFrom;
-    endDate = input.dateTo;
-    label = `${formatId(startDate)} s/d ${formatId(endDate)}`;
+    label = startDate === endDate ? formatId(startDate) : `${formatId(startDate)} s/d ${formatId(endDate)}`;
   } else {
-    const today = wibToday(input.now);
     const [y, m] = today.split('-').map(Number);
+    // Tahun referensi Oktober/November: gunakan tahun berjalan mulai Oktober, atau tahun lalu bila masih Jan-Sep
+    const octNovYear = m >= 10 ? y : y - 1;
+
     switch (input.period ?? 'daily') {
       case 'daily':
         startDate = today;
@@ -146,6 +181,30 @@ export function resolveReportRange(input: {
         label = `${firstHalf ? 'Semester 1' : 'Semester 2'} ${y}`;
         break;
       }
+      case 'october': {
+        startDate = `${octNovYear}-10-01`;
+        endDate = `${octNovYear}-10-31`;
+        label = `Oktober ${octNovYear}`;
+        break;
+      }
+      case 'november': {
+        startDate = `${octNovYear}-11-01`;
+        endDate = `${octNovYear}-11-30`;
+        label = `November ${octNovYear}`;
+        break;
+      }
+      case 'oct_nov': {
+        startDate = `${octNovYear}-10-01`;
+        endDate = `${octNovYear}-11-30`;
+        label = `Oktober – November ${octNovYear}`;
+        break;
+      }
+      case 'all': {
+        startDate = ALL_TIME_START_DATE <= today ? ALL_TIME_START_DATE : today;
+        endDate = today;
+        label = `Keseluruhan (s/d ${formatId(today)})`;
+        break;
+      }
     }
   }
 
@@ -155,7 +214,7 @@ export function resolveReportRange(input: {
     start: new Date(`${startDate}T00:00:00+07:00`),
     endExclusive: new Date(`${addDays(endDate, 1)}T00:00:00+07:00`),
     label,
-    period: input.period ?? (input.dateFrom && input.dateTo ? null : 'daily'),
+    period: rawFrom || rawTo ? null : (input.period ?? 'daily'),
   };
 }
 
@@ -204,6 +263,83 @@ export type DailyRow = {
   biayaOperasional: number;
   labaBersih: number;
 };
+
+export type MonthlyBreakdownRow = {
+  monthKey: string; // YYYY-MM
+  monthLabel: string;
+  activeDays: number;
+  txCount: number;
+  voidCount: number;
+  omzet: number;
+  omzetCash: number;
+  omzetQris: number;
+  hppTerjual: number;
+  labaKotor: number;
+  marginPct: number;
+  alokasiGajiKaryawan: number;
+  omzetTanpaHpp: number;
+  biayaOperasional: number;
+  labaBersih: number;
+};
+
+/**
+ * Mengelompokkan rekap harian menjadi ringkasan bulanan secara deterministik
+ * sehingga Σ baris bulanan identik 100% dengan ringkasan periode.
+ */
+export function summarizeDailyByMonth(daily: readonly DailyRow[]): MonthlyBreakdownRow[] {
+  const bucket = new Map<string, MonthlyBreakdownRow>();
+
+  for (const d of daily) {
+    const monthKey = d.date.slice(0, 7);
+    let row = bucket.get(monthKey);
+    if (!row) {
+      const monthLabel = new Intl.DateTimeFormat('id-ID', {
+        timeZone: 'UTC',
+        month: 'long',
+        year: 'numeric',
+      }).format(new Date(utcMs(`${monthKey}-01`)));
+
+      row = {
+        monthKey,
+        monthLabel,
+        activeDays: 0,
+        txCount: 0,
+        voidCount: 0,
+        omzet: 0,
+        omzetCash: 0,
+        omzetQris: 0,
+        hppTerjual: 0,
+        labaKotor: 0,
+        marginPct: 0,
+        alokasiGajiKaryawan: 0,
+        omzetTanpaHpp: 0,
+        biayaOperasional: 0,
+        labaBersih: 0,
+      };
+      bucket.set(monthKey, row);
+    }
+
+    row.activeDays += 1;
+    row.txCount += d.txCount;
+    row.voidCount += d.voidCount;
+    row.omzet = money(row.omzet + d.omzet);
+    row.omzetCash = money(row.omzetCash + d.omzetCash);
+    row.omzetQris = money(row.omzetQris + d.omzetQris);
+    row.hppTerjual = money(row.hppTerjual + d.hppTerjual);
+    row.labaKotor = money(row.labaKotor + d.labaKotor);
+    row.alokasiGajiKaryawan = money(row.alokasiGajiKaryawan + d.alokasiGajiKaryawan);
+    row.omzetTanpaHpp = money(row.omzetTanpaHpp + d.omzetTanpaHpp);
+    row.biayaOperasional = money(row.biayaOperasional + d.biayaOperasional);
+    row.labaBersih = money(row.labaBersih + d.labaBersih);
+  }
+
+  return [...bucket.values()]
+    .sort((a, b) => (a.monthKey < b.monthKey ? -1 : a.monthKey > b.monthKey ? 1 : 0))
+    .map((row) => ({
+      ...row,
+      marginPct: row.omzet > 0 ? Math.round((row.labaKotor / row.omzet) * 1000) / 10 : 0,
+    }));
+}
 
 export type IntegrityChecks = {
   /** Omzet Cash + Omzet QRIS = Omzet */
@@ -381,7 +517,7 @@ export async function ensureFinancialDataIntegrity(): Promise<void> {
   try {
     // 1. Nonaktifkan duplikat input manual biaya paten Rp 50.000 jika masih aktif
     await db.execute(sql`
-      UPDATE operating_expenses
+      UPDATE finance.operating_expenses
       SET deleted_at = NOW()
       WHERE id = '59939e14-c9be-43c9-9431-3b73c933ccfa'
         AND deleted_at IS NULL
@@ -389,13 +525,13 @@ export async function ensureFinancialDataIntegrity(): Promise<void> {
 
     // 2. Koreksi master produk dan snapshot item yang memiliki HPP > Harga Jual (anomali input)
     await db.execute(sql`
-      UPDATE products
+      UPDATE gudang.products
       SET cost_price = ROUND(selling_price * 0.80)
       WHERE cost_price > selling_price AND selling_price > 0
     `);
 
     const fixedItems = await db.execute(sql`
-      UPDATE transaction_items
+      UPDATE pos.transaction_items
       SET cost_price_snapshot = ROUND(selling_price_snapshot * 0.80),
           subtotal_cost = qty * ROUND(selling_price_snapshot * 0.80)
       WHERE cost_price_snapshot > selling_price_snapshot
@@ -403,12 +539,12 @@ export async function ensureFinancialDataIntegrity(): Promise<void> {
     `);
     if (Array.isArray(fixedItems) && fixedItems.length > 0) {
       await db.execute(sql`
-        UPDATE transactions t
+        UPDATE pos.transactions t
         SET total_cost = sub.sum_cost,
             gross_profit = t.gross_amount - sub.sum_cost
         FROM (
           SELECT transaction_id, COALESCE(SUM(subtotal_cost), 0) AS sum_cost
-          FROM transaction_items
+          FROM pos.transaction_items
           GROUP BY transaction_id
         ) sub
         WHERE t.id = sub.transaction_id
@@ -418,30 +554,30 @@ export async function ensureFinancialDataIntegrity(): Promise<void> {
 
     // 3. Satukan duplikat data karyawan Gita Aprilianingrum (Kasir -> Ketua UMKM / Admin Shift)
     await db.execute(sql`
-      UPDATE shifts
+      UPDATE hr.shifts
       SET employee_id = ${KETUA_UMKM_CANONICAL_ID}
       WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
     `);
     await db.execute(sql`
-      DELETE FROM attendances a_dup
+      DELETE FROM hr.attendances a_dup
       WHERE a_dup.employee_id = ${KETUA_UMKM_DUPLICATE_ID}
         AND EXISTS (
-          SELECT 1 FROM attendances a_can
+          SELECT 1 FROM hr.attendances a_can
           WHERE a_can.employee_id = ${KETUA_UMKM_CANONICAL_ID}
             AND a_can.attendance_date = a_dup.attendance_date
         )
     `);
     await db.execute(sql`
-      UPDATE attendances
+      UPDATE hr.attendances
       SET employee_id = ${KETUA_UMKM_CANONICAL_ID}
       WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
     `);
     await db.execute(sql`
-      DELETE FROM shift_schedules
+      DELETE FROM hr.shift_schedules
       WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
     `);
     await db.execute(sql`
-      DELETE FROM employees
+      DELETE FROM core.employees
       WHERE id = ${KETUA_UMKM_DUPLICATE_ID}
     `);
 

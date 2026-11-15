@@ -48,6 +48,16 @@ const STORAGE_KEY = 'wiramart_pwa_cart_v2';
 const MAX_DISTINCT_ITEMS = 10; // Sesuai Zod CreateOrderSchema max 10 types
 const MAX_ITEM_QTY = 50;
 
+async function requestBuyerProfile(signal?: AbortSignal): Promise<BuyerProfile | null> {
+  const res = await fetch('/api/order/auth/me', { credentials: 'same-origin', signal });
+  if (!res.ok) return null;
+  const json = await res.json();
+  if (json.success && json.data?.authenticated) {
+    return json.data.buyer ?? null;
+  }
+  return null;
+}
+
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -57,19 +67,31 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   // 1. Hydrate cart from localStorage on mount
   useEffect(() => {
+    let cancelled = false;
+    let hydratedItems: CartItem[] | null = null;
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
-          setItems(parsed);
+          hydratedItems = parsed;
         }
       }
     } catch {
       // localStorage error fallback
-    } finally {
-      setIsHydrated(true);
     }
+
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      if (hydratedItems !== null) {
+        setItems(hydratedItems);
+      }
+      setIsHydrated(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 2. Persist cart to localStorage on change
@@ -86,17 +108,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const refreshBuyer = useCallback(async () => {
     try {
       setIsLoadingBuyer(true);
-      const res = await fetch('/api/order/auth/me', { credentials: 'same-origin' });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data?.authenticated) {
-          setBuyer(json.data.buyer);
-        } else {
-          setBuyer(null);
-        }
-      } else {
-        setBuyer(null);
-      }
+      const profile = await requestBuyerProfile();
+      setBuyer(profile);
     } catch {
       setBuyer(null);
     } finally {
@@ -105,8 +118,29 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    refreshBuyer();
-  }, [refreshBuyer]);
+    const controller = new AbortController();
+
+    requestBuyerProfile(controller.signal)
+      .then((profile) => {
+        if (!controller.signal.aborted) {
+          setBuyer(profile);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setBuyer(null);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsLoadingBuyer(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
 
   const logoutBuyer = useCallback(async () => {
     try {

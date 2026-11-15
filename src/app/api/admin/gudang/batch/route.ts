@@ -5,14 +5,59 @@
 // Auth: Admin / Manajer Toko
 // =============================================================
 
+import { randomInt } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { stockBatches, products, stockAdjustments, type ExpiryClass } from '@/lib/db/schema';
-import { eq, and, sql, gte, lte, lt, desc, asc, like, isNull } from 'drizzle-orm';
+import {
+  stockBatches,
+  products,
+  stockAdjustments,
+  admins,
+  discountPolicies,
+  discountBarcodes,
+  type ExpiryClass,
+} from '@/lib/db/schema';
+import { eq, and, sql, gte, desc, asc, isNull, inArray } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { getTodayWib, getOffsetDateWib } from '@/lib/utils/helpers';
+import { resolveNormalizedSupplierId } from '@/lib/services/supplierResolver';
 
 export const runtime = 'nodejs';
+
+async function requireActiveManager(req: NextRequest) {
+  const session = await verifyJwt(req);
+  if (!session || session.role !== 'admin') {
+    return { ok: false as const, status: 401, error: 'Unauthorized: Memerlukan sesi Admin/Manager.' };
+  }
+
+  const [adminRow] = await db
+    .select({
+      id: admins.id,
+      role: admins.role,
+      fullName: admins.fullName,
+      nidn: admins.nidn,
+    })
+    .from(admins)
+    .where(
+      and(
+        eq(admins.id, session.sub),
+        eq(admins.isActive, true),
+        isNull(admins.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!adminRow || adminRow.role !== 'MANAGER') {
+    return {
+      ok: false as const,
+      status: 403,
+      error: 'Akses ditolak. Mutasi langsung batch stok hanya berhak disetujui oleh Manager (Dosen).',
+    };
+  }
+
+  return { ok: true as const, admin: adminRow };
+}
 
 // ─────────────────────────────────────────────────────────────
 // GET: List Batches & Summary Alert Kedaluwarsa
@@ -29,12 +74,16 @@ export async function GET(req: NextRequest) {
   const productId = searchParams.get('productId');
   const q = searchParams.get('q')?.trim() || '';
 
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const in7Days = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  if (productId && !z.string().uuid().safeParse(productId).success) {
+    return apiError('Parameter productId tidak valid.', 400);
+  }
+
+  const todayStr = getTodayWib();
+  const in7Days = getOffsetDateWib(7);
+  const in30Days = getOffsetDateWib(30);
 
   try {
-    // 1. Ambil summary statistik kedaluwarsa
+    // 1. Ambil summary statistik kedaluwarsa khusus produk yang masih aktif/belum dihapus
     const [summaryResult] = await db
       .select({
         totalBatches: sql<number>`COUNT(*)::int`,
@@ -43,7 +92,9 @@ export async function GET(req: NextRequest) {
         expiring7Count: sql<number>`COALESCE(COUNT(*) FILTER (WHERE ${stockBatches.expiryDate} IS NOT NULL AND ${stockBatches.expiryDate} >= ${todayStr} AND ${stockBatches.expiryDate} <= ${in7Days} AND ${stockBatches.currentQty} > 0), 0)::int`,
         expiring30Count: sql<number>`COALESCE(COUNT(*) FILTER (WHERE ${stockBatches.expiryDate} IS NOT NULL AND ${stockBatches.expiryDate} > ${in7Days} AND ${stockBatches.expiryDate} <= ${in30Days} AND ${stockBatches.currentQty} > 0), 0)::int`,
       })
-      .from(stockBatches);
+      .from(stockBatches)
+      .innerJoin(products, eq(stockBatches.productId, products.id))
+      .where(isNull(products.deletedAt));
 
     // 2. Query batch records dengan relasi produk
     const query = db
@@ -143,15 +194,16 @@ const CreateBatchSchema = z.object({
   initialQty: z.number().int().positive('Jumlah masuk harus lebih dari 0'),
   expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD').nullable().optional(),
   expiryClass: z.enum(['HARIAN', 'PENDEK', 'PANJANG']).default('PANJANG'),
+  supplierId: z.string().uuid('Supplier ID tidak valid').nullable().optional(),
   supplierName: z.string().trim().max(100).optional(),
   invoiceNumber: z.string().trim().max(100).optional(),
   notes: z.string().trim().max(500).optional(),
 });
 
 export async function POST(req: NextRequest) {
-  const session = await verifyJwt(req);
-  if (!session || session.role !== 'admin') {
-    return apiError('Akses ditolak. Memerlukan hak akses Admin/Manajer.', 403);
+  const auth = await requireActiveManager(req);
+  if (!auth.ok) {
+    return apiError(auth.error, auth.status);
   }
 
   let body: unknown;
@@ -172,6 +224,7 @@ export async function POST(req: NextRequest) {
     initialQty,
     expiryDate,
     expiryClass,
+    supplierId,
     supplierName,
     invoiceNumber,
     notes,
@@ -185,9 +238,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const now = new Date();
   const batchCode =
     parsed.data.batchCode ||
-    `BATCH-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+    `BATCH-${getTodayWib(now).replace(/-/g, '')}-${randomInt(1000, 10000)}`;
 
   const combinedNotes = [
     supplierName ? `Pemasok: ${supplierName}` : '',
@@ -199,22 +253,31 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await db.transaction(async (tx) => {
-      // 1. Verifikasi produk ada & aktif
+      // 1. Kunci & verifikasi produk ada & tidak dihapus
       const [product] = await tx
         .select()
         .from(products)
         .where(and(eq(products.id, productId), isNull(products.deletedAt)))
+        .for('update')
         .limit(1);
 
       if (!product) {
         throw new Error('PROD_NOT_FOUND: Produk tidak ditemukan atau telah dihapus.');
       }
 
-      // 2. Simpan batch baru ke stock_batches
+      // 2. Resolve supplier 3NF & simpan batch baru ke stock_batches
+      const resolvedSupplierId = await resolveNormalizedSupplierId(tx, {
+        supplierId,
+        supplierName,
+        createdByAdminId: auth.admin.id,
+        autoNote: 'Terdaftar otomatis dari penerimaan batch manual Manager',
+      });
+
       const [newBatch] = await tx
         .insert(stockBatches)
         .values({
           productId,
+          supplierId: resolvedSupplierId,
           batchCode,
           costPrice: costPrice.toString(),
           initialQty,
@@ -231,22 +294,27 @@ export async function POST(req: NextRequest) {
         .set({
           stockQty: sql`${products.stockQty} + ${initialQty}`,
           costPrice: costPrice > 0 ? costPrice.toString() : product.costPrice,
-          updatedAt: new Date(),
+          updatedAt: now,
         })
         .where(eq(products.id, productId))
         .returning({ stockQty: products.stockQty });
 
-      // 4. Catat riwayat di stockAdjustments untuk audit trail
+      const afterQty = updatedProduct.stockQty;
+      const beforeQty = afterQty - initialQty;
+      const managerLabel = auth.admin.fullName || auth.admin.nidn;
+
+      // 4. Catat riwayat di stockAdjustments dengan batchId FK untuk audit trail
       await tx.insert(stockAdjustments).values({
         productId,
-        adjustedByAdminId: session.sub,
-        qtyBefore: product.stockQty,
-        qtyAfter: updatedProduct.stockQty,
+        batchId: newBatch.id,
+        adjustedByAdminId: auth.admin.id,
+        qtyBefore: beforeQty,
+        qtyAfter: afterQty,
         qtyDiff: initialQty,
-        reason: `Penerimaan batch ${batchCode} (${initialQty} unit)${supplierName ? ` dari ${supplierName}` : ''}${invoiceNumber ? ` (Nota: ${invoiceNumber})` : ''}`,
+        reason: `Penerimaan batch ${batchCode} (+${initialQty} unit) oleh Manager ${managerLabel}${supplierName ? ` dari ${supplierName}` : ''}${invoiceNumber ? ` (Nota: ${invoiceNumber})` : ''}`,
       });
 
-      return { newBatch, totalStock: updatedProduct.stockQty };
+      return { newBatch, totalStock: afterQty };
     });
 
     return apiOk(
@@ -258,7 +326,8 @@ export async function POST(req: NextRequest) {
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Gagal menyimpan penerimaan batch baru';
-    return apiError(message, 500);
+    const statusCode = message.startsWith('PROD_NOT_FOUND') ? 404 : 500;
+    return apiError(message, statusCode);
   }
 }
 
@@ -273,9 +342,9 @@ const WriteOffBatchSchema = z.object({
 });
 
 export async function PATCH(req: NextRequest) {
-  const session = await verifyJwt(req);
-  if (!session || session.role !== 'admin') {
-    return apiError('Akses ditolak. Memerlukan hak akses Admin/Manajer.', 403);
+  const auth = await requireActiveManager(req);
+  if (!auth.ok) {
+    return apiError(auth.error, auth.status);
   }
 
   let body: unknown;
@@ -294,7 +363,28 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const result = await db.transaction(async (tx) => {
-      // 1. Kunci dan ambil batch target
+      // 1. Lookup non-blocking productId lalu kunci urut deterministik: products -> stock_batches (anti-deadlock)
+      const [batchMeta] = await tx
+        .select({ productId: stockBatches.productId })
+        .from(stockBatches)
+        .where(eq(stockBatches.id, batchId))
+        .limit(1);
+
+      if (!batchMeta) {
+        throw new Error('BATCH_NOT_FOUND: Batch stok tidak ditemukan.');
+      }
+
+      const [product] = await tx
+        .select()
+        .from(products)
+        .where(and(eq(products.id, batchMeta.productId), isNull(products.deletedAt)))
+        .limit(1)
+        .for('update');
+
+      if (!product) {
+        throw new Error('PROD_NOT_FOUND: Produk tidak ditemukan atau telah dihapus.');
+      }
+
       const [batch] = await tx
         .select()
         .from(stockBatches)
@@ -312,18 +402,6 @@ export async function PATCH(req: NextRequest) {
         );
       }
 
-      // 2. Kunci dan ambil produk terkait
-      const [product] = await tx
-        .select()
-        .from(products)
-        .where(and(eq(products.id, batch.productId), isNull(products.deletedAt)))
-        .limit(1)
-        .for('update');
-
-      if (!product) {
-        throw new Error('PROD_NOT_FOUND: Produk tidak ditemukan atau telah dihapus.');
-      }
-
       if (product.stockQty < qty) {
         throw new Error(
           `INSUFFICIENT_PROD_STOCK: Total stok produk di rak hanya ${product.stockQty} unit (diminta write-off ${qty} unit).`,
@@ -332,15 +410,51 @@ export async function PATCH(req: NextRequest) {
 
       const now = new Date();
 
-      // 3. Potong stok batch
+      // 3. Potong stok batch dengan guard atomik
       const [updatedBatch] = await tx
         .update(stockBatches)
         .set({
           currentQty: sql`${stockBatches.currentQty} - ${qty}`,
           updatedAt: now,
         })
-        .where(eq(stockBatches.id, batchId))
+        .where(and(eq(stockBatches.id, batchId), gte(stockBatches.currentQty, qty)))
         .returning();
+
+      if (!updatedBatch) {
+        throw new Error('INSUFFICIENT_BATCH_QTY: Stok batch berubah saat write-off diproses.');
+      }
+
+      // 3b. Sinkronkan kebijakan diskon & barcode diskon yang menempel pada batch ini
+      const linkedPolicies = await tx
+        .select({ id: discountPolicies.id })
+        .from(discountPolicies)
+        .where(and(eq(discountPolicies.batchId, batchId), eq(discountPolicies.isActive, true)));
+
+      if (linkedPolicies.length > 0) {
+        const policyIds = linkedPolicies.map((p) => p.id);
+        await tx
+          .update(discountBarcodes)
+          .set({
+            remainingQty: sql`LEAST(${discountBarcodes.remainingQty}, ${updatedBatch.currentQty})`,
+            ...(updatedBatch.currentQty <= 0 ? { isActive: false } : {}),
+          })
+          .where(and(inArray(discountBarcodes.policyId, policyIds), eq(discountBarcodes.isActive, true)));
+
+        if (updatedBatch.currentQty <= 0) {
+          await tx
+            .update(discountPolicies)
+            .set({ isActive: false, updatedAt: now })
+            .where(and(inArray(discountPolicies.id, policyIds), eq(discountPolicies.isActive, true)));
+        } else {
+          await tx
+            .update(discountPolicies)
+            .set({
+              allowedQty: sql`LEAST(${discountPolicies.allowedQty}, ${discountPolicies.soldQty} + ${updatedBatch.currentQty})`,
+              updatedAt: now,
+            })
+            .where(and(inArray(discountPolicies.id, policyIds), eq(discountPolicies.isActive, true)));
+        }
+      }
 
       // 4. Potong total stok produk secara atomik
       const [updatedProduct] = await tx
@@ -349,8 +463,12 @@ export async function PATCH(req: NextRequest) {
           stockQty: sql`${products.stockQty} - ${qty}`,
           updatedAt: now,
         })
-        .where(eq(products.id, batch.productId))
+        .where(and(eq(products.id, batch.productId), gte(products.stockQty, qty)))
         .returning({ stockQty: products.stockQty });
+
+      if (!updatedProduct) {
+        throw new Error('INSUFFICIENT_PROD_STOCK: Stok produk berubah saat write-off diproses.');
+      }
 
       // 5. Catat ke stockAdjustments untuk audit trail & laporan susut barang
       const actionLabel =
@@ -366,14 +484,16 @@ export async function PATCH(req: NextRequest) {
 
       const costPriceNum = parseFloat(batch.costPrice) || 0;
       const totalLostCost = costPriceNum * qty;
+      const managerLabel = auth.admin.fullName || auth.admin.nidn;
 
       await tx.insert(stockAdjustments).values({
         productId: batch.productId,
-        adjustedByAdminId: session.sub,
+        batchId: updatedBatch.id,
+        adjustedByAdminId: auth.admin.id,
         qtyBefore: product.stockQty,
         qtyAfter: updatedProduct.stockQty,
         qtyDiff: -qty,
-        reason: `[WRITE-OFF:${action}] ${actionLabel} - ${reason} (Batch: ${batch.batchCode}, HPP: Rp ${costPriceNum.toLocaleString('id-ID')}, Nilai Susut: Rp ${totalLostCost.toLocaleString('id-ID')})`,
+        reason: `[WRITE-OFF:${action}] ${actionLabel} oleh Manager ${managerLabel} - ${reason} (Batch: ${batch.batchCode}, HPP: Rp ${costPriceNum.toLocaleString('id-ID')}, Nilai Susut: Rp ${totalLostCost.toLocaleString('id-ID')})`,
       });
 
       return {

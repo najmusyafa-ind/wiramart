@@ -20,12 +20,15 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
+    const rawPage = searchParams.get('page');
+    const rawLimit = searchParams.get('limit');
     const result = await getCashierDailyRecap({
       employeeId: payload.sub, // IDOR-Proof: identitas diambil langsung dari token
-      tanggal: searchParams.get('tanggal') ?? undefined,
-      shiftId: searchParams.get('shiftId') ?? undefined,
-      page: Number(searchParams.get('page') ?? '1'),
-      limit: Number(searchParams.get('limit') ?? '20'),
+      tanggal: searchParams.get('tanggal') || undefined,
+      dateTo: searchParams.get('dateTo') || undefined,
+      shiftId: searchParams.get('shiftId') || undefined,
+      page: rawPage ? Number(rawPage) : 1,
+      limit: rawLimit ? Number(rawLimit) : 20,
     });
 
     return apiOk(result);

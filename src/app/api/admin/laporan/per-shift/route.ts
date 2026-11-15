@@ -8,7 +8,7 @@
 //
 // Auth: sk_admin + adminRole = MANAGER
 // Query params: dateFrom=YYYY-MM-DD & dateTo=YYYY-MM-DD
-//              period=daily|weekly|monthly|semi_annual
+//              period=daily|weekly|monthly|semi_annual|october|november|oct_nov|all
 // =============================================================
 
 import { NextRequest } from 'next/server';
@@ -29,19 +29,29 @@ import {
   resolveReportRange,
   getFinancialReport,
   allocateProportional,
+  InvalidRangeError,
+  isPeriodKey,
   KETUA_UMKM_NIM,
   KETUA_UMKM_CANONICAL_ID,
   KETUA_UMKM_DUPLICATE_ID,
-  PERSEN_TUNJANGAN_KETUA,
   extractRoleFromNotes,
-  getSessionDurationWeight,
   computePersonnelWeight,
-  type PeriodKey,
 } from '@/lib/finance/report';
 
 export const runtime = 'nodejs';
 
-const PERIODS: readonly PeriodKey[] = ['daily', 'weekly', 'monthly', 'semi_annual'];
+const MAX_SHIFTS_LIMIT = 5_000;
+const MAX_ATTENDANCES_LIMIT = 10_000;
+const SQL_IN_CHUNK_SIZE = 1_500;
+
+function chunkArray<T>(items: readonly T[], size = SQL_IN_CHUNK_SIZE): T[][] {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
 
 /** Akun admin/testing/dosen yang DILARANG menerima bagi hasil upah mahasiswa */
 function isExcludedAccount(name?: string | null, nim?: string | null): boolean {
@@ -80,11 +90,15 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   const sp = new URL(req.url).searchParams;
   const rawPeriod = sp.get('period');
-  const period = PERIODS.find((p) => p === rawPeriod) ?? null;
   const monthParam = sp.get('month'); // 'YYYY-MM'
   const dateParam = sp.get('date');   // 'YYYY-MM-DD'
   let dateFrom = sp.get('dateFrom') || dateParam;
   let dateTo = sp.get('dateTo') || dateParam;
+
+  if (rawPeriod && !dateFrom && !dateTo && !monthParam && !isPeriodKey(rawPeriod)) {
+    return apiError('Parameter period tidak valid', 400);
+  }
+  const period = isPeriodKey(rawPeriod) ? rawPeriod : null;
 
   if (monthParam) {
     const [yStr, mStr] = monthParam.split('-');
@@ -105,8 +119,8 @@ export async function GET(req: NextRequest): Promise<Response> {
       dateTo,
     });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Rentang tanggal tidak valid';
-    return apiError(msg, 400);
+    if (err instanceof InvalidRangeError) return apiError(err.message, 400);
+    throw err;
   }
 
   try {
@@ -121,7 +135,8 @@ export async function GET(req: NextRequest): Promise<Response> {
       })
       .from(shifts)
       .groupBy(sql`TO_CHAR(${shifts.clockIn} AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM')`)
-      .orderBy(sql`TO_CHAR(${shifts.clockIn} AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM') DESC`);
+      .orderBy(sql`TO_CHAR(${shifts.clockIn} AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM') DESC`)
+      .limit(60);
     const availableMonths = availableMonthsRaw.map((m) => m.month).filter(Boolean);
 
     // ─────────────────────────────────────────────────────────────
@@ -139,14 +154,14 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     const scheduleRows = await db
       .select({
-        dayOfWeek:    shiftSchedules.dayOfWeek,
-        slotStart:    shiftSchedules.slotStart,
-        orderInSlot:  shiftSchedules.orderInSlot,
-        employeeId:   employees.id,
-        fullName:     employees.fullName,
-        nim:          employees.nim,
+        dayOfWeek: shiftSchedules.dayOfWeek,
+        slotStart: shiftSchedules.slotStart,
+        orderInSlot: shiftSchedules.orderInSlot,
+        employeeId: employees.id,
+        fullName: employees.fullName,
+        nim: employees.nim,
         programStudi: employees.programStudi,
-        jabatan:      employees.jabatan,
+        jabatan: employees.jabatan,
       })
       .from(shiftSchedules)
       .innerJoin(
@@ -158,7 +173,8 @@ export async function GET(req: NextRequest): Promise<Response> {
         ),
       )
       .where(eq(shiftSchedules.isActive, true))
-      .orderBy(asc(shiftSchedules.dayOfWeek), asc(shiftSchedules.slotStart), asc(shiftSchedules.orderInSlot));
+      .orderBy(asc(shiftSchedules.dayOfWeek), asc(shiftSchedules.slotStart), asc(shiftSchedules.orderInSlot))
+      .limit(500);
 
     const scheduleTeams: Record<
       string,
@@ -217,7 +233,8 @@ export async function GET(req: NextRequest): Promise<Response> {
           lt(shifts.clockIn, range.endExclusive),
         ),
       )
-      .orderBy(shifts.clockIn);
+      .orderBy(shifts.clockIn)
+      .limit(MAX_SHIFTS_LIMIT);
 
     // Filter: Hari Sabtu (6) & Minggu (0) bukan hari operasional resmi Wiramart.
     // Shift di hari weekend adalah data uji coba, diexclude dari laporan shift mahasiswa.
@@ -266,106 +283,106 @@ export async function GET(req: NextRequest): Promise<Response> {
     }
 
     const shiftIds = shiftRows.map((s) => s.id);
+    const shiftIdChunks = chunkArray(shiftIds);
 
     // ─────────────────────────────────────────────────────────────
     // 2. Hitung laba kotor per shift dari SNAPSHOT item (audit-proof)
     //    Formula: SUM(subtotal_sell - subtotal_cost) di mana cost > 0
     //    Produk HPP=0 (dummy/selisih laci) TIDAK dihitung sebagai laba
     // ─────────────────────────────────────────────────────────────
-    const shiftFinancials = await db
-      .select({
-        shiftId: transactions.shiftId,
-        omzet: sql<string>`ROUND(COALESCE(SUM(${transactionItems.subtotalSell}), 0))`,
-        labaKotor: sql<string>`ROUND(COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalSell} - ${transactionItems.subtotalCost} ELSE 0 END), 0))`,
-        txCount: sql<number>`COUNT(DISTINCT ${transactions.id})::int`,
-      })
-      .from(transactionItems)
-      .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
-      .where(
-        and(
-          eq(transactions.status, 'COMPLETED'),
-          eq(transactions.isTest, false),
-          inArray(transactions.shiftId, shiftIds),
-        ),
-      )
-      .groupBy(transactions.shiftId);
-
     const finByShift = new Map<string, { omzet: number; labaKotor: number; txCount: number }>();
-    for (const f of shiftFinancials) {
-      if (f.shiftId) {
+    for (const idChunk of shiftIdChunks) {
+      const shiftFinancials = await db
+        .select({
+          shiftId: transactions.shiftId,
+          omzet: sql<string>`ROUND(COALESCE(SUM(${transactionItems.subtotalSell}), 0))`,
+          labaKotor: sql<string>`ROUND(COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalSell} - ${transactionItems.subtotalCost} ELSE 0 END), 0))`,
+          txCount: sql<number>`COUNT(DISTINCT ${transactions.id})::int`,
+        })
+        .from(transactionItems)
+        .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
+        .where(
+          and(
+            eq(transactions.status, 'COMPLETED'),
+            eq(transactions.isTest, false),
+            inArray(transactions.shiftId, idChunk),
+          ),
+        )
+        .groupBy(transactions.shiftId);
+
+      for (const f of shiftFinancials) {
+        if (!f.shiftId) continue;
+        const prev = finByShift.get(f.shiftId) ?? { omzet: 0, labaKotor: 0, txCount: 0 };
         finByShift.set(f.shiftId, {
-          omzet: parseFloat(f.omzet || '0'),
-          labaKotor: parseFloat(f.labaKotor || '0'),
-          txCount: f.txCount,
+          omzet: prev.omzet + parseFloat(f.omzet || '0'),
+          labaKotor: prev.labaKotor + parseFloat(f.labaKotor || '0'),
+          txCount: prev.txCount + f.txCount,
         });
       }
     }
 
     // ── 2b. Audit Uang Kas & Laci per Shift (Petty Cash Movements & Cash Sales) ──
-    const cashMovements = shiftIds.length > 0
-      ? await db
-          .select({
-            shiftId:      shiftCashMovements.shiftId,
-            movementType: shiftCashMovements.movementType,
-            total:        sql<string>`COALESCE(SUM(${shiftCashMovements.amount}), 0)`,
-          })
-          .from(shiftCashMovements)
-          .where(inArray(shiftCashMovements.shiftId, shiftIds))
-          .groupBy(shiftCashMovements.shiftId, shiftCashMovements.movementType)
-      : [];
-
     const cashOutMap = new Map<string, number>();
-    const cashInMap  = new Map<string, number>();
-    for (const m of cashMovements) {
-      const val = parseFloat(m.total || '0');
-      if (m.movementType === 'CASH_OUT') cashOutMap.set(m.shiftId, val);
-      else if (m.movementType === 'CASH_IN')  cashInMap.set(m.shiftId, val);
-    }
-
-    const splitCash = shiftIds.length > 0
-      ? await db
-          .select({
-            shiftId: transactions.shiftId,
-            total:   sql<string>`COALESCE(SUM(${transactionPayments.amount}), 0)`,
-          })
-          .from(transactionPayments)
-          .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
-          .where(and(
-            inArray(transactions.shiftId, shiftIds),
-            eq(transactions.status, 'COMPLETED'),
-            eq(transactionPayments.paymentMethod, 'CASH'),
-            eq(transactions.isTest, false),
-          ))
-          .groupBy(transactions.shiftId)
-      : [];
-
+    const cashInMap = new Map<string, number>();
     const cashSalesMap = new Map<string, number>();
-    for (const s of splitCash) {
-      if (s.shiftId) {
-        cashSalesMap.set(s.shiftId, (cashSalesMap.get(s.shiftId) ?? 0) + parseFloat(s.total || '0'));
+
+    for (const idChunk of shiftIdChunks) {
+      const cashMovements = await db
+        .select({
+          shiftId: shiftCashMovements.shiftId,
+          movementType: shiftCashMovements.movementType,
+          total: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}), 0)`,
+        })
+        .from(shiftCashMovements)
+        .where(inArray(shiftCashMovements.shiftId, idChunk))
+        .groupBy(shiftCashMovements.shiftId, shiftCashMovements.movementType);
+
+      for (const m of cashMovements) {
+        const val = parseFloat(m.total || '0');
+        if (m.movementType === 'CASH_OUT') cashOutMap.set(m.shiftId, (cashOutMap.get(m.shiftId) ?? 0) + val);
+        else if (m.movementType === 'CASH_IN') cashInMap.set(m.shiftId, (cashInMap.get(m.shiftId) ?? 0) + val);
       }
-    }
 
-    const directCash = shiftIds.length > 0
-      ? await db
-          .select({
-            shiftId: transactions.shiftId,
-            total:   sql<string>`COALESCE(SUM(${transactions.grossAmount}), 0)`,
-          })
-          .from(transactions)
-          .where(and(
-            inArray(transactions.shiftId, shiftIds),
-            eq(transactions.status, 'COMPLETED'),
-            eq(transactions.paymentMethod, 'CASH'),
-            eq(transactions.isTest, false),
-            sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
-          ))
-          .groupBy(transactions.shiftId)
-      : [];
+      const splitCash = await db
+        .select({
+          shiftId: transactions.shiftId,
+          total: sql<string>`COALESCE(SUM(${transactionPayments.amount}), 0)`,
+        })
+        .from(transactionPayments)
+        .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
+        .where(and(
+          inArray(transactions.shiftId, idChunk),
+          eq(transactions.status, 'COMPLETED'),
+          eq(transactionPayments.paymentMethod, 'CASH'),
+          eq(transactions.isTest, false),
+        ))
+        .groupBy(transactions.shiftId);
 
-    for (const d of directCash) {
-      if (d.shiftId) {
-        cashSalesMap.set(d.shiftId, (cashSalesMap.get(d.shiftId) ?? 0) + parseFloat(d.total || '0'));
+      for (const s of splitCash) {
+        if (s.shiftId) {
+          cashSalesMap.set(s.shiftId, (cashSalesMap.get(s.shiftId) ?? 0) + parseFloat(s.total || '0'));
+        }
+      }
+
+      const directCash = await db
+        .select({
+          shiftId: transactions.shiftId,
+          total: sql<string>`COALESCE(SUM(${transactions.grossAmount}), 0)`,
+        })
+        .from(transactions)
+        .where(and(
+          inArray(transactions.shiftId, idChunk),
+          eq(transactions.status, 'COMPLETED'),
+          eq(transactions.paymentMethod, 'CASH'),
+          eq(transactions.isTest, false),
+          sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+        ))
+        .groupBy(transactions.shiftId);
+
+      for (const d of directCash) {
+        if (d.shiftId) {
+          cashSalesMap.set(d.shiftId, (cashSalesMap.get(d.shiftId) ?? 0) + parseFloat(d.total || '0'));
+        }
       }
     }
 
@@ -434,6 +451,8 @@ export async function GET(req: NextRequest): Promise<Response> {
         lte(attendances.attendanceDate, range.endDate),
         inArray(attendances.status, ['HADIR', 'TELAT', 'PENGGANTI']),
       ),
+      orderBy: [asc(attendances.attendanceDate), asc(attendances.createdAt)],
+      limit: MAX_ATTENDANCES_LIMIT,
       with: {
         employee: {
           columns: { id: true, fullName: true, nim: true, programStudi: true, jabatan: true },

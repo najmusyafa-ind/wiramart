@@ -1,21 +1,52 @@
 // =============================================================
-// /api/kasir/makanan-sisa — Cut-off Sisa Makanan Harian (Jam 15:00)
+// /api/kasir/makanan-sisa — Cut-off Sisa Makanan Harian (Jam 15:00 WIB)
 // Mendukung Kelas H / E1: Makanan Cepat Basi & Non-Barcode (Cilok, Siomai, Ricebowl, Gorengan)
 // =============================================================
 
+import { randomInt } from 'node:crypto';
 import { z } from 'zod';
-import { eq, and, isNull, or, ilike, gt, asc, desc, sql } from 'drizzle-orm';
+import { eq, and, isNull, or, ilike, gt, asc, desc, sql, inArray } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { products, categories, stockAdjustments, admins, stockBatches } from '@/lib/db/schema';
+import {
+  products,
+  categories,
+  stockAdjustments,
+  admins,
+  employees,
+  stockBatches,
+  discountPolicies,
+  discountBarcodes,
+} from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { getTodayWib } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
 
+const cutOffDispositionSchema = z.enum([
+  'RETUR',
+  'BUANG_BASI',
+  'HABIS',
+  'SIMPAN',
+  'MAKAN_PETUGAS',
+  'OBRAL',
+]);
+
+type CutOffDisposition = z.infer<typeof cutOffDispositionSchema>;
+
+const DISPOSITION_LABELS: Record<CutOffDisposition, string> = {
+  RETUR: 'Retur ke Mitra Penitip',
+  BUANG_BASI: 'Dibuang (Basi)',
+  MAKAN_PETUGAS: 'Makan Petugas / Konsumsi Internal',
+  OBRAL: 'Obral Balik Modal HPP',
+  HABIS: 'Habis Terjual',
+  SIMPAN: 'Disimpan di Kulkas / Chiller',
+};
+
 const cutOffItemSchema = z.object({
   productId: z.string().uuid(),
-  qtySisaFisik: z.number().min(0).max(10_000),
-  disposition: z.enum(['RETUR', 'BUANG_BASI', 'HABIS', 'SIMPAN', 'MAKAN_PETUGAS', 'OBRAL']),
+  qtySisaFisik: z.number().int().min(0).max(10_000),
+  disposition: cutOffDispositionSchema,
   notes: z.string().max(200).optional(),
 });
 
@@ -23,11 +54,27 @@ const cutOffBatchSchema = z.object({
   items: z.array(cutOffItemSchema).min(1, 'Minimal satu item makanan harus dilaporkan'),
 });
 
+async function getActiveEmployee(employeeId: string) {
+  return db.query.employees.findFirst({
+    where: and(
+      eq(employees.id, employeeId),
+      eq(employees.isActive, true),
+      isNull(employees.deletedAt),
+    ),
+    columns: { id: true, fullName: true, nim: true },
+  });
+}
+
 // GET: Ambil daftar makanan harian / perishable untuk formulir cut-off
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'employee') {
     return apiError('Unauthorized', 401);
+  }
+
+  const emp = await getActiveEmployee(payload.sub);
+  if (!emp) {
+    return apiError('Akun karyawan tidak ditemukan atau telah dinonaktifkan', 403);
   }
 
   const rows = await db
@@ -60,11 +107,16 @@ export async function GET(req: NextRequest) {
   return apiOk({ items: rows });
 }
 
-// POST: Catat cut-off sisa makanan jam 15:00
+// POST: Catat cut-off sisa makanan jam 15:00 WIB
 export async function POST(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'employee') {
     return apiError('Unauthorized', 401);
+  }
+
+  const emp = await getActiveEmployee(payload.sub);
+  if (!emp) {
+    return apiError('Akun karyawan tidak ditemukan atau telah dinonaktifkan', 403);
   }
 
   let body: unknown;
@@ -81,11 +133,20 @@ export async function POST(req: NextRequest) {
 
   const { items } = parsed.data;
 
-  // Cari admin id untuk audit record stock_adjustments
-  const adminRow = await db.query.admins.findFirst({
-    where: eq(admins.isActive, true),
-    columns: { id: true },
-  });
+  // Cari admin aktif untuk FK audit record stock_adjustments
+  const adminRow =
+    (await db.query.admins.findFirst({
+      where: and(
+        eq(admins.isActive, true),
+        isNull(admins.deletedAt),
+        eq(admins.role, 'MANAGER'),
+      ),
+      columns: { id: true },
+    })) ??
+    (await db.query.admins.findFirst({
+      where: and(eq(admins.isActive, true), isNull(admins.deletedAt)),
+      columns: { id: true },
+    }));
 
   const adminId = adminRow?.id;
   if (!adminId) {
@@ -93,9 +154,13 @@ export async function POST(req: NextRequest) {
   }
 
   const nowWib = new Date();
-  const timeStr = nowWib.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  const wibShifted = new Date(nowWib.getTime() + 7 * 60 * 60 * 1000);
+  const timeStr = `${String(wibShifted.getUTCHours()).padStart(2, '0')}:${String(wibShifted.getUTCMinutes()).padStart(2, '0')} WIB`;
+  const todayCompact = getTodayWib(nowWib).replace(/-/g, '');
 
   try {
+    let adjustedCount = 0;
+
     // Eksekusi penyesuaian stok per item dalam satu transaksi ACID
     await db.transaction(async (tx) => {
       for (const item of items) {
@@ -107,48 +172,34 @@ export async function POST(req: NextRequest) {
             name: products.name,
           })
           .from(products)
-          .where(and(eq(products.id, item.productId), isNull(products.deletedAt)))
+          .where(
+            and(
+              eq(products.id, item.productId),
+              eq(products.isActive, true),
+              isNull(products.deletedAt),
+            ),
+          )
           .limit(1)
           .for('update');
 
         if (!existing) continue;
 
         const qtyBefore = existing.stockQty;
-        let qtyAfter = qtyBefore;
-
-        if (item.disposition === 'RETUR') {
-          // Sisa fisik dikembalikan ke mitra penitip (konsinyasi) -> stok toko di-reset ke 0
-          qtyAfter = 0;
-        } else if (item.disposition === 'BUANG_BASI') {
-          // Sisa basi dibuang (waste) -> stok toko di-reset ke 0
-          qtyAfter = 0;
-        } else if (item.disposition === 'MAKAN_PETUGAS') {
-          // Dimakan petugas / konsumsi internal -> stok toko di-reset ke 0
-          qtyAfter = 0;
-        } else if (item.disposition === 'OBRAL') {
-          // Diobral balik modal HPP -> stok toko di-reset ke 0
-          qtyAfter = 0;
-        } else if (item.disposition === 'HABIS') {
-          // Barang sudah habis terjual -> stok toko disetel ke 0
-          qtyAfter = 0;
-        } else if (item.disposition === 'SIMPAN') {
-          // Masih layak dan disimpan di etalase / chiller
-          qtyAfter = item.qtySisaFisik;
-        }
-
+        const qtyAfter = item.disposition === 'SIMPAN' ? item.qtySisaFisik : 0;
         const qtyDiff = qtyAfter - qtyBefore;
 
-        // Update stok produk & batch jika ada perubahan
+        // Update stok produk, batch FEFO, & sinkronisasi promo jika ada mutasi stok
         if (qtyDiff !== 0) {
+          adjustedCount += 1;
+
           // 1. Update master stok produk
           await tx
             .update(products)
             .set({ stockQty: qtyAfter, updatedAt: nowWib })
             .where(eq(products.id, item.productId));
 
-          // 2. Sinkronisasi batch stok (terutama kelas HARIAN / batch aktif)
+          // 2. Sinkronisasi batch stok & promo diskon terkait
           if (qtyAfter === 0) {
-            // Kosongkan seluruh batch aktif produk ini
             await tx
               .update(stockBatches)
               .set({ currentQty: 0, updatedAt: nowWib })
@@ -158,8 +209,36 @@ export async function POST(req: NextRequest) {
                   gt(stockBatches.currentQty, 0),
                 ),
               );
+
+            const productPolicies = await tx
+              .select({ id: discountPolicies.id })
+              .from(discountPolicies)
+              .where(eq(discountPolicies.productId, item.productId));
+
+            if (productPolicies.length > 0) {
+              const policyIds = productPolicies.map((p) => p.id);
+              await tx
+                .update(discountBarcodes)
+                .set({ isActive: false, remainingQty: 0 })
+                .where(
+                  and(
+                    inArray(discountBarcodes.policyId, policyIds),
+                    eq(discountBarcodes.isActive, true),
+                  ),
+                );
+
+              await tx
+                .update(discountPolicies)
+                .set({ isActive: false, updatedAt: nowWib })
+                .where(
+                  and(
+                    inArray(discountPolicies.id, policyIds),
+                    eq(discountPolicies.isActive, true),
+                  ),
+                );
+            }
           } else if (qtyDiff < 0) {
-            // Kurangi batch aktif menurut FEFO sebanyak penyusutan sisa fisik
+            // Kurangi batch aktif menurut FEFO sebanyak penyusutan sisa fisik (terkunci .for('update'))
             let neededDeduct = Math.abs(qtyDiff);
             const activeBatches = await tx
               .select({
@@ -173,23 +252,76 @@ export async function POST(req: NextRequest) {
                   gt(stockBatches.currentQty, 0),
                 ),
               )
-              .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt));
+              .orderBy(asc(stockBatches.expiryDate), asc(stockBatches.createdAt))
+              .for('update');
 
             for (const b of activeBatches) {
               if (neededDeduct <= 0) break;
               const deduct = Math.min(b.currentQty, neededDeduct);
-              await tx
+              const [updatedBatch] = await tx
                 .update(stockBatches)
                 .set({
                   currentQty: sql`${stockBatches.currentQty} - ${deduct}`,
                   updatedAt: nowWib,
                 })
-                .where(eq(stockBatches.id, b.id));
+                .where(eq(stockBatches.id, b.id))
+                .returning({ id: stockBatches.id, currentQty: stockBatches.currentQty });
+
+              if (updatedBatch) {
+                const linkedPolicies = await tx
+                  .select({
+                    id: discountPolicies.id,
+                    allowedQty: discountPolicies.allowedQty,
+                    soldQty: discountPolicies.soldQty,
+                  })
+                  .from(discountPolicies)
+                  .where(
+                    and(
+                      eq(discountPolicies.batchId, updatedBatch.id),
+                      eq(discountPolicies.isActive, true),
+                    ),
+                  );
+
+                for (const pol of linkedPolicies) {
+                  const maxAllowed = pol.soldQty + updatedBatch.currentQty;
+                  const cappedRemaining = Math.min(
+                    Math.max(0, pol.allowedQty - pol.soldQty),
+                    updatedBatch.currentQty,
+                  );
+                  const shouldRemainActive = cappedRemaining > 0;
+                  const newAllowedQty = Math.min(pol.allowedQty, maxAllowed);
+
+                  if (newAllowedQty !== pol.allowedQty || !shouldRemainActive) {
+                    await tx
+                      .update(discountPolicies)
+                      .set({
+                        allowedQty: newAllowedQty,
+                        isActive: shouldRemainActive,
+                        updatedAt: nowWib,
+                      })
+                      .where(eq(discountPolicies.id, pol.id));
+
+                    await tx
+                      .update(discountBarcodes)
+                      .set({
+                        remainingQty: cappedRemaining,
+                        isActive: shouldRemainActive,
+                      })
+                      .where(
+                        and(
+                          eq(discountBarcodes.policyId, pol.id),
+                          eq(discountBarcodes.isActive, true),
+                        ),
+                      );
+                  }
+                }
+              }
+
               neededDeduct -= deduct;
             }
           } else if (qtyDiff > 0) {
-            // Jika ada penambahan fisik saat opname sore, buat batch penyesuaian harian
-            const batchCode = `HARIAN-${nowWib.toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
+            // Jika ada penambahan fisik saat opname sore, buat batch penyesuaian harian (WIB + randomInt)
+            const batchCode = `HARIAN-${todayCompact}-${randomInt(1000, 10000)}`;
             await tx.insert(stockBatches).values({
               productId: item.productId,
               batchCode,
@@ -197,22 +329,11 @@ export async function POST(req: NextRequest) {
               initialQty: qtyDiff,
               currentQty: qtyDiff,
               expiryClass: 'HARIAN',
-              notes: `Sisa makanan simpan cut-off (+${qtyDiff} pcs)`,
+              notes: `Sisa makanan simpan cut-off oleh ${emp.fullName} (${emp.nim}) (+${qtyDiff} pcs)`,
             });
           }
 
-          const dispLabel =
-            item.disposition === 'RETUR'
-              ? 'Retur ke Mitra Penitip'
-              : item.disposition === 'BUANG_BASI'
-              ? 'Dibuang (Basi)'
-              : item.disposition === 'MAKAN_PETUGAS'
-              ? 'Makan Petugas / Konsumsi Internal'
-              : item.disposition === 'OBRAL'
-              ? 'Obral Balik Modal HPP'
-              : item.disposition === 'HABIS'
-              ? 'Habis Terjual'
-              : 'Disimpan di Kulkas';
+          const dispLabel = DISPOSITION_LABELS[item.disposition];
 
           const costNum = parseFloat(existing.costPrice) || 0;
           const lossCost =
@@ -226,7 +347,8 @@ export async function POST(req: NextRequest) {
                 : ` [Nilai Susut Basi: Rp ${lossCost.toLocaleString('id-ID')}]`
               : '';
 
-          const reasonNote = `[SISA-MAKANAN ${timeStr}] ${dispLabel} (Sisa fisik: ${item.qtySisaFisik} pcs). ${item.notes ? `Catatan: ${item.notes}` : ''}${lossInfo}`.trim();
+          const cleanNotes = item.notes?.trim();
+          const reasonNote = `[SISA-MAKANAN ${timeStr} • Kasir: ${emp.fullName} (${emp.nim})] ${dispLabel} (Sisa fisik: ${item.qtySisaFisik} pcs). ${cleanNotes ? `Catatan: ${cleanNotes}` : ''}${lossInfo}`.trim();
 
           await tx.insert(stockAdjustments).values({
             productId: item.productId,
@@ -242,8 +364,11 @@ export async function POST(req: NextRequest) {
     });
 
     return apiOk({
-      message: `Cut-off sisa ${items.length} produk makanan berhasil disimpan secara atomik.`,
-      processedCount: items.length,
+      message:
+        adjustedCount > 0
+          ? `Cut-off sisa ${items.length} produk (${adjustedCount} penyesuaian stok) berhasil disimpan secara atomik.`
+          : `Laporan cut-off ${items.length} produk diterima (tidak ada perubahan stok).`,
+      processedCount: adjustedCount,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Gagal menyimpan cut-off sisa makanan';

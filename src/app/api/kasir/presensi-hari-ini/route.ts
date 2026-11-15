@@ -4,13 +4,13 @@
 // Digunakan oleh Kiosk Presensi Bersama di komputer toko
 // =============================================================
 
-import { NextResponse } from 'next/server';
 import { eq, and, sql, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { shiftSchedules, employees, attendances, qrisSettings } from '@/lib/db/schema';
 import { apiOk, apiError } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const HARI_MAP: Record<string, 'MINGGU' | 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU'> = {
   Minggu: 'MINGGU',
@@ -56,9 +56,17 @@ export async function GET(): Promise<Response> {
         employeeNim:     employees.nim,
         employeeProdi:   employees.programStudi,
         employeeJabatan: employees.jabatan,
+        hasPin:          sql<boolean>`CASE WHEN ${employees.pinHash} IS NOT NULL THEN true ELSE false END`,
       })
       .from(shiftSchedules)
-      .leftJoin(employees, eq(shiftSchedules.employeeId, employees.id))
+      .leftJoin(
+        employees,
+        and(
+          eq(shiftSchedules.employeeId, employees.id),
+          eq(employees.isActive, true),
+          isNull(employees.deletedAt),
+        ),
+      )
       .where(and(
         eq(shiftSchedules.dayOfWeek, dayOfWeek),
         eq(shiftSchedules.isActive, true),
@@ -100,6 +108,7 @@ export async function GET(): Promise<Response> {
         nim: string | null;
         programStudi: string | null;
         defaultJabatan: string | null;
+        hasPin: boolean;
         attendance: {
           isAttended: boolean;
           isClockedOut: boolean;
@@ -136,7 +145,7 @@ export async function GET(): Promise<Response> {
         });
       }
 
-      if (s.employeeId) {
+      if (s.employeeId && s.employeeName) {
         const att = attendanceMap.get(`${s.employeeId}_${s.scheduleId}`);
         const clockInStr = att?.clockInActual
           ? new Date(att.clockInActual).toLocaleTimeString('en-GB', {
@@ -157,6 +166,7 @@ export async function GET(): Promise<Response> {
           nim:             s.employeeNim,
           programStudi:    s.employeeProdi,
           defaultJabatan:  s.employeeJabatan,
+          hasPin:          Boolean(s.hasPin),
           attendance: {
             isAttended:   Boolean(att),
             isClockedOut: Boolean(att?.clockOutActual),
@@ -178,6 +188,7 @@ export async function GET(): Promise<Response> {
         nim: employees.nim,
         programStudi: employees.programStudi,
         jabatan: employees.jabatan,
+        hasPin: sql<boolean>`CASE WHEN ${employees.pinHash} IS NOT NULL THEN true ELSE false END`,
       })
       .from(employees)
       .where(and(eq(employees.isActive, true), isNull(employees.deletedAt)))
