@@ -1128,7 +1128,16 @@ export default function AbsensiPage() {
                 <p style={{ fontWeight: 600, margin: 0 }}>Belum ada data presensi mahasiswa pada periode ini.</p>
               </div>
             ) : (
-              <div className="table-wrapper" style={{ border: '1px solid var(--color-border)', borderRadius: '10px', overflow: 'hidden' }}>
+              <div
+                className="table-wrapper"
+                style={{
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '10px',
+                  overflowX: 'auto',
+                  WebkitOverflowScrolling: 'touch',
+                  maxWidth: '100%',
+                }}
+              >
                 <table className="table" style={{ fontSize: '0.8rem', width: '100%' }}>
                   <thead style={{ backgroundColor: '#f8fafc' }}>
                     <tr>
@@ -1251,7 +1260,16 @@ export default function AbsensiPage() {
                 <p style={{ fontWeight: 600, margin: 0 }}>Tidak ada log presensi yang cocok.</p>
               </div>
             ) : (
-              <div className="table-wrapper" style={{ border: '1px solid var(--color-border)', borderRadius: '10px', overflow: 'hidden' }}>
+              <div
+                className="table-wrapper"
+                style={{
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '10px',
+                  overflowX: 'auto',
+                  WebkitOverflowScrolling: 'touch',
+                  maxWidth: '100%',
+                }}
+              >
                 <table className="table" style={{ fontSize: '0.8rem', width: '100%' }}>
                   <thead style={{ backgroundColor: '#f8fafc' }}>
                     <tr>

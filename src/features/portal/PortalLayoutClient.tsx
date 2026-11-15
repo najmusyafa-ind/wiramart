@@ -31,7 +31,7 @@ import {
   BarChart3,
   Settings,
   LogOut,
-  Menu,
+  LayoutGrid,
   X,
   Wrench,
   ChevronRight,
@@ -70,94 +70,101 @@ type NavItem = {
 function buildPortalNavItems(adminRole: 'MANAGER' | 'ADMIN_SHIFT'): NavItem[] {
   const basePath = getPortalBasePath(adminRole);
   return [
+    // ── 1. Ringkasan & Order ──────────────────────────────────
     {
       label: 'Dashboard',
       href: `${basePath}/dashboard`,
       icon: <LayoutDashboard size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
-    },
-    {
-      label: 'Produk',
-      href: `${basePath}/produk`,
-      icon: <Package size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
+      section: 'Ringkasan & Order',
     },
     {
       label: 'Pesanan Online',
       href: `${basePath}/pesanan-online`,
       icon: <ShoppingBag size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
+      section: 'Ringkasan & Order',
+    },
+
+    // ── 2. Produk & Gudang ────────────────────────────────────
+    {
+      label: 'Produk',
+      href: `${basePath}/produk`,
+      icon: <Package size={18} aria-hidden="true" />,
+      section: 'Produk & Gudang',
     },
     {
       label: 'Portal Gudang (FEFO)',
       href: GUDANG_BASE_PATH,
       icon: <Boxes size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
+      section: 'Produk & Gudang',
     },
     {
       label: 'Persetujuan Barang Masuk',
       href: `${MANAGER_BASE_PATH}/gudang-approval`,
       icon: <ShieldCheck size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
+      section: 'Produk & Gudang',
       managerOnly: true,
     },
     {
       label: 'Restock Barcode',
       href: `${MANAGER_BASE_PATH}/restock`,
       icon: <ScanLine size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
+      section: 'Produk & Gudang',
       managerOnly: true,
     },
+
+    // ── 3. Tim & Kehadiran ────────────────────────────────────
     {
       label: 'Karyawan',
       href: `${basePath}/karyawan`,
       icon: <Users size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
+      section: 'Tim & Kehadiran',
     },
     {
       label: 'Jadwal Shift',
       href: `${basePath}/jadwal`,
       icon: <CalendarDays size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
+      section: 'Tim & Kehadiran',
     },
     {
       label: 'Absensi',
       href: `${basePath}/absensi`,
       icon: <ClipboardList size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
+      section: 'Tim & Kehadiran',
     },
     {
       label: 'Riwayat Tukar Shift',
       href: `${basePath}/swap-request`,
       icon: <ArrowLeftRight size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
+      section: 'Tim & Kehadiran',
     },
+
+    // ── 4. Keuangan & Sistem ──────────────────────────────────
     {
       label: 'Laporan',
       href: `${MANAGER_BASE_PATH}/laporan`,
       icon: <BarChart3 size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
+      section: 'Keuangan & Sistem',
       managerOnly: true,
     },
     {
       label: 'Rekonsiliasi QRIS',
       href: `${MANAGER_BASE_PATH}/qris`,
       icon: <QrCode size={18} aria-hidden="true" />,
-      section: 'Menu Utama',
-      managerOnly: true,
-    },
-    {
-      label: 'Pengaturan',
-      href: `${MANAGER_BASE_PATH}/pengaturan`,
-      icon: <Settings size={18} aria-hidden="true" />,
-      section: 'Sistem',
+      section: 'Keuangan & Sistem',
       managerOnly: true,
     },
     {
       label: 'Export Data',
       href: `${MANAGER_BASE_PATH}/export`,
       icon: <Download size={18} aria-hidden="true" />,
-      section: 'Sistem',
+      section: 'Keuangan & Sistem',
+      managerOnly: true,
+    },
+    {
+      label: 'Pengaturan',
+      href: `${MANAGER_BASE_PATH}/pengaturan`,
+      icon: <Settings size={18} aria-hidden="true" />,
+      section: 'Keuangan & Sistem',
       managerOnly: true,
     },
   ];
@@ -258,7 +265,7 @@ function AdminSidebar({ adminName, adminRole = 'ADMIN_SHIFT', isMobileOpen, onCl
       {/* Navigation */}
       <div className="sidebar-nav" role="list">
         {Object.entries(sections).map(([section, items]) => (
-          <div key={section} role="group" aria-label={section}>
+          <div key={section} className="sidebar-section-group" role="group" aria-label={section}>
             <div className="sidebar-section-label">{section}</div>
             {items.map((item) => {
               // isActive hanya dihitung setelah mounted agar SSR dan CSR konsisten
@@ -517,22 +524,24 @@ export default function AdminLayoutClient({
       {/* Main Content */}
       <div className="layout-main">
         <header className="layout-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
-            {/* Hamburger button — hanya tampil di mobile (< 1024px) via class .btn-hamburger */}
+          <div className="layout-header-left" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
+            {/* Mobile drawer pill trigger — hanya tampil di mobile (< 1024px) via class .btn-hamburger */}
             <button
               id="btn-mobile-menu"
               type="button"
               className="btn-hamburger"
               onClick={() => setIsMobileOpen((v) => !v)}
-              aria-label="Buka menu navigasi"
+              aria-label="Buka kategori menu"
               aria-expanded={isMobileOpen}
               aria-controls="admin-sidebar"
               suppressHydrationWarning
             >
-              <Menu size={22} aria-hidden="true" />
+              <LayoutGrid size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+              <span className="btn-hamburger__label">Menu</span>
             </button>
             {pageTitle && (
               <h1
+                className="layout-header-title"
                 style={{
                   fontSize: 'var(--text-lg)',
                   fontWeight: 'var(--weight-semibold)',
@@ -550,85 +559,48 @@ export default function AdminLayoutClient({
 
           <div
             className="layout-header-right"
-            style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0 }}
           >
-            {adminRole === 'MANAGER' && (
-              <Link
-                href="/manager/pengaturan"
-                title="Pengaturan Sistem (Manager Khusus)"
-                aria-label="Pengaturan Sistem"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 44,
-                  minHeight: 44,
-                  borderRadius: 'var(--radius-sm)',
-                  color: 'var(--color-text-muted)',
-                  textDecoration: 'none',
-                }}
-              >
-                <Wrench size={18} aria-hidden="true" />
-              </Link>
-            )}
             {/* ── MANAGER ON DUTY (MOD) BADGE & QUICK TRIGGER ── */}
             {adminRole === 'MANAGER' && (modStatus?.isCheckedIn ? (
               <button
                 id="btn-mod-header"
                 type="button"
+                className="header-mod-pill header-mod-pill--active"
                 onClick={() => setIsModModalOpen(true)}
                 title="Klik untuk detail Manager on Duty hari ini"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  minHeight: 44,
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  background: '#f0fdf4',
-                  border: '1px solid #86efac',
-                  color: '#15803d',
-                  fontSize: 12,
-                  fontWeight: 800,
-                  whiteSpace: 'nowrap',
-                  cursor: 'pointer',
-                }}
               >
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }} />
-                <span>Aktif: {modStatus.managerName}</span>
+                <span className="header-mod-dot" />
+                <span className="header-mod-text">Aktif: {modStatus.managerName}</span>
               </button>
             ) : (
               <button
                 id="btn-mod-header"
                 type="button"
+                className="header-mod-pill header-mod-pill--idle"
                 onClick={() => setIsModModalOpen(true)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  minHeight: 44,
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  background: '#fef3c7',
-                  border: '1px solid #f59e0b',
-                  color: '#b45309',
-                  fontSize: 12,
-                  fontWeight: 800,
-                  whiteSpace: 'nowrap',
-                  cursor: 'pointer',
-                }}
               >
-                <Sparkles size={13} color="#d97706" aria-hidden="true" />
-                <span>Mulai Sesi Kerja</span>
+                <Sparkles size={13} color="#d97706" aria-hidden="true" style={{ flexShrink: 0 }} />
+                <span>Mulai Sesi</span>
               </button>
             ))}
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {adminRole === 'MANAGER' && (
+              <Link
+                href="/manager/pengaturan"
+                className="header-icon-pill"
+                title="Pengaturan Sistem (Manager Khusus)"
+                aria-label="Pengaturan Sistem"
+              >
+                <Wrench size={16} aria-hidden="true" />
+              </Link>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
               <span
+                className="header-role-pill"
                 style={{
-                  fontSize: 11,
                   fontWeight: 700,
-                  padding: '4px 10px',
                   borderRadius: 999,
                   whiteSpace: 'nowrap',
                   backgroundColor: adminRole === 'MANAGER' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(37, 99, 235, 0.12)',
@@ -636,7 +608,7 @@ export default function AdminLayoutClient({
                   border: adminRole === 'MANAGER' ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid rgba(37, 99, 235, 0.25)',
                 }}
               >
-                {adminRole === 'MANAGER' ? '👑 MANAGER' : '🛡️ ADMIN SHIFT'}
+                {adminRole === 'MANAGER' ? '👑 MANAGER' : '🛡️ SHIFT'}
               </span>
               <div
                 className="hide-xs-text"
@@ -855,9 +827,9 @@ export default function AdminLayoutClient({
         </main>
       </div>
 
-      {/* Mobile bottom nav — hanya tampil di layar < 1024px.
+      {/* Mobile bottom nav — hanya tampil di layar < 1024px dan disembunyikan saat drawer terbuka.
           Dibungkus mounted guard agar tidak ada hydration mismatch. */}
-      {mounted && <MobileBottomNav adminRole={adminRole} />}
+      {mounted && !isMobileOpen && <MobileBottomNav adminRole={adminRole} />}
     </div>
     </AdminContext.Provider>
   );

@@ -1007,22 +1007,24 @@ export default function PengaturanPage() {
             <div
               style={{
                 display: 'flex',
+                flexWrap: 'wrap',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                gap: 'var(--space-3)',
                 padding: 'var(--space-3) var(--space-4)',
                 borderRadius: 'var(--radius-md)',
                 backgroundColor: 'var(--color-primary-light)',
                 border: '1px solid var(--color-border)',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                <ShieldCheck size={20} style={{ color: 'var(--color-primary)' }} aria-hidden="true" />
-                <div>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)', minWidth: 0, flex: '1 1 220px' }}>
+                <ShieldCheck size={20} style={{ color: 'var(--color-primary)', flexShrink: 0, marginTop: 2 }} aria-hidden="true" />
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-sm)', color: 'var(--color-primary)' }}>
-                    Row-Level Security (RLS v1.2): 14 / 14 Tabel Terproteksi
+                    Row-Level Security (RLS v4.0): 33 / 33 Tabel Terproteksi
                   </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                    Akses anonim ditolak total. Mutasi database diamankan dengan isolasi transaksi ACID & Drizzle ORM.
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', marginTop: 2, lineHeight: 1.45 }}>
+                    Akses anonim &amp; authenticated ditolak total. Mutasi database diamankan dengan isolasi transaksi ACID &amp; Drizzle ORM.
                   </div>
                 </div>
               </div>
@@ -1030,10 +1032,14 @@ export default function PengaturanPage() {
                 style={{
                   fontSize: 'var(--text-xs)',
                   fontWeight: 'var(--weight-bold)',
-                  padding: '2px 8px',
+                  padding: '4px 12px',
                   borderRadius: 'var(--radius-full)',
                   backgroundColor: 'var(--color-primary)',
                   color: 'white',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
                 }}
               >
                 Zero-Trust Active
@@ -1044,7 +1050,7 @@ export default function PengaturanPage() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))',
                 gap: 'var(--space-4)',
               }}
             >
@@ -1058,16 +1064,17 @@ export default function PengaturanPage() {
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 'var(--space-3)',
+                  minWidth: 0,
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                  <Download size={16} style={{ color: 'var(--color-primary)' }} aria-hidden="true" />
+                  <Download size={16} style={{ color: 'var(--color-primary)', flexShrink: 0 }} aria-hidden="true" />
                   <span style={{ fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-sm)' }}>
                     Cadangkan Data (Backup)
                   </span>
                 </div>
-                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
-                  Unduh seluruh snapshot 14 tabel database (produk, stok, transaksi, karyawan, pengaturan) ke dalam satu berkas terenkripsi dengan Checksum SHA-256.
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                  Unduh seluruh snapshot 14 tabel inti database (produk, stok, transaksi, karyawan, pengaturan) ke berkas JSON dengan Checksum SHA-256.
                 </p>
 
                 <button
@@ -1075,17 +1082,28 @@ export default function PengaturanPage() {
                   onClick={handleDownloadBackup}
                   disabled={backupLoading}
                   className="btn btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', justifyContent: 'center', marginTop: 'auto' }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-2)',
+                    justifyContent: 'center',
+                    marginTop: 'auto',
+                    width: '100%',
+                    maxWidth: '100%',
+                    whiteSpace: 'normal',
+                    textAlign: 'center',
+                    lineHeight: 1.3,
+                  }}
                 >
                   {backupLoading ? (
                     <>
-                      <Loader2 size={14} className="spin-icon" aria-hidden="true" />
-                      Mengekstraksi Data...
+                      <Loader2 size={14} className="spin-icon" style={{ flexShrink: 0 }} aria-hidden="true" />
+                      <span>Mengekstraksi Data...</span>
                     </>
                   ) : (
                     <>
-                      <Download size={14} aria-hidden="true" />
-                      Unduh Snapshot Database (.json)
+                      <Download size={14} style={{ flexShrink: 0 }} aria-hidden="true" />
+                      <span>Unduh Snapshot (.json)</span>
                     </>
                   )}
                 </button>
@@ -1138,7 +1156,7 @@ export default function PengaturanPage() {
                   type="file"
                   accept=".json,application/json"
                   onChange={handleRestoreFileSelect}
-                  style={{ fontSize: 'var(--text-xs)' }}
+                  style={{ fontSize: 'var(--text-xs)', width: '100%', maxWidth: '100%' }}
                 />
 
                 {restoreInspect && (
@@ -1176,13 +1194,18 @@ export default function PengaturanPage() {
                     gap: 'var(--space-2)',
                     justifyContent: 'center',
                     marginTop: 'auto',
+                    width: '100%',
+                    maxWidth: '100%',
+                    whiteSpace: 'normal',
+                    textAlign: 'center',
+                    lineHeight: 1.3,
                     backgroundColor: restorePayload ? 'var(--color-warning)' : 'var(--color-surface-muted)',
                     color: restorePayload ? 'white' : 'var(--color-text-muted)',
                     cursor: restorePayload ? 'pointer' : 'not-allowed',
                   }}
                 >
-                  <RotateCcw size={14} aria-hidden="true" />
-                  Lanjutkan Pemulihan Data...
+                  <RotateCcw size={14} style={{ flexShrink: 0 }} aria-hidden="true" />
+                  <span>Lanjutkan Pemulihan Data...</span>
                 </button>
 
                 {restoreFeedback && (

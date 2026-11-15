@@ -480,6 +480,7 @@ export default function KasirLoginPage() {
         role="main"
         style={{
           maxWidth: activeTab === 'presensi' ? 520 : 420,
+          overflowX: 'hidden',
           transition: 'max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
@@ -578,8 +579,10 @@ export default function KasirLoginPage() {
               <div
                 style={{
                   display: 'flex',
+                  flexWrap: 'wrap',
                   justifyContent: 'space-between',
                   alignItems: 'center',
+                  gap: '6px 12px',
                   padding: '8px 12px',
                   backgroundColor: 'var(--color-primary-light)',
                   borderRadius: 'var(--radius-md)',
@@ -589,12 +592,12 @@ export default function KasirLoginPage() {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 'var(--weight-semibold)' }}>
-                  <Calendar size={14} />
+                  <Calendar size={14} style={{ flexShrink: 0 }} />
                   <span>{presensiData.hari}, {presensiData.tanggal}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Clock size={13} />
-                  <span>Jam Sekarang: <strong>{presensiData.jamSekarang} WIB</strong></span>
+                  <Clock size={13} style={{ flexShrink: 0 }} />
+                  <span>Pukul <strong>{presensiData.jamSekarang} WIB</strong></span>
                 </div>
               </div>
             )}
@@ -693,7 +696,7 @@ export default function KasirLoginPage() {
                   <div
                     style={{
                       textAlign: 'center',
-                      padding: 'var(--space-6) var(--space-4)',
+                      padding: 'var(--space-5) var(--space-4)',
                       backgroundColor: 'var(--color-surface-muted, #f8fafc)',
                       border: '1px dashed var(--color-border)',
                       borderRadius: 'var(--radius-lg)',
@@ -710,34 +713,34 @@ export default function KasirLoginPage() {
                         borderRadius: 999,
                         fontSize: 11,
                         fontWeight: 'bold',
-                        marginBottom: 12,
+                        marginBottom: 10,
                       }}
                     >
                       <Clock size={13} />
-                      <span>Istirahat Malam Operasional Toko</span>
+                      <span>Di Luar Jam Operasional</span>
                     </div>
                     <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', margin: '0 0 6px', color: 'var(--color-text)' }}>
-                      Toko Istirahat Malam ({presensiData?.jamSekarang} WIB)
+                      Toko Tutup ({presensiData?.jamSekarang} WIB)
                     </h2>
                     <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '0 0 var(--space-4)', lineHeight: 1.5 }}>
-                      Halaman absensi &amp; jadwal shift perkuliahan reguler hari {presensiData?.hari} akan <strong>otomatis aktif mulai pukul 05:00 Subuh WIB</strong> agar petugas dapat memeriksa jadwal dan bersiap lebih awal.
+                      Presensi shift {presensiData?.hari} aktif mulai <strong>05:00 WIB</strong>.
                     </p>
-                    <div style={{ maxWidth: 280, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ maxWidth: 300, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                       <button
                         type="button"
                         onClick={() => setActiveTab('pos')}
                         className="btn btn-primary"
-                        style={{ fontSize: 'var(--text-xs)', padding: '8px 12px' }}
+                        style={{ width: '100%', maxWidth: '100%', whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.3, fontSize: 'var(--text-xs)', padding: '10px 12px' }}
                       >
-                        Buka Form Login Petugas
+                        Login Kasir (POS)
                       </button>
                       <button
                         type="button"
                         onClick={() => router.push('/login')}
                         className="btn btn-secondary"
-                        style={{ fontSize: 'var(--text-xs)', padding: '8px 12px' }}
+                        style={{ width: '100%', maxWidth: '100%', whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.3, fontSize: 'var(--text-xs)', padding: '10px 12px' }}
                       >
-                        Login Pengelola (Admin &amp; Manager)
+                        Login Pengelola
                       </button>
                     </div>
                   </div>
@@ -750,7 +753,7 @@ export default function KasirLoginPage() {
                   <div
                     style={{
                       textAlign: 'center',
-                      padding: 'var(--space-6) var(--space-4)',
+                      padding: 'var(--space-5) var(--space-4)',
                       backgroundColor: 'var(--color-surface-muted, #f8fafc)',
                       border: '1px dashed var(--color-border)',
                       borderRadius: 'var(--radius-lg)',
@@ -767,43 +770,52 @@ export default function KasirLoginPage() {
                         borderRadius: 999,
                         fontSize: 11,
                         fontWeight: 'bold',
-                        marginBottom: 12,
+                        marginBottom: 10,
                       }}
                     >
-                      <Package size={13} />
-                      <span>Sesi Akhir Pekan: Evaluasi, Opname &amp; Restock</span>
+                      <Package size={13} style={{ flexShrink: 0 }} />
+                      <span>Operasional Akhir Pekan</span>
                     </div>
                     <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', margin: '0 0 6px', color: 'var(--color-text)' }}>
-                      Operasional Gudang &amp; Logistik ({presensiData?.hari})
+                      Gudang, Opname &amp; Restock ({presensiData?.hari})
                     </h2>
                     <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '0 0 var(--space-4)', lineHeight: 1.5 }}>
-                      Hari ini jadwal kuliah shift reguler libur. Sistem aktif khusus untuk evaluasi mingguan, opname fisik barang, restock kiriman supplier, dan radar FEFO (Buka s.d. pukul {hariUpper === 'SABTU' ? '21:00' : '22:00'} WIB).
+                      Shift reguler libur. Akses opname, restock, dan FEFO aktif s.d. pukul {hariUpper === 'SABTU' ? '21:00' : '22:00'} WIB.
                     </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 320, margin: '0 auto' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 300, width: '100%', margin: '0 auto' }}>
                       <button
                         type="button"
-                        onClick={() => setActiveTab('pos')}
+                        onClick={() => router.push('/gudang/login')}
                         className="btn btn-primary"
                         style={{
+                          width: '100%',
+                          maxWidth: '100%',
+                          whiteSpace: 'normal',
+                          textAlign: 'center',
+                          lineHeight: 1.3,
                           fontSize: 'var(--text-xs)',
-                          padding: '8px 12px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 6,
+                          padding: '10px 12px',
                         }}
                       >
-                        <Package size={14} />
-                        <span>Masuk Portal Petugas Gudang &amp; FEFO</span>
-                        <ChevronRight size={14} />
+                        <Package size={14} style={{ flexShrink: 0 }} />
+                        <span>Portal Gudang &amp; FEFO (PIN)</span>
+                        <ChevronRight size={14} style={{ flexShrink: 0 }} />
                       </button>
                       <button
                         type="button"
                         onClick={() => setActiveTab('pos')}
                         className="btn btn-secondary"
-                        style={{ fontSize: 'var(--text-xs)', padding: '8px 12px' }}
+                        style={{
+                          width: '100%',
+                          maxWidth: '100%',
+                          whiteSpace: 'normal',
+                          textAlign: 'center',
+                          lineHeight: 1.3,
+                          fontSize: 'var(--text-xs)',
+                          padding: '10px 12px',
+                        }}
                       >
-                        Buka Kasir POS Khusus
+                        Login Kasir POS Khusus
                       </button>
                     </div>
                   </div>
@@ -816,7 +828,7 @@ export default function KasirLoginPage() {
                   <div
                     style={{
                       textAlign: 'center',
-                      padding: 'var(--space-6) var(--space-4)',
+                      padding: 'var(--space-5) var(--space-4)',
                       backgroundColor: 'var(--color-surface-muted, #f8fafc)',
                       border: '1px dashed var(--color-border)',
                       borderRadius: 'var(--radius-lg)',
@@ -833,36 +845,36 @@ export default function KasirLoginPage() {
                         borderRadius: 999,
                         fontSize: 11,
                         fontWeight: 'bold',
-                        marginBottom: 12,
+                        marginBottom: 10,
                       }}
                     >
                       <Clock size={13} />
-                      <span>Jendela Operasional Akhir Pekan Ditutup</span>
+                      <span>Akhir Pekan Ditutup</span>
                     </div>
                     <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', margin: '0 0 6px', color: 'var(--color-text)' }}>
                       Toko &amp; Gudang Tutup ({presensiData?.jamSekarang} WIB)
                     </h2>
                     <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '0 0 var(--space-4)', lineHeight: 1.5 }}>
                       {hariUpper === 'MINGGU'
-                        ? 'Sesi opname & restock akhir pekan telah selesai (Sabtu tutup 21:00 WIB, Minggu tutup 22:00 WIB). Presensi shift perkuliahan reguler akan otomatis aktif kembali besok hari Senin pukul 05:00 Subuh WIB.'
-                        : 'Sesi opname akhir pekan ditutup pukul 21:00 WIB. Operasional gudang akan dibuka kembali besok hari Minggu pukul 06:00 WIB.'}
+                        ? 'Presensi shift reguler aktif kembali besok Senin pukul 05:00 WIB.'
+                        : 'Operasional akhir pekan buka kembali besok Minggu pukul 06:00 WIB.'}
                     </p>
-                    <div style={{ maxWidth: 300, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ maxWidth: 300, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
                       <button
                         type="button"
                         onClick={() => setActiveTab('pos')}
                         className="btn btn-primary"
-                        style={{ fontSize: 'var(--text-xs)', padding: '8px 12px' }}
+                        style={{ width: '100%', maxWidth: '100%', whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.3, fontSize: 'var(--text-xs)', padding: '10px 12px' }}
                       >
-                        Buka Form Login Petugas (Kasir &amp; Gudang)
+                        Login Petugas (POS)
                       </button>
                       <button
                         type="button"
-                        onClick={() => router.push('/login')}
+                        onClick={() => router.push('/gudang/login')}
                         className="btn btn-secondary"
-                        style={{ fontSize: 'var(--text-xs)', padding: '8px 12px' }}
+                        style={{ width: '100%', maxWidth: '100%', whiteSpace: 'normal', textAlign: 'center', lineHeight: 1.3, fontSize: 'var(--text-xs)', padding: '10px 12px' }}
                       >
-                        Login Pengelola (Admin Shift &amp; Manager)
+                        Portal Gudang &amp; FEFO
                       </button>
                     </div>
                   </div>
@@ -1094,47 +1106,69 @@ export default function KasirLoginPage() {
               );
             })()}
 
-            {/* Bottom Shortcut to POS */}
-            <div style={{ marginTop: 'var(--space-6)', textAlign: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-4)' }}>
-              <button
-                type="button"
-                onClick={() => setActiveTab('pos')}
-                className="btn btn-primary btn-full"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  fontSize: 'var(--text-xs)',
-                  padding: '10px 14px',
-                }}
-              >
-                <span>Sudah Presensi? Lanjut Buka Kasir POS Sekarang</span>
-                <ChevronRight size={16} />
-              </button>
-              <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--color-text-muted)' }}>
-                Buka kasir dapat dilakukan oleh petugas yang hadir tanpa harus menunggu 4 anggota lengkap.
-              </p>
-              <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
-                <button
-                  type="button"
-                  onClick={() => router.push('/gudang/login')}
-                  className="btn btn-secondary"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    fontSize: '11px',
-                    padding: '6px 12px',
-                    borderRadius: 'var(--radius-full)',
-                  }}
-                >
-                  <Package size={13} />
-                  <span>Petugas Gudang? Masuk ke Portal Inventaris &amp; FEFO (NIM + PIN)</span>
-                  <ChevronRight size={13} />
-                </button>
-              </div>
-            </div>
+            {/* Bottom Shortcut to POS (hanya tampil saat jadwal shift reguler aktif) */}
+            {(() => {
+              const hariUpper = (presensiData?.hari ?? '').toUpperCase();
+              const isWeekday = ['SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT'].includes(hariUpper);
+              const [h, m] = (presensiData?.jamSekarang ?? '00:00').split(':').map(Number);
+              const totalMenit = (h ?? 0) * 60 + (m ?? 0);
+              const isOpenWeekday = isWeekday && totalMenit >= 5 * 60 && totalMenit <= 22 * 60;
+              if (loadingPresensi || !isOpenWeekday || !presensiData?.shifts.length) return null;
+
+              return (
+                <div style={{ marginTop: 'var(--space-6)', textAlign: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-4)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('pos')}
+                    className="btn btn-primary btn-full"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      fontSize: 'var(--text-xs)',
+                      padding: '10px 14px',
+                      width: '100%',
+                      maxWidth: '100%',
+                      whiteSpace: 'normal',
+                      textAlign: 'center',
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    <span>Lanjut Login Kasir (POS)</span>
+                    <ChevronRight size={16} style={{ flexShrink: 0 }} />
+                  </button>
+                  <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--color-text-muted)' }}>
+                    Petugas yang sudah absen dapat langsung membuka kasir.
+                  </p>
+                  <div style={{ marginTop: 10 }}>
+                    <button
+                      type="button"
+                      onClick={() => router.push('/gudang/login')}
+                      className="btn btn-secondary"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        fontSize: '11px',
+                        padding: '8px 14px',
+                        borderRadius: 'var(--radius-full)',
+                        width: '100%',
+                        maxWidth: '100%',
+                        whiteSpace: 'normal',
+                        textAlign: 'center',
+                        lineHeight: 1.3,
+                      }}
+                    >
+                      <Package size={13} style={{ flexShrink: 0 }} />
+                      <span>Portal Gudang &amp; FEFO (PIN)</span>
+                      <ChevronRight size={13} style={{ flexShrink: 0 }} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1820,6 +1854,7 @@ export default function KasirLoginPage() {
                 border: '1px solid hsl(142 71% 45% / 0.25)',
                 borderRadius: 'var(--radius-lg)',
                 display: 'flex',
+                flexWrap: 'wrap',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: 'var(--space-3)',

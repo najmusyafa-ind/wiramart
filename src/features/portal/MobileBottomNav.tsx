@@ -81,10 +81,10 @@ export default function MobileBottomNav({ adminRole = 'ADMIN_SHIFT' }: { adminRo
             aria-current={isActive ? 'page' : undefined}
           >
             <Icon
-              size={22}
+              size={20}
               aria-hidden="true"
               className="admin-bottom-nav__icon"
-              strokeWidth={isActive ? 2.5 : 1.8}
+              strokeWidth={isActive ? 2.4 : 1.8}
             />
             <span className="admin-bottom-nav__label">{label}</span>
           </Link>

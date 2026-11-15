@@ -833,13 +833,13 @@ p, h1, h2, h3, h4, h5, h6 {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: clip;
 }
 
 .layout-header {
   background-color: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
-  padding: var(--space-4) var(--space-6);
+  padding: var(--space-3) var(--space-6);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -848,6 +848,79 @@ p, h1, h2, h3, h4, h5, h6 {
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
+}
+
+.header-mod-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow var(--duration-fast) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.header-mod-pill:active {
+  transform: scale(0.97);
+}
+
+.header-mod-pill--active {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #15803d;
+}
+
+.header-mod-pill--idle {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  color: #b45309;
+}
+
+.header-mod-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+}
+
+.header-mod-text {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-icon-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 9999px;
+  color: var(--color-text-secondary);
+  background-color: hsl(145, 18%, 95%);
+  border: 1px solid var(--color-border);
+  text-decoration: none;
+  flex-shrink: 0;
+  transition:
+    background-color var(--duration-fast) cubic-bezier(0.16, 1, 0.3, 1),
+    color var(--duration-fast) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.header-icon-pill:hover {
+  background-color: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.header-role-pill {
+  font-size: 11px;
+  padding: 5px 10px;
 }
 
 /* Backdrop gelap saat sidebar mobile terbuka.
@@ -864,28 +937,37 @@ p, h1, h2, h3, h4, h5, h6 {
   touch-action: none;
 }
 
-/* Hamburger button — hanya tampil di mobile (< 1024px), target sentuh >= 44x44px */
+/* Menu trigger button — pill bersih di mobile (< 1024px) */
 .btn-hamburger {
-  background: none;
-  border: none;
+  background: hsl(145, 45%, 94%);
+  border: 1px solid hsl(145, 32%, 85%);
   cursor: pointer;
-  color: var(--color-text-secondary);
-  display: flex;
+  color: var(--color-primary);
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-2);
-  border-radius: var(--radius-sm);
-  min-width: 44px;
-  min-height: 44px;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  min-height: 38px;
+  font-size: 12px;
+  font-weight: 700;
   flex-shrink: 0;
   -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--duration-fast) cubic-bezier(0.16, 1, 0.3, 1),
+    transform var(--duration-fast) cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .btn-hamburger:hover {
-  background-color: var(--color-surface-hover);
+  background-color: hsl(145, 45%, 89%);
 }
 
-/* Di desktop (>= 1024px), sembunyikan hamburger karena sidebar permanen tampil */
+.btn-hamburger:active {
+  transform: scale(0.96);
+}
+
+/* Di desktop (>= 1024px), sembunyikan tombol menu mobile karena sidebar permanen tampil */
 @media (min-width: 1024px) {
   .btn-hamburger {
     display: none !important;
@@ -899,7 +981,7 @@ p, h1, h2, h3, h4, h5, h6 {
 }
 
 /* ==========================================================
-   ADMIN MOBILE BOTTOM NAV
+   ADMIN MOBILE BOTTOM NAV — Floating Oval Capsule Dock
    Hanya muncul di layar < 1024px (dikontrol via CSS display)
    ========================================================== */
 
@@ -908,22 +990,31 @@ p, h1, h2, h3, h4, h5, h6 {
 }
 
 @media (max-width: 1023px) {
-  /* Beri ruang untuk bottom nav di content area */
+  /* Beri ruang lega untuk floating capsule dock di bawah */
   .layout-content {
-    padding-bottom: calc(var(--space-4) + 64px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(var(--space-6) + 84px + env(safe-area-inset-bottom, 0px));
   }
 
   .admin-bottom-nav {
     display: flex;
+    align-items: center;
+    gap: 2px;
     position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    right: 12px;
+    max-width: 440px;
+    margin: 0 auto;
     z-index: var(--z-sticky);
-    background-color: var(--color-surface);
-    border-top: 1.5px solid var(--color-border);
-    box-shadow: 0 -4px 20px hsla(145, 30%, 10%, 0.10);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background-color: hsla(0, 0%, 100%, 0.90);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid hsla(145, 24%, 84%, 0.92);
+    border-radius: 9999px;
+    padding: 6px 8px;
+    box-shadow:
+      0 14px 34px -8px hsla(145, 35%, 12%, 0.22),
+      0 3px 10px -2px hsla(145, 35%, 12%, 0.08);
   }
 
   .admin-bottom-nav__item {
@@ -932,14 +1023,16 @@ p, h1, h2, h3, h4, h5, h6 {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 3px;
-    padding: 10px 2px 8px;
+    gap: 2px;
+    padding: 6px 4px;
+    border-radius: 9999px;
     text-decoration: none;
     color: var(--color-text-muted);
     transition:
-      color var(--duration-fast) var(--ease-in-out),
-      background-color var(--duration-fast) var(--ease-in-out);
-    min-height: 64px;
+      color var(--duration-fast) cubic-bezier(0.16, 1, 0.3, 1),
+      background-color var(--duration-fast) cubic-bezier(0.16, 1, 0.3, 1),
+      transform var(--duration-fast) cubic-bezier(0.16, 1, 0.3, 1);
+    min-height: 52px;
     -webkit-tap-highlight-color: transparent;
     position: relative;
   }
@@ -949,24 +1042,13 @@ p, h1, h2, h3, h4, h5, h6 {
   }
 
   .admin-bottom-nav__item:active {
-    background-color: hsl(145, 40%, 95%);
+    transform: scale(0.95);
+    background-color: hsl(145, 45%, 94%);
   }
 
   .admin-bottom-nav__item.active {
     color: var(--color-primary);
-  }
-
-  /* Active indicator — garis hijau di atas item aktif */
-  .admin-bottom-nav__item.active::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 28px;
-    height: 3px;
-    background-color: var(--color-primary);
-    border-radius: 0 0 var(--radius-full) var(--radius-full);
+    background-color: hsl(145, 55%, 93%);
   }
 
   .admin-bottom-nav__icon {
@@ -975,21 +1057,21 @@ p, h1, h2, h3, h4, h5, h6 {
   }
 
   .admin-bottom-nav__label {
-    font-size: var(--text-xs);
+    font-size: 11px;
     font-weight: var(--weight-medium);
-    line-height: 1.2;
+    line-height: 1.15;
     letter-spacing: 0.01em;
     white-space: nowrap;
   }
 
   @media (max-width: 359px) {
     .admin-bottom-nav__label {
-      font-size: 11px;
+      font-size: 10px;
     }
   }
 
   .admin-bottom-nav__item.active .admin-bottom-nav__label {
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-bold);
   }
 }
 
@@ -1047,14 +1129,19 @@ p, h1, h2, h3, h4, h5, h6 {
   gap: var(--space-1);
 }
 
+.sidebar-section-group + .sidebar-section-group {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid hsla(145, 25%, 35%, 0.35);
+}
+
 .sidebar-section-label {
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
+  font-size: 11px;
+  font-weight: var(--weight-bold);
   color: var(--color-sidebar-muted);
-  letter-spacing: var(--tracking-wider);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: var(--space-3) var(--space-3) var(--space-2);
-  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-1);
 }
 
 .sidebar-nav-item {
@@ -2020,8 +2107,8 @@ p, h1, h2, h3, h4, h5, h6 {
     width: min(280px, 85vw);
     z-index: 400;
     height: 100dvh;
-    /* Ruang ekstra agar tombol Logout tidak tertutup bottom nav */
-    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    /* Ruang ekstra agar tombol Logout tidak tertutup floating bottom dock */
+    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
     /* Cegah scroll keluar dari sidebar */
     overscroll-behavior-y: contain;
   }
@@ -2031,22 +2118,64 @@ p, h1, h2, h3, h4, h5, h6 {
     animation: slide-in-left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
+  /* Dynamic Island floating pill top header di mobile */
   .layout-header {
-    padding: var(--space-3) var(--space-4);
-    gap: var(--space-2);
-    flex-wrap: wrap;
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    margin: 10px 12px 2px;
+    padding: 6px 8px;
+    border-radius: 9999px;
+    border: 1px solid hsla(145, 24%, 84%, 0.92);
+    background-color: hsla(0, 0%, 100%, 0.88);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow:
+      0 10px 26px -8px hsla(145, 35%, 14%, 0.16),
+      0 2px 6px -1px hsla(145, 35%, 14%, 0.06);
+    gap: 6px;
+    flex-wrap: nowrap;
+    min-height: 50px;
+  }
+
+  .layout-header-title {
+    display: none;
   }
 
   .layout-header-right {
-    gap: var(--space-2) !important;
-    flex-wrap: wrap;
+    gap: 6px !important;
+    flex-wrap: nowrap;
     justify-content: flex-end;
+  }
+
+  .header-mod-pill {
+    min-height: 36px;
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  .header-mod-text {
+    max-width: 84px;
+  }
+
+  .header-icon-pill {
+    width: 36px;
+    height: 36px;
+  }
+
+  .header-role-pill {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+
+  .btn-hamburger {
+    min-height: 36px;
+    padding: 5px 11px;
+    font-size: 11.5px;
   }
 
   .layout-content {
     padding: var(--space-4);
-    /* Tambah padding-bottom setelah shorthand agar tidak ditimpa — ruang untuk bottom nav */
-    padding-bottom: calc(var(--space-4) + 64px + env(safe-area-inset-bottom, 0px));
+    /* Tambah padding-bottom setelah shorthand agar tidak ditimpa — ruang untuk floating capsule dock */
+    padding-bottom: calc(var(--space-6) + 84px + env(safe-area-inset-bottom, 0px));
   }
 
   .grid-2,
