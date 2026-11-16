@@ -898,36 +898,42 @@ export async function POST(req: NextRequest) {
     //   }
     // ─────────────────────────────────────────────────────────────
     // ─────────────────────────────────────────────────────────────
-    // JEJAK TRANSAKSI — Siklus hidup STARTED → COMMITTED / ROLLED_BACK
-    // Sesuai materi dosen: START TRANSACTION → UPDATE/INSERT → SELECT → COMMIT/ROLLBACK
-    //
-    // Log ditulis DI LUAR db.transaction() agar tidak ikut di-rollback.
+    // JEJAK TRANSAKSI (Append-Only Event Log)
+    // Mencatat fase STARTED → COMMITTED / ROLLED_BACK sebagai baris terpisah
+    // DI LUAR db.transaction() agar bukti STARTED & ROLLED_BACK tetap
+    // tersimpan permanen di Supabase (tidak tertimpa atau ikut ter-rollback).
     // ─────────────────────────────────────────────────────────────
     const logId = randomUUID();
-
-    // ── 🟡 STARTED: bukti "memulai transaksi" sebelum BEGIN ─────
-    await db.insert(transactionLogs).values({
-      id: logId,
+    const startedAt = new Date();
+    const baseLogFields = {
       employeeId,
       shiftId: activeShiftId ?? undefined,
-      invoiceAttempt: null,           // belum punya invoice — dibuat di dalam tx
-      attemptNumber: 1,
       itemCount: items.length,
       grossAmount: grossAmount.toString(),
       paymentMethod: primaryPaymentMethod,
+      createdAt: startedAt,
+    };
+
+    // ── 🟡 STARTED: baris permanen bukti "memulai transaksi" sebelum BEGIN ──
+    await db.insert(transactionLogs).values({
+      id: logId,
+      ...baseLogFields,
+      invoiceAttempt: null, // belum punya invoice — dibuat di dalam tx
+      attemptNumber: 1,
       outcome: 'STARTED',
       transactionId: null,
       rollbackReason: null,
     });
+    console.log(`\n[AUDIT LOG] 🟡 STARTED — baris log awal tercatat di transaction_logs (logId: ${logId})`);
 
     let result: Awaited<ReturnType<typeof runTransaction>> | undefined;
     for (let attempt = 1; attempt <= MAX_INVOICE_ATTEMPTS; attempt++) {
       const invoiceNumber = generateInvoiceNumber();
 
-      // ── 🟡 BEGIN ────────────────────────────────────────────────
+      // ── 🟡 BEGIN / START TRANSACTION ────────────────────────────
       // Drizzle/PostgreSQL otomatis mengirim perintah BEGIN ke DB.
       // Semua operasi INSERT + UPDATE di bawah bersifat ATOMIC.
-      console.log(`\n[DB TRANSACTION] 🟡 BEGIN — memulai transaksi...`);
+      console.log(`[DB TRANSACTION] 🟡 START TRANSACTION (BEGIN) — memulai blok atomik...`);
       console.log(`  Invoice : ${invoiceNumber}`);
       console.log(`  Items   : ${items.length} produk | Total: Rp ${grossAmount.toLocaleString('id-ID')} | Metode: ${primaryPaymentMethod}`);
 
@@ -943,11 +949,11 @@ export async function POST(req: NextRequest) {
         console.log(`  Status         : COMPLETED — data tersimpan permanen di Supabase`);
         console.log(`  Stok produk    : berhasil dikurangi secara atomik\n`);
 
-        // ── Catat COMMIT ke tabel transaction_logs (di LUAR tx utama) ──
-        // UPDATE (bukan INSERT) → log STARTED berubah jadi COMMITTED.
+        // ── Catat COMMIT sebagai event log baru (tetap mempertahankan baris STARTED) ──
         // Dibungkus try/catch terpisah agar kegagalan tulis log TIDAK memicu ROLLBACK palsu.
         try {
-          await db.update(transactionLogs).set({
+          await db.insert(transactionLogs).values({
+            ...baseLogFields,
             outcome: 'COMMITTED',
             transactionId: result.id,
             invoiceAttempt: result.invoiceNumber,
@@ -955,7 +961,7 @@ export async function POST(req: NextRequest) {
             rollbackReason: null,
             failedStep: null,
             finishedAt: new Date(),
-          }).where(eq(transactionLogs.id, logId));
+          });
           console.log(`  [AUDIT LOG] ✅ Dicatat ke tabel transaction_logs (outcome: COMMITTED)\n`);
         } catch (logErr) {
           console.error('  [AUDIT LOG] Gagal mencatat log commit:', logErr);
@@ -974,19 +980,20 @@ export async function POST(req: NextRequest) {
         console.error(`  Status : TIDAK ADA data yang tersimpan ke DB`);
         console.error(`  Stok   : TIDAK BERKURANG — rollback atomik oleh PostgreSQL\n`);
 
-        // ── Catat ROLLBACK ke tabel transaction_logs (di LUAR tx utama) ──
-        // UPDATE log STARTED menjadi ROLLED_BACK + catat langkah gagal.
+        // ── Catat ROLLBACK sebagai event log baru (tetap mempertahankan baris STARTED) ──
         // Karena tx utama sudah di-rollback, INSERT terpisah ini tetap tersimpan.
         // Bukti nyata di Supabase: SELECT * FROM transaction_logs WHERE outcome='ROLLED_BACK'
         try {
-          await db.update(transactionLogs).set({
+          await db.insert(transactionLogs).values({
+            ...baseLogFields,
             outcome: 'ROLLED_BACK',
             invoiceAttempt: invoiceNumber,
             attemptNumber: attempt,
+            transactionId: null,
             rollbackReason: rollbackMsg.substring(0, 500),
             failedStep: deriveFailedStep(rollbackMsg),
             finishedAt: new Date(),
-          }).where(eq(transactionLogs.id, logId));
+          });
           console.error(`  [AUDIT LOG] ❌ Dicatat ke tabel transaction_logs (outcome: ROLLED_BACK)\n`);
         } catch (logErr) {
           console.error('  [AUDIT LOG] Gagal mencatat log rollback:', logErr);

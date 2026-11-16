@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
     .from(transactionLogs)
     .leftJoin(employees, eq(transactionLogs.employeeId, employees.id))
     .where(and(...wheres))
-    .orderBy(desc(transactionLogs.createdAt))
+    .orderBy(desc(transactionLogs.createdAt), sql`${transactionLogs.finishedAt} DESC NULLS LAST`)
     .limit(limit)
     .offset(offset);
 

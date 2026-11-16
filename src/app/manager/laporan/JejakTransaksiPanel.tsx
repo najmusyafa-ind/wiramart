@@ -318,13 +318,13 @@ export default function JejakTransaksiPanel() {
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155' }}>STARTED (MENGGANTUNG)</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155' }}>STARTED (MULAI TX)</span>
             <Clock size={18} style={{ color: '#64748b' }} />
           </div>
           <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#1e293b', marginTop: 4 }}>
             {summary.STARTED.toLocaleString('id-ID')}
           </div>
-          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Sedang berjalan / terputus</div>
+          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Log awal sebelum BEGIN</div>
         </button>
       </div>
 
@@ -457,7 +457,9 @@ export default function JejakTransaksiPanel() {
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                         <div style={{ color: '#334155' }}>{formatWibTime(row.finishedAt)}</div>
                         <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                          Durasi: {calcDurationMs(row.createdAt, row.finishedAt)}
+                          {row.outcome === 'STARTED'
+                            ? 'Fase awal (pra-BEGIN)'
+                            : `Durasi: ${calcDurationMs(row.createdAt, row.finishedAt)}`}
                         </div>
                       </td>
                       <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: 600 }}>
@@ -567,6 +569,10 @@ export default function JejakTransaksiPanel() {
                         {row.outcome === 'COMMITTED' ? (
                           <div style={{ fontSize: '0.74rem', color: '#15803d', fontFamily: 'monospace' }}>
                             tx_id: {row.transactionId ? `${row.transactionId.slice(0, 8)}...` : 'tersimpan'}
+                          </div>
+                        ) : row.outcome === 'STARTED' ? (
+                          <div style={{ fontSize: '0.74rem', color: '#334155' }}>
+                            Memulai blok <span style={{ fontFamily: 'monospace' }}>db.transaction()</span> (BEGIN)
                           </div>
                         ) : (
                           <div>

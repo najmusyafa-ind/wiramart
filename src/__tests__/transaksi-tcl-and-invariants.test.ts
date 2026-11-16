@@ -167,11 +167,11 @@ describe('2. Integrasi TCL (COMMIT, REJECTED, ROLLED_BACK, Idempotency) & 3. Kon
     for (const logId of createdLogIds) {
       await db.delete(transactionLogs).where(eq(transactionLogs.id, logId));
     }
-    // Bersihkan log REJECTED/ROLLED_BACK yang dibuat selama test oleh kasir ini dalam 2 menit terakhir
+    // Bersihkan log STARTED/REJECTED/ROLLED_BACK yang dibuat selama test oleh kasir ini dalam 2 menit terakhir
     await db.execute(sql`
       DELETE FROM public.transaction_logs
       WHERE employee_id = ${testEmployeeId}::uuid
-        AND outcome IN ('REJECTED', 'ROLLED_BACK')
+        AND outcome IN ('STARTED', 'REJECTED', 'ROLLED_BACK')
         AND created_at > now() - interval '2 minutes'
     `);
     // Bersihkan sandbox shift yang dibuat saat test
@@ -205,6 +205,7 @@ describe('2. Integrasi TCL (COMMIT, REJECTED, ROLLED_BACK, Idempotency) & 3. Kon
       body: JSON.stringify(bodyObj),
     });
 
+    const beforeReqTs = new Date(Date.now() - 1000);
     const res1 = await postTransaksi(req1);
     const json1 = (await res1.json()) as {
       success: boolean;
@@ -228,6 +229,25 @@ describe('2. Integrasi TCL (COMMIT, REJECTED, ROLLED_BACK, Idempotency) & 3. Kon
     assert.equal(logRow.invoiceAttempt, json1.data.invoiceNumber);
     assert.ok(logRow.finishedAt, 'finished_at harus terisi saat COMMITTED');
     assert.equal(logRow.rollbackReason, null);
+
+    // Verifikasi baris STARTED tetap tersimpan permanen (append-only, Opsi A)
+    const [startedRow] = await db
+      .select()
+      .from(transactionLogs)
+      .where(
+        and(
+          eq(transactionLogs.employeeId, testEmployeeId),
+          eq(transactionLogs.outcome, 'STARTED'),
+          sql`${transactionLogs.createdAt} >= ${beforeReqTs.toISOString()}::timestamptz`,
+        ),
+      )
+      .limit(1);
+
+    assert.ok(startedRow, 'Baris STARTED harus tetap tersimpan permanen di transaction_logs');
+    assert.equal(startedRow.outcome, 'STARTED');
+    assert.ok(startedRow.createdAt && startedRow.createdAt >= beforeReqTs, 'created_at STARTED harus sesuai waktu checkout');
+    assert.equal(startedRow.finishedAt, null);
+    assert.equal(startedRow.transactionId, null);
 
     // Verifikasi stok berkurang tepat 1
     const [prodAfter1] = await db
