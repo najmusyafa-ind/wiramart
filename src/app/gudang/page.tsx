@@ -600,7 +600,7 @@ export default function GudangPortalPage() {
           >
             <AlertCircle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
             <div>
-              <strong>Mode Pantau Admin Shift (Read-Only):</strong> Anda dapat memantau kesehatan stok, stok menipis/habis, rincian batch FEFO, serta riwayat restock. Input barang masuk dan eksekusi tindakan gudang hanya dapat dilakukan oleh Petugas Gudang atau Manager (Dosen).
+              <strong>Portal Gudang & Nota Supplier (Admin Shift):</strong> Anda dapat mengunggah foto nota & melihat Tabel Buku Nota di tab <strong>🧾 Nota Supplier & Barang Masuk</strong>, serta memantau stok kritis dan batch FEFO.
             </div>
           </div>
         )}
@@ -819,7 +819,7 @@ export default function GudangPortalPage() {
         >
           {[
             { id: 'semua', label: summary ? `Semua Produk (${summary.totalSku})` : 'Semua Produk' },
-            ...(isReadOnlyAdminShift ? [] : [{ id: 'penerimaan', label: '🚚 Barang Masuk (ACC)' }]),
+            { id: 'penerimaan', label: '🧾 Nota Supplier & Barang Masuk' },
             {
               id: 'fefo',
               label: summary
@@ -1029,7 +1029,7 @@ export default function GudangPortalPage() {
               </div>
             )}
           </section>
-        ) : activeTab === 'penerimaan' && !isReadOnlyAdminShift ? (
+        ) : activeTab === 'penerimaan' ? (
           <PenerimaanBarangSection
             productsList={products.map((p) => ({
               id: p.id,
