@@ -10,8 +10,13 @@ import { db } from '@/lib/db/client';
 import {
   attendances,
   employees,
+  products,
   shifts,
   shiftCashMovements,
+  stockAdjustments,
+  stockReceiveDrafts,
+  stockReceiveItems,
+  suppliers,
   transactions,
   transactionItems,
   transactionPayments,
@@ -130,6 +135,18 @@ export type CashierRecapItemDTO = {
   voidReason: string | null;
 };
 
+export type ClosingProductMovementDTO = {
+  productId: string;
+  productName: string;
+  unit: string;
+  supplierName: string | null;
+  qtyReceived: number;    // Qty masuk dari nota supplier pada tanggal/periode ini
+  qtySold: number;        // Qty laku terjual di POS (COMPLETED)
+  omzetSold: number;      // Total rupiah penjualan produk ini (tanpa HPP)
+  qtyReturned: number;    // Qty diretur ke supplier / cut-off sisa makanan
+  stockRemaining: number; // Sisa stok fisik saat ini di toko
+};
+
 export type CashierRecapResponseDTO = {
   kasir: {
     id: string;
@@ -144,6 +161,7 @@ export type CashierRecapResponseDTO = {
   shiftsSaya: CashierShiftInfoDTO[];
   summary: CashierRecapSummaryDTO;
   hourlyBreakdown: CashierHourlyBucketDTO[];
+  closingProductRecap: ClosingProductMovementDTO[];
   transaksi: CashierRecapItemDTO[];
   pagination: {
     page: number;
@@ -691,6 +709,147 @@ export async function getCashierDailyRecap(
     };
   });
 
+  // 8. Agregasi Closing Pergerakan Barang ("Masuk Nota Berapa, Laku Berapa, Retur Berapa, Sisa Berapa")
+  const [soldItemsRows, receivedItemsRows, adjustmentRows] = await Promise.all([
+    db
+      .select({
+        productId: transactionItems.productId,
+        qtySold: sql<number>`cast(coalesce(sum(${transactionItems.qty}), 0) as int)`,
+        omzetSold: sql<string>`coalesce(sum(${transactionItems.subtotalSell}), 0)::text`,
+      })
+      .from(transactionItems)
+      .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
+      .where(
+        and(
+          eq(transactions.status, 'COMPLETED'),
+          eq(transactions.isTest, false),
+          targetShiftId
+            ? eq(transactions.shiftId, targetShiftId)
+            : and(gte(transactions.createdAt, startUtc), lte(transactions.createdAt, endUtc)),
+        ),
+      )
+      .groupBy(transactionItems.productId),
+
+    db
+      .select({
+        productId: stockReceiveItems.productId,
+        qtyReceived: sql<number>`cast(coalesce(sum(${stockReceiveItems.qty}), 0) as int)`,
+        supplierName: sql<string | null>`max(${suppliers.name})`,
+      })
+      .from(stockReceiveItems)
+      .innerJoin(stockReceiveDrafts, eq(stockReceiveItems.draftId, stockReceiveDrafts.id))
+      .leftJoin(suppliers, eq(stockReceiveDrafts.supplierId, suppliers.id))
+      .where(
+        and(
+          isNull(stockReceiveDrafts.deletedAt),
+          sql`${stockReceiveDrafts.status} != 'REJECTED'`,
+          gte(
+            sql`coalesce(${stockReceiveDrafts.invoiceDate}, (${stockReceiveDrafts.createdAt} AT TIME ZONE 'Asia/Jakarta')::date)`,
+            sql`${tanggalWIB}::date`,
+          ),
+          lte(
+            sql`coalesce(${stockReceiveDrafts.invoiceDate}, (${stockReceiveDrafts.createdAt} AT TIME ZONE 'Asia/Jakarta')::date)`,
+            sql`${dateToWIB}::date`,
+          ),
+        ),
+      )
+      .groupBy(stockReceiveItems.productId),
+
+    db
+      .select({
+        productId: stockAdjustments.productId,
+        qtyDiff: stockAdjustments.qtyDiff,
+        reason: stockAdjustments.reason,
+      })
+      .from(stockAdjustments)
+      .where(
+        and(
+          gte(stockAdjustments.createdAt, startUtc),
+          lte(stockAdjustments.createdAt, endUtc),
+          sql`${stockAdjustments.qtyDiff} < 0`,
+        ),
+      ),
+  ]);
+
+  const movementProductIds = new Set<string>();
+  for (const r of soldItemsRows) movementProductIds.add(r.productId);
+  for (const r of receivedItemsRows) movementProductIds.add(r.productId);
+  for (const r of adjustmentRows) movementProductIds.add(r.productId);
+
+  const productMetaMap = new Map<string, { name: string; unit: string; stockQty: number }>();
+  for (const idChunk of chunkArray([...movementProductIds])) {
+    const prodRows = await db
+      .select({
+        id: products.id,
+        name: products.name,
+        unit: products.unit,
+        stockQty: products.stockQty,
+      })
+      .from(products)
+      .where(inArray(products.id, idChunk));
+
+    for (const p of prodRows) {
+      productMetaMap.set(p.id, {
+        name: p.name,
+        unit: p.unit,
+        stockQty: p.stockQty,
+      });
+    }
+  }
+
+  const soldMap = new Map<string, { qtySold: number; omzetSold: number }>();
+  for (const r of soldItemsRows) {
+    soldMap.set(r.productId, {
+      qtySold: Number(r.qtySold ?? 0),
+      omzetSold: Math.round(parseFloat(r.omzetSold ?? '0') || 0),
+    });
+  }
+
+  const receivedMap = new Map<string, { qtyReceived: number; supplierName: string | null }>();
+  for (const r of receivedItemsRows) {
+    receivedMap.set(r.productId, {
+      qtyReceived: Number(r.qtyReceived ?? 0),
+      supplierName: r.supplierName ?? null,
+    });
+  }
+
+  const returnedMap = new Map<string, number>();
+  for (const adj of adjustmentRows) {
+    const reasonUpper = (adj.reason ?? '').toUpperCase();
+    const isReturnOrCutoff =
+      reasonUpper.includes('RETUR') ||
+      reasonUpper.includes('CUT-OFF') ||
+      reasonUpper.includes('RETURN_SUPPLIER') ||
+      reasonUpper.includes('BASI') ||
+      reasonUpper.includes('EXPIRED') ||
+      reasonUpper.includes('DAMAGED');
+    if (isReturnOrCutoff) {
+      const prev = returnedMap.get(adj.productId) ?? 0;
+      returnedMap.set(adj.productId, prev + Math.abs(Number(adj.qtyDiff ?? 0)));
+    }
+  }
+
+  const closingProductRecap: ClosingProductMovementDTO[] = [...movementProductIds]
+    .map((pid) => {
+      const meta = productMetaMap.get(pid);
+      const sold = soldMap.get(pid);
+      const rec = receivedMap.get(pid);
+      const retQty = returnedMap.get(pid) ?? 0;
+      return {
+        productId: pid,
+        productName: meta?.name ?? 'Produk',
+        unit: meta?.unit ?? 'pcs',
+        supplierName: rec?.supplierName ?? null,
+        qtyReceived: rec?.qtyReceived ?? 0,
+        qtySold: sold?.qtySold ?? 0,
+        omzetSold: sold?.omzetSold ?? 0,
+        qtyReturned: retQty,
+        stockRemaining: meta?.stockQty ?? 0,
+      };
+    })
+    .filter((item) => item.qtyReceived > 0 || item.qtySold > 0 || item.qtyReturned > 0)
+    .sort((a, b) => b.qtySold - a.qtySold || b.qtyReturned - a.qtyReturned || b.qtyReceived - a.qtyReceived);
+
   return {
     kasir: {
       id: cashier.id,
@@ -705,6 +864,7 @@ export async function getCashierDailyRecap(
     shiftsSaya,
     summary,
     hourlyBreakdown,
+    closingProductRecap,
     transaksi: transaksiDTO,
     pagination: {
       page,

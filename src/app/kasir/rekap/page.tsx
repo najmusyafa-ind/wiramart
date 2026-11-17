@@ -850,6 +850,167 @@ export default function CashierRecapPage() {
               )}
             </div>
 
+            {/* ── BAGIAN TERAKHIR CLOSING: TABEL BARANG LAKU BERAPA & RETUR BERAPA ── */}
+            {(() => {
+              const itemsRecap = data.closingProductRecap ?? [];
+              const totalMasuk = itemsRecap.reduce((acc, r) => acc + r.qtyReceived, 0);
+              const totalLaku = itemsRecap.reduce((acc, r) => acc + r.qtySold, 0);
+              const totalOmzetBarang = itemsRecap.reduce((acc, r) => acc + r.omzetSold, 0);
+              const totalRetur = itemsRecap.reduce((acc, r) => acc + r.qtyReturned, 0);
+
+              return (
+                <div
+                  className="no-print"
+                  style={{
+                    background: 'var(--color-surface)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 18,
+                    overflow: 'hidden',
+                    boxShadow: 'var(--shadow-sm)',
+                    marginTop: 20,
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: '18px 20px',
+                      borderBottom: '1px solid var(--color-border)',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                    }}
+                  >
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--color-text)' }}>
+                        📦 Rekap Closing Barang: Laku Berapa & Retur Berapa
+                      </h3>
+                      <p style={{ margin: '4px 0 0 0', fontSize: 12, color: 'var(--color-text-muted)' }}>
+                        Ringkasan barang yang masuk dari nota supplier, laku terjual di kasir, diretur kembali, dan sisa stok akhir.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => router.push('/gudang')}
+                      style={{
+                        minHeight: 40,
+                        padding: '8px 14px',
+                        borderRadius: 10,
+                        border: '1px solid var(--color-primary)',
+                        background: 'var(--color-primary-light)',
+                        color: 'var(--color-primary)',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      🧾 Buka Arsip & Upload Nota Supplier →
+                    </button>
+                  </div>
+
+                  {/* Ringkasan Angka Cepat */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))',
+                      gap: 12,
+                      padding: '14px 20px',
+                      background: 'var(--color-surface-muted)',
+                      borderBottom: '1px solid var(--color-border)',
+                    }}
+                  >
+                    <div style={{ padding: '10px 12px', background: 'var(--color-surface)', borderRadius: 10, border: '1px solid var(--color-border)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Masuk dari Nota Supplier</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: 'hsl(200 85% 32%)', marginTop: 2 }}>
+                        {totalMasuk.toLocaleString('id-ID')} pcs
+                      </div>
+                    </div>
+                    <div style={{ padding: '10px 12px', background: 'var(--color-surface)', borderRadius: 10, border: '1px solid var(--color-border)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Total Barang Laku Terjual</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: 'hsl(150 75% 28%)', marginTop: 2 }}>
+                        {totalLaku.toLocaleString('id-ID')} pcs <span style={{ fontSize: 12, fontWeight: 600 }}>({rp(totalOmzetBarang)})</span>
+                      </div>
+                    </div>
+                    <div style={{ padding: '10px 12px', background: 'var(--color-surface)', borderRadius: 10, border: '1px solid var(--color-border)' }}>
+                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Total Barang Diretur / Cut-Off</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: totalRetur > 0 ? 'hsl(0 75% 42%)' : 'var(--color-text)', marginTop: 2 }}>
+                        {totalRetur.toLocaleString('id-ID')} pcs
+                      </div>
+                    </div>
+                  </div>
+
+                  {itemsRecap.length === 0 ? (
+                    <div style={{ padding: '32px 20px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
+                      Belum ada pergerakan barang (masuk nota, laku terjual, atau retur) pada tanggal ini.
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
+                        <thead>
+                          <tr style={{ background: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)', textAlign: 'left', color: 'var(--color-text-secondary)' }}>
+                            <th style={{ padding: '12px 18px', fontWeight: 700 }}>Nama Barang & Supplier</th>
+                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Masuk (Nota)</th>
+                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Laku Terjual</th>
+                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Diretur</th>
+                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Nilai Laku (Rp)</th>
+                            <th style={{ padding: '12px 18px', fontWeight: 700, textAlign: 'right' }}>Sisa Stok</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {itemsRecap.map((item) => (
+                            <tr key={item.productId} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                              <td style={{ padding: '12px 18px' }}>
+                                <div style={{ fontWeight: 700, color: 'var(--color-text)' }}>{item.productName}</div>
+                                {item.supplierName && (
+                                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                                    Supplier: {item.supplierName}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: item.qtyReceived > 0 ? 'hsl(200 85% 32%)' : 'var(--color-text-muted)' }}>
+                                {item.qtyReceived > 0 ? `+${item.qtyReceived} ${item.unit}` : '-'}
+                              </td>
+                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800, color: item.qtySold > 0 ? 'hsl(150 75% 28%)' : 'var(--color-text-muted)' }}>
+                                {item.qtySold > 0 ? `${item.qtySold} ${item.unit}` : '0'}
+                              </td>
+                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800, color: item.qtyReturned > 0 ? 'hsl(0 75% 42%)' : 'var(--color-text-muted)' }}>
+                                {item.qtyReturned > 0 ? `${item.qtyReturned} ${item.unit}` : '0'}
+                              </td>
+                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--color-text)' }}>
+                                {item.omzetSold > 0 ? rp(item.omzetSold) : '-'}
+                              </td>
+                              <td style={{ padding: '12px 18px', textAlign: 'right', fontWeight: 700, color: 'var(--color-text-secondary)' }}>
+                                {item.stockRemaining} {item.unit}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ background: 'var(--color-surface-muted)', borderTop: '2px solid var(--color-border)', fontWeight: 800 }}>
+                            <td style={{ padding: '12px 18px' }}>TOTAL CLOSING BARANG ({itemsRecap.length} produk)</td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right', color: 'hsl(200 85% 32%)' }}>
+                              {totalMasuk} pcs
+                            </td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right', color: 'hsl(150 75% 28%)' }}>
+                              {totalLaku} pcs
+                            </td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right', color: totalRetur > 0 ? 'hsl(0 75% 42%)' : 'var(--color-text)' }}>
+                              {totalRetur} pcs
+                            </td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right', color: 'var(--color-text)' }}>
+                              {rp(totalOmzetBarang)}
+                            </td>
+                            <td style={{ padding: '12px 18px' }} />
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* ── DEDICATED THERMAL PRINT SLIP (HANYA MUNCUL SAAT CETAK / PRINT) ── */}
             <div className="print-only" style={{
               width: '100%',

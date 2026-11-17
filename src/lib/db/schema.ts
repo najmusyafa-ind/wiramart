@@ -1174,6 +1174,8 @@ export const stockReceiveDrafts = pgTable(
       .references(() => employees.id),
     supplierId: uuid('supplier_id').references(() => suppliers.id),
     deliveryNote: text('delivery_note'),
+    invoiceDate: date('invoice_date'),
+    invoicePhotoUrl: text('invoice_photo_url'),
     status: stockReceiveStatusEnum('status').notNull().default('DRAFT'),
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
     approvedAt: timestamp('approved_at', { withTimezone: true }),

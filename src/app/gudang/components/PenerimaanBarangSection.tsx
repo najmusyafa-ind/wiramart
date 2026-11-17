@@ -23,6 +23,11 @@ import {
   X,
   AlertCircle,
   Edit3,
+  Camera,
+  Sparkles,
+  FileSpreadsheet,
+  Calculator,
+  Calendar,
 } from 'lucide-react';
 
 export type DraftStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'REVISED';
@@ -32,6 +37,8 @@ export type DraftSummaryItem = {
   receiveNumber: string;
   supplierName: string | null;
   deliveryNote: string | null;
+  invoiceDate?: string | null;
+  invoicePhotoUrl?: string | null;
   status: DraftStatus;
   submittedAt: string | null;
   approvedAt: string | null;
@@ -55,6 +62,27 @@ export type DraftItemDetail = {
 
 export type DraftFullDetail = DraftSummaryItem & {
   items: DraftItemDetail[];
+};
+
+export type SupplierInvoiceTableRow = {
+  itemId: string;
+  draftId: string;
+  receiveNumber: string;
+  invoiceDate: string;
+  deliveryNote: string | null;
+  invoicePhotoUrl: string | null;
+  status: DraftStatus;
+  supplierName: string;
+  productId: string;
+  productName: string;
+  batchCode: string;
+  qty: number;
+  costPrice: number;
+  totalPrice: number;
+  expiryDate: string | null;
+  conditionNote: string | null;
+  creatorName: string;
+  createdAt: string;
 };
 
 export type ProductOption = {
@@ -85,9 +113,90 @@ async function requestDrafts(filter: string, signal?: AbortSignal): Promise<Draf
   return json.data.items || [];
 }
 
+async function requestInvoiceTableRows(filter: string, signal?: AbortSignal): Promise<SupplierInvoiceTableRow[]> {
+  const statusQuery = filter === 'semua' ? '' : `&status=${filter.toUpperCase()}`;
+  const res = await fetch(`/api/gudang/penerimaan?view=table&limit=200${statusQuery}`, { signal });
+  const json = await res.json();
+  if (!res.ok || !json.success) {
+    throw new Error(json.error ?? 'Gagal memuat tabel buku nota supplier');
+  }
+  return json.data.items || [];
+}
+
 function createDefaultBatchCode(): string {
   const today = new Date();
   return `B${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}-${String(Math.floor(1000 + Math.random() * 9000))}`;
+}
+
+function getTodayWibStr(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
+}
+
+function addDaysToToday(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
+}
+
+// ── Helper Kompresi Gambar Nota di Browser (HTML5 Canvas -> JPEG <= 200KB) ──
+async function compressInvoiceImageToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Gagal membaca file foto nota.'));
+    reader.onload = () => {
+      const img = new window.Image();
+      img.onerror = () => reject(new Error('File bukan gambar yang valid.'));
+      img.onload = () => {
+        const maxDim = 1280;
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width >= height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Gagal memproses kompresi gambar.'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/jpeg', 0.76);
+        resolve(compressed);
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── Helper Fuzzy Matching Nama Barang Nota ke Master Produk Wiramart ──
+function computeProductSimilarity(rawQuery: string, product: ProductOption): number {
+  const cleanQ = rawQuery.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
+  const cleanName = product.name.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
+  if (!cleanQ || !cleanName) return 0;
+  if (product.barcode && cleanQ.includes(product.barcode.toLowerCase())) return 1.0;
+  if (cleanName === cleanQ) return 0.99;
+  if (cleanName.includes(cleanQ) || cleanQ.includes(cleanName)) return 0.88;
+
+  const qTokens = cleanQ.split(/\s+/).filter((t) => t.length >= 2);
+  const nameTokens = cleanName.split(/\s+/).filter((t) => t.length >= 2);
+  if (qTokens.length === 0 || nameTokens.length === 0) return 0;
+
+  let matchedTokens = 0;
+  for (const qt of qTokens) {
+    if (nameTokens.some((nt) => nt === qt || nt.startsWith(qt) || qt.startsWith(nt))) {
+      matchedTokens += 1;
+    }
+  }
+  return matchedTokens / Math.max(qTokens.length, nameTokens.length * 0.65);
 }
 
 export default function PenerimaanBarangSection({
@@ -95,12 +204,22 @@ export default function PenerimaanBarangSection({
   onDraftApproved,
 }: PenerimaanBarangSectionProps) {
   const modalSearchId = useId();
+  const photoUploadId = useId();
 
-  // State List Drafts
+  // State Mode Tampilan: 'cards' (Antrian Draft) | 'table' (Tabel Buku Nota Lengkap)
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+
+  // State List Drafts & Tabel Buku Nota
   const [drafts, setDrafts] = useState<DraftSummaryItem[]>([]);
+  const [tableRows, setTableRows] = useState<SupplierInvoiceTableRow[]>([]);
+  const [tableSearch, setTableSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('semua');
+
+  // State Modal Preview Foto Nota
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
+  const [previewPhotoTitle, setPreviewPhotoTitle] = useState<string>('');
 
   // State Modal Detail
   const [viewingDraftId, setViewingDraftId] = useState<string | null>(null);
@@ -115,9 +234,17 @@ export default function PenerimaanBarangSection({
     Array<{ id: string; name: string; contactPerson: string | null; phone: string | null }>
   >([]);
   const [deliveryNote, setDeliveryNote] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState<string>(() => getTodayWibStr());
+  const [invoicePhotoUrl, setInvoicePhotoUrl] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [items, setItems] = useState<DraftItemDetail[]>([]);
   const [submittingForm, setSubmittingForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // State Smart Auto-Match ("Ngepasin Nota Otomatis")
+  const [isSmartMatcherOpen, setIsSmartMatcherOpen] = useState(false);
+  const [smartPasteText, setSmartPasteText] = useState('');
+  const [smartMatchFeedback, setSmartMatchFeedback] = useState<string | null>(null);
 
   // State Picker Produk
   const [productSearch, setProductSearch] = useState('');
@@ -139,13 +266,17 @@ export default function PenerimaanBarangSection({
     return () => controller.abort();
   }, []);
 
-  // ── Load List Drafts (untuk tombol refresh & post-mutasi) ────
+  // ── Load List Drafts & Tabel Buku Nota ─────────────────────────
   async function fetchDrafts(filter = statusFilter) {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const itemsData = await requestDrafts(filter);
+      const [itemsData, tableData] = await Promise.all([
+        requestDrafts(filter),
+        requestInvoiceTableRows(filter),
+      ]);
       setDrafts(itemsData);
+      setTableRows(tableData);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Terjadi kesalahan sistem.');
     } finally {
@@ -155,11 +286,15 @@ export default function PenerimaanBarangSection({
 
   useEffect(() => {
     const controller = new AbortController();
-    requestDrafts(statusFilter, controller.signal)
-      .then((itemsData) => {
+    Promise.all([
+      requestDrafts(statusFilter, controller.signal),
+      requestInvoiceTableRows(statusFilter, controller.signal),
+    ])
+      .then(([itemsData, tableData]) => {
         if (controller.signal.aborted) return;
         setErrorMsg(null);
         setDrafts(itemsData);
+        setTableRows(tableData);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -170,7 +305,6 @@ export default function PenerimaanBarangSection({
       });
     return () => controller.abort();
   }, [statusFilter]);
-
 
   // ── Load Detail Draft ────────────────────────────────────────
   async function openDetailModal(draftId: string) {
@@ -199,6 +333,11 @@ export default function PenerimaanBarangSection({
     setEditingDraftId(null);
     setSupplierName('');
     setDeliveryNote('');
+    setInvoiceDate(getTodayWibStr());
+    setInvoicePhotoUrl(null);
+    setSmartPasteText('');
+    setSmartMatchFeedback(null);
+    setIsSmartMatcherOpen(false);
     setItems([]);
     setFormError(null);
     setIsFormOpen(true);
@@ -219,6 +358,11 @@ export default function PenerimaanBarangSection({
       setEditingDraftId(d.id);
       setSupplierName(d.supplierName || '');
       setDeliveryNote(d.deliveryNote || '');
+      setInvoiceDate(d.invoiceDate || getTodayWibStr());
+      setInvoicePhotoUrl(d.invoicePhotoUrl || null);
+      setSmartPasteText('');
+      setSmartMatchFeedback(null);
+      setIsSmartMatcherOpen(false);
       setItems(
         d.items.map((it) => ({
           productId: it.productId,
@@ -239,9 +383,221 @@ export default function PenerimaanBarangSection({
     }
   }
 
+  // ── OTOMATISASI 3: Upload & Kompresi Foto Nota + Auto-Detect ───
+  async function handleUploadInvoicePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    setFormError(null);
+    try {
+      const dataUrl = await compressInvoiceImageToDataUrl(file);
+      setInvoicePhotoUrl(dataUrl);
+
+      if (!invoiceDate) {
+        setInvoiceDate(getTodayWibStr());
+      }
+      // Jika nama supplier belum diisi, coba deteksi dari nama file foto
+      if (!supplierName.trim()) {
+        const cleanFileName = file.name.replace(/\.[^.]+$/, '').toLowerCase();
+        const matchedSupplier = registeredSuppliers.find((s) =>
+          cleanFileName.includes(s.name.toLowerCase()),
+        );
+        if (matchedSupplier) {
+          setSupplierName(matchedSupplier.name);
+        }
+      }
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Gagal memproses foto nota.');
+    } finally {
+      setUploadingPhoto(false);
+      e.target.value = '';
+    }
+  }
+
+  // ── OTOMATISASI 1: Auto-Fill Barang & Harga dari Riwayat Nota Supplier ──
+  const supplierHistoryItems = (() => {
+    const cleanSup = supplierName.trim().toLowerCase();
+    if (!cleanSup) return [];
+    const seenProducts = new Map<string, SupplierInvoiceTableRow>();
+    for (const r of tableRows) {
+      if (r.supplierName.toLowerCase().includes(cleanSup) || cleanSup.includes(r.supplierName.toLowerCase())) {
+        if (!seenProducts.has(r.productId)) {
+          seenProducts.set(r.productId, r);
+        }
+      }
+    }
+    return Array.from(seenProducts.values());
+  })();
+
+  function handleAutoFillFromSupplierHistory() {
+    if (supplierHistoryItems.length === 0) return;
+    const existingIds = new Set(items.map((it) => it.productId));
+    const newItems: DraftItemDetail[] = [];
+
+    for (const hist of supplierHistoryItems) {
+      if (existingIds.has(hist.productId)) continue;
+      const prodMeta = productsList.find((p) => p.id === hist.productId);
+      newItems.push({
+        productId: hist.productId,
+        productName: hist.productName,
+        batchCode: createDefaultBatchCode(),
+        qty: hist.qty > 0 ? hist.qty : 1,
+        costPrice: hist.costPrice,
+        expiryDate: prodMeta?.isPerishable ? addDaysToToday(1) : '',
+        conditionNote: 'Sesuai nota supplier (Auto-Fill)',
+      });
+    }
+
+    if (newItems.length > 0) {
+      setItems((prev) => [...prev, ...newItems]);
+      setSmartMatchFeedback(
+        `⚡ Berhasil memuat otomatis ${newItems.length} barang langganan beserta harga beli terakhir dari "${supplierName}"! Silakan cek jumlah Qty & tanggal expired.`,
+      );
+    } else {
+      setSmartMatchFeedback('Seluruh barang langganan supplier ini sudah ada di daftar form.');
+    }
+  }
+
+  // ── OTOMATISASI 2: Smart Auto-Match Teks Nota / WA ke Database Produk ──
+  function handleSmartMatchNotaText() {
+    setFormError(null);
+    setSmartMatchFeedback(null);
+    const lines = smartPasteText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length >= 2);
+
+    if (lines.length === 0) {
+      setFormError('Tempelkan teks rincian nota atau daftar barang terlebih dahulu.');
+      return;
+    }
+
+    let matchedCount = 0;
+    const addedItems: DraftItemDetail[] = [];
+
+    for (const line of lines) {
+      // Cek apakah baris adalah metadata header (Supplier / No Faktur / Tanggal)
+      const supMatch = line.match(/^(?:supplier|pemasok|toko|mitra)\s*[:=-]\s*(.+)$/i);
+      if (supMatch && supMatch[1] && !supplierName.trim()) {
+        setSupplierName(supMatch[1].trim());
+        continue;
+      }
+      const noNotaMatch = line.match(/^(?:no\.?\s*(?:nota|faktur|sj)|faktur|nota)\s*[:=-]\s*(.+)$/i);
+      if (noNotaMatch && noNotaMatch[1] && !deliveryNote.trim()) {
+        setDeliveryNote(noNotaMatch[1].trim());
+        continue;
+      }
+
+      // Ekstrak tanggal expired jika ada di baris (YYYY-MM-DD atau DD/MM/YYYY)
+      let detectedExpiry = '';
+      let workingLine = line;
+      const isoDateMatch = workingLine.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+      if (isoDateMatch && isoDateMatch[1]) {
+        detectedExpiry = isoDateMatch[1];
+        workingLine = workingLine.replace(isoDateMatch[0], ' ');
+      } else {
+        const dmyMatch = workingLine.match(/\b(\d{2})[/-](\d{2})[/-](20\d{2})\b/);
+        if (dmyMatch) {
+          detectedExpiry = `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+          workingLine = workingLine.replace(dmyMatch[0], ' ');
+        }
+      }
+
+      // Bersihkan penanda ribuan (misal Rp 3.500 -> 3500)
+      const normalizedNumbersLine = workingLine
+        .replace(/rp\.?\s*/gi, '')
+        .replace(/(\d)\.(\d{3})(?!\d)/g, '$1$2')
+        .replace(/(\d),(\d{3})(?!\d)/g, '$1$2');
+
+      const numMatches = Array.from(normalizedNumbersLine.matchAll(/\b\d+\b/g)).map((m) => Number(m[0]));
+      // Teks nama barang = hapus angka-angka qty/harga & satuan umum
+      const textOnly = normalizedNumbersLine
+        .replace(/\b\d+\s*(?:pcs|bh|bks|bungkus|pak|pack|dus|box|botol|btl|cup|unit|x|@)?\b/gi, ' ')
+        .replace(/[@x×=-]/g, ' ')
+        .trim();
+
+      if (textOnly.length < 2) continue;
+
+      // Cari produk paling mirip di productsList
+      let bestProd: ProductOption | null = null;
+      let bestScore = 0;
+      for (const prod of productsList) {
+        const score = computeProductSimilarity(textOnly, prod);
+        if (score > bestScore) {
+          bestScore = score;
+          bestProd = prod;
+        }
+      }
+
+      if (!bestProd || bestScore < 0.34) continue;
+
+      // Tentukan Qty dan Harga Satuan dari angka yang ditemukan di baris
+      let qty = 1;
+      let costPrice = 0;
+      if (numMatches.length === 1) {
+        if (numMatches[0] <= 500) {
+          qty = Math.max(1, numMatches[0]);
+        } else {
+          costPrice = numMatches[0];
+        }
+      } else if (numMatches.length >= 2) {
+        const smallNums = numMatches.filter((n) => n >= 1 && n <= 499);
+        const largeNums = numMatches.filter((n) => n >= 500);
+        if (smallNums.length > 0 && largeNums.length > 0) {
+          qty = smallNums[0];
+          // Jika ada 2 angka besar (misal harga satuan 3000 dan total 60000), ambil harga satuan terkecil
+          const sortedLarge = [...largeNums].sort((a, b) => a - b);
+          costPrice = sortedLarge[0];
+          // Jika hanya 1 angka besar dan habis dibagi qty menjadi harga wajar (>= 500), cek apakah itu harga total
+          if (largeNums.length === 1 && qty > 1 && largeNums[0] >= qty * 1000 && largeNums[0] % qty === 0) {
+            // Biarkan sebagai harga satuan bila <= 15000, atau bagi otomatis bila > 25000
+            if (largeNums[0] > 25000) {
+              costPrice = Math.round(largeNums[0] / qty);
+            }
+          }
+        } else {
+          qty = Math.max(1, numMatches[0]);
+          costPrice = numMatches[1] ?? 0;
+        }
+      }
+
+      // Jika costPrice masih 0, cek apakah ada riwayat harga terakhir di tableRows
+      if (costPrice === 0) {
+        const prevRow = tableRows.find((r) => r.productId === bestProd.id && r.costPrice > 0);
+        if (prevRow) costPrice = prevRow.costPrice;
+      }
+
+      addedItems.push({
+        productId: bestProd.id,
+        productName: bestProd.name,
+        batchCode: createDefaultBatchCode(),
+        qty,
+        costPrice,
+        expiryDate: detectedExpiry || (bestProd.isPerishable ? addDaysToToday(1) : ''),
+        conditionNote: `Auto-Match dari nota ("${textOnly.slice(0, 40)}")`,
+      });
+      matchedCount += 1;
+    }
+
+    if (addedItems.length === 0) {
+      setFormError(
+        'Tidak ada nama barang yang cocok dengan master produk Wiramart. Pastikan format per baris seperti: "Indomie Goreng 40 3100".',
+      );
+      return;
+    }
+
+    setItems((prev) => [...prev, ...addedItems]);
+    setSmartMatchFeedback(
+      `🤖 Berhasil mencocokkan ("ngepasin") ${matchedCount} barang dari teks nota ke database produk Wiramart!`,
+    );
+    setSmartPasteText('');
+    setIsSmartMatcherOpen(false);
+  }
+
   // ── Tambah Produk ke List ────────────────────────────────────
   function handleSelectProduct(prod: ProductOption) {
     const batchCode = createDefaultBatchCode();
+    const lastKnownPrice = tableRows.find((r) => r.productId === prod.id && r.costPrice > 0)?.costPrice ?? 0;
 
     setItems((prev) => [
       ...prev,
@@ -250,8 +606,8 @@ export default function PenerimaanBarangSection({
         productName: prod.name,
         batchCode,
         qty: 1,
-        costPrice: 0,
-        expiryDate: '',
+        costPrice: lastKnownPrice,
+        expiryDate: prod.isPerishable ? addDaysToToday(1) : '',
         conditionNote: 'Kondisi kemasan rapi dan tersegel',
       },
     ]);
@@ -306,6 +662,9 @@ export default function PenerimaanBarangSection({
       const payload = {
         supplierName: supplierName.trim() || undefined,
         deliveryNote: deliveryNote.trim() || undefined,
+        invoiceDate: invoiceDate || undefined,
+        invoicePhotoUrl: invoicePhotoUrl || undefined,
+        autoSubmit: shouldSubmitToManager,
         items: items.map((it) => ({
           productId: it.productId,
           productName: it.productName,
@@ -317,8 +676,6 @@ export default function PenerimaanBarangSection({
         })),
       };
 
-      let draftId = editingDraftId;
-
       if (editingDraftId) {
         // PATCH update
         const res = await fetch(`/api/gudang/penerimaan/${editingDraftId}`, {
@@ -327,28 +684,16 @@ export default function PenerimaanBarangSection({
           body: JSON.stringify(payload),
         });
         const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error ?? 'Gagal memperbarui draft');
+        if (!res.ok || !json.success) throw new Error(json.error ?? 'Gagal memperbarui nota penerimaan');
       } else {
-        // POST create
+        // POST create (sudah mendukung autoSubmit langsung di server!)
         const res = await fetch('/api/gudang/penerimaan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
         const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.error ?? 'Gagal membuat draft');
-        draftId = json.data.id;
-      }
-
-      // Jika user memilih langsung mengajukan ke Manager
-      if (shouldSubmitToManager && draftId) {
-        const subRes = await fetch(`/api/gudang/penerimaan/${draftId}/submit`, {
-          method: 'POST',
-        });
-        const subJson = await subRes.json();
-        if (!subRes.ok || !subJson.success) {
-          throw new Error(subJson.error ?? 'Draft tersimpan, tetapi gagal diajukan ke Manager.');
-        }
+        if (!res.ok || !json.success) throw new Error(json.error ?? 'Gagal menyimpan nota penerimaan');
       }
 
       setIsFormOpen(false);
@@ -486,6 +831,26 @@ export default function PenerimaanBarangSection({
     return p.name.toLowerCase().includes(q) || (p.barcode && p.barcode.includes(q));
   });
 
+  // Filter Baris untuk Tabel Buku Nota Lengkap
+  const filteredTableRows = tableRows.filter((r) => {
+    if (!tableSearch.trim()) return true;
+    const q = tableSearch.toLowerCase();
+    return (
+      r.supplierName.toLowerCase().includes(q) ||
+      r.productName.toLowerCase().includes(q) ||
+      r.receiveNumber.toLowerCase().includes(q) ||
+      (r.deliveryNote && r.deliveryNote.toLowerCase().includes(q))
+    );
+  });
+
+  const totalTableQty = filteredTableRows.reduce((acc, r) => acc + r.qty, 0);
+  const totalTableAmount = filteredTableRows.reduce((acc, r) => acc + r.totalPrice, 0);
+  const totalFormQty = items.reduce((acc, it) => acc + (Number(it.qty) || 0), 0);
+  const totalFormAmount = items.reduce(
+    (acc, it) => acc + (Number(it.qty) || 0) * (Number(it.costPrice) || 0),
+    0,
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* ── HEADER & ACTION BAR ── */}
@@ -515,35 +880,91 @@ export default function PenerimaanBarangSection({
               gap: 8,
             }}
           >
-            <Truck size={20} color="#0284c7" /> Penerimaan Barang Masuk (2-Layer ACC)
+            <Truck size={20} color="#0284c7" /> Penerimaan Barang & Arsip Nota Supplier
           </h2>
           <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
-            Input stok dari supplier & minta persetujuan Manager sebelum stok masuk ke kasir.
+            Upload foto nota supplier, auto-match rincian barang, dan lihat Tabel Buku Nota Lengkap.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openCreateModal}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-            minHeight: 44,
-            padding: '10px 16px',
-            backgroundColor: '#0284c7',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: 10,
-            fontSize: '0.85rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-            boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)',
-            transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
-          }}
-        >
-          <Plus size={16} /> + Input Barang Masuk
-        </button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          {/* Toggle Mode Tampilan: Kartu vs Tabel Buku Nota */}
+          <div
+            style={{
+              display: 'inline-flex',
+              background: '#f1f5f9',
+              padding: 4,
+              borderRadius: 10,
+              gap: 4,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setViewMode('cards')}
+              style={{
+                minHeight: 44,
+                padding: '6px 12px',
+                borderRadius: 8,
+                border: 'none',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                background: viewMode === 'cards' ? '#ffffff' : 'transparent',
+                color: viewMode === 'cards' ? '#0f172a' : '#64748b',
+                boxShadow: viewMode === 'cards' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <Layers size={14} /> Antrian Nota
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              style={{
+                minHeight: 44,
+                padding: '6px 12px',
+                borderRadius: 8,
+                border: 'none',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                background: viewMode === 'table' ? '#ffffff' : 'transparent',
+                color: viewMode === 'table' ? '#0284c7' : '#64748b',
+                boxShadow: viewMode === 'table' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <FileSpreadsheet size={14} /> Tabel Buku Nota ({tableRows.length})
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={openCreateModal}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              minHeight: 44,
+              padding: '10px 16px',
+              backgroundColor: '#0284c7',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: 10,
+              fontSize: '0.85rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)',
+              transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+          >
+            <Plus size={16} /> + Upload & Input Nota
+          </button>
+        </div>
       </div>
 
       {/* ── FILTER STATUS TABS ── */}
@@ -616,8 +1037,161 @@ export default function PenerimaanBarangSection({
         </button>
       </div>
 
-      {/* ── LIST DRAFTS / CARDS ── */}
-      {loading ? (
+      {/* ── VIEW 1: TABEL BUKU NOTA SUPPLIER LENGKAP (SPREADSHEET FORMAT) ── */}
+      {viewMode === 'table' ? (
+        <div
+          style={{
+            background: '#ffffff',
+            borderRadius: 14,
+            border: '1px solid #e2e8f0',
+            padding: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>
+                📊 Buku Arsip Nota Supplier (Format Tabel Lengkap)
+              </h3>
+              <p style={{ margin: '2px 0 0 0', fontSize: '0.76rem', color: '#64748b' }}>
+                Menampilkan rincian Tanggal Faktur, No. Faktur, Foto Nota, Supplier, Nama Barang, Qty, Harga, Jumlah, & Expired.
+              </p>
+            </div>
+            <div style={{ position: 'relative', minWidth: 240, flex: '1 1 240px', maxWidth: 360 }}>
+              <Search size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+              <input
+                type="text"
+                placeholder="Cari supplier, nama barang, atau no. faktur..."
+                value={tableSearch}
+                onChange={(e) => setTableSearch(e.target.value)}
+                style={{
+                  width: '100%',
+                  minHeight: 44,
+                  padding: '8px 12px 8px 34px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  fontSize: 'var(--text-base)',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+          </div>
+
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #e2e8f0', borderRadius: 10 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: 860 }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #e2e8f0', textAlign: 'left', color: '#334155' }}>
+                  <th style={{ padding: '10px 12px', fontWeight: 800 }}>Tgl Faktur</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 800 }}>No. Faktur & Foto</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 800 }}>Nama Supplier</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 800 }}>Nama Barang</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 800, textAlign: 'right' }}>Kuantiti</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 800, textAlign: 'right' }}>Harga Satuan</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 800, textAlign: 'right' }}>Jumlah (Total)</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 800 }}>Expired Date</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 800 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTableRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ padding: 28, textAlign: 'center', color: '#64748b' }}>
+                      Belum ada rincian item nota supplier yang sesuai filter.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredTableRows.map((row) => (
+                    <tr key={row.itemId} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontWeight: 600, color: '#0f172a' }}>
+                        {row.invoiceDate}
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <div style={{ fontWeight: 700, color: '#0f172a', fontFamily: 'monospace', fontSize: '0.76rem' }}>
+                          {row.deliveryNote || row.receiveNumber}
+                        </div>
+                        {row.invoicePhotoUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPreviewPhotoUrl(row.invoicePhotoUrl);
+                              setPreviewPhotoTitle(`${row.supplierName} — ${row.deliveryNote || row.receiveNumber}`);
+                            }}
+                            style={{
+                              marginTop: 4,
+                              padding: '3px 8px',
+                              borderRadius: 6,
+                              border: '1px solid #38bdf8',
+                              background: '#f0f9ff',
+                              color: '#0284c7',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <Camera size={11} /> Lihat Foto Nota
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>Tanpa foto</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '10px 12px', fontWeight: 700, color: '#1e293b' }}>
+                        {row.supplierName}
+                      </td>
+                      <td style={{ padding: '10px 12px', fontWeight: 600, color: '#0f172a' }}>
+                        <div>{row.productName}</div>
+                        <div style={{ fontSize: '0.7rem', color: '#64748b', fontFamily: 'monospace' }}>
+                          Batch: {row.batchCode}
+                        </div>
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, color: '#0284c7' }}>
+                        {row.qty.toLocaleString('id-ID')}
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', color: '#334155', whiteSpace: 'nowrap' }}>
+                        Rp {Math.round(row.costPrice).toLocaleString('id-ID')}
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                        Rp {Math.round(row.totalPrice).toLocaleString('id-ID')}
+                      </td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        {row.expiryDate ? (
+                          <span style={{ fontWeight: 700, color: '#d97706' }}>{row.expiryDate}</span>
+                        ) : (
+                          <span style={{ color: '#94a3b8' }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        {renderStatusBadge(row.status)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {filteredTableRows.length > 0 && (
+                <tfoot>
+                  <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: 800, color: '#0f172a' }}>
+                    <td colSpan={4} style={{ padding: '10px 12px' }}>
+                      TOTAL RINGKASAN TABEL NOTA ({filteredTableRows.length} baris barang)
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: '#0284c7' }}>
+                      {totalTableQty.toLocaleString('id-ID')} pcs
+                    </td>
+                    <td style={{ padding: '10px 12px' }} />
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: '#15803d', whiteSpace: 'nowrap' }}>
+                      Rp {Math.round(totalTableAmount).toLocaleString('id-ID')}
+                    </td>
+                    <td colSpan={2} style={{ padding: '10px 12px' }} />
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      ) : loading ? (
         <div
           style={{
             textAlign: 'center',
@@ -682,7 +1256,7 @@ export default function PenerimaanBarangSection({
               cursor: 'pointer',
             }}
           >
-            + Input Barang Sekarang
+            + Upload & Input Nota Sekarang
           </button>
         </div>
       ) : (
@@ -715,7 +1289,7 @@ export default function PenerimaanBarangSection({
                   gap: 8,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span
                     style={{
                       fontFamily: 'monospace',
@@ -730,9 +1304,34 @@ export default function PenerimaanBarangSection({
                     {d.receiveNumber}
                   </span>
                   {renderStatusBadge(d.status)}
+                  {d.invoicePhotoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreviewPhotoUrl(d.invoicePhotoUrl || null);
+                        setPreviewPhotoTitle(`${d.supplierName || 'Supplier'} — ${d.deliveryNote || d.receiveNumber}`);
+                      }}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        border: '1px solid #38bdf8',
+                        background: '#f0f9ff',
+                        color: '#0284c7',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <Camera size={12} /> Foto Nota Tersimpan
+                    </button>
+                  )}
                 </div>
 
                 <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                  {d.invoiceDate ? `Tgl Faktur: ${d.invoiceDate} • ` : ''}
                   {new Date(d.createdAt).toLocaleDateString('id-ID', {
                     day: 'numeric',
                     month: 'short',
@@ -761,7 +1360,7 @@ export default function PenerimaanBarangSection({
                   <span style={{ fontWeight: 600 }}>{d.supplierName || '— (Umum)'}</span>
                 </div>
                 <div>
-                  <span style={{ color: '#64748b' }}>No. Surat Jalan: </span>
+                  <span style={{ color: '#64748b' }}>No. Faktur / SJ: </span>
                   <span style={{ fontWeight: 600 }}>{d.deliveryNote || '—'}</span>
                 </div>
                 <div>
@@ -880,6 +1479,75 @@ export default function PenerimaanBarangSection({
         </div>
       )}
 
+      {/* ── MODAL LIGHTBOX PREVIEW FOTO NOTA ── */}
+      {previewPhotoUrl && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.8)',
+            zIndex: 1300,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => setPreviewPhotoUrl(null)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: 16,
+              maxWidth: 680,
+              width: '100%',
+              maxHeight: '92dvh',
+              overflowY: 'auto',
+              padding: 16,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>
+                📷 Foto Fisik Nota: {previewPhotoTitle}
+              </h4>
+              <button
+                type="button"
+                aria-label="Tutup foto nota"
+                onClick={() => setPreviewPhotoUrl(null)}
+                style={{
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: 8,
+                  minWidth: 44,
+                  minHeight: 44,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewPhotoUrl}
+              alt={previewPhotoTitle}
+              style={{
+                width: '100%',
+                maxHeight: '75dvh',
+                objectFit: 'contain',
+                borderRadius: 10,
+                background: '#0f172a',
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── MODAL RINCIAN DRAFT ── */}
       {viewingDraftId && (
         <div
@@ -926,7 +1594,7 @@ export default function PenerimaanBarangSection({
             >
               <div>
                 <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>
-                  Rincian Penerimaan Barang
+                  Rincian Nota Penerimaan Barang
                 </h3>
                 {detailData && (
                   <span style={{ fontSize: '0.8rem', color: '#64748b', fontFamily: 'monospace' }}>
@@ -984,9 +1652,30 @@ export default function PenerimaanBarangSection({
                     <strong>{detailData.supplierName || '—'}</strong>
                   </div>
                   <div>
-                    <span style={{ color: '#64748b' }}>Surat Jalan: </span>
+                    <span style={{ color: '#64748b' }}>Tanggal Faktur: </span>
+                    <strong>{detailData.invoiceDate || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b' }}>No. Faktur / Surat Jalan: </span>
                     <strong>{detailData.deliveryNote || '—'}</strong>
                   </div>
+                  {detailData.invoicePhotoUrl && (
+                    <div style={{ marginTop: 4 }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={detailData.invoicePhotoUrl}
+                        alt="Foto Nota Supplier"
+                        style={{
+                          width: '100%',
+                          maxHeight: 220,
+                          objectFit: 'contain',
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          background: '#0f172a',
+                        }}
+                      />
+                    </div>
+                  )}
                   {detailData.managerNote && (
                     <div style={{ color: '#c2410c', background: '#ffedd5', padding: 8, borderRadius: 6 }}>
                       <strong>Catatan Manager: </strong> {detailData.managerNote}
@@ -1015,11 +1704,14 @@ export default function PenerimaanBarangSection({
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontWeight: 700 }}>
                           <span>{it.productName}</span>
-                          <span style={{ color: '#0284c7', flexShrink: 0 }}>{it.qty} unit</span>
+                          <span style={{ color: '#0284c7', flexShrink: 0 }}>
+                            {it.qty} unit × Rp {Number(it.costPrice).toLocaleString('id-ID')} = Rp{' '}
+                            {(it.qty * Number(it.costPrice)).toLocaleString('id-ID')}
+                          </span>
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, color: '#64748b', fontSize: '0.75rem' }}>
                           <span>
-                            HPP: <strong>Rp {Number(it.costPrice).toLocaleString('id-ID')}</strong>
+                            Harga Satuan: <strong>Rp {Number(it.costPrice).toLocaleString('id-ID')}</strong>
                           </span>
                           <span>
                             Batch: <code style={{ color: '#475569' }}>{it.batchCode}</code>
@@ -1099,7 +1791,7 @@ export default function PenerimaanBarangSection({
         </div>
       )}
 
-      {/* ── MODAL FORM (INPUT / EDIT DRAFT) ── */}
+      {/* ── MODAL FORM (INPUT / EDIT NOTA SUPPLIER + 5 OTOMATISASI) ── */}
       {isFormOpen && (
         <div
           style={{
@@ -1118,7 +1810,7 @@ export default function PenerimaanBarangSection({
             style={{
               backgroundColor: '#ffffff',
               borderRadius: 16,
-              maxWidth: 720,
+              maxWidth: 780,
               width: '100%',
               maxHeight: '94dvh',
               overflowY: 'auto',
@@ -1143,10 +1835,10 @@ export default function PenerimaanBarangSection({
             >
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>
-                  {editingDraftId ? 'Edit Draft Penerimaan Barang' : 'Form Input Penerimaan Barang Masuk'}
+                  {editingDraftId ? 'Edit Nota Penerimaan Supplier' : 'Upload & Input Nota Supplier'}
                 </h3>
                 <p style={{ margin: '2px 0 0 0', fontSize: '0.75rem', color: '#64748b' }}>
-                  Stok tidak akan bertambah sebelum Manager memberikan persetujuan (2-Layer ACC).
+                  Simpan foto fisik nota, tanggal faktur, kuantiti, harga, & expired date dalam satu tempat.
                 </p>
               </div>
               <button
@@ -1190,22 +1882,133 @@ export default function PenerimaanBarangSection({
               </div>
             )}
 
-            {/* Input Informasi Pengiriman */}
+            {smartMatchFeedback && (
+              <div
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  color: '#15803d',
+                  fontSize: '0.8rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <Sparkles size={16} />
+                <span>{smartMatchFeedback}</span>
+              </div>
+            )}
+
+            {/* ── OTOMATISASI 3: UPLOAD FOTO FISIK NOTA + PREVIEW ── */}
+            <div
+              style={{
+                background: '#f8fafc',
+                border: '1.5px dashed #94a3b8',
+                borderRadius: 12,
+                padding: 14,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Camera size={16} color="#0284c7" /> Foto Fisik Nota / Faktur Supplier
+                  </div>
+                  <div style={{ fontSize: '0.73rem', color: '#64748b' }}>
+                    Otomatis dikompres ringan oleh browser agar tersimpan permanen di sistem.
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <input
+                    id={photoUploadId}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadInvoicePhoto}
+                    style={{ display: 'none' }}
+                  />
+                  <label
+                    htmlFor={photoUploadId}
+                    style={{
+                      minHeight: 44,
+                      padding: '8px 14px',
+                      borderRadius: 8,
+                      background: '#0284c7',
+                      color: '#ffffff',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <Camera size={14} /> {uploadingPhoto ? 'Mengompres Foto...' : invoicePhotoUrl ? 'Ganti Foto Nota' : 'Upload / Foto Nota'}
+                  </label>
+                  {invoicePhotoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setInvoicePhotoUrl(null)}
+                      style={{
+                        minHeight: 44,
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: '1px solid #fecaca',
+                        background: '#fef2f2',
+                        color: '#dc2626',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Hapus Foto
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {invoicePhotoUrl && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={invoicePhotoUrl}
+                    alt="Preview Nota Supplier"
+                    style={{
+                      width: '100%',
+                      maxHeight: 210,
+                      objectFit: 'contain',
+                      borderRadius: 8,
+                      background: '#0f172a',
+                      border: '1px solid #cbd5e1',
+                    }}
+                  />
+                  <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>
+                    ✅ Foto nota siap disimpan. Anda bisa membaca angka di foto ini sambil mengecek tabel di bawah.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Input Informasi Pengiriman (Supplier, Tanggal Faktur, No. Faktur) */}
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))',
                 gap: 12,
               }}
             >
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
                   <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155' }}>
-                    Nama Supplier / Distributor
+                    Nama Supplier / Distributor *
                   </label>
                   {registeredSuppliers.length > 0 && (
                     <span style={{ fontSize: '0.68rem', color: '#64748b' }}>
-                      Pilih dari master atau ketik
+                      Pilih atau ketik
                     </span>
                   )}
                 </div>
@@ -1244,7 +2047,7 @@ export default function PenerimaanBarangSection({
 
                 <input
                   type="text"
-                  placeholder="Ketik nama pemasok (misal: PT Indofood / Toko Roti Mandiri)"
+                  placeholder="Ketik nama supplier (misal: PT Indofood / Roti Mandiri)"
                   value={supplierName}
                   onChange={(e) => setSupplierName(e.target.value)}
                   style={{
@@ -1260,14 +2063,34 @@ export default function PenerimaanBarangSection({
                 />
               </div>
 
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                  Tanggal Faktur Nota *
+                </label>
+                <input
+                  type="date"
+                  value={invoiceDate}
+                  onChange={(e) => setInvoiceDate(e.target.value)}
+                  style={{
+                    width: '100%',
+                    minHeight: 44,
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #cbd5e1',
+                    fontSize: 'var(--text-base)',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
-                  Nomor Surat Jalan / Catatan Kirim
+                  Nomor Faktur / Surat Jalan
                 </label>
                 <input
                   type="text"
-                  placeholder="Contoh: SJ-2026/X/0091"
+                  placeholder="Contoh: FK-2026/XI/0091"
                   value={deliveryNote}
                   onChange={(e) => setDeliveryNote(e.target.value)}
                   style={{
@@ -1284,6 +2107,130 @@ export default function PenerimaanBarangSection({
               </div>
             </div>
 
+            {/* ── OTOMATISASI 1: BANNER AUTO-FILL DARI RIWAYAT SUPPLIER ── */}
+            {supplierHistoryItems.length > 0 && (
+              <div
+                style={{
+                  background: '#eff6ff',
+                  border: '1px solid #bfdbfe',
+                  borderRadius: 10,
+                  padding: '10px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontSize: '0.78rem', color: '#1e3a8a' }}>
+                  <strong>⚡ Otomatisasi Supplier:</strong> Ditemukan{' '}
+                  <strong>{supplierHistoryItems.length} barang langganan</strong> beserta harga beli terakhir dari{' '}
+                  <strong>{supplierName}</strong>.
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAutoFillFromSupplierHistory}
+                  style={{
+                    minHeight: 44,
+                    padding: '8px 14px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: '#2563eb',
+                    color: '#ffffff',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Sparkles size={14} /> Muat Barang & Harga Otomatis
+                </button>
+              </div>
+            )}
+
+            {/* ── OTOMATISASI 2: PANEL SMART AUTO-MATCH TEKS NOTA / WA ── */}
+            <div
+              style={{
+                background: '#faf5ff',
+                border: '1px solid #e9d5ff',
+                borderRadius: 10,
+                padding: '10px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 800, color: '#581c87', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Sparkles size={15} color="#7e22ce" /> Smart Auto-Match (&ldquo;Ngepasin&rdquo; Teks Nota / Chat WA ke Produk)
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsSmartMatcherOpen((prev) => !prev)}
+                  style={{
+                    minHeight: 44,
+                    padding: '6px 12px',
+                    borderRadius: 8,
+                    border: '1px solid #c084fc',
+                    background: '#ffffff',
+                    color: '#6b21a8',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isSmartMatcherOpen ? 'Tutup Panel Auto-Match' : '⚡ Buka Auto-Match Teks Nota'}
+                </button>
+              </div>
+
+              {isSmartMatcherOpen && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <p style={{ margin: 0, fontSize: '0.74rem', color: '#6b21a8' }}>
+                    Tempel (paste) daftar barang dari chat WA supplier atau hasil <em>Copy Text</em> foto nota HP (1 baris 1 barang, contoh: <code>Indomie Goreng 40 3100 2027-05-10</code>). Sistem akan otomatis mencocokkan nama produk, kuantiti, harga beli, dan expired!
+                  </p>
+                  <textarea
+                    rows={4}
+                    placeholder={'Contoh:\nSupplier: Toko Sembako Jaya\nNo Nota: FK-0912\nIndomie Goreng 40 3100 2027-05-10\nTeh Pucuk Harum 24 2800'}
+                    value={smartPasteText}
+                    onChange={(e) => setSmartPasteText(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: 10,
+                      borderRadius: 8,
+                      border: '1px solid #d8b4fe',
+                      fontSize: 'var(--text-base)',
+                      fontFamily: 'monospace',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      onClick={handleSmartMatchNotaText}
+                      style={{
+                        minHeight: 44,
+                        padding: '8px 14px',
+                        borderRadius: 8,
+                        border: 'none',
+                        background: '#7e22ce',
+                        color: '#ffffff',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <Sparkles size={14} /> Cocokkan & Masukkan ke Tabel Otomatis
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Daftar Produk yang Diterima */}
             <div>
               <div
@@ -1297,7 +2244,7 @@ export default function PenerimaanBarangSection({
                 }}
               >
                 <label style={{ fontSize: '0.82rem', fontWeight: 800, color: '#1e293b' }}>
-                  Daftar Produk Masuk ({items.length} item)
+                  Tabel Rincian Barang Nota ({items.length} item)
                 </label>
 
                 <button
@@ -1318,7 +2265,7 @@ export default function PenerimaanBarangSection({
                     gap: 6,
                   }}
                 >
-                  <Plus size={15} /> + Pilih Produk SKU
+                  <Plus size={15} /> + Pilih Produk SKU Manual
                 </button>
               </div>
 
@@ -1335,10 +2282,10 @@ export default function PenerimaanBarangSection({
                 >
                   <Layers size={28} color="#94a3b8" style={{ margin: '0 auto 8px' }} />
                   <p style={{ margin: '0 0 6px 0', fontSize: '0.82rem', fontWeight: 600 }}>
-                    Belum ada produk yang ditambahkan ke draft
+                    Belum ada produk di nota ini
                   </p>
                   <p style={{ margin: 0, fontSize: '0.75rem' }}>
-                    Klik tombol <strong>+ Pilih Produk SKU</strong> di atas untuk memasukkan barang.
+                    Gunakan tombol <strong>Auto-Match</strong> di atas atau klik <strong>+ Pilih Produk SKU Manual</strong>.
                   </p>
                 </div>
               ) : (
@@ -1346,6 +2293,7 @@ export default function PenerimaanBarangSection({
                   {items.map((it, idx) => {
                     const prodMeta = productsList.find((p) => p.id === it.productId);
                     const isPerishable = prodMeta?.isPerishable;
+                    const lineTotal = (Number(it.qty) || 0) * (Number(it.costPrice) || 0);
 
                     return (
                       <div
@@ -1382,27 +2330,32 @@ export default function PenerimaanBarangSection({
                               </span>
                             )}
                           </div>
-                          <button
-                            type="button"
-                            aria-label={`Hapus ${it.productName}`}
-                            onClick={() => handleRemoveItem(idx)}
-                            style={{
-                              background: '#fee2e2',
-                              border: 'none',
-                              color: '#dc2626',
-                              minWidth: 44,
-                              minHeight: 44,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              borderRadius: 8,
-                              cursor: 'pointer',
-                              flexShrink: 0,
-                            }}
-                            title="Hapus Item"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0284c7', background: '#f0f9ff', padding: '4px 8px', borderRadius: 6 }}>
+                              Subtotal: Rp {Math.round(lineTotal).toLocaleString('id-ID')}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`Hapus ${it.productName}`}
+                              onClick={() => handleRemoveItem(idx)}
+                              style={{
+                                background: '#fee2e2',
+                                border: 'none',
+                                color: '#dc2626',
+                                minWidth: 44,
+                                minHeight: 44,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                borderRadius: 8,
+                                cursor: 'pointer',
+                                flexShrink: 0,
+                              }}
+                              title="Hapus Item"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </div>
 
                         <div
@@ -1414,7 +2367,7 @@ export default function PenerimaanBarangSection({
                         >
                           <div>
                             <label style={{ display: 'block', fontSize: '0.7rem', color: '#64748b', marginBottom: 2 }}>
-                              Jumlah Qty (Unit)
+                              Kuantiti (Qty Unit)
                             </label>
                             <input
                               type="number"
@@ -1434,9 +2387,35 @@ export default function PenerimaanBarangSection({
                           </div>
 
                           <div>
-                            <label style={{ display: 'block', fontSize: '0.7rem', color: '#64748b', marginBottom: 2 }}>
-                              Harga Beli HPP (Rp)
-                            </label>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                              <label style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                                Harga Satuan (Rp)
+                              </label>
+                              {it.qty > 1 && it.costPrice >= it.qty * 500 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUpdateItem(idx, 'costPrice', Math.round(it.costPrice / it.qty))
+                                  }
+                                  title="Jika yang Anda ketik adalah harga 1 kardus/total, klik untuk membagi otomatis menjadi harga per pcs"
+                                  style={{
+                                    border: 'none',
+                                    background: '#e0f2fe',
+                                    color: '#0369a1',
+                                    fontSize: '0.65rem',
+                                    fontWeight: 700,
+                                    padding: '1px 6px',
+                                    borderRadius: 4,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 2,
+                                  }}
+                                >
+                                  <Calculator size={10} /> ÷{it.qty} (Rp {Math.round(it.costPrice / it.qty).toLocaleString('id-ID')}/pcs)
+                                </button>
+                              )}
+                            </div>
                             <input
                               type="number"
                               min={0}
@@ -1455,9 +2434,33 @@ export default function PenerimaanBarangSection({
                           </div>
 
                           <div>
-                            <label style={{ display: 'block', fontSize: '0.7rem', color: '#64748b', marginBottom: 2 }}>
-                              Tanggal Expired {isPerishable && <span style={{ color: '#ef4444' }}>*Wajib</span>}
-                            </label>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                              <label style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                                Tanggal Expired {isPerishable && <span style={{ color: '#ef4444' }}>*Wajib</span>}
+                              </label>
+                              <div style={{ display: 'inline-flex', gap: 3 }}>
+                                {[1, 2, 7].map((dNum) => (
+                                  <button
+                                    key={dNum}
+                                    type="button"
+                                    onClick={() => handleUpdateItem(idx, 'expiryDate', addDaysToToday(dNum))}
+                                    style={{
+                                      border: '1px solid #cbd5e1',
+                                      background: '#f8fafc',
+                                      color: '#475569',
+                                      fontSize: '0.62rem',
+                                      fontWeight: 700,
+                                      padding: '1px 4px',
+                                      borderRadius: 4,
+                                      cursor: 'pointer',
+                                    }}
+                                    title={`Isi otomatis +${dNum} hari dari hari ini`}
+                                  >
+                                    +{dNum}h
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
                             <input
                               type="date"
                               value={it.expiryDate || ''}
@@ -1516,6 +2519,28 @@ export default function PenerimaanBarangSection({
                       </div>
                     );
                   })}
+
+                  {/* ── OTOMATISASI 4: KOTAK RINGKASAN GRAND TOTAL FAKTUR ── */}
+                  <div
+                    style={{
+                      background: '#f0fdf4',
+                      border: '1.5px solid #86efac',
+                      borderRadius: 10,
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ fontSize: '0.8rem', color: '#166534', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Calendar size={15} /> Ringkasan Nota ({items.length} jenis barang • Total {totalFormQty.toLocaleString('id-ID')} pcs)
+                    </div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#15803d' }}>
+                      Total Faktur: Rp {Math.round(totalFormAmount).toLocaleString('id-ID')}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -1570,7 +2595,7 @@ export default function PenerimaanBarangSection({
                   gap: 6,
                 }}
               >
-                Simpan sebagai Draft
+                Simpan Nota (Draft)
               </button>
 
               <button
@@ -1593,7 +2618,7 @@ export default function PenerimaanBarangSection({
                   boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)',
                 }}
               >
-                <Send size={14} /> Simpan & Langsung Ajukan ke Manager
+                <Send size={14} /> Simpan Nota & Langsung Ajukan ACC
               </button>
             </div>
           </div>

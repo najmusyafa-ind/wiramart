@@ -16,7 +16,6 @@ import {
   admins,
   auditLogs,
   type StockReceiveDraft,
-  type StockReceiveItem,
   type ExpiryClass,
 } from '@/lib/db/schema';
 import { eq, and, desc, isNull, inArray, sql, count } from 'drizzle-orm';
@@ -44,7 +43,29 @@ export const StockReceiveItemInputSchema = z.object({
 export const CreateStockReceiveDraftSchema = z.object({
   supplierId: z.string().uuid('ID supplier tidak valid').optional().nullable(),
   supplierName: z.string().trim().max(200, 'Nama supplier maksimal 200 karakter').optional().nullable(),
-  deliveryNote: z.string().trim().max(500, 'Catatan pengiriman maksimal 500 karakter').optional().nullable(),
+  deliveryNote: z.string().trim().max(500, 'Catatan pengiriman / No. Faktur maksimal 500 karakter').optional().nullable(),
+  invoiceDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal faktur harus YYYY-MM-DD')
+    .optional()
+    .nullable(),
+  invoicePhotoUrl: z
+    .string()
+    .trim()
+    .max(1_500_000, 'Ukuran foto nota terlalu besar (maksimal ~1 MB setelah kompresi)')
+    .refine(
+      (val) =>
+        !val ||
+        val.startsWith('data:image/jpeg;base64,') ||
+        val.startsWith('data:image/png;base64,') ||
+        val.startsWith('data:image/webp;base64,') ||
+        val.startsWith('https://') ||
+        val.startsWith('/'),
+      'Format foto nota harus berupa gambar valid (JPEG, PNG, atau WebP)',
+    )
+    .optional()
+    .nullable(),
+  autoSubmit: z.boolean().optional().default(false),
   items: z.array(StockReceiveItemInputSchema).min(1, 'Penerimaan harus memiliki minimal 1 item produk').max(200),
 });
 
@@ -103,25 +124,71 @@ async function generateReceiveNumber(): Promise<string> {
 }
 
 // =============================================================
-// 1. GUDANG: Buat Draft Penerimaan Barang
+// HELPER: Resolusi Pembuat Draft (Karyawan Gudang ATAU Admin Shift/Manager)
+// =============================================================
+
+async function resolveCreatorEmployeeId(
+  actorId: string,
+  actorRole: 'employee' | 'admin' = 'employee',
+): Promise<{ employeeId: string; isAdminActor: boolean }> {
+  // 1. Cek langsung di tabel employees
+  const [emp] = await db
+    .select({ id: employees.id })
+    .from(employees)
+    .where(and(eq(employees.id, actorId), eq(employees.isActive, true), isNull(employees.deletedAt)))
+    .limit(1);
+
+  if (emp) {
+    return { employeeId: emp.id, isAdminActor: actorRole === 'admin' };
+  }
+
+  // 2. Jika berasal dari sesi Admin (sk_admin), cocokkan admins.nidn ke employees.nim
+  if (actorRole === 'admin') {
+    const [adm] = await db
+      .select({ id: admins.id, nidn: admins.nidn })
+      .from(admins)
+      .where(and(eq(admins.id, actorId), eq(admins.isActive, true), isNull(admins.deletedAt)))
+      .limit(1);
+
+    if (adm) {
+      const [matchedEmp] = await db
+        .select({ id: employees.id })
+        .from(employees)
+        .where(and(eq(employees.nim, adm.nidn), isNull(employees.deletedAt)))
+        .limit(1);
+
+      if (matchedEmp) {
+        return { employeeId: matchedEmp.id, isAdminActor: true };
+      }
+
+      // Fallback untuk Manager Dosen yang tidak punya baris di employees:
+      // atribusikan ke petugas gudang/admin shift aktif pertama
+      const [fallbackEmp] = await db
+        .select({ id: employees.id })
+        .from(employees)
+        .where(and(eq(employees.isActive, true), isNull(employees.deletedAt)))
+        .limit(1);
+
+      if (fallbackEmp) {
+        return { employeeId: fallbackEmp.id, isAdminActor: true };
+      }
+    }
+  }
+
+  throw new AppError('FORBIDDEN', 'Akun petugas/admin tidak ditemukan atau nonaktif.', 403);
+}
+
+// =============================================================
+// 1. GUDANG / ADMIN KASIR: Buat Draft / Simpan Nota Supplier
 // =============================================================
 
 export async function createStockReceiveDraft(
-  employeeId: string,
+  actorId: string,
   rawInput: CreateStockReceiveDraftInput,
+  actorRole: 'employee' | 'admin' = 'employee',
 ) {
   const input = CreateStockReceiveDraftSchema.parse(rawInput);
-
-  // Verifikasi Karyawan Aktif
-  const [emp] = await db
-    .select({ id: employees.id, fullName: employees.fullName, jabatan: employees.jabatan })
-    .from(employees)
-    .where(and(eq(employees.id, employeeId), eq(employees.isActive, true), isNull(employees.deletedAt)))
-    .limit(1);
-
-  if (!emp) {
-    throw new AppError('FORBIDDEN', 'Karyawan tidak ditemukan atau nonaktif.', 403);
-  }
+  const { employeeId, isAdminActor } = await resolveCreatorEmployeeId(actorId, actorRole);
 
   // Verifikasi Produk-Produk yang Diinput
   const productIds = input.items.map((i) => i.productId);
@@ -158,6 +225,8 @@ export async function createStockReceiveDraft(
   }
 
   const receiveNumber = await generateReceiveNumber();
+  const resolvedInvoiceDate = input.invoiceDate || todayStr;
+  const targetStatus = input.autoSubmit ? 'SUBMITTED' : 'DRAFT';
 
   // Insert Draft Header + Items Atomik
   const createdDraft = await db.transaction(async (tx) => {
@@ -173,7 +242,10 @@ export async function createStockReceiveDraft(
         createdByEmployeeId: employeeId,
         supplierId: resolvedSupplierId,
         deliveryNote: input.deliveryNote?.trim() || null,
-        status: 'DRAFT',
+        invoiceDate: resolvedInvoiceDate,
+        invoicePhotoUrl: input.invoicePhotoUrl?.trim() || null,
+        status: targetStatus,
+        submittedAt: input.autoSubmit ? new Date() : null,
       })
       .returning();
 
@@ -192,19 +264,21 @@ export async function createStockReceiveDraft(
     return draft;
   });
 
-  return getStockReceiveDraftDetail(createdDraft.id, employeeId);
+  return getStockReceiveDraftDetail(createdDraft.id, isAdminActor ? undefined : employeeId);
 }
 
 // =============================================================
-// 2. GUDANG: Update Draft (Hanya saat status DRAFT / REVISED)
+// 2. GUDANG / ADMIN KASIR: Update Draft (Hanya saat status DRAFT / REVISED)
 // =============================================================
 
 export async function updateStockReceiveDraft(
   draftId: string,
-  employeeId: string,
+  actorId: string,
   rawInput: CreateStockReceiveDraftInput,
+  actorRole: 'employee' | 'admin' = 'employee',
 ) {
   const input = UpdateStockReceiveDraftSchema.parse(rawInput);
+  const { employeeId, isAdminActor } = await resolveCreatorEmployeeId(actorId, actorRole);
 
   const [existing] = await db
     .select()
@@ -216,8 +290,8 @@ export async function updateStockReceiveDraft(
     throw new AppError('NOT_FOUND', 'Draft penerimaan barang tidak ditemukan.', 404);
   }
 
-  // IDOR Guard
-  if (existing.createdByEmployeeId !== employeeId) {
+  // IDOR Guard (Admin Shift / Manager diizinkan membantu mengedit draft nota)
+  if (!isAdminActor && existing.createdByEmployeeId !== employeeId) {
     throw new AppError('FORBIDDEN', 'Anda tidak memiliki hak akses untuk mengubah draft ini.', 403);
   }
 
@@ -247,7 +321,13 @@ export async function updateStockReceiveDraft(
       .set({
         supplierId: resolvedSupplierId,
         deliveryNote: input.deliveryNote?.trim() || null,
-        status: 'DRAFT', // Reset ke DRAFT jika sebelumnya REVISED
+        invoiceDate: input.invoiceDate !== undefined ? (input.invoiceDate || existing.invoiceDate) : existing.invoiceDate,
+        invoicePhotoUrl:
+          input.invoicePhotoUrl !== undefined
+            ? (input.invoicePhotoUrl?.trim() || null)
+            : existing.invoicePhotoUrl,
+        status: input.autoSubmit ? 'SUBMITTED' : 'DRAFT',
+        submittedAt: input.autoSubmit ? new Date() : existing.submittedAt,
         updatedAt: new Date(),
       })
       .where(eq(stockReceiveDrafts.id, draftId));
@@ -268,14 +348,20 @@ export async function updateStockReceiveDraft(
     await tx.insert(stockReceiveItems).values(itemValues);
   });
 
-  return getStockReceiveDraftDetail(draftId, employeeId);
+  return getStockReceiveDraftDetail(draftId, isAdminActor ? undefined : employeeId);
 }
 
 // =============================================================
-// 3. GUDANG: Submit Draft ke Manager untuk Approval
+// 3. GUDANG / ADMIN KASIR: Submit Draft ke Manager untuk Approval
 // =============================================================
 
-export async function submitStockReceiveDraft(draftId: string, employeeId: string) {
+export async function submitStockReceiveDraft(
+  draftId: string,
+  actorId: string,
+  actorRole: 'employee' | 'admin' = 'employee',
+) {
+  const { employeeId, isAdminActor } = await resolveCreatorEmployeeId(actorId, actorRole);
+
   const [existing] = await db
     .select()
     .from(stockReceiveDrafts)
@@ -287,8 +373,8 @@ export async function submitStockReceiveDraft(draftId: string, employeeId: strin
   }
 
   // IDOR Guard
-  if (existing.createdByEmployeeId !== employeeId) {
-    throw new AppError('FORBIDDEN', 'Hanya pembuat draft yang dapat mengajukan ke Manager.', 403);
+  if (!isAdminActor && existing.createdByEmployeeId !== employeeId) {
+    throw new AppError('FORBIDDEN', 'Hanya pembuat draft atau Admin Shift yang dapat mengajukan ke Manager.', 403);
   }
 
   if (existing.status !== 'DRAFT' && existing.status !== 'REVISED') {
@@ -571,6 +657,8 @@ export async function getStockReceiveDrafts(options: {
       supplierId: stockReceiveDrafts.supplierId,
       supplierName: suppliers.name,
       deliveryNote: stockReceiveDrafts.deliveryNote,
+      invoiceDate: stockReceiveDrafts.invoiceDate,
+      invoicePhotoUrl: stockReceiveDrafts.invoicePhotoUrl,
       status: stockReceiveDrafts.status,
       submittedAt: stockReceiveDrafts.submittedAt,
       approvedAt: stockReceiveDrafts.approvedAt,
@@ -613,6 +701,8 @@ export async function getStockReceiveDraftDetail(
       supplierId: stockReceiveDrafts.supplierId,
       supplierName: suppliers.name,
       deliveryNote: stockReceiveDrafts.deliveryNote,
+      invoiceDate: stockReceiveDrafts.invoiceDate,
+      invoicePhotoUrl: stockReceiveDrafts.invoicePhotoUrl,
       status: stockReceiveDrafts.status,
       submittedAt: stockReceiveDrafts.submittedAt,
       approvedAt: stockReceiveDrafts.approvedAt,
@@ -661,4 +751,101 @@ export async function getStockReceiveDraftDetail(
     ...draft,
     items,
   };
+}
+
+// =============================================================
+// 9. QUERY: Tabel Buku Nota Supplier Lengkap (Spreadsheet View)
+// =============================================================
+
+export type SupplierInvoiceTableRowDTO = {
+  itemId: string;
+  draftId: string;
+  receiveNumber: string;
+  invoiceDate: string;
+  deliveryNote: string | null;
+  invoicePhotoUrl: string | null;
+  status: StockReceiveDraft['status'];
+  supplierName: string;
+  productId: string;
+  productName: string;
+  batchCode: string;
+  qty: number;
+  costPrice: number;
+  totalPrice: number;
+  expiryDate: string | null;
+  conditionNote: string | null;
+  creatorName: string;
+  createdAt: string;
+};
+
+export async function getSupplierInvoiceTableRows(options: {
+  employeeId?: string;
+  status?: string;
+  limit?: number;
+}): Promise<SupplierInvoiceTableRowDTO[]> {
+  const { employeeId, status, limit = 150 } = options;
+  const conditions = [isNull(stockReceiveDrafts.deletedAt)];
+
+  if (employeeId) {
+    conditions.push(eq(stockReceiveDrafts.createdByEmployeeId, employeeId));
+  }
+  if (status && status !== 'SEMUA') {
+    conditions.push(eq(stockReceiveDrafts.status, status as StockReceiveDraft['status']));
+  }
+
+  const rows = await db
+    .select({
+      itemId: stockReceiveItems.id,
+      draftId: stockReceiveDrafts.id,
+      receiveNumber: stockReceiveDrafts.receiveNumber,
+      invoiceDate: stockReceiveDrafts.invoiceDate,
+      deliveryNote: stockReceiveDrafts.deliveryNote,
+      invoicePhotoUrl: stockReceiveDrafts.invoicePhotoUrl,
+      status: stockReceiveDrafts.status,
+      supplierName: suppliers.name,
+      productId: stockReceiveItems.productId,
+      productName: products.name,
+      batchCode: stockReceiveItems.batchCode,
+      qty: stockReceiveItems.qty,
+      costPrice: stockReceiveItems.costPrice,
+      expiryDate: stockReceiveItems.expiryDate,
+      conditionNote: stockReceiveItems.conditionNote,
+      creatorName: employees.fullName,
+      createdAt: stockReceiveDrafts.createdAt,
+    })
+    .from(stockReceiveItems)
+    .innerJoin(stockReceiveDrafts, eq(stockReceiveItems.draftId, stockReceiveDrafts.id))
+    .innerJoin(products, eq(stockReceiveItems.productId, products.id))
+    .innerJoin(employees, eq(stockReceiveDrafts.createdByEmployeeId, employees.id))
+    .leftJoin(suppliers, eq(stockReceiveDrafts.supplierId, suppliers.id))
+    .where(and(...conditions))
+    .orderBy(desc(stockReceiveDrafts.createdAt), stockReceiveItems.createdAt)
+    .limit(Math.min(Math.max(1, limit), 300));
+
+  return rows.map((r) => {
+    const costNum = Number(r.costPrice ?? 0);
+    const fallbackDate = r.createdAt
+      ? new Date(r.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' })
+      : '';
+    return {
+      itemId: r.itemId,
+      draftId: r.draftId,
+      receiveNumber: r.receiveNumber,
+      invoiceDate: r.invoiceDate || fallbackDate,
+      deliveryNote: r.deliveryNote ?? null,
+      invoicePhotoUrl: r.invoicePhotoUrl ?? null,
+      status: r.status,
+      supplierName: r.supplierName || 'Supplier Umum',
+      productId: r.productId,
+      productName: r.productName,
+      batchCode: r.batchCode,
+      qty: r.qty,
+      costPrice: costNum,
+      totalPrice: r.qty * costNum,
+      expiryDate: r.expiryDate ?? null,
+      conditionNote: r.conditionNote ?? null,
+      creatorName: r.creatorName,
+      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : '',
+    };
+  });
 }

@@ -1,32 +1,71 @@
 // =============================================================
 // POST /api/auth/karyawan/daftar
-// Self-register karyawan (mahasiswa/siswi):
-//   Body: { fullName, nim, programStudi, slotId }
+// Self-register karyawan (Mahasiswa UNPERBA & Mitra Luar Instansi):
+//   Body: { fullName, nim, programStudi, slotId, pin?, confirmPin? }
+//   - Mahasiswa UNPERBA: nim = 8 digit NIM, programStudi = Prodi UNPERBA
+//   - Mitra Luar UNPERBA: nim = 10–15 digit Nomor HP, programStudi = 'Umum / Mitra Luar UNPERBA'
+//   - PIN Keamanan: 6–8 digit angka (standar 8 angka), disimpan ke employees.pin_hash
 //
 // PROTEKSI BERLAPIS:
 //   1. Slot harus kosong (employee_id IS NULL) + row-level lock
-//   2. NIM yang sama tidak boleh mendaftar 2x (sudah punya slot)
-//   3. Satu NIM hanya boleh punya 1 slot aktif
+//   2. NIM / Nomor HP yang sama tidak boleh mendaftar 2x (sudah punya slot)
+//   3. Satu NIM / Nomor HP hanya boleh punya 1 slot aktif
 //   4. Slot tidak bisa diubah oleh karyawan sendiri — hanya admin
 // ATOMIC: db.transaction() untuk race-condition safety
 // =============================================================
 
 import { z } from 'zod';
+import bcrypt from 'bcryptjs';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { employees, shiftSchedules } from '@/lib/db/schema';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
+import { kasirAuthLimiter } from '@/lib/utils/rate-limit';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-const daftarSchema = z.object({
-  fullName:     z.string().min(2, 'Nama minimal 2 karakter').max(200).trim(),
-  nim:          z.string()
-                  .regex(/^\d{8}$/, 'NIM harus tepat 8 angka (contoh: 22101010)')
-                  .trim(),
-  programStudi: z.string().max(100).trim().optional().default('Umum'),
-  slotId:       z.string().uuid('Slot jadwal tidak valid'),
-});
+const PIN_REGEX = /^\d{6,8}$/;
+
+const daftarSchema = z
+  .object({
+    fullName: z.string().min(2, 'Nama minimal 2 karakter').max(200).trim(),
+    nim: z
+      .string()
+      .trim()
+      .transform((val) => val.replace(/[\s-]/g, '').replace(/^\+62/, '0'))
+      .pipe(
+        z
+          .string()
+          .regex(
+            /^\d{8,15}$/,
+            'NIM harus 8 angka (contoh: 22101010) atau Nomor HP 10–15 angka (contoh: 081234567890)',
+          ),
+      ),
+    programStudi: z.string().max(100).trim().optional().default('Umum / Mitra Luar UNPERBA'),
+    slotId: z.string().uuid('Slot jadwal tidak valid'),
+    pin: z.string().trim().optional(),
+    confirmPin: z.string().trim().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.pin !== undefined && data.pin !== '') {
+      if (!PIN_REGEX.test(data.pin)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['pin'],
+          message: 'PIN keamanan harus berupa 6 hingga 8 digit angka (disarankan 8 angka)',
+        });
+      }
+      if (data.confirmPin !== undefined && data.confirmPin !== '' && data.pin !== data.confirmPin) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['confirmPin'],
+          message: 'Konfirmasi PIN tidak cocok dengan PIN baru',
+        });
+      }
+    }
+  });
 
 export async function POST(request: Request): Promise<Response> {
   let body: unknown;
@@ -38,13 +77,25 @@ export async function POST(request: Request): Promise<Response> {
     return apiError(parsed.error.issues[0]?.message ?? 'Data tidak valid', 'VALIDATION_ERROR', 422);
   }
 
-  const { fullName, nim, programStudi, slotId } = parsed.data;
+  const { fullName, nim, programStudi, slotId, pin } = parsed.data;
+
+  // Rate limit proteksi brute-force & CPU exhaustion bcrypt pada endpoint publik
+  const rateCheck = kasirAuthLimiter.check(`daftar:${nim}`, true);
+  if (!rateCheck.allowed) {
+    return apiError(
+      `Terlalu banyak percobaan pendaftaran. Silakan tunggu ${rateCheck.retryAfterSeconds} detik.`,
+      'RATE_LIMITED',
+      429,
+    );
+  }
+
+  const hashedPin = pin ? await bcrypt.hash(pin, 10) : null;
 
   try {
     const result = await db.transaction(async (tx) => {
 
       // ──────────────────────────────────────────────────────────
-      // GUARD 1: Cek NIM sudah ada di DB atau belum
+      // GUARD 1: Cek NIM / Nomor HP sudah ada di DB atau belum
       // ──────────────────────────────────────────────────────────
       const existingEmployee = await tx.query.employees.findFirst({
         where: eq(employees.nim, nim),
@@ -52,7 +103,7 @@ export async function POST(request: Request): Promise<Response> {
       });
 
       if (existingEmployee && !existingEmployee.deletedAt) {
-        // Cek apakah NIM ini sudah punya slot
+        // Cek apakah NIM / Nomor HP ini sudah punya slot
         const existingSlot = await tx.query.shiftSchedules.findFirst({
           where: and(
             eq(shiftSchedules.employeeId, existingEmployee.id),
@@ -66,18 +117,18 @@ export async function POST(request: Request): Promise<Response> {
         });
 
         if (existingSlot) {
-          // NIM sudah terdaftar DAN sudah punya slot → tolak tegas
+          // NIM / Nomor HP sudah terdaftar DAN sudah punya slot → tolak tegas
           throw new AppError(
-            `NIM ${nim} sudah terdaftar di shift ${existingSlot.dayOfWeek} ` +
+            `NIM / Nomor HP ${nim} sudah terdaftar di shift ${existingSlot.dayOfWeek} ` +
             `${existingSlot.slotStart}–${existingSlot.slotEnd}. ` +
             `Silakan login langsung. Jika ingin pindah shift, hubungi admin.`,
             'NIM_HAS_SLOT',
             409,
           );
         } else {
-          // NIM ada tapi belum punya slot (edge case: employee tanpa slot)
+          // NIM / Nomor HP ada tapi belum punya slot (edge case: employee tanpa slot)
           throw new AppError(
-            `NIM ${nim} sudah terdaftar tapi belum memiliki slot shift. ` +
+            `NIM / Nomor HP ${nim} sudah terdaftar tapi belum memiliki slot shift. ` +
             `Silakan login dan hubungi admin untuk pengaturan jadwal.`,
             'NIM_EXISTS_NO_SLOT',
             409,
@@ -139,7 +190,7 @@ export async function POST(request: Request): Promise<Response> {
             isSelfRegistered: true,
             deletedAt:        null,
             isKetuaShift:     false,
-            pinHash:          null,
+            pinHash:          hashedPin,
             pinFailedAttempts: 0,
             pinLockedUntil:   null,
             updatedAt:        new Date(),
@@ -160,6 +211,7 @@ export async function POST(request: Request): Promise<Response> {
             jabatan:          'Kasir',
             isActive:         true,
             isSelfRegistered: true,
+            pinHash:          hashedPin,
             createdByAdminId: null,
           })
           .returning({ id: employees.id, fullName: employees.fullName });

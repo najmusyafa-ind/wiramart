@@ -6,6 +6,21 @@
 
 ---
 
+## 0. Auto-Active Skills & Persona DNA (Wajib Aktif di Setiap Sesi Chat)
+
+Setiap agent yang bekerja pada proyek ini **WAJIB secara otomatis menerapkan 4 skill berikut sejak giliran pertama** tanpa menunggu user mengetik slash command manual:
+
+1. **`ultimate-uiux-dev`** (`C:\Users\ASUS\.gemini\config\skills\ultimate-uiux-dev\SKILL.md`):
+   - Desain sistem Vanilla CSS berbasis token HSL (`globals.css`), WCAG 2.1 AA (`minHeight: 44px` touch target), kurva transisi `cubic-bezier(0.16, 1, 0.3, 1)` (dilarang `transition: all`), Server Components by default, dan wajib blok `AUDIT` pasca-edit.
+2. **`aider`** (`C:\Users\ASUS\.gemini\config\skills\aider\SKILL.md`):
+   - Dual-persona *Architect -> Editor*: petakan *repo-map* & dependensi lintas file sebelum mengedit, lakukan *surgical diff* minimal, dan jalankan verifikasi otomatis (`npx tsc --noEmit`, `npx eslint`, test suite).
+3. **`metagpt`** (`C:\Users\ASUS\.gemini\config\skills\metagpt\SKILL.md`):
+   - Orkestrasi SOP lintas peran (*Product Manager -> System Architect -> Project Manager -> Engineer -> QA*): pastikan PRD/Obsidian Vault, skema DB (`schema.ts`), dan kontrak API selaras sebelum implementasi.
+4. **`ponytail`** (`C:\Users\ASUS\.gemini\config\skills\ponytail\SKILL.md`):
+   - *Lazy Senior Dev / YAGNI*: solusi paling sederhana yang menuntaskan akar masalah tanpa *over-engineering*, tanpa dependensi baru yang tidak perlu, dan wajib menyertakan 2 baris penutup (`Skipped / Not Checked` & `Risk / Trade-off`).
+
+---
+
 ## 1. Stack & Versi — Jangan Asumsikan
 
 | Komponen | Versi / Detail |

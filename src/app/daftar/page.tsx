@@ -281,28 +281,40 @@ function PanelDosen({ onBack }: { onBack: () => void }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PANEL: Mahasiswa — Daftar + Pilih Shift / Lupa NIM
+// PANEL: Mahasiswa & Mitra Luar — Daftar + Pilih Shift / Lupa NIM
 // ─────────────────────────────────────────────────────────────
-// Prodi resmi UNPERBA yang terlibat di Wiramart (FEB + FST)
+// Prodi resmi UNPERBA (FEB + FST) + Kategori Umum / Mitra Luar UNPERBA
+const EXTERNAL_PRODI_LABEL = 'Umum / Mitra Luar UNPERBA';
+
 const PRODI_OPTIONS: { fakultas: string; prodi: string[] }[] = [
   {
-    fakultas: 'FEB — Ekonomi & Bisnis',
+    fakultas: 'FEB — Ekonomi & Bisnis (UNPERBA)',
     prodi: ['Akuntansi', 'Manajemen'],
   },
   {
-    fakultas: 'FST — Sains & Teknologi',
+    fakultas: 'FST — Sains & Teknologi (UNPERBA)',
     prodi: ['Teknik Informatika', 'Agribisnis', 'Teknik Mesin'],
   },
+  {
+    fakultas: 'Non-UNPERBA / Umum',
+    prodi: [EXTERNAL_PRODI_LABEL],
+  },
 ];
+
+function normalizeNimOrPhone(val: string): string {
+  return val.trim().replace(/[\s-]/g, '').replace(/^\+62/, '0');
+}
 
 function PanelMahasiswa({ onBack }: { onBack: () => void }) {
   const uid = useId();
   const [tab, setTab] = useState<MahasiswaTab>('daftar');
-  // Step daftar: 1 = isi data, 2 = pilih slot, 3 = sukses
+  // Step daftar: 1 = isi data + PIN, 2 = pilih slot, 3 = sukses
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [nama, setNama] = useState('');
   const [nim, setNim] = useState('');
   const [prodi, setProdi] = useState('');
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -314,15 +326,64 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
   const [lupaLoading, setLupaLoading] = useState(false);
   const [lupaError, setLupaError] = useState<string | null>(null);
 
+  const isExternal = prodi === EXTERNAL_PRODI_LABEL;
+
+  function handleNextStep1() {
+    setError(null);
+    const cleanName = nama.trim();
+    const cleanId = normalizeNimOrPhone(nim);
+    const cleanPin = pin.trim();
+    const cleanConfirmPin = confirmPin.trim();
+
+    if (cleanName.length < 2) {
+      setError('Nama lengkap minimal 2 karakter.');
+      return;
+    }
+    if (!prodi) {
+      setError('Pilih Program Studi atau kategori Umum / Mitra Luar UNPERBA.');
+      return;
+    }
+    if (isExternal) {
+      if (!/^\d{10,15}$/.test(cleanId)) {
+        setError('Nomor HP untuk penjaga luar UNPERBA harus berupa 10 hingga 15 digit angka (contoh: 081234567890).');
+        return;
+      }
+    } else {
+      if (!/^\d{8}$/.test(cleanId)) {
+        setError('NIM Mahasiswa UNPERBA harus tepat 8 digit angka (contoh: 22101010).');
+        return;
+      }
+    }
+    if (!/^\d{6,8}$/.test(cleanPin)) {
+      setError('PIN baru harus berupa 6 hingga 8 digit angka (disarankan 8 angka).');
+      return;
+    }
+    if (cleanPin !== cleanConfirmPin) {
+      setError('Konfirmasi PIN tidak cocok dengan PIN baru.');
+      return;
+    }
+
+    setNim(cleanId);
+    setStep(2);
+  }
+
   async function handleDaftar() {
     if (!selectedSlot) return;
     setLoading(true);
     setError(null);
+    const cleanId = normalizeNimOrPhone(nim);
     try {
       const res = await fetch('/api/auth/karyawan/daftar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fullName: nama, nim, programStudi: prodi, slotId: selectedSlot }),
+        body: JSON.stringify({
+          fullName: nama.trim(),
+          nim: cleanId,
+          programStudi: prodi,
+          slotId: selectedSlot,
+          pin: pin.trim(),
+          confirmPin: confirmPin.trim(),
+        }),
       });
       const json = await res.json() as { success: boolean; data?: { message: string }; error?: string };
       if (json.success) {
@@ -366,7 +427,7 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
 
       {/* Tab */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 0, marginBottom: 'var(--space-5)', borderBottom: '2px solid var(--color-border)' }}>
-        {([['daftar', '📝 Daftar Shift'], ['lupa-nim', '🔍 Lupa NIM']] as [MahasiswaTab, string][]).map(([t, label]) => (
+        {([['daftar', '📝 Daftar Shift'], ['lupa-nim', '🔍 Lupa NIM / ID']] as [MahasiswaTab, string][]).map(([t, label]) => (
           <button
             type="button"
             aria-pressed={tab === t}
@@ -391,24 +452,21 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
           {step === 1 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               <div className="form-group">
-                <label htmlFor={`${uid}-nama`} className="form-label">Nama Lengkap</label>
-                <input id={`${uid}-nama`} className="form-input" style={{ fontSize: 'var(--text-base)', minHeight: 44 }} placeholder="Sesuai data pendaftaran" value={nama} onChange={e => setNama(e.target.value)} />
+                <label htmlFor={`${uid}-nama`} className="form-label">Nama Lengkap *</label>
+                <input id={`${uid}-nama`} className="form-input" style={{ fontSize: 'var(--text-base)', minHeight: 44 }} placeholder="Sesuai identitas resmi" value={nama} onChange={e => setNama(e.target.value)} />
               </div>
+
               <div className="form-group">
-                <label htmlFor={`${uid}-nim`} className="form-label">NIM</label>
-                <input id={`${uid}-nim`} inputMode="numeric" className="form-input" style={{ fontSize: 'var(--text-base)', minHeight: 44 }} placeholder="Nomor Induk Mahasiswa" value={nim} onChange={e => setNim(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label htmlFor={`${uid}-prodi`} className="form-label">Program Studi *</label>
+                <label htmlFor={`${uid}-prodi`} className="form-label">Program Studi / Asal Instansi *</label>
                 <select
                   id={`${uid}-prodi`}
                   className="form-input form-select"
                   style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
                   value={prodi}
-                  onChange={e => setProdi(e.target.value)}
+                  onChange={e => { setProdi(e.target.value); setError(null); }}
                   required
                 >
-                  <option value="">— Pilih Program Studi —</option>
+                  <option value="">— Pilih Program Studi / Kategori —</option>
                   {PRODI_OPTIONS.map((group) => (
                     <optgroup key={group.fakultas} label={group.fakultas}>
                       {group.prodi.map((p) => (
@@ -417,12 +475,74 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                     </optgroup>
                   ))}
                 </select>
+                <p className="form-hint">
+                  Bagi penjaga dari luar kampus UNPERBA, pilih <strong>{EXTERNAL_PRODI_LABEL}</strong>.
+                </p>
               </div>
+
+              <div className="form-group">
+                <label htmlFor={`${uid}-nim`} className="form-label">
+                  {isExternal ? 'Nomor HP (Sebagai ID Login) *' : 'NIM (8 Angka) *'}
+                </label>
+                <input
+                  id={`${uid}-nim`}
+                  inputMode="numeric"
+                  maxLength={isExternal ? 15 : 8}
+                  className="form-input"
+                  style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
+                  placeholder={isExternal ? 'Contoh: 081234567890' : 'Contoh: 22101010'}
+                  value={nim}
+                  onChange={e => setNim(e.target.value.replace(/[^\d+-\s]/g, ''))}
+                />
+                <p className="form-hint">
+                  {isExternal
+                    ? 'Masukkan Nomor HP aktif (10–15 angka). Nomor ini digunakan sebagai pengganti NIM saat login kasir/gudang.'
+                    : 'Masukkan 8 digit Nomor Induk Mahasiswa UNPERBA.'}
+                </p>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor={`${uid}-pin`} className="form-label">Buat PIN Baru (8 Angka) *</label>
+                <input
+                  id={`${uid}-pin`}
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={8}
+                  className="form-input"
+                  style={{ fontSize: 'var(--text-base)', minHeight: 44, letterSpacing: '0.15em' }}
+                  placeholder="Masukkan 8 digit angka (6–8 angka)"
+                  value={pin}
+                  onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                />
+                <p className="form-hint">PIN keamanan untuk login Kasir POS, Gudang, dan Admin Shift (seragam 6–8 digit angka).</p>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor={`${uid}-confirm-pin`} className="form-label">Konfirmasi PIN Baru *</label>
+                <input
+                  id={`${uid}-confirm-pin`}
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={8}
+                  className="form-input"
+                  style={{ fontSize: 'var(--text-base)', minHeight: 44, letterSpacing: '0.15em' }}
+                  placeholder="Ulangi PIN angka yang sama"
+                  value={confirmPin}
+                  onChange={e => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                />
+              </div>
+
+              {error && (
+                <div style={{ padding: 'var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--color-error-light)', display: 'flex', gap: 8, fontSize: 'var(--text-sm)', color: 'var(--color-error)' }}>
+                  <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} /> {error}
+                </div>
+              )}
+
               <button
                 type="button"
-                onClick={() => { setError(null); setStep(2); }}
+                onClick={handleNextStep1}
                 className="btn btn-primary"
-                disabled={!nama || !nim || !prodi}
+                disabled={!nama.trim() || !nim.trim() || !prodi || !pin.trim() || !confirmPin.trim()}
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 44 }}
               >
                 Lanjut Pilih Shift <ChevronRight size={16} />
@@ -433,7 +553,7 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
           {step === 2 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               <div style={{ padding: 'var(--space-3)', background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-                <span><strong>{nama}</strong> · NIM {nim} · {prodi}</span>
+                <span><strong>{nama}</strong> · {isExternal ? `No. HP ${nim}` : `NIM ${nim}`} · {prodi} · PIN {pin.length} digit</span>
                 <button type="button" onClick={() => setStep(1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)', fontSize: 'var(--text-xs)', fontWeight: 600, minHeight: 44, padding: '0 8px', display: 'inline-flex', alignItems: 'center' }}>ubah</button>
               </div>
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
@@ -466,7 +586,13 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                 <CheckCircle size={36} style={{ color: 'var(--color-success)' }} />
               </div>
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text)', textAlign: 'center' }}>{successMsg}</p>
-              <a href="/login" className="btn btn-primary" style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>Login Sekarang →</a>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                Silakan login menggunakan <strong>{isExternal ? `Nomor HP (${nim})` : `NIM (${nim})`}</strong> dan <strong>PIN {pin.length} angka</strong> yang baru Anda buat.
+              </p>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', justifyContent: 'center', width: '100%' }}>
+                <a href="/kasir/login" className="btn btn-primary" style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 1, minWidth: 160 }}>Login Kasir POS →</a>
+                <a href="/login" className="btn btn-secondary" style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 1, minWidth: 160 }}>Login Admin →</a>
+              </div>
             </div>
           )}
         </div>

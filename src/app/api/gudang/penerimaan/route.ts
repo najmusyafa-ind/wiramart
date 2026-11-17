@@ -9,20 +9,24 @@ import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import {
   createStockReceiveDraft,
   getStockReceiveDrafts,
+  getSupplierInvoiceTableRows,
   CreateStockReceiveDraftSchema,
 } from '@/lib/services/stockReceiveService';
 import { AppError } from '@/lib/utils/helpers';
 import { z, ZodError } from 'zod';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const GetPenerimaanQuerySchema = z.object({
   status: z.string().max(50).optional(),
+  view: z.enum(['drafts', 'table']).optional().default('drafts'),
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(300).default(20),
 });
 
-// ── GET: Ambil Daftar Penerimaan Barang ─────────────────────────
+// ── GET: Ambil Daftar Penerimaan Barang / Tabel Buku Nota Lengkap ──
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || (payload.role !== 'employee' && payload.role !== 'admin')) {
@@ -43,13 +47,19 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const { status, page, limit } = parsed.data;
-
-  // Zero-Trust IDOR Protection:
-  // Karyawan hanya bisa melihat draft milik sendiri. Admin/Manager bisa melihat semua antrian.
+  const { status, view, page, limit } = parsed.data;
   const employeeId = payload.role === 'employee' ? payload.sub : undefined;
 
   try {
+    if (view === 'table') {
+      const tableRows = await getSupplierInvoiceTableRows({
+        employeeId,
+        status,
+        limit,
+      });
+      return apiOk({ items: tableRows });
+    }
+
     const data = await getStockReceiveDrafts({
       employeeId,
       status,
@@ -64,17 +74,17 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── POST: Buat Draft Penerimaan Barang Baru ─────────────────────
+// ── POST: Buat Draft / Simpan Nota Supplier Baru (Gudang & Admin Kasir) ──
 export async function POST(req: NextRequest) {
   const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'employee') {
-    return apiError('Forbidden: Pembuatan draft penerimaan hanya untuk akun petugas toko / gudang', 403);
+  if (!payload || (payload.role !== 'employee' && payload.role !== 'admin')) {
+    return apiError('Forbidden: Pembuatan nota penerimaan hanya untuk Petugas Gudang atau Admin Kasir', 403);
   }
 
   try {
     const body = await req.json();
     const validatedBody = CreateStockReceiveDraftSchema.parse(body);
-    const result = await createStockReceiveDraft(payload.sub, validatedBody);
+    const result = await createStockReceiveDraft(payload.sub, validatedBody, payload.role);
     return apiOk(result, 201);
   } catch (error) {
     if (error instanceof ZodError) {
