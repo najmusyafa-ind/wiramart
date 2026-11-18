@@ -5,9 +5,7 @@ import { getAdminSession } from '@/lib/utils/auth';
 import { db } from '@/lib/db/client';
 import { admins } from '@/lib/db/schema';
 import {
-  ADMIN_DASHBOARD_PATH,
   ADMIN_LOGIN_PATH,
-  MANAGER_DASHBOARD_PATH,
   type PortalAdminRole,
 } from '@/lib/utils/routes';
 

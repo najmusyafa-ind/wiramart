@@ -56,7 +56,10 @@ export async function GET(req: NextRequest) {
     ]);
 
     if (!employee) {
-      return apiError('Akun kasir tidak aktif atau tidak ditemukan', 'UNAUTHORIZED', 401);
+      const errRes = apiError('Akun kasir tidak aktif atau tidak ditemukan', 'UNAUTHORIZED', 401);
+      errRes.cookies.delete('sk_kasir');
+      errRes.cookies.delete('sk_kasir_r');
+      return errRes;
     }
 
     const resolution = await resolveActiveDrawerShift({
