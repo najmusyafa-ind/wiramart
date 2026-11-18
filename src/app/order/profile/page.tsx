@@ -25,7 +25,7 @@ export default async function BuyerProfilePage() {
   // Pastikan akun buyer masih ada & aktif di database (bukan sekadar cookie JWT basi setelah akun dihapus)
   const profile = await getActiveBuyerProfile(session.sub);
   if (!profile) {
-    redirect('/order/login?next=/order/profile');
+    redirect('/order/login?reason=invalid_session&next=/order/profile');
   }
 
   let initialOrders: BuyerOrderSummary[] = [];

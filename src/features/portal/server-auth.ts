@@ -48,19 +48,19 @@ export const getVerifiedPortalActor = cache(async (): Promise<VerifiedPortalActo
 
 export async function requirePortalActor(): Promise<VerifiedPortalActor> {
   const actor = await getVerifiedPortalActor();
-  if (!actor) redirect(ADMIN_LOGIN_PATH);
+  if (!actor) redirect(`${ADMIN_LOGIN_PATH}?reason=invalid_session`);
   return actor;
 }
 
 export async function requireManagerActor(): Promise<VerifiedPortalActor> {
   const actor = await requirePortalActor();
-  if (actor.adminRole !== 'MANAGER') redirect(ADMIN_DASHBOARD_PATH);
+  if (actor.adminRole !== 'MANAGER') redirect(`${ADMIN_LOGIN_PATH}?reason=invalid_session`);
   return actor;
 }
 
 export async function requireAdminShiftActor(): Promise<VerifiedPortalActor> {
   const actor = await requirePortalActor();
-  if (actor.adminRole === 'MANAGER') redirect(MANAGER_DASHBOARD_PATH);
+  if (actor.adminRole === 'MANAGER') redirect(`${ADMIN_LOGIN_PATH}?reason=invalid_session`);
   return actor;
 }
 

@@ -55,6 +55,11 @@ export default function LoginPage() {
     const timeout = sp.get('timeout');
     const timedOutRole = sp.get('role');
 
+    if (reason === 'invalid_session') {
+      clearIdleStorage('admin');
+      return;
+    }
+
     if (reason !== 'idle') return;
 
     const timerId = window.setTimeout(() => {

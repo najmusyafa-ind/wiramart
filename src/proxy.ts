@@ -137,8 +137,15 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     return NextResponse.redirect(new URL(`${mappedPath}${search}`, request.url));
   }
 
-  // --- Auth routes (login pages): redirect jika admin sudah login ---
+  // --- Auth routes (login pages): bersihkan cookie basi jika sesi tidak valid di DB, atau redirect jika admin masih valid ---
+  const reason = request.nextUrl.searchParams.get('reason');
   if (pathname === ADMIN_LOGIN_PATH) {
+    if (reason === 'invalid_session' || reason === 'idle') {
+      const res = NextResponse.next();
+      res.cookies.delete(ADMIN_ACCESS_COOKIE);
+      res.cookies.delete('sk_admin_r');
+      return res;
+    }
     if (adminSession) {
       return NextResponse.redirect(
         new URL(getDashboardPathForRole(adminSession.adminRole), request.url),
@@ -148,7 +155,19 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   }
 
   if (pathname === KASIR_LOGIN_PATH || pathname === GUDANG_LOGIN_PATH) {
+    if (reason === 'invalid_session' || reason === 'idle') {
+      const res = NextResponse.next();
+      res.cookies.delete(KASIR_ACCESS_COOKIE);
+      res.cookies.delete('sk_kasir_r');
+      return res;
+    }
     return NextResponse.next();
+  }
+
+  if (pathname === '/order/login' && reason === 'invalid_session') {
+    const res = NextResponse.next();
+    res.cookies.delete('sk_buyer');
+    return res;
   }
 
   // --- Gudang routes (/gudang & /gudang/**) ---
