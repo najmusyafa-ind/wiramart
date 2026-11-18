@@ -6,6 +6,7 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { getBuyerSession } from '@/lib/utils/auth';
+import { getActiveBuyerProfile } from '@/features/order/buyer.service';
 import { getOrdersByBuyerId } from '@/features/order/order.service';
 import ProfileClient, { type BuyerOrderSummary } from './ProfileClient';
 
@@ -21,9 +22,15 @@ export default async function BuyerProfilePage() {
     redirect('/order/login?next=/order/profile');
   }
 
+  // Pastikan akun buyer masih ada & aktif di database (bukan sekadar cookie JWT basi setelah akun dihapus)
+  const profile = await getActiveBuyerProfile(session.sub);
+  if (!profile) {
+    redirect('/order/login?next=/order/profile');
+  }
+
   let initialOrders: BuyerOrderSummary[] = [];
   try {
-    const rows = await getOrdersByBuyerId(session.sub, 15);
+    const rows = await getOrdersByBuyerId(profile.id, 15);
     initialOrders = rows.map((row) => ({
       id: row.id,
       orderNumber: row.orderNumber,
@@ -42,9 +49,9 @@ export default async function BuyerProfilePage() {
   return (
     <ProfileClient
       initialBuyer={{
-        id: session.sub,
-        fullName: session.name,
-        nim: session.nim,
+        id: profile.id,
+        fullName: profile.name,
+        nim: profile.nim,
       }}
       initialOrders={initialOrders}
     />
