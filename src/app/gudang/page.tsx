@@ -1079,7 +1079,7 @@ export default function GudangPortalPage() {
         ) : (
           /* ── TAB KONTEN 2: LIST PRODUK GUDANG & RADAR FEFO ── */
           <section>
-            {/* ── CARD EDUKASI Makanan Basah (PERISHABLE) ── */}
+            {/* ── CARD EDUKASI Makanan Harian (PERISHABLE) ── */}
             {activeTab === 'perishable' && (
               <div
                 style={{
@@ -1122,14 +1122,14 @@ export default function GudangPortalPage() {
                       <span>🥫 Tipe 1: Produk Kemasan Ber-Barcode (FEFO)</span>
                     </div>
                     <p style={{ margin: 0, lineHeight: 1.45 }}>
-                      <strong>Sistem FEFO:</strong> Minuman botol (Ades, Sprite), susu, biskuit, snack pabrik. Tanggal expired dicatat per batch dus masuk dan dipantau 7 s/d 30 hari sebelum basi. Produk expired terdekat wajib ditaruh paling depan rak.
+                      <strong>Sistem FEFO:</strong> Minuman botol (Ades, Sprite), susu, biskuit, snack pabrik. Tanggal expired dicatat per batch dus masuk dan dipantau 7 s/d 30 hari sebelum kedaluwarsa. Produk kedaluwarsa terdekat wajib ditempatkan paling depan rak.
                     </p>
                     <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#ea580c', fontWeight: 700 }}>
                       &bull; {summary ? `${summary.expiringSoonSku} batch mendekati expired` : 'Dipantau otomatis'}
                     </div>
                   </div>
 
-                  {/* Tipe 2: Makanan Basah Non-Barcode */}
+                  {/* Tipe 2: Makanan Harian Non-Barcode */}
                   <div
                     style={{
                       backgroundColor: activeTab === 'perishable' ? '#f0fdf4' : '#f8fafc',
@@ -1141,13 +1141,13 @@ export default function GudangPortalPage() {
                     onClick={() => setActiveTab('perishable')}
                   >
                     <div style={{ fontWeight: 800, color: '#15803d', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span>🥪 Tipe 2: Makanan Basah Non-Barcode (Harian)</span>
+                      <span>🥪 Tipe 2: Makanan Harian (Wajib Habis 1 Hari)</span>
                     </div>
                     <p style={{ margin: 0, lineHeight: 1.45 }}>
-                      <strong>Kadaluarsa 1 Hari (Cut-off Jam 15:00 WIB):</strong> Risol, lemper, ricebowl, donat, jajanan pasar konsinyasi/titipan mitra. <em>Wajib habis hari ini juga</em>. Jam 15:00 sore wajib cut-off sisa (retur/obral), dilarang menginap di rak!
+                      <strong>Batas Konsumsi 1 Hari (Cut-off Pukul 15:00 WIB):</strong> Nasi bungkus, risol, donat, cilok, kue tradisional, dan makanan titipan harian. <em>Wajib habis di hari yang sama</em>. Pukul 15:00 WIB wajib dilakukan cut-off sisa (retur/obral) dan stok sisa otomatis di-reset menjadi 0 saat pergantian hari.
                     </p>
                     <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#16a34a', fontWeight: 700 }}>
-                      &bull; {summary ? `${summary.perishableSku ?? 0} item makanan basah terdaftar` : 'Wajib Cut-Off Jam 15:00'}
+                      &bull; {summary ? `${summary.perishableSku ?? 0} item Makanan Harian terdaftar` : 'Wajib Cut-Off Jam 15:00'}
                     </div>
                   </div>
                 </div>
@@ -1157,7 +1157,7 @@ export default function GudangPortalPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <h2 style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1e293b' }}>
                 {activeTab === 'perishable'
-                  ? 'Daftar Makanan Basah Harian (Kadaluarsa 1 Hari / Cut-off 15:00)'
+                  ? 'Daftar Makanan Harian (Wajib Habis 1 Hari / Cut-off 15:00 WIB)'
                   : activeTab === 'fefo'
                   ? 'Radar Produk FEFO Mendekati Kedaluwarsa (Read-Only)'
                   : activeTab === 'kritis'

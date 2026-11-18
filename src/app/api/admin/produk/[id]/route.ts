@@ -34,6 +34,8 @@ const PatchSchema = z.object({
   stockAdjustmentReason: z.string().max(300).optional(),
   unit: z.string().max(20).optional(),
   isActive: z.boolean().optional(),
+  isPerishable: z.boolean().optional(),
+  perishableType: z.enum(['KONSINYASI', 'BELI_LEPAS']).optional(),
   categoryId: z.string().uuid().optional(),
 });
 
@@ -101,6 +103,8 @@ export async function PATCH(req: NextRequest, ctx: Context) {
     }
     if (parsed.data.unit !== undefined) updateData.unit = parsed.data.unit;
     if (parsed.data.isActive !== undefined) updateData.isActive = parsed.data.isActive;
+    if (parsed.data.isPerishable !== undefined) updateData.isPerishable = parsed.data.isPerishable;
+    if (parsed.data.perishableType !== undefined) updateData.perishableType = parsed.data.perishableType;
     if (parsed.data.categoryId !== undefined) updateData.categoryId = parsed.data.categoryId;
 
     if (parsed.data.barcode !== undefined) {
@@ -157,14 +161,16 @@ export async function PATCH(req: NextRequest, ctx: Context) {
       if (newStock > totalBatchQty) {
         // Penambahan stok manual -> buat batch baru memakai tanggal WIB
         const deltaBatch = newStock - totalBatchQty;
-        const batchCode = `ADJ-${getTodayWib(now).replace(/-/g, '')}-${randomInt(1000, 10000)}`;
+        const todayStr = getTodayWib(now);
+        const batchCode = `ADJ-${todayStr.replace(/-/g, '')}-${randomInt(1000, 10000)}`;
         await tx.insert(stockBatches).values({
           productId: id,
           batchCode,
           costPrice: updated.costPrice,
           initialQty: deltaBatch,
           currentQty: deltaBatch,
-          expiryClass: 'PANJANG',
+          expiryDate: updated.isPerishable ? todayStr : undefined,
+          expiryClass: updated.isPerishable ? 'HARIAN' : 'PANJANG',
           notes: 'Penyesuaian stok manual katalog produk',
         });
       } else if (newStock < totalBatchQty) {

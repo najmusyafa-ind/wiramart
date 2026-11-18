@@ -36,6 +36,7 @@ import {
 import UsulanProdukTab from './UsulanProdukTab';
 import BatchStokTab from './BatchStokTab';
 import RiwayatKoreksiStokTab from './RiwayatKoreksiStokTab';
+import { getBundlePriceDisplay } from '@/lib/utils/helpers';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -50,6 +51,8 @@ type Product = {
   stockQty: number;
   unit: string;
   isActive: boolean;
+  isPerishable?: boolean;
+  perishableType?: 'KONSINYASI' | 'BELI_LEPAS' | string | null;
   categoryId: string;
   categoryName: string;
   photoUrl?: string | null;
@@ -645,14 +648,16 @@ function ProdukModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({
-    categoryId:   editData?.categoryId ?? '',
-    name:         editData?.name ?? prefillName ?? '',
-    description:  editData?.description ?? '',
-    barcode:      editData?.barcode ?? prefillBarcode ?? '',
-    costPrice:    editData?.costPrice ?? '',
-    sellingPrice: editData?.sellingPrice ?? '',
-    stockQty:     editData?.stockQty?.toString() ?? '0',
-    unit:         editData?.unit ?? 'pcs',
+    categoryId:     editData?.categoryId ?? '',
+    name:           editData?.name ?? prefillName ?? '',
+    description:    editData?.description ?? '',
+    barcode:        editData?.barcode ?? prefillBarcode ?? '',
+    costPrice:      editData?.costPrice ?? '',
+    sellingPrice:   editData?.sellingPrice ?? '',
+    stockQty:       editData?.stockQty?.toString() ?? '0',
+    unit:           editData?.unit ?? 'pcs',
+    isPerishable:   Boolean(editData?.isPerishable),
+    perishableType: (editData?.perishableType === 'BELI_LEPAS' ? 'BELI_LEPAS' : 'KONSINYASI') as 'KONSINYASI' | 'BELI_LEPAS',
   });
 
   // Update nama jika prefill berubah setelah mount (saat fetch OFF selesai)
@@ -855,6 +860,96 @@ function ProdukModal({
                 disabled={loading}
                 style={{ fontFamily: 'var(--font-mono)', letterSpacing: 1, fontSize: 'var(--text-base)', minHeight: 44 }} />
             </div>
+            {/* Pengaturan Makanan Harian (Wajib Habis 1 Hari) */}
+            <div
+              style={{
+                padding: 'var(--space-3)',
+                borderRadius: 'var(--radius-md)',
+                border: form.isPerishable
+                  ? '1.5px solid hsl(28 90% 55%)'
+                  : '1px solid var(--color-border)',
+                backgroundColor: form.isPerishable ? 'hsl(38 95% 96%)' : 'var(--color-surface)',
+              }}
+            >
+              <label
+                htmlFor={`${uid}-perishable`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 'var(--space-2)',
+                  cursor: 'pointer',
+                  fontSize: 'var(--text-sm)',
+                  fontWeight: 'var(--weight-semibold)',
+                  color: 'var(--color-text)',
+                }}
+              >
+                <input
+                  id={`${uid}-perishable`}
+                  type="checkbox"
+                  checked={form.isPerishable}
+                  onChange={(e) => setForm((f) => ({ ...f, isPerishable: e.target.checked }))}
+                  disabled={loading}
+                  style={{ width: 18, height: 18, marginTop: 2, flexShrink: 0 }}
+                />
+                <div>
+                  <div>Makanan Harian (Wajib Habis di Hari yang Sama)</div>
+                  <div
+                    style={{
+                      fontSize: 'var(--text-xs)',
+                      fontWeight: 'var(--weight-normal)',
+                      color: 'var(--color-text-muted)',
+                      marginTop: 2,
+                    }}
+                  >
+                    Aktifkan untuk nasi bungkus, gorengan, kue basah, atau jajanan titipan harian agar sisa stok otomatis di-reset menjadi 0 setiap pergantian hari.
+                  </div>
+                </div>
+              </label>
+              {form.isPerishable && (
+                <div style={{ marginTop: 'var(--space-3)', paddingLeft: 26 }}>
+                  <label
+                    htmlFor={`${uid}-perishable-type`}
+                    className="form-label"
+                    style={{ fontSize: 'var(--text-xs)', marginBottom: 4 }}
+                  >
+                    Skema Kepemilikan Makanan Harian
+                  </label>
+                  <select
+                    id={`${uid}-perishable-type`}
+                    className="form-select"
+                    value={form.perishableType}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        perishableType: e.target.value as 'KONSINYASI' | 'BELI_LEPAS',
+                      }))
+                    }
+                    disabled={loading}
+                    style={{ fontSize: 'var(--text-sm)', minHeight: 40 }}
+                  >
+                    <option value="KONSINYASI">Konsinyasi (Titipan Mitra / Supplier)</option>
+                    <option value="BELI_LEPAS">Beli Lepas (Modal Toko)</option>
+                  </select>
+                </div>
+              )}
+            </div>
+            {getBundlePriceDisplay(form.sellingPrice, form.unit).step > 1 && (
+              <div
+                style={{
+                  padding: 'var(--space-3)',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'hsl(214 95% 95%)',
+                  border: '1px solid hsl(214 85% 80%)',
+                  fontSize: 'var(--text-xs)',
+                  color: 'hsl(214 85% 28%)',
+                  fontWeight: 'var(--weight-medium)',
+                }}
+              >
+                Paket Eceran Otomatis Aktif: Harga satuan Rp {parseFloat(form.sellingPrice).toLocaleString('id-ID')}/{form.unit} akan dijual per paket{' '}
+                <strong>{getBundlePriceDisplay(form.sellingPrice, form.unit).primaryLabel}</strong> (dan{' '}
+                <strong>{getBundlePriceDisplay(form.sellingPrice, form.unit).secondaryLabel}</strong>) di mesin kasir POS.
+              </div>
+            )}
             {margin !== null && marginPct !== null && (
               <div style={{
                 padding: 'var(--space-3)', borderRadius: 'var(--radius-md)',
@@ -1413,7 +1508,24 @@ export default function ProdukPage() {
                   {products.map((p) => (
                     <tr key={p.id}>
                       <td>
-                        <div style={{ fontWeight: 'var(--weight-medium)' }}>{p.name}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 'var(--weight-medium)' }}>{p.name}</span>
+                          {p.isPerishable && (
+                            <span
+                              style={{
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                padding: '2px 7px',
+                                borderRadius: 999,
+                                backgroundColor: 'hsl(38 95% 92%)',
+                                color: 'hsl(28 90% 30%)',
+                                border: '1px solid hsl(38 90% 75%)',
+                              }}
+                            >
+                              Makanan Harian
+                            </span>
+                          )}
+                        </div>
                         {p.description && (
                           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                             {p.description}
@@ -1429,7 +1541,20 @@ export default function ProdukPage() {
                         Rp {parseFloat(p.costPrice).toLocaleString('id-ID')}
                       </td>
                       <td className="text-right" style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-primary)' }}>
-                        Rp {parseFloat(p.sellingPrice).toLocaleString('id-ID')}
+                        {(() => {
+                          const bundle = getBundlePriceDisplay(p.sellingPrice, p.unit);
+                          if (bundle.step > 1) {
+                            return (
+                              <div>
+                                <div>{bundle.primaryLabel}</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', fontWeight: 'var(--weight-normal)' }}>
+                                  @Rp {bundle.unitPrice.toLocaleString('id-ID')}/{p.unit}
+                                </div>
+                              </div>
+                            );
+                          }
+                          return <>Rp {parseFloat(p.sellingPrice).toLocaleString('id-ID')}</>;
+                        })()}
                       </td>
                       <td className="text-right">
                         {(() => {

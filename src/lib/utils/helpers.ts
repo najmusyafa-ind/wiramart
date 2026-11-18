@@ -240,5 +240,82 @@ export function computeFefoDiscountedPrice(originalPrice: number, discountPct: n
   return Math.max(0, Math.round(safePrice * (1 - safePct / 100)));
 }
 
+/**
+ * Mengembalikan objek Date yang merepresentasikan pukul 00:00:00.000 WIB pada hari ini.
+ * Dipakai untuk mendeteksi stok Makanan Harian yang belum di-reset sejak hari sebelumnya.
+ */
+export function getStartOfTodayWib(now = new Date()): Date {
+  const todayStr = getTodayWib(now);
+  return new Date(`${todayStr}T00:00:00.000+07:00`);
+}
+
+/**
+ * Menghitung kelipatan paket eceran minimum (bundle step) berdasarkan harga satuan.
+ * Contoh warung/ritel: harga satuan Rp 250/pcs -> step 2 pcs (Rp 500 dapat 2, Rp 1.000 dapat 4).
+ */
+export function getProductBundleStep(sellingPrice: number | string | null | undefined): number {
+  const raw = typeof sellingPrice === 'string' ? parseFloat(sellingPrice) : Number(sellingPrice ?? 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 1;
+  const price = Math.round(raw);
+  if (price > 0 && price < 500 && 500 % price === 0) {
+    return Math.max(1, Math.round(500 / price));
+  }
+  return 1;
+}
+
+/**
+ * Membulatkan jumlah item ke kelipatan paket (bundleStep) yang valid dan tidak melebihi stok.
+ */
+export function snapToBundleQty(qty: number, step: number, maxStock?: number): number {
+  const safeStep = Math.max(1, Math.round(step));
+  const rawQty = Math.max(safeStep, Math.round(qty / safeStep) * safeStep);
+  if (maxStock !== undefined && Number.isFinite(maxStock)) {
+    const maxAllowed = Math.floor(Math.max(0, maxStock) / safeStep) * safeStep;
+    return Math.min(rawQty, maxAllowed);
+  }
+  return rawQty;
+}
+
+/**
+ * Menghasilkan label harga ramah pengguna untuk produk paket eceran (mis. Rp 500 / 2 pcs).
+ */
+export function getBundlePriceDisplay(
+  sellingPrice: number | string | null | undefined,
+  unit = 'pcs',
+): {
+  step: number;
+  unitPrice: number;
+  bundlePrice: number;
+  primaryLabel: string;
+  secondaryLabel: string | null;
+} {
+  const raw = typeof sellingPrice === 'string' ? parseFloat(sellingPrice) : Number(sellingPrice ?? 0);
+  const unitPrice = Number.isFinite(raw) && raw > 0 ? Math.round(raw) : 0;
+  const step = getProductBundleStep(unitPrice);
+  const bundlePrice = unitPrice * step;
+  const cleanUnit = unit?.trim() || 'pcs';
+
+  if (step > 1) {
+    const doubleStep = step * 2;
+    const doublePrice = unitPrice * doubleStep;
+    return {
+      step,
+      unitPrice,
+      bundlePrice,
+      primaryLabel: `Rp ${bundlePrice.toLocaleString('id-ID')} / ${step} ${cleanUnit}`,
+      secondaryLabel: `Rp ${doublePrice.toLocaleString('id-ID')} / ${doubleStep} ${cleanUnit}`,
+    };
+  }
+
+  return {
+    step: 1,
+    unitPrice,
+    bundlePrice: unitPrice,
+    primaryLabel: `Rp ${unitPrice.toLocaleString('id-ID')}`,
+    secondaryLabel: null,
+  };
+}
+
+
 
 

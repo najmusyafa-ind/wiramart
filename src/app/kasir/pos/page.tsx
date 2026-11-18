@@ -12,7 +12,13 @@ import { useRouter } from 'next/navigation';
 import KalkulatorPecahan, { type DenominasiMap } from './KalkulatorPecahan';
 import KasGerakModal from './KasGerakModal';
 import SisaMakananModal from './SisaMakananModal';
-import { getHourWib, getTodayWib } from '@/lib/utils/helpers';
+import {
+  getBundlePriceDisplay,
+  getHourWib,
+  getProductBundleStep,
+  getTodayWib,
+  snapToBundleQty,
+} from '@/lib/utils/helpers';
 
 // BarcodeDetector Type — Shape Detection API (belum di TS stdlib)
 declare class BarcodeDetector {
@@ -136,7 +142,8 @@ function ProductCard({
   onAdd: (p: Product) => void;
   lowStockThreshold?: number;
 }) {
-  const isOut = product.stockQty <= 0;
+  const bundle = getBundlePriceDisplay(product.sellingPrice, product.unit);
+  const isOut = product.stockQty < bundle.step;
   const isLow = !isOut && product.stockQty <= lowStockThreshold;
   return (
     <button
@@ -162,9 +169,26 @@ function ProductCard({
         )}
       </div>
       <div className="pos-product-name">{product.name}</div>
-      <div className="pos-product-price">{rp(parseFloat(product.sellingPrice))}</div>
+      <div className="pos-product-price">
+        {bundle.step > 1 ? bundle.primaryLabel : rp(parseFloat(product.sellingPrice))}
+      </div>
+      {bundle.secondaryLabel && (
+        <div
+          style={{
+            fontSize: '0.68rem',
+            fontWeight: 700,
+            color: 'var(--color-primary)',
+            marginTop: -2,
+          }}
+        >
+          {bundle.secondaryLabel}
+        </div>
+      )}
       {!isLow && !isOut && (
-        <div className="pos-product-stock">Stok: {product.stockQty} {product.unit}</div>
+        <div className="pos-product-stock">
+          Stok: {product.stockQty} {product.unit}
+          {product.isPerishable ? ' • Makanan Harian' : ''}
+        </div>
       )}
     </button>
   );
@@ -1991,24 +2015,29 @@ export default function PosPage() {
 
   /** @returns true jika item berhasil ditambahkan ke keranjang */
   const addToCart = (product: Product): boolean => {
-    if (product.stockQty <= 0) {
-      showCartToast(`"${product.name}" stok habis di sistem. Cek fisik barang / hubungi admin.`);
+    const step = getProductBundleStep(product.sellingPrice);
+    if (product.stockQty < step) {
+      showCartToast(
+        step > 1
+          ? `"${product.name}" stok tersisa ${product.stockQty} ${product.unit} (minimal paket ${step} ${product.unit}).`
+          : `"${product.name}" stok habis di sistem. Cek fisik barang / hubungi admin.`,
+      );
       return false;
     }
     const targetKey = getCartKey(product);
     const existing = cartRef.current.find((i) => (i.cartKey || getCartKey(i)) === targetKey);
-    if (existing && existing.qty >= product.stockQty) {
-      showCartToast(`Stok "${product.name}" di sistem hanya ${product.stockQty}. Tidak bisa ditambah lagi.`);
+    if (existing && existing.qty + step > product.stockQty) {
+      showCartToast(`Stok "${product.name}" di sistem hanya ${product.stockQty} ${product.unit}. Tidak bisa ditambah lagi.`);
       return false;
     }
     applyCart((prev) => {
       const found = prev.find((i) => (i.cartKey || getCartKey(i)) === targetKey);
       if (found) {
         return prev.map((i) =>
-          (i.cartKey || getCartKey(i)) === targetKey ? { ...i, qty: i.qty + 1 } : i,
+          (i.cartKey || getCartKey(i)) === targetKey ? { ...i, qty: i.qty + step } : i,
         );
       }
-      return [...prev, { ...product, cartKey: targetKey, qty: 1 }];
+      return [...prev, { ...product, cartKey: targetKey, qty: step }];
     });
     return true;
   };
@@ -2019,7 +2048,10 @@ export default function PosPage() {
         .map((i) => {
           const k = i.cartKey || getCartKey(i);
           if (k === keyOrId || i.id === keyOrId) {
-            return { ...i, qty: Math.max(0, Math.min(i.qty + delta, i.stockQty)) };
+            const step = getProductBundleStep(i.sellingPrice);
+            const signedDelta = delta > 0 ? step : -step;
+            const maxValid = Math.floor(i.stockQty / step) * step;
+            return { ...i, qty: Math.max(0, Math.min(i.qty + signedDelta, maxValid)) };
           }
           return i;
         })
@@ -2059,15 +2091,20 @@ export default function PosPage() {
   };
 
   const handleDirectQtyBlur = (keyOrId: string, currentQty: number) => {
-    if (currentQty <= 0) {
-      // Kembalikan ke 1 jika ditinggal kosong / 0
-      applyCart((prev) =>
-        prev.map((i) => {
-          const k = i.cartKey || getCartKey(i);
-          return (k === keyOrId || i.id === keyOrId) ? { ...i, qty: 1 } : i;
-        }),
-      );
-    }
+    applyCart((prev) =>
+      prev.map((i) => {
+        const k = i.cartKey || getCartKey(i);
+        if (k !== keyOrId && i.id !== keyOrId) return i;
+        const step = getProductBundleStep(i.sellingPrice);
+        const snapped = snapToBundleQty(currentQty <= 0 ? step : currentQty, step, i.stockQty);
+        if (step > 1 && currentQty > 0 && snapped !== currentQty) {
+          showCartToast(
+            `"${i.name}" dijual per paket kelipatan ${step} ${i.unit} (${rp(parseFloat(i.sellingPrice) * step)} / ${step} ${i.unit}).`,
+          );
+        }
+        return { ...i, qty: Math.max(step, snapped) };
+      }),
+    );
   };
 
   const clearCart = () => applyCart(() => []);
@@ -2398,7 +2435,7 @@ export default function PosPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'hsl(38 92% 30%)' }}>
                     <Utensils size={15} style={{ flexShrink: 0 }} />
                     <span>
-                      {perishableRemainingCount} item makanan basah/konsinyasi masih tersisa (&gt; 0) setelah jam 15:00 WIB.
+                      {perishableRemainingCount} item Makanan Harian / Konsinyasi masih tersisa (&gt; 0) setelah jam 15:00 WIB.
                     </span>
                   </div>
                   <button
@@ -2834,7 +2871,7 @@ export default function PosPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'hsl(32 90% 24%)', fontWeight: 600 }}>
               <Utensils size={16} style={{ color: 'hsl(32 90% 42%)', flexShrink: 0 }} />
               <span>
-                Cut-off 15:00 WIB: {perishableRemainingCount} item makanan basah/konsinyasi masih memiliki stok sisa.
+                Cut-off 15:00 WIB: {perishableRemainingCount} item Makanan Harian / Konsinyasi masih memiliki stok sisa.
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -3097,10 +3134,15 @@ export default function PosPage() {
                         )}
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-primary)', fontWeight: 'var(--weight-semibold)' }}>
                           {rp(parseFloat(item.sellingPrice) * item.qty)}
                         </span>
+                        {getProductBundleStep(item.sellingPrice) > 1 && (
+                          <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
+                            ({item.qty} {item.unit} • Paket {getProductBundleStep(item.sellingPrice)} {item.unit})
+                          </span>
+                        )}
                         {item.originalPrice && (
                           <span style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', textDecoration: 'line-through' }}>
                             {rp(parseFloat(item.originalPrice) * item.qty)}
@@ -3119,7 +3161,8 @@ export default function PosPage() {
                       </button>
                       <input
                         type="number"
-                        min={1}
+                        min={getProductBundleStep(item.sellingPrice)}
+                        step={getProductBundleStep(item.sellingPrice)}
                         max={item.stockQty}
                         value={item.qty === 0 ? '' : item.qty}
                         onChange={(e) => handleDirectQtyChange(itemKey, e.target.value, item.stockQty, item.name)}
@@ -3137,10 +3180,10 @@ export default function PosPage() {
                       />
                       <button
                         onClick={() => updateQty(itemKey, 1)}
-                        disabled={item.qty >= item.stockQty}
+                        disabled={item.qty + getProductBundleStep(item.sellingPrice) > item.stockQty}
                         aria-label={`Tambah ${item.name}`}
                         className="pos-qty-btn"
-                        style={{ opacity: item.qty >= item.stockQty ? 0.35 : 1 }}
+                        style={{ opacity: item.qty + getProductBundleStep(item.sellingPrice) > item.stockQty ? 0.35 : 1 }}
                       >
                         <Plus size={11} />
                       </button>

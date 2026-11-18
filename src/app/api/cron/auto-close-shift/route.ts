@@ -130,17 +130,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       )
       .limit(50);
 
-    if (activeShifts.length === 0) {
-      return NextResponse.json({
-        success: true,
-        message: 'Tidak ada shift aktif.',
-        closedCount: 0,
-        skippedCount: 0,
-        timestamp: nowWib.toISOString(),
-      });
-    }
-
-    // Proses setiap shift aktif secara serial (menghindari race condition)
+    // Proses setiap shift aktif secara serial (menghindari race condition).
+    // PENTING: Jangan return lebih awal bila activeShifts kosong agar PASS 2 (Auto-Absen)
+    // dan PASS 3 (Sapu Makanan Harian 00:00 WIB) tetap selalu dijalankan!
     for (const shift of activeShifts) {
       try {
         // Tentukan hari WIB saat kasir buka shift (bukan hari cron berjalan)
@@ -300,8 +292,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     // =========================================================================
-    // PASS 3: PERISHABLE DAILY FOOD MIDNIGHT SWEEP (Sapu Makanan Basah Jam 00:00 WIB)
-    // Makanan basah harian (is_perishable = true) memiliki batas konsumsi 1 hari.
+    // PASS 3: PERISHABLE DAILY FOOD MIDNIGHT SWEEP (Sapu Makanan Harian Jam 00:00 WIB)
+    // Makanan harian (is_perishable = true) memiliki batas konsumsi 1 hari.
     // Jika kasir lupa lapor cut-off saat shift sore, cron tengah malam akan
     // mereset stok ke 0 secara aman (ACID) & mencatat riwayat ke stock_adjustments.
     // =========================================================================
@@ -363,7 +355,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
                 qtyBefore,
                 qtyAfter: 0,
                 qtyDiff,
-                reason: `[AUTO-CRON-MIDNIGHT] Sapu otomatis sisa makanan basah ${item.perishableType || 'KONSINYASI'}. Kasir tidak melapor / sisa sore dibersihkan (${qtyBefore} ${item.unit}).`,
+                reason: `[AUTO-CRON-MIDNIGHT] Sapu otomatis sisa Makanan Harian (${item.perishableType || 'KONSINYASI'}). Sisa hari sebelumnya dibersihkan (${qtyBefore} ${item.unit}).`,
                 adjustedByAdminId: auditAdminId,
                 createdAt: nowWib,
               });
@@ -379,7 +371,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({
       success: true,
-      message: `Cron selesai. Ditutup: ${closedCount}, Dilewati: ${skippedCount}, Auto-Absen: ${absenCount}, Sapu Makanan Basah: ${sweptPerishableCount}.`,
+      message: `Cron selesai. Ditutup: ${closedCount}, Dilewati: ${skippedCount}, Auto-Absen: ${absenCount}, Sapu Makanan Harian: ${sweptPerishableCount}.`,
       closedCount,
       skippedCount,
       absenCount,

@@ -15,10 +15,84 @@ import {
   stockBatches,
   stockAdjustments,
 } from '@/lib/db/schema';
-import { eq, and, isNull, or, ilike, sql } from 'drizzle-orm';
+import { eq, and, isNull, or, ilike, gt, lt, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
-import { getTodayWib } from '@/lib/utils/helpers';
+import { getTodayWib, getStartOfTodayWib } from '@/lib/utils/helpers';
 import { getLowStockThreshold } from '@/lib/services/operationalSettingsService';
+
+let lastAdminLazySweepDateWib = '';
+let lastAdminLazySweepEpoch = 0;
+const ADMIN_LAZY_SWEEP_TTL_MS = 5 * 60 * 1_000;
+
+async function sweepYesterdayPerishableInAdmin(): Promise<void> {
+  const now = new Date();
+  const todayWib = getTodayWib(now);
+  const nowEpoch = now.getTime();
+  if (
+    lastAdminLazySweepDateWib === todayWib &&
+    nowEpoch - lastAdminLazySweepEpoch < ADMIN_LAZY_SWEEP_TTL_MS
+  ) {
+    return;
+  }
+  lastAdminLazySweepDateWib = todayWib;
+  lastAdminLazySweepEpoch = nowEpoch;
+
+  try {
+    const startOfToday = getStartOfTodayWib(now);
+    const staleItems = await db
+      .select({
+        id: products.id,
+        stockQty: products.stockQty,
+        unit: products.unit,
+        perishableType: products.perishableType,
+      })
+      .from(products)
+      .where(
+        and(
+          eq(products.isPerishable, true),
+          eq(products.isActive, true),
+          isNull(products.deletedAt),
+          gt(products.stockQty, 0),
+          lt(products.updatedAt, startOfToday),
+        ),
+      );
+
+    if (staleItems.length === 0) return;
+
+    const adminRow = await db.query.admins.findFirst({
+      where: eq(admins.isActive, true),
+      columns: { id: true },
+    });
+    if (!adminRow?.id) return;
+
+    await db.transaction(async (tx) => {
+      for (const item of staleItems) {
+        const qtyBefore = item.stockQty;
+        await tx
+          .update(products)
+          .set({ stockQty: 0, updatedAt: now })
+          .where(eq(products.id, item.id));
+
+        await tx
+          .update(stockBatches)
+          .set({ currentQty: 0, updatedAt: now })
+          .where(and(eq(stockBatches.productId, item.id), gt(stockBatches.currentQty, 0)));
+
+        await tx.insert(stockAdjustments).values({
+          productId: item.id,
+          qtyBefore,
+          qtyAfter: 0,
+          qtyDiff: -qtyBefore,
+          reason: `[AUTO-RESET-HARIAN] Sisa Makanan Harian (${item.perishableType || 'KONSINYASI'}) dari hari sebelumnya di-reset otomatis saat pergantian hari (${qtyBefore} ${item.unit}).`,
+          adjustedByAdminId: adminRow.id,
+          createdAt: now,
+        });
+      }
+    });
+  } catch {
+    // Non-blocking
+  }
+}
 
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
@@ -31,6 +105,7 @@ export async function GET(req: NextRequest) {
   const showAll = searchParams.get('showAll') === '1'; // include soft-deleted
 
   const lowStockThreshold = await getLowStockThreshold();
+  await sweepYesterdayPerishableInAdmin();
 
   const [rows, cats, [summaryRow]] = await Promise.all([
     db
@@ -44,6 +119,8 @@ export async function GET(req: NextRequest) {
         unit: products.unit,
         photoUrl: products.photoUrl,
         isActive: products.isActive,
+        isPerishable: products.isPerishable,
+        perishableType: products.perishableType,
         deletedAt: products.deletedAt,
         createdAt: products.createdAt,
         categoryId: products.categoryId,
@@ -104,6 +181,8 @@ const CreateProductSchema = z.object({
   sellingPrice: z.number().positive(),
   stockQty: z.number().int().nonnegative().default(0),
   unit: z.string().max(20).default('pcs'),
+  isPerishable: z.boolean().optional().default(false),
+  perishableType: z.enum(['KONSINYASI', 'BELI_LEPAS']).optional().default('KONSINYASI'),
 });
 
 export async function POST(req: NextRequest) {
@@ -155,7 +234,18 @@ export async function POST(req: NextRequest) {
   const parsed = CreateProductSchema.safeParse(body);
   if (!parsed.success) return apiError(parsed.error.flatten().fieldErrors, 422);
 
-  const { categoryId, name, description, barcode, costPrice, sellingPrice, stockQty, unit } = parsed.data;
+  const {
+    categoryId,
+    name,
+    description,
+    barcode,
+    costPrice,
+    sellingPrice,
+    stockQty,
+    unit,
+    isPerishable,
+    perishableType,
+  } = parsed.data;
 
   // Cek kategori valid
   const [cat] = await db
@@ -181,13 +271,16 @@ export async function POST(req: NextRequest) {
           sellingPrice: sellingPrice.toString(),
           stockQty,
           unit,
+          isPerishable,
+          perishableType,
           createdByAdminId: resolvedAdminId,
         })
         .returning();
 
       // Jika produk baru langsung memiliki stok awal > 0, buat batch INIT- & catat histori awal
       if (stockQty > 0) {
-        const batchCode = `INIT-${getTodayWib(now).replace(/-/g, '')}-${randomInt(1000, 10000)}`;
+        const todayStr = getTodayWib(now);
+        const batchCode = `INIT-${todayStr.replace(/-/g, '')}-${randomInt(1000, 10000)}`;
         const [initBatch] = await tx
           .insert(stockBatches)
           .values({
@@ -196,7 +289,8 @@ export async function POST(req: NextRequest) {
             costPrice: costPrice.toString(),
             initialQty: stockQty,
             currentQty: stockQty,
-            expiryClass: 'PANJANG',
+            expiryDate: isPerishable ? todayStr : undefined,
+            expiryClass: isPerishable ? 'HARIAN' : 'PANJANG',
             notes: `Stok awal produk baru oleh ${actorLabel}`,
           })
           .returning({ id: stockBatches.id });
