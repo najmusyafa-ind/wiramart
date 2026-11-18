@@ -38,8 +38,23 @@ import { formatRupiah } from './shared';
 import type { PeriodKey as ReportPeriodKey } from '@/lib/finance/report';
 import { useTableSelection } from '@/hooks/useTableSelection';
 import { SelectAllCheckbox, SelectedRowsBar } from '@/components/admin/SelectedRowsBar';
-import { exportSelectedRowsToExcel, todayWibSlug } from '@/lib/utils/exportSelectedExcel';
-import type ExcelJS from 'exceljs';
+import {
+  EXCEL_BORDER,
+  EXCEL_FILL,
+  EXCEL_FMT,
+  EXCEL_FONT,
+  applySheetLayout,
+  calcWrapRowHeight,
+  colLetter,
+  createWiramartWorkbook,
+  downloadWorkbookBlob,
+  exportSelectedRowsToExcel,
+  formatWibDateTime,
+  sanitizeExcelText,
+  styleBannerBlock,
+  toSafeExcelNum,
+  todayWibSlug,
+} from '@/lib/utils/exportSelectedExcel';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -630,212 +645,216 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
     });
   }
 
-  // Export Excel Profesional 4-Sheet (Standar Akuntansi, Tanpa Emoji, Tanpa AI-Slop)
+  // Export Excel Profesional 5-Sheet (Standar Akuntansi Wiramart, Rumus Dinamis, Cetak A4)
   async function handleExportExcel() {
     if (!data || filteredGroups.length === 0) return;
     setExportLoading(true);
     try {
-      const ExcelJS = (await import('exceljs')).default;
-      const wb = new ExcelJS.Workbook();
-      wb.creator = 'Wiramart UNPERBA — Smartkasir Perwira';
-      wb.lastModifiedBy = 'Manager (Dosen)';
-      wb.created = new Date();
-      wb.modified = new Date();
-
-      // Palette & Typography Akuntansi Bersih
-      const FONT_TITLE = { name: 'Calibri', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
-      const FONT_HEADER = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
-      const FONT_BOLD = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF1E293B' } };
-      const FONT_REGULAR = { name: 'Calibri', size: 10, color: { argb: 'FF1E293B' } };
-      const FONT_MUTED = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF64748B' } };
-
-      const FILL_NAVY = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
-      const FILL_HEADER = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2B4C7E' } };
-      const FILL_ZEBRA = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-      const FILL_TOTAL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
-
-      const BORDER_THIN = {
-        top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-        left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-        bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-        right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-      };
-
-      const BORDER_TOTAL = {
-        top: { style: 'thin', color: { argb: 'FF1E293B' } },
-        bottom: { style: 'double', color: { argb: 'FF1E293B' } },
-        left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-        right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-      };
-
-      const CURRENCY_FMT = '_("Rp "* #,##0_);_("Rp "* (#,##0);_("Rp "* "-"_);_(@_)';
-      const NUMBER_FMT = '#,##0';
+      const wb = await createWiramartWorkbook('Manager - Laporan Gaji & Shift');
+      const printedWib = formatWibDateTime();
+      const subtitlePeriod = `Periode: ${data.range.label} (${data.range.startDate} s/d ${data.range.endDate}) • Dicetak: ${printedWib} WIB`;
 
       // ─────────────────────────────────────────────────────────────────────
-      // SHEET 1: RINGKASAN FINANSIAL
+      // SHEET 1: RINGKASAN FINANSIAL & PEDOMAN RUMUS
       // ─────────────────────────────────────────────────────────────────────
-      const ws1 = wb.addWorksheet('Ringkasan Finansial', { views: [{ showGridLines: true }] });
-      ws1.columns = [{ width: 4 }, { width: 36 }, { width: 24 }, { width: 48 }];
-
-      ws1.mergeCells('B2:D2');
-      const h1 = ws1.getCell('B2');
-      h1.value = 'WIRAMART UNPERBA — LAPORAN REKAPITULASI KEUANGAN & BAGI HASIL';
-      h1.font = FONT_TITLE;
-      h1.fill = FILL_NAVY as ExcelJS.Fill;
-      h1.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws1.getRow(2).height = 28;
-
-      ws1.mergeCells('B3:D3');
-      const h2 = ws1.getCell('B3');
-      h2.value = `Periode Operasional: ${data.range.label} | Sistem Pembagian Gaji Hybrid 70% Kehadiran / 30% Kinerja`;
-      h2.font = FONT_MUTED;
-      h2.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws1.getRow(3).height = 20;
-
-      const r5 = ws1.getRow(5);
-      r5.values = ['', 'Pos Finansial', 'Nilai (Rupiah / Satuan)', 'Keterangan Sistem'];
-      ['B5', 'C5', 'D5'].forEach((addr) => {
-        const c = ws1.getCell(addr);
-        c.font = FONT_HEADER;
-        c.fill = FILL_HEADER as ExcelJS.Fill;
-        c.alignment = { vertical: 'middle', horizontal: addr === 'C5' ? 'right' : 'left' };
+      const ws1 = wb.addWorksheet('Ringkasan Finansial');
+      const cols1 = [
+        { header: 'Pos Finansial', width: 34, align: 'left' as const },
+        { header: 'Nilai (Rupiah / Satuan)', width: 24, align: 'right' as const },
+        { header: 'Keterangan Sistem', width: 56, align: 'left' as const },
+      ];
+      cols1.forEach((c, i) => {
+        ws1.getColumn(i + 1).width = c.width;
       });
-      r5.height = 22;
 
-      const summaryRows = [
-        { pos: 'Total Transaksi Kasir', val: data.grandTotal.txCount, fmt: NUMBER_FMT, desc: 'Jumlah transaksi sukses tercatat di POS kasir' },
-        { pos: 'Total Omzet Penjualan', val: data.grandTotal.omzet, fmt: CURRENCY_FMT, desc: 'Total penerimaan kotor dari seluruh transaksi produk' },
-        { pos: 'Laba Kotor Operasional', val: data.grandTotal.labaKotor, fmt: CURRENCY_FMT, desc: 'Selisih harga jual terhadap HPP (Cost of Goods Sold)' },
-        { pos: 'Beban Operasional Toko', val: data.grandTotal.biayaOperasional ?? 50000, fmt: CURRENCY_FMT, desc: 'Biaya utilitas & operasional paten bulanan UMKM' },
-        { pos: 'Laba Bersih Operasional', val: data.grandTotal.labaOperasionalBersih ?? (data.grandTotal.labaKotor - 50000), fmt: CURRENCY_FMT, desc: 'Laba Kotor dikurangi Beban Operasional Toko' },
-        { pos: 'Alokasi Hak Mahasiswa (50%)', val: data.grandTotal.poolGaji, fmt: CURRENCY_FMT, desc: 'Plafon total upah bagi hasil seluruh mahasiswa shift' },
-        { pos: 'Alokasi Kas Toko (50%)', val: data.grandTotal.labaBersihToko ?? data.grandTotal.poolGaji, fmt: CURRENCY_FMT, desc: 'Bagian kas bersih toko untuk pengembangan UMKM' },
-        { pos: 'Total Upah Terdistribusi', val: data.grandTotal.totalDistributed ?? data.grandTotal.poolGaji, fmt: CURRENCY_FMT, desc: 'Total upah yang disalurkan tuntas ke seluruh anggota' },
-        { pos: 'Sisa Saldo Pool (Kebocoran)', val: data.grandTotal.sisaPool ?? 0, fmt: CURRENCY_FMT, desc: 'Metode Hamilton menjamin zero-leakage (Rp 0 selisih)' },
+      styleBannerBlock(ws1, {
+        title: 'LAPORAN REKAPITULASI KEUANGAN & BAGI HASIL SHIFT — WIRAMART UNPERBA',
+        subtitle: `${subtitlePeriod} • Skema Pembagian Hybrid 70% Kehadiran / 30% Kinerja`,
+        endCol: cols1.length,
+        titleRow: 1,
+        subtitleRow: 2,
+      });
+      ws1.getRow(3).height = 8;
+
+      const r1Head = ws1.getRow(4);
+      r1Head.height = 26;
+      cols1.forEach((c, i) => {
+        const cell = r1Head.getCell(i + 1);
+        cell.value = c.header;
+        cell.font = EXCEL_FONT.HEADER;
+        cell.fill = EXCEL_FILL.HEADER;
+        cell.border = EXCEL_BORDER.HEADER;
+        cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
+      });
+
+      const gtTx = Math.round(toSafeExcelNum(data.grandTotal.txCount));
+      const gtOmzet = Math.round(toSafeExcelNum(data.grandTotal.omzet));
+      const gtLabaKotor = Math.round(toSafeExcelNum(data.grandTotal.labaKotor));
+      const gtBiayaOp = Math.round(toSafeExcelNum(data.grandTotal.biayaOperasional));
+      const gtLabaOp = Math.round(
+        toSafeExcelNum(data.grandTotal.labaOperasionalBersih ?? Math.max(0, gtLabaKotor - gtBiayaOp)),
+      );
+      const gtPoolGaji = Math.round(toSafeExcelNum(data.grandTotal.poolGaji));
+      const gtKasToko = Math.round(toSafeExcelNum(data.grandTotal.labaBersihToko ?? gtPoolGaji));
+      const gtDistributed = Math.round(toSafeExcelNum(data.grandTotal.totalDistributed ?? gtPoolGaji));
+      const gtSisaPool = Math.round(toSafeExcelNum(data.grandTotal.sisaPool ?? gtPoolGaji - gtDistributed));
+
+      const summaryRows: {
+        pos: string;
+        val: number | { formula: string; result: number };
+        fmt: string;
+        desc: string;
+        highlight?: boolean;
+      }[] = [
+        { pos: 'Total Transaksi Kasir', val: gtTx, fmt: EXCEL_FMT.INT, desc: 'Jumlah transaksi sukses tercatat pada POS kasir' },
+        { pos: 'Total Omzet Penjualan', val: gtOmzet, fmt: EXCEL_FMT.RUPIAH, desc: 'Total penerimaan kotor dari seluruh penjualan produk' },
+        { pos: 'Laba Kotor Operasional', val: gtLabaKotor, fmt: EXCEL_FMT.RUPIAH, desc: 'Selisih harga jual terhadap HPP (Cost of Goods Sold)' },
+        { pos: 'Beban Operasional Toko', val: gtBiayaOp, fmt: EXCEL_FMT.RUPIAH, desc: 'Biaya utilitas & operasional toko pada periode laporan' },
+        { pos: 'Laba Bersih Operasional', val: { formula: 'MAX(0,B7-B8)', result: gtLabaOp }, fmt: EXCEL_FMT.RUPIAH, desc: 'Laba Kotor dikurangi Beban Operasional Toko', highlight: true },
+        { pos: 'Alokasi Hak Mahasiswa (50%)', val: gtPoolGaji, fmt: EXCEL_FMT.RUPIAH, desc: 'Plafon total upah bagi hasil seluruh personel shift', highlight: true },
+        { pos: 'Alokasi Kas Toko (50%)', val: gtKasToko, fmt: EXCEL_FMT.RUPIAH, desc: 'Bagian kas bersih toko untuk pengembangan unit usaha', highlight: true },
+        { pos: 'Total Upah Terdistribusi', val: gtDistributed, fmt: EXCEL_FMT.RUPIAH, desc: 'Total upah bersih yang disalurkan kepada seluruh anggota' },
+        { pos: 'Sisa Saldo Pool (Selisih)', val: { formula: 'B10-B12', result: gtSisaPool }, fmt: EXCEL_FMT.RUPIAH, desc: 'Metode Hamilton menjamin selisih pembulatan Rp 0 (zero-leakage)' },
       ];
 
       summaryRows.forEach((item, idx) => {
-        const rowNum = 6 + idx;
+        const rowNum = 5 + idx;
         const r = ws1.getRow(rowNum);
-        r.values = ['', item.pos, item.val, item.desc];
-        const isSpecial = item.pos.includes('(50%)') || item.pos.includes('Laba Bersih');
-        
-        ['B', 'C', 'D'].forEach((col) => {
-          const c = ws1.getCell(`${col}${rowNum}`);
-          c.font = isSpecial ? FONT_BOLD : FONT_REGULAR;
-          c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
-          c.alignment = { vertical: 'middle', horizontal: col === 'C' ? 'right' : 'left' };
-          if (idx % 2 === 1 && !isSpecial) c.fill = FILL_ZEBRA as ExcelJS.Fill;
-          if (isSpecial) c.fill = FILL_TOTAL as ExcelJS.Fill;
+        const cells: (string | number | { formula: string; result: number })[] = [item.pos, item.val, item.desc];
+        cells.forEach((v, cIdx) => {
+          const c = r.getCell(cIdx + 1);
+          c.value = v;
+          c.font = item.highlight ? EXCEL_FONT.BOLD : EXCEL_FONT.BODY;
+          c.border = EXCEL_BORDER.THIN;
+          c.alignment = {
+            vertical: 'middle',
+            horizontal: cIdx === 1 ? 'right' : 'left',
+            wrapText: cIdx === 2,
+          };
+          if (cIdx === 1) c.numFmt = item.fmt;
+          if (item.highlight) {
+            c.fill = EXCEL_FILL.TOTAL;
+          } else if (idx % 2 === 1) {
+            c.fill = EXCEL_FILL.ZEBRA;
+          }
         });
-        ws1.getCell(`C${rowNum}`).numFmt = item.fmt;
-        r.height = 21;
+        r.height = calcWrapRowHeight([{ text: item.desc, width: cols1[2].width }], 21, 14);
       });
 
-      // Bagian Pedoman Rumus Detail
-      const noteStartRow = 17;
-      ws1.mergeCells(`B${noteStartRow}:D${noteStartRow}`);
-      const noteTitle = ws1.getCell(`B${noteStartRow}`);
-      noteTitle.value = 'PEDOMAN & FORMULA SISTEM PENGGAJIAN PERSHIFT WIRAMART';
-      noteTitle.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF1E3A5F' } };
-      ws1.getRow(noteStartRow).height = 22;
+      const noteStartRow = 16;
+      ws1.mergeCells(`A${noteStartRow}:C${noteStartRow}`);
+      const noteTitle = ws1.getCell(`A${noteStartRow}`);
+      noteTitle.value = 'PEDOMAN & FORMULA SISTEM PENGGAJIAN PER SHIFT WIRAMART';
+      noteTitle.font = EXCEL_FONT.SECTION;
+      noteTitle.fill = EXCEL_FILL.SECTION;
+      noteTitle.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+      noteTitle.border = EXCEL_BORDER.THIN;
+      ws1.getRow(noteStartRow).height = 24;
 
       const notesList = [
         { no: '1.', rule: 'Rasio Utama 50% : 50% (Paten)', detail: 'Laba Bersih Toko dibagi seimbang 50% untuk Kas Toko dan 50% untuk Plafon Upah Mahasiswa (Closed-Loop).' },
-        { no: '2.', rule: 'Komposisi Pool Hybrid 70% / 30%', detail: '70% Jatah Kehadiran (Attendance Pool) dibagikan berdasarkan poin kedisiplinan hadir dan ketepatan waktu. 30% Bonus Produktivitas (Performance Pool) dibagikan proporsional sesuai laba kotor shift.' },
-        { no: '3.', rule: 'Faktor Disiplin Waktu Kehadiran', detail: 'Hadir tepat waktu = bobot 1.0 (100%). Keterlambatan dikenakan penalti poin proporsional waktu telat.' },
-        { no: '4.', rule: 'Pembagian Internal Shift', detail: 'Upah yang dialokasikan ke shift dibagikan ke seluruh personel yang hadir di shift tersebut berdasarkan bobot peran & kedisiplinan.' },
-        { no: '5.', rule: 'Distribusi Bulat Tanpa Residu (Hamilton)', detail: 'Seluruh alokasi rupiah dibulatkan menggunakan metode Largest Remainder (Hamilton) sehingga sisa saldo pool selalu Rp 0 (zero-leakage).' },
+        { no: '2.', rule: 'Komposisi Pool Hybrid 70% / 30%', detail: '70% Alokasi Kehadiran dibagikan berdasarkan poin kedisiplinan hadir dan ketepatan waktu. 30% Bonus Produktivitas dibagikan proporsional sesuai laba kotor shift.' },
+        { no: '3.', rule: 'Faktor Disiplin Waktu Kehadiran', detail: 'Hadir tepat waktu mendapat bobot 1,00 (100%). Keterlambatan dikenakan penalti poin proporsional sesuai durasi keterlambatan.' },
+        { no: '4.', rule: 'Pembagian Internal Shift', detail: 'Upah yang dialokasikan ke tiap shift dibagikan kepada seluruh personel yang hadir berdasarkan bobot peran dan kedisiplinan.' },
+        { no: '5.', rule: 'Distribusi Bulat Tanpa Residu (Hamilton)', detail: 'Seluruh alokasi rupiah dibulatkan menggunakan metode Largest Remainder (Hamilton) sehingga sisa saldo pool selalu Rp 0.' },
       ];
 
+      const mergedDescWidth = cols1[1].width + cols1[2].width;
       notesList.forEach((n, idx) => {
         const rowNum = noteStartRow + 1 + idx;
         const r = ws1.getRow(rowNum);
-        r.values = ['', `${n.no} ${n.rule}`, n.detail, ''];
-        ws1.mergeCells(`C${rowNum}:D${rowNum}`);
-        ws1.getCell(`B${rowNum}`).font = FONT_BOLD;
-        ws1.getCell(`C${rowNum}`).font = FONT_REGULAR;
-        ws1.getCell(`B${rowNum}`).border = BORDER_THIN as Partial<ExcelJS.Borders>;
-        ws1.getCell(`C${rowNum}`).border = BORDER_THIN as Partial<ExcelJS.Borders>;
-        ws1.getCell(`D${rowNum}`).border = BORDER_THIN as Partial<ExcelJS.Borders>;
-        r.height = 20;
+        const label = `${n.no} ${n.rule}`;
+        ws1.mergeCells(`B${rowNum}:C${rowNum}`);
+        const cLabel = ws1.getCell(`A${rowNum}`);
+        cLabel.value = label;
+        cLabel.font = EXCEL_FONT.BOLD;
+        cLabel.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+        cLabel.border = EXCEL_BORDER.THIN;
+
+        const cDetail = ws1.getCell(`B${rowNum}`);
+        cDetail.value = n.detail;
+        cDetail.font = EXCEL_FONT.BODY;
+        cDetail.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+        cDetail.border = EXCEL_BORDER.THIN;
+        ws1.getCell(`C${rowNum}`).border = EXCEL_BORDER.THIN;
+
+        if (idx % 2 === 1) {
+          cLabel.fill = EXCEL_FILL.ZEBRA;
+          cDetail.fill = EXCEL_FILL.ZEBRA;
+        }
+        r.height = calcWrapRowHeight(
+          [
+            { text: label, width: cols1[0].width },
+            { text: n.detail, width: mergedDescWidth },
+          ],
+          21,
+          14,
+        );
       });
 
+      applySheetLayout(ws1, { freezeRow: 4, orientation: 'landscape' });
+
       // ─────────────────────────────────────────────────────────────────────
-      // SHEET 2: REKAP KELOMPOK SHIFT (DENGAN DETAIL GAJI PER ANGGOTA)
+      // SHEET 2: REKAP KELOMPOK SHIFT (DENGAN DETAIL UPAH PER ANGGOTA)
       // ─────────────────────────────────────────────────────────────────────
-      const ws2 = wb.addWorksheet('Rekap Kelompok Shift', { views: [{ showGridLines: true }] });
-      ws2.columns = [
-        { width: 4 },  // Margin A
-        { width: 6 },  // B: No
-        { width: 14 }, // C: Hari
-        { width: 10 }, // D: Sesi
-        { width: 16 }, // E: Jam Kerja
-        { width: 12 }, // F: Jml Personel
-        { width: 14 }, // G: Frekuensi Shift
-        { width: 14 }, // H: Total Tx
-        { width: 18 }, // I: Total Omzet
-        { width: 18 }, // J: Laba Kotor
-        { width: 20 }, // K: Total Upah Bersih
-        { width: 18 }, // L: Rata-Rata/Shift
-        { width: 58 }, // M: Keterangan Detail Upah Per Anggota
+      const ws2 = wb.addWorksheet('Rekap Kelompok Shift');
+      const cols2 = [
+        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Hari', width: 12, align: 'center' as const },
+        { header: 'Sesi', width: 10, align: 'center' as const },
+        { header: 'Jam Kerja (WIB)', width: 15, align: 'center' as const },
+        { header: 'Personel', width: 11, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Frekuensi Shift', width: 14, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Transaksi', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Omzet (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Laba Kotor (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Upah Bersih (Rp)', width: 19, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Rata-Rata / Shift (Rp)', width: 20, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Rincian Pembagian Upah per Anggota', width: 56, align: 'left' as const },
       ];
-
-      ws2.mergeCells('B2:M2');
-      const t2 = ws2.getCell('B2');
-      t2.value = 'REKAPITULASI UPAH PER KELOMPOK SHIFT RESMI & DETAIL PEMBAGIAN PER ANGGOTA';
-      t2.font = FONT_TITLE;
-      t2.fill = FILL_NAVY as ExcelJS.Fill;
-      t2.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws2.getRow(2).height = 28;
-
-      ws2.mergeCells('B3:M3');
-      const t2Sub = ws2.getCell('B3');
-      t2Sub.value = `Periode: ${data.range.label} | Jadwal Operasional Senin s/d Jumat (9 Kelompok Kerja Resmi)`;
-      t2Sub.font = FONT_MUTED;
-      t2Sub.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws2.getRow(3).height = 20;
-
-      const headerCols2 = [
-        'No', 'Hari', 'Sesi', 'Jam Kerja', 'Personel',
-        'Frekuensi', 'Transaksi', 'Omzet (Rp)', 'Laba Kotor (Rp)', 'Upah Bersih (Rp)', 'Rata-Rata/Shift', 'Keterangan Detail Upah Per Anggota'
-      ];
-      const r2Header = ws2.getRow(5);
-      r2Header.values = ['', ...headerCols2];
-      ['B5','C5','D5','E5','F5','G5','H5','I5','J5','K5','L5','M5'].forEach((addr) => {
-        const c = ws2.getCell(addr);
-        c.font = FONT_HEADER;
-        c.fill = FILL_HEADER as ExcelJS.Fill;
-        c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
-        c.alignment = {
-          vertical: 'middle',
-          horizontal: ['B5','C5','D5','E5','F5','G5'].includes(addr) ? 'center' : (['H5','I5','J5','K5','L5'].includes(addr) ? 'right' : 'left'),
-        };
+      cols2.forEach((c, i) => {
+        ws2.getColumn(i + 1).width = c.width;
       });
-      r2Header.height = 24;
 
-      // Hitung akumulasi per kelompok dan per anggota kelompok
-      const groupStats = new Map<string, {
-        memberNominals: Map<string, number>;
-      }>();
+      styleBannerBlock(ws2, {
+        title: 'REKAPITULASI UPAH PER KELOMPOK SHIFT RESMI — WIRAMART UNPERBA',
+        subtitle: `${subtitlePeriod} • ${filteredGroups.length} Kelompok Kerja Aktif`,
+        endCol: cols2.length,
+        titleRow: 1,
+        subtitleRow: 2,
+      });
+      ws2.getRow(3).height = 8;
 
+      const r2Header = ws2.getRow(4);
+      r2Header.height = 26;
+      cols2.forEach((c, i) => {
+        const cell = r2Header.getCell(i + 1);
+        cell.value = c.header;
+        cell.font = EXCEL_FONT.HEADER;
+        cell.fill = EXCEL_FILL.HEADER;
+        cell.border = EXCEL_BORDER.HEADER;
+        cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
+      });
+
+      const groupStats = new Map<string, { memberNominals: Map<string, number> }>();
       for (const s of data.shifts) {
         const gKey = `${s.hari}-${s.sesi}`;
-        if (!groupStats.has(gKey)) {
-          groupStats.set(gKey, { memberNominals: new Map<string, number>() });
-        }
-        const g = groupStats.get(gKey)!;
+        const existing = groupStats.get(gKey) ?? { memberNominals: new Map<string, number>() };
         for (const p of s.personnel) {
-          const cur = g.memberNominals.get(p.fullName) ?? 0;
-          g.memberNominals.set(p.fullName, cur + p.nominalBagiHasil);
+          existing.memberNominals.set(
+            p.fullName,
+            (existing.memberNominals.get(p.fullName) ?? 0) + Math.round(toSafeExcelNum(p.nominalBagiHasil)),
+          );
         }
+        groupStats.set(gKey, existing);
       }
 
       filteredGroups.forEach((g, idx) => {
-        const rowNum = 6 + idx;
+        const rowNum = 5 + idx;
         const r = ws2.getRow(rowNum);
-        const shiftCount = g.totalShiftCount;
-        const avgPerMeeting = shiftCount > 0 ? Math.round(g.upahBersih / shiftCount) : 0;
+        const shiftCount = Math.round(toSafeExcelNum(g.totalShiftCount));
+        const upahG = Math.round(toSafeExcelNum(g.upahBersih));
+        const avgPerMeeting = shiftCount > 0 ? Math.round(upahG / shiftCount) : 0;
 
         const gStat = groupStats.get(g.groupKey);
         const memberDetails: string[] = [];
@@ -848,429 +867,528 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
             memberDetails.push(m.fullName);
           });
         }
-        const detailKeterangan = memberDetails.join(', ');
+        const detailKeterangan = sanitizeExcelText(memberDetails.join(', ')) || '—';
 
-        r.values = [
-          '',
+        const values: (string | number | { formula: string; result: number })[] = [
           idx + 1,
-          g.hari,
-          g.sesi,
-          g.waktuLabel,
-          g.totalPersonel,
-          g.totalShiftCount,
-          g.totalTx,
-          g.totalOmzet,
-          g.totalLabaKotor,
-          g.upahBersih,
-          avgPerMeeting,
+          sanitizeExcelText(g.hari),
+          sanitizeExcelText(g.sesi),
+          sanitizeExcelText(g.waktuLabel),
+          Math.round(toSafeExcelNum(g.totalPersonel)),
+          shiftCount,
+          Math.round(toSafeExcelNum(g.totalTx)),
+          Math.round(toSafeExcelNum(g.totalOmzet)),
+          Math.round(toSafeExcelNum(g.totalLabaKotor)),
+          upahG,
+          { formula: `IF(F${rowNum}>0,ROUND(J${rowNum}/F${rowNum},0),0)`, result: avgPerMeeting },
           detailKeterangan,
         ];
 
-        ['B','C','D','E','F','G','H','I','J','K','L','M'].forEach((col) => {
-          const c = ws2.getCell(`${col}${rowNum}`);
-          c.font = FONT_REGULAR;
-          c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
-          c.alignment = {
+        values.forEach((val, cIdx) => {
+          const cell = r.getCell(cIdx + 1);
+          const meta = cols2[cIdx];
+          cell.value = val;
+          cell.font = EXCEL_FONT.BODY;
+          cell.border = EXCEL_BORDER.THIN;
+          cell.alignment = {
             vertical: 'middle',
-            horizontal: ['B','C','D','E','F','G'].includes(col) ? 'center' : (['H','I','J','K','L'].includes(col) ? 'right' : 'left'),
-            wrapText: col === 'M',
+            horizontal: meta.align,
+            wrapText: cIdx === 11,
           };
-          if (idx % 2 === 1) c.fill = FILL_ZEBRA as ExcelJS.Fill;
+          if (meta.fmt) cell.numFmt = meta.fmt;
+          if (idx % 2 === 1) cell.fill = EXCEL_FILL.ZEBRA;
         });
 
-        ws2.getCell(`F${rowNum}`).numFmt = NUMBER_FMT;
-        ws2.getCell(`G${rowNum}`).numFmt = NUMBER_FMT;
-        ws2.getCell(`H${rowNum}`).numFmt = NUMBER_FMT;
-        ws2.getCell(`I${rowNum}`).numFmt = CURRENCY_FMT;
-        ws2.getCell(`J${rowNum}`).numFmt = CURRENCY_FMT;
-        ws2.getCell(`K${rowNum}`).numFmt = CURRENCY_FMT;
-        ws2.getCell(`L${rowNum}`).numFmt = CURRENCY_FMT;
-        r.height = 24;
+        r.height = calcWrapRowHeight([{ text: detailKeterangan, width: cols2[11].width }], 22, 14);
       });
 
-      const totalRowNum2 = 6 + filteredGroups.length;
-      const r2Total = ws2.getRow(totalRowNum2);
-      r2Total.values = [
-        '',
-        '',
-        'TOTAL KESELURUHAN',
-        '',
-        '',
-        tableTotals.totalPersonel,
-        tableTotals.totalShiftCount,
-        tableTotals.totalTx,
-        tableTotals.totalOmzet,
-        tableTotals.totalLabaKotor,
-        tableTotals.upahBersih,
-        tableTotals.totalShiftCount > 0 ? Math.round(tableTotals.upahBersih / tableTotals.totalShiftCount) : 0,
-        `Selesai 100% — Total Hak Mahasiswa Rp ${tableTotals.upahBersih.toLocaleString('id-ID')} Klop 50:50 dengan Kas Toko`,
-      ];
+      const end2 = 5 + filteredGroups.length - 1;
+      const tot2Num = end2 + 1;
+      const r2Total = ws2.getRow(tot2Num);
+      r2Total.height = 25;
+      const sumMap2: Record<number, number> = {
+        4: Math.round(toSafeExcelNum(tableTotals.totalPersonel)),
+        5: Math.round(toSafeExcelNum(tableTotals.totalShiftCount)),
+        6: Math.round(toSafeExcelNum(tableTotals.totalTx)),
+        7: Math.round(toSafeExcelNum(tableTotals.totalOmzet)),
+        8: Math.round(toSafeExcelNum(tableTotals.totalLabaKotor)),
+        9: Math.round(toSafeExcelNum(tableTotals.upahBersih)),
+      };
+      const avgAll2 =
+        tableTotals.totalShiftCount > 0
+          ? Math.round(tableTotals.upahBersih / tableTotals.totalShiftCount)
+          : 0;
 
-      ws2.mergeCells(`C${totalRowNum2}:E${totalRowNum2}`);
-      ['B','C','D','E','F','G','H','I','J','K','L','M'].forEach((col) => {
-        const c = ws2.getCell(`${col}${totalRowNum2}`);
-        c.font = FONT_BOLD;
-        c.fill = FILL_TOTAL as ExcelJS.Fill;
-        c.border = BORDER_TOTAL as Partial<ExcelJS.Borders>;
-        c.alignment = {
+      ws2.mergeCells(`B${tot2Num}:D${tot2Num}`);
+      cols2.forEach((c, cIdx) => {
+        const cell = r2Total.getCell(cIdx + 1);
+        const colChar = colLetter(cIdx + 1);
+        if (cIdx === 1) {
+          cell.value = 'TOTAL KESELURUHAN';
+        } else if (cIdx === 10) {
+          cell.value = { formula: `IF(F${tot2Num}>0,ROUND(J${tot2Num}/F${tot2Num},0),0)`, result: avgAll2 };
+        } else if (cIdx === 11) {
+          cell.value = sanitizeExcelText(
+            `Distribusi 50:50 terverifikasi — Total Hak Mahasiswa Rp ${Math.round(tableTotals.upahBersih).toLocaleString('id-ID')}`,
+          );
+        } else if (cIdx in sumMap2) {
+          cell.value = { formula: `SUM(${colChar}5:${colChar}${end2})`, result: sumMap2[cIdx] };
+        } else if (cIdx < 1 || cIdx > 3) {
+          cell.value = '';
+        }
+        cell.font = EXCEL_FONT.BOLD;
+        cell.fill = EXCEL_FILL.TOTAL;
+        cell.border = EXCEL_BORDER.TOTAL;
+        cell.alignment = {
           vertical: 'middle',
-          horizontal: ['C','D','E','F','G'].includes(col) ? 'center' : (['H','I','J','K','L'].includes(col) ? 'right' : 'left'),
+          horizontal: cIdx >= 1 && cIdx <= 3 ? 'center' : c.align,
         };
+        if (c.fmt) cell.numFmt = c.fmt;
       });
 
-      ws2.getCell(`F${totalRowNum2}`).numFmt = NUMBER_FMT;
-      ws2.getCell(`G${totalRowNum2}`).numFmt = NUMBER_FMT;
-      ws2.getCell(`H${totalRowNum2}`).numFmt = NUMBER_FMT;
-      ws2.getCell(`I${totalRowNum2}`).numFmt = CURRENCY_FMT;
-      ws2.getCell(`J${totalRowNum2}`).numFmt = CURRENCY_FMT;
-      ws2.getCell(`K${totalRowNum2}`).numFmt = CURRENCY_FMT;
-      ws2.getCell(`L${totalRowNum2}`).numFmt = CURRENCY_FMT;
-      r2Total.height = 26;
+      applySheetLayout(ws2, {
+        freezeRow: 4,
+        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: cols2.length } },
+        orientation: 'landscape',
+      });
 
       // ─────────────────────────────────────────────────────────────────────
       // SHEET 3: RINCIAN UPAH PER MAHASISWA
       // ─────────────────────────────────────────────────────────────────────
-      const ws3 = wb.addWorksheet('Upah Mahasiswa', { views: [{ showGridLines: true }] });
-      ws3.columns = [
-        { width: 4 },  // Margin A
-        { width: 6 },  // B: No
-        { width: 28 }, // C: Nama Lengkap
-        { width: 14 }, // D: NIM
-        { width: 22 }, // E: Program Studi
-        { width: 24 }, // F: Jabatan / Peran
-        { width: 14 }, // G: Total Hadir
-        { width: 22 }, // H: Nominal Upah (Rp)
-        { width: 20 }, // I: Tanda Tangan
+      const ws3 = wb.addWorksheet('Upah Mahasiswa');
+      const cols3 = [
+        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Nama Lengkap', width: 28, align: 'left' as const },
+        { header: 'NIM', width: 15, align: 'center' as const },
+        { header: 'Program Studi', width: 24, align: 'left' as const },
+        { header: 'Jabatan / Peran', width: 22, align: 'left' as const },
+        { header: 'Kehadiran', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Upah Diterima (Rp)', width: 21, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Tanda Tangan', width: 20, align: 'center' as const },
       ];
-
-      ws3.mergeCells('B2:I2');
-      const t3 = ws3.getCell('B2');
-      t3.value = 'DAFTAR PENERIMAAN UPAH BAGI HASIL MAHASISWA — WIRAMART';
-      t3.font = FONT_TITLE;
-      t3.fill = FILL_NAVY as ExcelJS.Fill;
-      t3.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws3.getRow(2).height = 28;
-
-      ws3.mergeCells('B3:I3');
-      const t3Sub = ws3.getCell('B3');
-      t3Sub.value = `Periode: ${data.range.label} | Total Mahasiswa: ${data.summaryPerEmployee.length} Orang`;
-      t3Sub.font = FONT_MUTED;
-      t3Sub.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws3.getRow(3).height = 20;
-
-      const headerCols3 = [
-        'No', 'Nama Lengkap', 'NIM', 'Program Studi', 'Jabatan / Peran',
-        'Kehadiran', 'Upah Diterima (Rp)', 'Tanda Tangan'
-      ];
-      const r3Header = ws3.getRow(5);
-      r3Header.values = ['', ...headerCols3];
-      ['B5','C5','D5','E5','F5','G5','H5','I5'].forEach((addr) => {
-        const c = ws3.getCell(addr);
-        c.font = FONT_HEADER;
-        c.fill = FILL_HEADER as ExcelJS.Fill;
-        c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
-        c.alignment = { vertical: 'middle', horizontal: ['B5','D5','G5','I5'].includes(addr) ? 'center' : (addr === 'H5' ? 'right' : 'left') };
+      cols3.forEach((c, i) => {
+        ws3.getColumn(i + 1).width = c.width;
       });
-      r3Header.height = 24;
+
+      styleBannerBlock(ws3, {
+        title: 'DAFTAR PENERIMAAN UPAH BAGI HASIL MAHASISWA — WIRAMART UNPERBA',
+        subtitle: `${subtitlePeriod} • ${data.summaryPerEmployee.length} Personel Mahasiswa`,
+        endCol: cols3.length,
+        titleRow: 1,
+        subtitleRow: 2,
+      });
+      ws3.getRow(3).height = 8;
+
+      const r3Header = ws3.getRow(4);
+      r3Header.height = 26;
+      cols3.forEach((c, i) => {
+        const cell = r3Header.getCell(i + 1);
+        cell.value = c.header;
+        cell.font = EXCEL_FONT.HEADER;
+        cell.fill = EXCEL_FILL.HEADER;
+        cell.border = EXCEL_BORDER.HEADER;
+        cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
+      });
 
       let totalHadirEmps = 0;
       let totalUpahEmps = 0;
-
       const sortedEmps = [...data.summaryPerEmployee].sort((a, b) => a.fullName.localeCompare(b.fullName));
+
       sortedEmps.forEach((emp, idx) => {
-        totalHadirEmps += emp.totalHadir;
-        totalUpahEmps += emp.totalNominal;
-        const rowNum = 6 + idx;
-        const r = ws3.getRow(rowNum);
-        r.values = [
-          '',
+        const hadirN = Math.round(toSafeExcelNum(emp.totalHadir));
+        const upahN = Math.round(toSafeExcelNum(emp.totalNominal));
+        totalHadirEmps += hadirN;
+        totalUpahEmps += upahN;
+
+        const nameTxt = sanitizeExcelText(emp.fullName) || '—';
+        const prodiTxt = sanitizeExcelText(emp.programStudi) || '—';
+        const jabTxt = sanitizeExcelText(emp.jabatan) || '—';
+
+        const r = ws3.getRow(5 + idx);
+        const vals: (string | number)[] = [
           idx + 1,
-          emp.fullName,
-          emp.nim,
-          emp.programStudi,
-          emp.jabatan,
-          emp.totalHadir,
-          emp.totalNominal,
+          nameTxt,
+          sanitizeExcelText(emp.nim) || '—',
+          prodiTxt,
+          jabTxt,
+          hadirN,
+          upahN,
           '',
         ];
 
-        ['B','C','D','E','F','G','H','I'].forEach((col) => {
-          const c = ws3.getCell(`${col}${rowNum}`);
-          c.font = FONT_REGULAR;
-          c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
-          c.alignment = {
+        vals.forEach((val, cIdx) => {
+          const cell = r.getCell(cIdx + 1);
+          const meta = cols3[cIdx];
+          cell.value = val;
+          cell.font = EXCEL_FONT.BODY;
+          cell.border = EXCEL_BORDER.THIN;
+          cell.alignment = {
             vertical: 'middle',
-            horizontal: ['B','D','G','I'].includes(col) ? 'center' : (col === 'H' ? 'right' : 'left'),
+            horizontal: meta.align,
+            wrapText: cIdx === 1 || cIdx === 3 || cIdx === 4,
           };
-          if (idx % 2 === 1) c.fill = FILL_ZEBRA as ExcelJS.Fill;
+          if (meta.fmt) cell.numFmt = meta.fmt;
+          if (idx % 2 === 1) cell.fill = EXCEL_FILL.ZEBRA;
         });
 
-        ws3.getCell(`G${rowNum}`).numFmt = NUMBER_FMT;
-        ws3.getCell(`H${rowNum}`).numFmt = CURRENCY_FMT;
-        r.height = 21;
+        r.height = calcWrapRowHeight(
+          [
+            { text: nameTxt, width: cols3[1].width },
+            { text: prodiTxt, width: cols3[3].width },
+            { text: jabTxt, width: cols3[4].width },
+          ],
+          22,
+          14,
+        );
       });
 
-      const totalRowNum3 = 6 + sortedEmps.length;
-      const r3Total = ws3.getRow(totalRowNum3);
-      r3Total.values = [
-        '',
-        '',
-        'TOTAL KESELURUHAN',
-        '',
-        '',
-        `${sortedEmps.length} Mahasiswa`,
-        totalHadirEmps,
-        totalUpahEmps,
-        '',
-      ];
+      if (sortedEmps.length > 0) {
+        const end3 = 5 + sortedEmps.length - 1;
+        const tot3Num = end3 + 1;
+        const r3Total = ws3.getRow(tot3Num);
+        r3Total.height = 25;
+        ws3.mergeCells(`B${tot3Num}:D${tot3Num}`);
 
-      ws3.mergeCells(`C${totalRowNum3}:E${totalRowNum3}`);
-      ['B','C','D','E','F','G','H','I'].forEach((col) => {
-        const c = ws3.getCell(`${col}${totalRowNum3}`);
-        c.font = FONT_BOLD;
-        c.fill = FILL_TOTAL as ExcelJS.Fill;
-        c.border = BORDER_TOTAL as Partial<ExcelJS.Borders>;
-        c.alignment = {
-          vertical: 'middle',
-          horizontal: ['C','D','E','G','I'].includes(col) ? 'center' : (col === 'H' ? 'right' : 'left'),
-        };
+        cols3.forEach((c, cIdx) => {
+          const cell = r3Total.getCell(cIdx + 1);
+          const colChar = colLetter(cIdx + 1);
+          if (cIdx === 1) {
+            cell.value = 'TOTAL KESELURUHAN';
+          } else if (cIdx === 4) {
+            cell.value = `${sortedEmps.length} Mahasiswa`;
+          } else if (cIdx === 5) {
+            cell.value = { formula: `SUM(${colChar}5:${colChar}${end3})`, result: totalHadirEmps };
+          } else if (cIdx === 6) {
+            cell.value = { formula: `SUM(${colChar}5:${colChar}${end3})`, result: totalUpahEmps };
+          } else if (cIdx !== 2 && cIdx !== 3) {
+            cell.value = '';
+          }
+          cell.font = EXCEL_FONT.BOLD;
+          cell.fill = EXCEL_FILL.TOTAL;
+          cell.border = EXCEL_BORDER.TOTAL;
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: cIdx >= 1 && cIdx <= 3 ? 'center' : c.align,
+          };
+          if (c.fmt) cell.numFmt = c.fmt;
+        });
+      }
+
+      applySheetLayout(ws3, {
+        freezeRow: 4,
+        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: cols3.length } },
+        orientation: 'landscape',
       });
-
-      ws3.getCell(`G${totalRowNum3}`).numFmt = NUMBER_FMT;
-      ws3.getCell(`H${totalRowNum3}`).numFmt = CURRENCY_FMT;
-      r3Total.height = 24;
 
       // ─────────────────────────────────────────────────────────────────────
       // SHEET 4: LOG SHIFT HARIAN (DENGAN RINCIAN PEMBAGIAN PER ORANG)
       // ─────────────────────────────────────────────────────────────────────
-      const ws4 = wb.addWorksheet('Log Shift Harian', { views: [{ showGridLines: true }] });
-      ws4.columns = [
-        { width: 4 },  // Margin A
-        { width: 6 },  // B: No
-        { width: 14 }, // C: Tanggal
-        { width: 12 }, // D: Hari
-        { width: 10 }, // E: Sesi
-        { width: 26 }, // F: Kasir Bertugas
-        { width: 16 }, // G: Buka (WIB)
-        { width: 16 }, // H: Tutup (WIB)
-        { width: 12 }, // I: Transaksi
-        { width: 18 }, // J: Omzet (Rp)
-        { width: 18 }, // K: Laba Kotor (Rp)
-        { width: 18 }, // L: Upah Shift (Rp)
-        { width: 14 }, // M: Jml Personel
-        { width: 56 }, // N: Rincian Pembagian Upah Personel Shift
+      const ws4 = wb.addWorksheet('Log Shift Harian');
+      const cols4 = [
+        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Tanggal', width: 13, align: 'center' as const },
+        { header: 'Hari', width: 11, align: 'center' as const },
+        { header: 'Sesi', width: 10, align: 'center' as const },
+        { header: 'Kasir Bertugas', width: 25, align: 'left' as const },
+        { header: 'Buka (WIB)', width: 12, align: 'center' as const },
+        { header: 'Tutup (WIB)', width: 12, align: 'center' as const },
+        { header: 'Transaksi', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Omzet (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Laba Kotor (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Upah Shift (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Personel', width: 11, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Rincian Pembagian Upah Personel Shift', width: 54, align: 'left' as const },
       ];
-
-      ws4.mergeCells('B2:N2');
-      const t4 = ws4.getCell('B2');
-      t4.value = 'JURNAL LOG TRANSAKSI & RINCIAN HASIL OPERASIONAL SETIAP SHIFT';
-      t4.font = FONT_TITLE;
-      t4.fill = FILL_NAVY as ExcelJS.Fill;
-      t4.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws4.getRow(2).height = 28;
-
-      ws4.mergeCells('B3:N3');
-      const t4Sub = ws4.getCell('B3');
-      t4Sub.value = `Periode: ${data.range.label} | Total Pertemuan Shift: ${data.shifts.length} Shift`;
-      t4Sub.font = FONT_MUTED;
-      t4Sub.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws4.getRow(3).height = 20;
-
-      const headerCols4 = [
-        'No', 'Tanggal', 'Hari', 'Sesi', 'Kasir Bertugas',
-        'Buka (WIB)', 'Tutup (WIB)', 'Transaksi', 'Omzet (Rp)', 'Laba Kotor (Rp)', 'Upah Shift (Rp)', 'Personel', 'Rincian Pembagian Upah Personel Shift'
-      ];
-      const r4Header = ws4.getRow(5);
-      r4Header.values = ['', ...headerCols4];
-      ['B5','C5','D5','E5','F5','G5','H5','I5','J5','K5','L5','M5','N5'].forEach((addr) => {
-        const c = ws4.getCell(addr);
-        c.font = FONT_HEADER;
-        c.fill = FILL_HEADER as ExcelJS.Fill;
-        c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
-        c.alignment = {
-          vertical: 'middle',
-          horizontal: ['B5','C5','D5','E5','G5','H5','M5'].includes(addr) ? 'center' : (['I5','J5','K5','L5'].includes(addr) ? 'right' : 'left'),
-        };
+      cols4.forEach((c, i) => {
+        ws4.getColumn(i + 1).width = c.width;
       });
-      r4Header.height = 24;
+
+      styleBannerBlock(ws4, {
+        title: 'JURNAL LOG TRANSAKSI & RINCIAN HASIL OPERASIONAL SETIAP SHIFT — WIRAMART UNPERBA',
+        subtitle: `${subtitlePeriod} • Total Pertemuan Shift: ${data.shifts.length} Shift`,
+        endCol: cols4.length,
+        titleRow: 1,
+        subtitleRow: 2,
+      });
+      ws4.getRow(3).height = 8;
+
+      const r4Header = ws4.getRow(4);
+      r4Header.height = 26;
+      cols4.forEach((c, i) => {
+        const cell = r4Header.getCell(i + 1);
+        cell.value = c.header;
+        cell.font = EXCEL_FONT.HEADER;
+        cell.fill = EXCEL_FILL.HEADER;
+        cell.border = EXCEL_BORDER.HEADER;
+        cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
+      });
+
+      let sum4Tx = 0;
+      let sum4Omzet = 0;
+      let sum4Laba = 0;
+      let sum4Upah = 0;
+      let sum4Pers = 0;
 
       data.shifts.forEach((s, idx) => {
-        const inTime = s.clockIn ? new Date(s.clockIn).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : '-';
-        const outTime = s.clockOut ? new Date(s.clockOut).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }) : 'Berjalan';
-        const rowNum = 6 + idx;
-        const personelList = s.personnel.map((p) => `${p.fullName}: Rp ${p.nominalBagiHasil.toLocaleString('id-ID')}`).join(' | ');
+        const inTime = s.clockIn
+          ? new Date(s.clockIn).toLocaleTimeString('id-ID', {
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+              timeZone: 'Asia/Jakarta',
+            })
+          : '—';
+        const outTime = s.clockOut
+          ? new Date(s.clockOut).toLocaleTimeString('id-ID', {
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+              timeZone: 'Asia/Jakarta',
+            })
+          : 'Berjalan';
 
-        const r = ws4.getRow(rowNum);
-        r.values = [
-          '',
+        const txN = Math.round(toSafeExcelNum(s.txCount));
+        const omzN = Math.round(toSafeExcelNum(s.omzet));
+        const labaN = Math.round(toSafeExcelNum(s.labaKotor));
+        const gajiN = Math.round(
+          toSafeExcelNum(s.gajiBersih !== undefined ? s.gajiBersih : s.personnelCount > 0 ? s.poolGaji : 0),
+        );
+        const persN = Math.round(toSafeExcelNum(s.personnelCount));
+
+        sum4Tx += txN;
+        sum4Omzet += omzN;
+        sum4Laba += labaN;
+        sum4Upah += gajiN;
+        sum4Pers += persN;
+
+        const personelList = sanitizeExcelText(
+          s.personnel
+            .map((p) => `${p.fullName}: Rp ${Math.round(toSafeExcelNum(p.nominalBagiHasil)).toLocaleString('id-ID')}`)
+            .join(' | '),
+        ) || 'Hanya Kasir';
+        const kasirTxt = sanitizeExcelText(s.kasirName) || '—';
+
+        const r = ws4.getRow(5 + idx);
+        const vals: (string | number)[] = [
           idx + 1,
-          s.tanggal,
-          s.hari,
-          s.sesi,
-          s.kasirName,
+          sanitizeExcelText(s.tanggal) || '—',
+          sanitizeExcelText(s.hari) || '—',
+          sanitizeExcelText(s.sesi) || '—',
+          kasirTxt,
           inTime,
           outTime,
-          s.txCount,
-          s.omzet,
-          s.labaKotor,
-          s.gajiBersih,
-          s.personnelCount,
-          personelList || 'Hanya Kasir',
+          txN,
+          omzN,
+          labaN,
+          gajiN,
+          persN,
+          personelList,
         ];
 
-        ['B','C','D','E','F','G','H','I','J','K','L','M','N'].forEach((col) => {
-          const c = ws4.getCell(`${col}${rowNum}`);
-          c.font = FONT_REGULAR;
-          c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
-          c.alignment = {
+        vals.forEach((val, cIdx) => {
+          const cell = r.getCell(cIdx + 1);
+          const meta = cols4[cIdx];
+          cell.value = val;
+          cell.font = EXCEL_FONT.BODY;
+          cell.border = EXCEL_BORDER.THIN;
+          cell.alignment = {
             vertical: 'middle',
-            horizontal: ['B','C','D','E','G','H','M'].includes(col) ? 'center' : (['I','J','K','L'].includes(col) ? 'right' : 'left'),
-            wrapText: col === 'N',
+            horizontal: meta.align,
+            wrapText: cIdx === 4 || cIdx === 12,
           };
-          if (idx % 2 === 1) c.fill = FILL_ZEBRA as ExcelJS.Fill;
+          if (meta.fmt) cell.numFmt = meta.fmt;
+          if (idx % 2 === 1) cell.fill = EXCEL_FILL.ZEBRA;
         });
 
-        ws4.getCell(`I${rowNum}`).numFmt = NUMBER_FMT;
-        ws4.getCell(`J${rowNum}`).numFmt = CURRENCY_FMT;
-        ws4.getCell(`K${rowNum}`).numFmt = CURRENCY_FMT;
-        ws4.getCell(`L${rowNum}`).numFmt = CURRENCY_FMT;
-        ws4.getCell(`M${rowNum}`).numFmt = NUMBER_FMT;
-        r.height = 22;
+        r.height = calcWrapRowHeight(
+          [
+            { text: kasirTxt, width: cols4[4].width },
+            { text: personelList, width: cols4[12].width },
+          ],
+          22,
+          14,
+        );
+      });
+
+      if (data.shifts.length > 0) {
+        const end4 = 5 + data.shifts.length - 1;
+        const tot4Num = end4 + 1;
+        const r4Total = ws4.getRow(tot4Num);
+        r4Total.height = 25;
+        const sumMap4: Record<number, number> = {
+          7: sum4Tx,
+          8: sum4Omzet,
+          9: sum4Laba,
+          10: sum4Upah,
+          11: sum4Pers,
+        };
+        ws4.mergeCells(`B${tot4Num}:D${tot4Num}`);
+
+        cols4.forEach((c, cIdx) => {
+          const cell = r4Total.getCell(cIdx + 1);
+          const colChar = colLetter(cIdx + 1);
+          if (cIdx === 1) {
+            cell.value = 'TOTAL KESELURUHAN';
+          } else if (cIdx === 4) {
+            cell.value = `${data.shifts.length} Pertemuan Shift`;
+          } else if (cIdx in sumMap4) {
+            cell.value = { formula: `SUM(${colChar}5:${colChar}${end4})`, result: sumMap4[cIdx] };
+          } else if (cIdx !== 2 && cIdx !== 3) {
+            cell.value = '';
+          }
+          cell.font = EXCEL_FONT.BOLD;
+          cell.fill = EXCEL_FILL.TOTAL;
+          cell.border = EXCEL_BORDER.TOTAL;
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: cIdx >= 1 && cIdx <= 3 ? 'center' : c.align,
+          };
+          if (c.fmt) cell.numFmt = c.fmt;
+        });
+      }
+
+      applySheetLayout(ws4, {
+        freezeRow: 4,
+        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: cols4.length } },
+        orientation: 'landscape',
       });
 
       // ─────────────────────────────────────────────────────────────────────
       // SHEET 5: RINCIAN AUDIT PER SHIFT & PERSONEL (PAYROLL MATRIX)
       // ─────────────────────────────────────────────────────────────────────
-      const ws5 = wb.addWorksheet('Detail Shift & Personel', { views: [{ showGridLines: true }] });
-      ws5.columns = [
-        { width: 4 },  // Margin A
-        { width: 6 },  // B: No
-        { width: 14 }, // C: Tanggal
-        { width: 12 }, // D: Hari
-        { width: 10 }, // E: Sesi
-        { width: 28 }, // F: Nama Mahasiswa
-        { width: 14 }, // G: NIM
-        { width: 22 }, // H: Peran Tugas
-        { width: 16 }, // I: Status Kehadiran
-        { width: 14 }, // J: Bobot Poin
-        { width: 22 }, // K: Upah Diterima (Rp)
+      const ws5 = wb.addWorksheet('Detail Shift & Personel');
+      const cols5 = [
+        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Tanggal', width: 13, align: 'center' as const },
+        { header: 'Hari', width: 11, align: 'center' as const },
+        { header: 'Sesi', width: 10, align: 'center' as const },
+        { header: 'Nama Mahasiswa', width: 28, align: 'left' as const },
+        { header: 'NIM', width: 14, align: 'center' as const },
+        { header: 'Peran Tugas', width: 22, align: 'left' as const },
+        { header: 'Status Kehadiran', width: 18, align: 'center' as const },
+        { header: 'Bobot Poin', width: 13, align: 'right' as const, fmt: EXCEL_FMT.DEC2 },
+        { header: 'Upah Bersih (Rp)', width: 21, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
       ];
-
-      ws5.mergeCells('B2:K2');
-      const t5 = ws5.getCell('B2');
-      t5.value = 'RINCIAN MATRIKS AUDIT PEMBAGIAN UPAH PER SHIFT & PER PERSONEL';
-      t5.font = FONT_TITLE;
-      t5.fill = FILL_NAVY as ExcelJS.Fill;
-      t5.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws5.getRow(2).height = 28;
-
-      ws5.mergeCells('B3:K3');
-      const t5Sub = ws5.getCell('B3');
-      t5Sub.value = `Periode: ${data.range.label} | Transparansi Penuh Distribusi Upah Mahasiswa Berdasarkan Presensi & Kinerja`;
-      t5Sub.font = FONT_MUTED;
-      t5Sub.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws5.getRow(3).height = 20;
-
-      const headerCols5 = [
-        'No', 'Tanggal', 'Hari', 'Sesi', 'Nama Mahasiswa',
-        'NIM', 'Peran Tugas', 'Kehadiran', 'Bobot Poin', 'Upah Bersih (Rp)'
-      ];
-      const r5Header = ws5.getRow(5);
-      r5Header.values = ['', ...headerCols5];
-      ['B5','C5','D5','E5','F5','G5','H5','I5','J5','K5'].forEach((addr) => {
-        const c = ws5.getCell(addr);
-        c.font = FONT_HEADER;
-        c.fill = FILL_HEADER as ExcelJS.Fill;
-        c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
-        c.alignment = {
-          vertical: 'middle',
-          horizontal: ['B5','C5','D5','E5','G5','I5','J5'].includes(addr) ? 'center' : (addr === 'K5' ? 'right' : 'left'),
-        };
+      cols5.forEach((c, i) => {
+        ws5.getColumn(i + 1).width = c.width;
       });
-      r5Header.height = 24;
 
-      let rowIdx5 = 6;
+      styleBannerBlock(ws5, {
+        title: 'RINCIAN MATRIKS AUDIT PEMBAGIAN UPAH PER SHIFT & PER PERSONEL — WIRAMART UNPERBA',
+        subtitle: `${subtitlePeriod} • Transparansi Distribusi Upah Mahasiswa Berdasarkan Presensi & Kinerja`,
+        endCol: cols5.length,
+        titleRow: 1,
+        subtitleRow: 2,
+      });
+      ws5.getRow(3).height = 8;
+
+      const r5Header = ws5.getRow(4);
+      r5Header.height = 26;
+      cols5.forEach((c, i) => {
+        const cell = r5Header.getCell(i + 1);
+        cell.value = c.header;
+        cell.font = EXCEL_FONT.HEADER;
+        cell.fill = EXCEL_FILL.HEADER;
+        cell.border = EXCEL_BORDER.HEADER;
+        cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
+      });
+
+      let rowIdx5 = 5;
       let counter5 = 1;
       let grandTotalMatrixUpah = 0;
 
       for (const s of data.shifts) {
         for (const p of s.personnel) {
-          grandTotalMatrixUpah += p.nominalBagiHasil;
-          const r = ws5.getRow(rowIdx5);
-          const lateStr = p.lateMinutes > 0 ? `Telat ${p.lateMinutes}m` : 'Hadir Tepat Waktu';
+          const upahP = Math.round(toSafeExcelNum(p.nominalBagiHasil));
+          grandTotalMatrixUpah += upahP;
 
-          r.values = [
-            '',
-            counter5++,
-            s.tanggal,
-            s.hari,
-            s.sesi,
-            p.fullName,
-            p.nim,
-            p.jabatan,
+          const r = ws5.getRow(rowIdx5);
+          const lateStr = p.lateMinutes > 0 ? `Terlambat ${p.lateMinutes} mnt` : 'Hadir Tepat Waktu';
+          const weightNum = toSafeExcelNum(p.totalWeight ?? 1) || 1;
+          const nameTxt = sanitizeExcelText(p.fullName) || '—';
+          const jabTxt = sanitizeExcelText(p.jabatan) || '—';
+
+          const vals: (string | number)[] = [
+            counter5,
+            sanitizeExcelText(s.tanggal) || '—',
+            sanitizeExcelText(s.hari) || '—',
+            sanitizeExcelText(s.sesi) || '—',
+            nameTxt,
+            sanitizeExcelText(p.nim) || '—',
+            jabTxt,
             lateStr,
-            p.totalWeight ? p.totalWeight.toFixed(2) : '1.00',
-            p.nominalBagiHasil,
+            weightNum,
+            upahP,
           ];
 
-          ['B','C','D','E','F','G','H','I','J','K'].forEach((col) => {
-            const c = ws5.getCell(`${col}${rowIdx5}`);
-            c.font = FONT_REGULAR;
-            c.border = BORDER_THIN as Partial<ExcelJS.Borders>;
-            c.alignment = {
+          const isZebra = counter5 % 2 === 0;
+          vals.forEach((val, cIdx) => {
+            const cell = r.getCell(cIdx + 1);
+            const meta = cols5[cIdx];
+            cell.value = val;
+            cell.font = EXCEL_FONT.BODY;
+            cell.border = EXCEL_BORDER.THIN;
+            cell.alignment = {
               vertical: 'middle',
-              horizontal: ['B','C','D','E','G','I','J'].includes(col) ? 'center' : (col === 'K' ? 'right' : 'left'),
+              horizontal: meta.align,
+              wrapText: cIdx === 4 || cIdx === 6,
             };
-            if (counter5 % 2 === 1) c.fill = FILL_ZEBRA as ExcelJS.Fill;
+            if (meta.fmt) cell.numFmt = meta.fmt;
+            if (isZebra) cell.fill = EXCEL_FILL.ZEBRA;
           });
 
-          ws5.getCell(`K${rowIdx5}`).numFmt = CURRENCY_FMT;
-          r.height = 21;
+          r.height = calcWrapRowHeight(
+            [
+              { text: nameTxt, width: cols5[4].width },
+              { text: jabTxt, width: cols5[6].width },
+            ],
+            21,
+            14,
+          );
+          counter5++;
           rowIdx5++;
         }
       }
 
-      // Baris Total Sheet 5
-      const r5Total = ws5.getRow(rowIdx5);
-      r5Total.values = [
-        '',
-        '',
-        'TOTAL KESELURUHAN',
-        '',
-        '',
-        `${counter5 - 1} Penugasan Personel Shift`,
-        '',
-        '',
-        '',
-        '',
-        grandTotalMatrixUpah,
-      ];
+      if (counter5 > 1) {
+        const end5 = rowIdx5 - 1;
+        const r5Total = ws5.getRow(rowIdx5);
+        r5Total.height = 25;
+        ws5.mergeCells(`B${rowIdx5}:D${rowIdx5}`);
 
-      ws5.mergeCells(`C${rowIdx5}:E${rowIdx5}`);
-      ['B','C','D','E','F','G','H','I','J','K'].forEach((col) => {
-        const c = ws5.getCell(`${col}${rowIdx5}`);
-        c.font = FONT_BOLD;
-        c.fill = FILL_TOTAL as ExcelJS.Fill;
-        c.border = BORDER_TOTAL as Partial<ExcelJS.Borders>;
-        c.alignment = {
-          vertical: 'middle',
-          horizontal: ['C','D','E'].includes(col) ? 'center' : (col === 'K' ? 'right' : 'left'),
-        };
-      });
-      ws5.getCell(`K${rowIdx5}`).numFmt = CURRENCY_FMT;
-      r5Total.height = 24;
+        cols5.forEach((c, cIdx) => {
+          const cell = r5Total.getCell(cIdx + 1);
+          const colChar = colLetter(cIdx + 1);
+          if (cIdx === 1) {
+            cell.value = 'TOTAL KESELURUHAN';
+          } else if (cIdx === 4) {
+            cell.value = `${counter5 - 1} Penugasan Personel Shift`;
+          } else if (cIdx === 9) {
+            cell.value = { formula: `SUM(${colChar}5:${colChar}${end5})`, result: grandTotalMatrixUpah };
+          } else if (cIdx !== 2 && cIdx !== 3) {
+            cell.value = '';
+          }
+          cell.font = EXCEL_FONT.BOLD;
+          cell.fill = EXCEL_FILL.TOTAL;
+          cell.border = EXCEL_BORDER.TOTAL;
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: cIdx >= 1 && cIdx <= 3 ? 'center' : c.align,
+          };
+          if (c.fmt) cell.numFmt = c.fmt;
+        });
+      }
 
-      // Download file ke browser pengguna
-      const buf = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buf], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      applySheetLayout(ws5, {
+        freezeRow: 4,
+        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: cols5.length } },
+        orientation: 'landscape',
       });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Laporan_Gaji_Wiramart_${data.range.startDate}_sd_${data.range.endDate}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
+
+      await downloadWorkbookBlob(
+        wb,
+        `Laporan_Gaji_Wiramart_${data.range.startDate}_sd_${data.range.endDate}.xlsx`,
+      );
     } catch (e) {
       console.error(e);
       alert('Gagal mengekspor Excel.');

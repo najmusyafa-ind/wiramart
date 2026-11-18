@@ -35,6 +35,22 @@ import {
 
 import { formatRupiah, computeFefoDiscountedPrice } from '@/lib/utils/helpers';
 import LaporanMutasiStokSection from '@/features/portal/laporan/LaporanMutasiStokSection';
+import {
+  EXCEL_BORDER,
+  EXCEL_FILL,
+  EXCEL_FMT,
+  EXCEL_FONT,
+  applySheetLayout,
+  calcWrapRowHeight,
+  colLetter,
+  createWiramartWorkbook,
+  downloadWorkbookBlob,
+  formatWibDateTime,
+  sanitizeExcelText,
+  styleBannerBlock,
+  toSafeExcelNum,
+  todayWibSlug,
+} from '@/lib/utils/exportSelectedExcel';
 
 type DraftStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'REVISED';
 
@@ -217,7 +233,7 @@ export default function GudangApprovalPage() {
   const [createdBarcodeToast, setCreatedBarcodeToast] = useState<string | null>(null);
   const [exportingFefoExcel, setExportingFefoExcel] = useState(false);
 
-  // ── Ekspor Rekap Laporan FEFO ke Excel (.xlsx) Tabel Hitam Putih Clean ──
+  // ── Ekspor Rekap Laporan FEFO ke Excel (.xlsx) Standar Akademik Wiramart ──
   async function handleExportFefoExcel() {
     if (!fefoReports || fefoReports.length === 0) {
       alert('Tidak ada data laporan FEFO untuk diekspor pada filter ini.');
@@ -225,115 +241,70 @@ export default function GudangApprovalPage() {
     }
     setExportingFefoExcel(true);
     try {
-      const ExcelJS = (await import('exceljs')).default;
-      const wb = new ExcelJS.Workbook();
-      wb.creator = 'Wiramart UNPERBA';
-      wb.lastModifiedBy = 'Manager Gudang';
-      wb.created = new Date();
+      const wb = await createWiramartWorkbook('Manager Gudang - Audit FEFO');
 
-      const ws = wb.addWorksheet('Rekap Laporan FEFO', {
-        views: [{ showGridLines: true }],
-      });
-
-      // ── BARIS 1: Header Utama Perusahaan (Hitam #18181B) ──
-      ws.mergeCells('A1:N1');
-      const r1 = ws.getCell('A1');
-      r1.value = 'WIRAMART — UKM KEWIRAUSAHAAN UNPERBA';
-      r1.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
-      r1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF18181B' } };
-      r1.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(1).height = 30;
-
-      // ── BARIS 2: Judul Dokumen (Charcoal #27272A) ──
-      ws.mergeCells('A2:N2');
-      const r2 = ws.getCell('A2');
-      r2.value = 'REKAP LAPORAN AUDIT FEFO, KEDALUWARSA & DISKON DARURAT';
-      r2.font = { name: 'Segoe UI', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
-      r2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF27272A' } };
-      r2.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(2).height = 24;
-
-      // ── BARIS 3: Metadata ──
-      ws.mergeCells('A3:N3');
-      const r3 = ws.getCell('A3');
-      const nowWib = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
       const filterLabel =
         fefoStatusFilter === 'SUBMITTED'
           ? 'Menunggu Keputusan'
           : fefoStatusFilter === 'APPROVED'
             ? 'Telah Disetujui / Diskon Aktif'
             : 'Semua Laporan FEFO';
-      r3.value = `Filter Status: ${filterLabel}   |   Dicetak: ${nowWib} WIB   |   Total Data: ${fefoReports.length} Laporan FEFO`;
-      r3.font = { name: 'Segoe UI', size: 9, italic: true, color: { argb: 'FF52525B' } };
-      r3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F4F5' } };
-      r3.border = { bottom: { style: 'thin', color: { argb: 'FFD4D4D8' } } };
-      r3.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(3).height = 20;
 
-      // Spacer row
-      ws.getRow(4).height = 10;
-
-      // ── BARIS 5: Headers ──
-      const headers = [
-        'No',
-        'Nama Produk',
-        'Kode Batch',
-        'Tingkat Alert',
-        'Tgl Expired (ED)',
-        'Sisa di Rak',
-        'Harga Normal (Rp)',
-        'Catatan Fisik Gudang',
-        'Usulan Gudang',
-        'Status Laporan',
-        'Keputusan Manager',
-        'Diskon (%)',
-        'Harga Diskon (Rp)',
-        'Barcode Diskon / Catatan',
+      const ws = wb.addWorksheet('Rekap Laporan FEFO');
+      const fefoCols = [
+        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Nama Produk', width: 32, align: 'left' as const },
+        { header: 'Kode Batch', width: 16, align: 'center' as const },
+        { header: 'Tingkat Peringatan', width: 20, align: 'center' as const },
+        { header: 'Tanggal Kedaluwarsa', width: 18, align: 'center' as const },
+        { header: 'Sisa Stok Rak', width: 14, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Harga Normal (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Catatan Fisik Gudang', width: 28, align: 'left' as const },
+        { header: 'Usulan Gudang', width: 24, align: 'left' as const },
+        { header: 'Status Laporan', width: 20, align: 'center' as const },
+        { header: 'Keputusan Manager', width: 20, align: 'center' as const },
+        { header: 'Diskon (%)', width: 12, align: 'right' as const, fmt: EXCEL_FMT.PCT },
+        { header: 'Harga Diskon (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Barcode Diskon / Keterangan', width: 28, align: 'left' as const },
       ];
 
-      ws.columns = [
-        { key: 'no', width: 6 },
-        { key: 'productName', width: 32 },
-        { key: 'batchCode', width: 16 },
-        { key: 'alertLevel', width: 16 },
-        { key: 'expiryDate', width: 16 },
-        { key: 'qty', width: 12 },
-        { key: 'sellingPrice', width: 18 },
-        { key: 'physicalCondition', width: 28 },
-        { key: 'gudangSuggestion', width: 24 },
-        { key: 'status', width: 22 },
-        { key: 'managerDecision', width: 22 },
-        { key: 'discountPct', width: 12 },
-        { key: 'discountedPrice', width: 18 },
-        { key: 'barcodeNote', width: 26 },
-      ];
-
-      const hRow = ws.getRow(5);
-      hRow.values = headers;
-      hRow.height = 26;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hRow.eachCell((cell: any) => {
-        cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FFFFFFFF' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF18181B' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FF000000' } },
-          bottom: { style: 'medium', color: { argb: 'FF000000' } },
-          left: { style: 'thin', color: { argb: 'FF3F3F46' } },
-          right: { style: 'thin', color: { argb: 'FF3F3F46' } },
-        };
+      fefoCols.forEach((col, i) => {
+        ws.getColumn(i + 1).width = col.width;
       });
 
-      // ── BARIS DATA ──
+      styleBannerBlock(ws, {
+        title: 'REKAPITULASI AUDIT FEFO, KEDALUWARSA & DISKON DARURAT — WIRAMART UNPERBA',
+        subtitle: `Filter Status: ${filterLabel} • ${fefoReports.length} Laporan FEFO • Dicetak: ${formatWibDateTime()} WIB`,
+        endCol: fefoCols.length,
+        titleRow: 1,
+        subtitleRow: 2,
+      });
+      ws.getRow(3).height = 8;
+
+      const hRow = ws.getRow(4);
+      hRow.height = 28;
+      fefoCols.forEach((col, i) => {
+        const cell = hRow.getCell(i + 1);
+        cell.value = col.header;
+        cell.font = EXCEL_FONT.HEADER;
+        cell.fill = EXCEL_FILL.HEADER;
+        cell.border = EXCEL_BORDER.HEADER;
+        cell.alignment = { vertical: 'middle', horizontal: col.align, wrapText: true };
+      });
+
+      const dataStart = 5;
+      let totalQtyAll = 0;
+
       fefoReports.forEach((rep, idx) => {
+        const rowNum = dataStart + idx;
         const alertDesc =
           rep.alertLevel === 'H1'
-            ? '🚨 H-1 Kritis (Besok ED)'
+            ? 'H-1 Kritis (Besok ED)'
             : rep.alertLevel === 'H3'
-              ? '⚠️ H-3 Urgent'
+              ? 'H-3 Mendesak'
               : rep.alertLevel === 'H5'
-                ? '⚡ H-5 Warning'
-                : '👀 H-7 Watch';
+                ? 'H-5 Peringatan'
+                : 'H-7 Pantauan';
 
         const statusDesc =
           rep.status === 'SUBMITTED'
@@ -344,142 +315,127 @@ export default function GudangApprovalPage() {
                 ? 'Ditolak'
                 : rep.status === 'EXECUTED'
                   ? 'Selesai / Terlaksana'
-                  : 'Menunggu Cek';
+                  : 'Menunggu Pemeriksaan';
 
         const decisionDesc =
           rep.managerDecision === 'DISCOUNT'
             ? 'Diskon Obral'
             : rep.managerDecision === 'DISPLAY_FRONT'
-              ? 'Pajang Depan'
+              ? 'Pajang Bagian Depan'
               : rep.managerDecision === 'DESTROY'
-                ? 'Dimusnahkan (Basi)'
+                ? 'Dimusnahkan (Kedaluwarsa)'
                 : rep.managerDecision === 'RETURN_SUPPLIER'
                   ? 'Retur Pemasok'
                   : rep.managerDecision === 'HOLD'
-                    ? 'Tahan'
+                    ? 'Ditahan Sementara'
                     : '—';
 
+        const productNameTxt = sanitizeExcelText(rep.productName) || '—';
+        const batchTxt = sanitizeExcelText(rep.batchCode) || '—';
+        const condTxt = sanitizeExcelText(rep.physicalCondition) || '—';
+        const suggTxt = sanitizeExcelText(rep.gudangSuggestion) || '—';
         const barcodeOrNote = rep.discountBarcode
-          ? `Barcode: ${rep.discountBarcode}`
-          : rep.managerNote || '—';
+          ? sanitizeExcelText(`Barcode: ${rep.discountBarcode}`)
+          : sanitizeExcelText(rep.managerNote) || '—';
 
-        const discPrice =
+        const qtyVal = Math.round(toSafeExcelNum(rep.currentBatchQty));
+        totalQtyAll += qtyVal;
+
+        const sellPriceVal = Math.round(toSafeExcelNum(rep.sellingPrice));
+        const rawPct = rep.approvedDiscountPct ? toSafeExcelNum(rep.approvedDiscountPct) : null;
+        const discPriceRaw =
           rep.discountedPrice ??
-          (rep.approvedDiscountPct
-            ? computeFefoDiscountedPrice(Number(rep.sellingPrice), Number(rep.approvedDiscountPct))
-            : 0);
+          (rawPct ? computeFefoDiscountedPrice(sellPriceVal, rawPct) : 0);
+        const discPriceVal = discPriceRaw > 0 ? Math.round(discPriceRaw) : null;
 
-        const row = ws.addRow({
-          no: idx + 1,
-          productName: rep.productName,
-          batchCode: rep.batchCode,
-          alertLevel: alertDesc,
-          expiryDate: rep.expiryDate ? rep.expiryDate.slice(0, 10) : '—',
-          qty: rep.currentBatchQty,
-          sellingPrice: Number(rep.sellingPrice) || 0,
-          physicalCondition: rep.physicalCondition || '—',
-          gudangSuggestion: rep.gudangSuggestion || '—',
-          status: statusDesc,
-          managerDecision: decisionDesc,
-          discountPct: rep.approvedDiscountPct ? `${Number(rep.approvedDiscountPct)}%` : '—',
-          discountedPrice: discPrice > 0 ? discPrice : 0,
-          barcodeNote: barcodeOrNote,
-        });
+        const rowValues: (string | number)[] = [
+          idx + 1,
+          productNameTxt,
+          batchTxt,
+          alertDesc,
+          rep.expiryDate ? sanitizeExcelText(rep.expiryDate.slice(0, 10)) : '—',
+          qtyVal,
+          sellPriceVal,
+          condTxt,
+          suggTxt,
+          statusDesc,
+          decisionDesc,
+          rawPct !== null && rawPct > 0 ? rawPct : '—',
+          discPriceVal !== null ? discPriceVal : '—',
+          barcodeOrNote,
+        ];
 
-        row.height = 20;
+        const row = ws.getRow(rowNum);
         const isZebra = idx % 2 === 1;
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        row.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
-          cell.font = { name: 'Segoe UI', size: 9.5, color: { argb: 'FF18181B' } };
-          cell.border = {
-            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-            right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        rowValues.forEach((val, cIdx) => {
+          const cell = row.getCell(cIdx + 1);
+          const meta = fefoCols[cIdx];
+          cell.value = val;
+          cell.font = EXCEL_FONT.BODY;
+          cell.border = EXCEL_BORDER.THIN;
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: typeof val === 'string' && meta.fmt ? 'center' : meta.align,
+            wrapText: cIdx === 1 || cIdx === 7 || cIdx === 8 || cIdx === 13,
           };
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: isZebra ? 'FFF9FAFB' : 'FFFFFFFF' },
-          };
-
-          if (
-            colNumber === 1 ||
-            colNumber === 3 ||
-            colNumber === 4 ||
-            colNumber === 5 ||
-            colNumber === 10 ||
-            colNumber === 11 ||
-            colNumber === 12
-          ) {
-            cell.alignment = { horizontal: 'center', vertical: 'middle' };
-          } else if (colNumber === 2 || colNumber === 8 || colNumber === 9 || colNumber === 14) {
-            cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-          } else if (colNumber === 6) {
-            cell.alignment = { horizontal: 'right', vertical: 'middle' };
-            cell.numFmt = '#,##0';
-          } else if (colNumber === 7 || colNumber === 13) {
-            cell.alignment = { horizontal: 'right', vertical: 'middle' };
-            cell.numFmt = '"Rp "#,##0';
+          if (typeof val === 'number' && meta.fmt) {
+            cell.numFmt = meta.fmt;
+          }
+          if (cIdx === 3 && rep.alertLevel === 'H1') {
+            cell.fill = EXCEL_FILL.DANGER_SOFT;
+            cell.font = { ...EXCEL_FONT.BOLD, color: { argb: 'FF991B1B' } };
+          } else if (cIdx === 3 && rep.alertLevel === 'H3') {
+            cell.fill = EXCEL_FILL.WARN_SOFT;
+            cell.font = { ...EXCEL_FONT.BOLD, color: { argb: 'FF92400E' } };
+          } else if (isZebra) {
+            cell.fill = EXCEL_FILL.ZEBRA;
           }
         });
+
+        row.height = calcWrapRowHeight(
+          [
+            { text: productNameTxt, width: fefoCols[1].width },
+            { text: condTxt, width: fefoCols[7].width },
+            { text: suggTxt, width: fefoCols[8].width },
+            { text: barcodeOrNote, width: fefoCols[13].width },
+          ],
+          21,
+          14,
+        );
       });
 
-      // ── BARIS SUMMARY TOTAL ──
-      const totalQtyAll = fefoReports.reduce((s, r) => s + (Number(r.currentBatchQty) || 0), 0);
-      const totalRow = ws.addRow({
-        no: '',
-        productName: `TOTAL BATCH KEDALUWARSA (${fefoReports.length} Laporan)`,
-        batchCode: '',
-        alertLevel: '',
-        expiryDate: '',
-        qty: totalQtyAll,
-        sellingPrice: 0,
-        physicalCondition: '',
-        gudangSuggestion: '',
-        status: '',
-        managerDecision: '',
-        discountPct: '',
-        discountedPrice: 0,
-        barcodeNote: '',
-      });
-
+      const dataEnd = dataStart + fefoReports.length - 1;
+      const totalRow = ws.getRow(dataEnd + 1);
       totalRow.height = 24;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      totalRow.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
-        cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF000000' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4E4E7' } };
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FF000000' } },
-          bottom: { style: 'double', color: { argb: 'FF000000' } },
-          left: { style: 'thin', color: { argb: 'FFD4D4D8' } },
-          right: { style: 'thin', color: { argb: 'FFD4D4D8' } },
-        };
+      const qtyColChar = colLetter(6); // F: Sisa Stok Rak
 
-        if (colNumber === 2) {
-          cell.alignment = { horizontal: 'left', vertical: 'middle' };
-        } else if (colNumber === 6) {
-          cell.alignment = { horizontal: 'right', vertical: 'middle' };
-          cell.numFmt = '#,##0';
+      fefoCols.forEach((col, cIdx) => {
+        const cell = totalRow.getCell(cIdx + 1);
+        if (cIdx === 1) {
+          cell.value = `TOTAL BATCH KEDALUWARSA (${fefoReports.length} Laporan)`;
+        } else if (cIdx === 5) {
+          cell.value = {
+            formula: `SUM(${qtyColChar}${dataStart}:${qtyColChar}${dataEnd})`,
+            result: totalQtyAll,
+          };
+          cell.numFmt = EXCEL_FMT.INT;
         } else {
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          cell.value = '';
         }
+        cell.font = EXCEL_FONT.BOLD;
+        cell.fill = EXCEL_FILL.TOTAL;
+        cell.border = EXCEL_BORDER.TOTAL;
+        cell.alignment = { vertical: 'middle', horizontal: col.align };
       });
 
-      const buf = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buf], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      applySheetLayout(ws, {
+        freezeRow: 4,
+        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: fefoCols.length } },
+        orientation: 'landscape',
       });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-      a.download = `Rekap_Laporan_FEFO_Wiramart_${todayStr}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+
+      await downloadWorkbookBlob(wb, `Rekap_Laporan_FEFO_Wiramart_${todayWibSlug()}.xlsx`);
     } catch (e) {
       console.error(e);
       alert('Gagal mengekspor laporan FEFO ke Excel.');

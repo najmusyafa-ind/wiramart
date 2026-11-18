@@ -9,6 +9,21 @@ import {
 } from 'lucide-react';
 import BagiHasilTab from './BagiHasilTab';
 import { useAdmin } from '../PortalLayoutClient';
+import {
+  EXCEL_BORDER,
+  EXCEL_FILL,
+  EXCEL_FMT,
+  EXCEL_FONT,
+  applySheetLayout,
+  calcWrapRowHeight,
+  colLetter,
+  createWiramartWorkbook,
+  downloadWorkbookBlob,
+  formatWibDateTime,
+  sanitizeExcelText,
+  styleBannerBlock,
+  toSafeExcelNum,
+} from '@/lib/utils/exportSelectedExcel';
 
 // ─── Types ────────────────────────────────────────────────────
 type AttendanceStatus = 'HADIR' | 'TELAT' | 'IJIN' | 'TIDAK_HADIR' | 'PENGGANTI';
@@ -508,7 +523,7 @@ export default function AbsensiPage() {
     };
   }, [apiSummary, records]);
 
-  // Export Excel
+  // Export Excel Standar Akuntansi & Akademik Wiramart
   async function handleExportExcel() {
     if (records.length === 0 && summaryByEmployee.length === 0) {
       alert('Tidak ada data absensi untuk diekspor.');
@@ -516,121 +531,287 @@ export default function AbsensiPage() {
     }
     setExportLoading(true);
     try {
-      const ExcelJS = (await import('exceljs')).default;
-      const wb = new ExcelJS.Workbook();
-      wb.creator = 'Smartkasir Perwira — Wiramart UNPERBA';
-      wb.created = new Date();
+      const wb = await createWiramartWorkbook('Portal - Rekap Absensi & Kedisiplinan');
+      const periodText = rangeLabel || today;
+      const printedWib = formatWibDateTime();
 
-      // Sheet 1: Rekap Disiplin Mahasiswa
-      const ws1 = wb.addWorksheet('Rekap Disiplin & Gaji');
-      ws1.mergeCells('A1:J1');
-      const t1 = ws1.getCell('A1');
-      t1.value = `REKAP KEDISIPLINAN ABSENSI & KINERJA GAJI — ${rangeLabel.toUpperCase()}`;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (t1 as any).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (t1 as any).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (t1 as any).alignment = { horizontal: 'center', vertical: 'middle' };
-      ws1.getRow(1).height = 26;
-
-      ws1.columns = [
-        { key: 'no', width: 6 },
-        { key: 'nama', width: 28 },
-        { key: 'nim', width: 14 },
-        { key: 'prodi', width: 20 },
-        { key: 'totalShift', width: 12 },
-        { key: 'hadir', width: 12 },
-        { key: 'telat', width: 18 },
-        { key: 'alpa', width: 12 },
-        { key: 'pctHadir', width: 14 },
-        { key: 'skorDisiplin', width: 16 },
+      // ── SHEET 1: REKAP KEDISIPLINAN PERSONEL ────────────────────
+      const ws1 = wb.addWorksheet('Rekap Disiplin & Kinerja');
+      const cols1 = [
+        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Nama Lengkap', width: 26, align: 'left' as const },
+        { header: 'NIM', width: 14, align: 'center' as const },
+        { header: 'Program Studi', width: 22, align: 'left' as const },
+        { header: 'Total Shift', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Hadir Tepat Waktu', width: 17, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Terlambat (Kali)', width: 16, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Total Telat (Menit)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Izin / Tidak Hadir', width: 17, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Kehadiran (%)', width: 15, align: 'right' as const, fmt: EXCEL_FMT.PCT },
+        { header: 'Skor Disiplin (%)', width: 17, align: 'right' as const, fmt: EXCEL_FMT.PCT },
       ];
 
-      const h1 = ws1.getRow(3);
-      h1.values = ['No', 'Nama Mahasiswa', 'NIM', 'Prodi', 'Total Shift', 'Hadir Tepat', 'Telat (x & mnt)', 'Ijin / Alpa', '% Kehadiran', '% Skor Disiplin'];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      h1.eachCell((cell: any) => {
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cols1.forEach((c, i) => {
+        ws1.getColumn(i + 1).width = c.width;
       });
-      h1.height = 22;
+
+      styleBannerBlock(ws1, {
+        title: `REKAPITULASI KEDISIPLINAN & PRESENSI STAFF — WIRAMART UNPERBA`,
+        subtitle: `Periode: ${periodText} • ${summaryByEmployee.length} Personel • Dicetak: ${printedWib} WIB`,
+        endCol: cols1.length,
+        titleRow: 1,
+        subtitleRow: 2,
+      });
+      ws1.getRow(3).height = 8;
+
+      const h1 = ws1.getRow(4);
+      h1.height = 26;
+      cols1.forEach((c, i) => {
+        const cell = h1.getCell(i + 1);
+        cell.value = c.header;
+        cell.font = EXCEL_FONT.HEADER;
+        cell.fill = EXCEL_FILL.HEADER;
+        cell.border = EXCEL_BORDER.HEADER;
+        cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
+      });
+
+      let sumShift = 0;
+      let sumHadir = 0;
+      let sumTelat = 0;
+      let sumLateMins = 0;
+      let sumAlpa = 0;
+      let sumPctHadir = 0;
+      let sumSkor = 0;
 
       summaryByEmployee.forEach((e, idx) => {
-        ws1.addRow({
-          no: idx + 1,
-          nama: e.fullName,
-          nim: e.nim,
-          prodi: e.programStudi,
-          totalShift: `${e.totalShift}x`,
-          hadir: e.hadir,
-          telat: e.telat > 0 ? `${e.telat}x (${e.totalLateMinutes} mnt)` : '0',
-          alpa: e.ijin + e.tidakHadir,
-          pctHadir: `${e.persenKehadiran}%`,
-          skorDisiplin: `${e.skorDisiplin}%`,
+        const rowNum = 5 + idx;
+        const row = ws1.getRow(rowNum);
+        const shiftN = Math.round(toSafeExcelNum(e.totalShift));
+        const hadirN = Math.round(toSafeExcelNum(e.hadir));
+        const telatN = Math.round(toSafeExcelNum(e.telat));
+        const lateMinsN = Math.round(toSafeExcelNum(e.totalLateMinutes));
+        const alpaN = Math.round(toSafeExcelNum(e.ijin + e.tidakHadir));
+        const pctHadirN = toSafeExcelNum(e.persenKehadiran);
+        const skorN = toSafeExcelNum(e.skorDisiplin);
+
+        sumShift += shiftN;
+        sumHadir += hadirN;
+        sumTelat += telatN;
+        sumLateMins += lateMinsN;
+        sumAlpa += alpaN;
+        sumPctHadir += pctHadirN;
+        sumSkor += skorN;
+
+        const nameTxt = sanitizeExcelText(e.fullName) || '—';
+        const nimTxt = sanitizeExcelText(e.nim) || '—';
+        const prodiTxt = sanitizeExcelText(e.programStudi) || '—';
+
+        const rowValues: (string | number)[] = [
+          idx + 1,
+          nameTxt,
+          nimTxt,
+          prodiTxt,
+          shiftN,
+          hadirN,
+          telatN,
+          lateMinsN,
+          alpaN,
+          pctHadirN,
+          skorN,
+        ];
+
+        rowValues.forEach((val, cIdx) => {
+          const cell = row.getCell(cIdx + 1);
+          const meta = cols1[cIdx];
+          cell.value = val;
+          cell.font = EXCEL_FONT.BODY;
+          cell.border = EXCEL_BORDER.THIN;
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: meta.align,
+            wrapText: cIdx === 1 || cIdx === 3,
+          };
+          if (meta.fmt) cell.numFmt = meta.fmt;
+          if (idx % 2 === 1) cell.fill = EXCEL_FILL.ZEBRA;
         });
+
+        row.height = calcWrapRowHeight(
+          [
+            { text: nameTxt, width: cols1[1].width },
+            { text: prodiTxt, width: cols1[3].width },
+          ],
+          21,
+          14,
+        );
       });
 
-      // Sheet 2: Detail Log Presensi
-      const ws2 = wb.addWorksheet('Log Presensi Shift');
-      ws2.mergeCells('A1:I1');
-      const t2 = ws2.getCell('A1');
-      t2.value = `LOG PRESENSI SHIFT DETAIL — ${rangeLabel.toUpperCase()}`;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (t2 as any).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (t2 as any).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (t2 as any).alignment = { horizontal: 'center', vertical: 'middle' };
-      ws2.getRow(1).height = 26;
+      if (summaryByEmployee.length > 0) {
+        const end1 = 5 + summaryByEmployee.length - 1;
+        const tot1 = ws1.getRow(end1 + 1);
+        tot1.height = 24;
+        const avgHadir = Number((sumPctHadir / summaryByEmployee.length).toFixed(1));
+        const avgSkor = Number((sumSkor / summaryByEmployee.length).toFixed(1));
+        const sumMap1: Record<number, number> = {
+          4: sumShift,
+          5: sumHadir,
+          6: sumTelat,
+          7: sumLateMins,
+          8: sumAlpa,
+        };
 
-      ws2.columns = [
-        { key: 'no', width: 6 },
-        { key: 'tanggal', width: 14 },
-        { key: 'nama', width: 26 },
-        { key: 'nim', width: 14 },
-        { key: 'shift', width: 18 },
-        { key: 'clockIn', width: 12 },
-        { key: 'telat', width: 14 },
-        { key: 'status', width: 14 },
-        { key: 'catatan', width: 30 },
+        cols1.forEach((c, cIdx) => {
+          const cell = tot1.getCell(cIdx + 1);
+          const colChar = colLetter(cIdx + 1);
+          if (cIdx === 1) {
+            cell.value = `TOTAL / RATA-RATA (${summaryByEmployee.length} Personel)`;
+          } else if (cIdx in sumMap1) {
+            cell.value = { formula: `SUM(${colChar}5:${colChar}${end1})`, result: sumMap1[cIdx] };
+          } else if (cIdx === 9) {
+            cell.value = { formula: `AVERAGE(${colChar}5:${colChar}${end1})`, result: avgHadir };
+          } else if (cIdx === 10) {
+            cell.value = { formula: `AVERAGE(${colChar}5:${colChar}${end1})`, result: avgSkor };
+          } else {
+            cell.value = '';
+          }
+          cell.font = EXCEL_FONT.BOLD;
+          cell.fill = EXCEL_FILL.TOTAL;
+          cell.border = EXCEL_BORDER.TOTAL;
+          cell.alignment = { vertical: 'middle', horizontal: c.align };
+          if (c.fmt) cell.numFmt = c.fmt;
+        });
+      }
+
+      applySheetLayout(ws1, {
+        freezeRow: 4,
+        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: cols1.length } },
+        orientation: 'landscape',
+      });
+
+      // ── SHEET 2: DETAIL LOG PRESENSI SHIFT ──────────────────────
+      const ws2 = wb.addWorksheet('Log Presensi Shift');
+      const cols2 = [
+        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Tanggal', width: 13, align: 'center' as const },
+        { header: 'Nama Lengkap', width: 26, align: 'left' as const },
+        { header: 'NIM', width: 14, align: 'center' as const },
+        { header: 'Jadwal Shift', width: 20, align: 'left' as const },
+        { header: 'Waktu Masuk (WIB)', width: 16, align: 'center' as const },
+        { header: 'Keterlambatan (Mnt)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Status Kehadiran', width: 16, align: 'center' as const },
+        { header: 'Catatan', width: 34, align: 'left' as const },
       ];
 
-      const h2 = ws2.getRow(3);
-      h2.values = ['No', 'Tanggal', 'Nama Mahasiswa', 'NIM', 'Jadwal Shift', 'Clock In', 'Keterlambatan', 'Status', 'Catatan'];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      h2.eachCell((cell: any) => {
-        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cols2.forEach((c, i) => {
+        ws2.getColumn(i + 1).width = c.width;
       });
-      h2.height = 22;
+
+      styleBannerBlock(ws2, {
+        title: 'LOG RINCIAN PRESENSI SHIFT STAFF — WIRAMART UNPERBA',
+        subtitle: `Periode: ${periodText} • ${records.length} Catatan Presensi • Dicetak: ${printedWib} WIB`,
+        endCol: cols2.length,
+        titleRow: 1,
+        subtitleRow: 2,
+      });
+      ws2.getRow(3).height = 8;
+
+      const h2 = ws2.getRow(4);
+      h2.height = 26;
+      cols2.forEach((c, i) => {
+        const cell = h2.getCell(i + 1);
+        cell.value = c.header;
+        cell.font = EXCEL_FONT.HEADER;
+        cell.fill = EXCEL_FILL.HEADER;
+        cell.border = EXCEL_BORDER.HEADER;
+        cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
+      });
+
+      let sumRecordLate = 0;
 
       records.forEach((r, idx) => {
-        ws2.addRow({
-          no: idx + 1,
-          tanggal: r.attendanceDate,
-          nama: r.employee.fullName,
-          nim: r.employee.nim,
-          shift: `${r.schedule.dayOfWeek} ${r.schedule.slotStart}–${r.schedule.slotEnd}`,
-          clockIn: r.clockInActual ? new Date(r.clockInActual).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '—',
-          telat: r.lateMinutes > 0 ? `+${r.lateMinutes} mnt` : '—',
-          status: r.status,
-          catatan: r.notes ?? '—',
+        const rowNum = 5 + idx;
+        const row = ws2.getRow(rowNum);
+        const lateN = Math.max(0, Math.round(toSafeExcelNum(r.lateMinutes)));
+        sumRecordLate += lateN;
+
+        const clockInStr = r.clockInActual
+          ? new Date(r.clockInActual).toLocaleTimeString('id-ID', {
+              timeZone: 'Asia/Jakarta',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            })
+          : '—';
+
+        const nameTxt = sanitizeExcelText(r.employee.fullName) || '—';
+        const shiftTxt = sanitizeExcelText(`${r.schedule.dayOfWeek} ${r.schedule.slotStart}–${r.schedule.slotEnd}`) || '—';
+        const noteTxt = sanitizeExcelText(r.notes) || '—';
+
+        const rowValues: (string | number)[] = [
+          idx + 1,
+          sanitizeExcelText(r.attendanceDate) || '—',
+          nameTxt,
+          sanitizeExcelText(r.employee.nim) || '—',
+          shiftTxt,
+          clockInStr,
+          lateN,
+          sanitizeExcelText(r.status) || '—',
+          noteTxt,
+        ];
+
+        rowValues.forEach((val, cIdx) => {
+          const cell = row.getCell(cIdx + 1);
+          const meta = cols2[cIdx];
+          cell.value = val;
+          cell.font = EXCEL_FONT.BODY;
+          cell.border = EXCEL_BORDER.THIN;
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: meta.align,
+            wrapText: cIdx === 2 || cIdx === 4 || cIdx === 8,
+          };
+          if (meta.fmt) cell.numFmt = meta.fmt;
+          if (idx % 2 === 1) cell.fill = EXCEL_FILL.ZEBRA;
         });
+
+        row.height = calcWrapRowHeight(
+          [
+            { text: nameTxt, width: cols2[2].width },
+            { text: noteTxt, width: cols2[8].width },
+          ],
+          21,
+          14,
+        );
       });
 
-      const buffer = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buffer], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      if (records.length > 0) {
+        const end2 = 5 + records.length - 1;
+        const tot2 = ws2.getRow(end2 + 1);
+        tot2.height = 24;
+        cols2.forEach((c, cIdx) => {
+          const cell = tot2.getCell(cIdx + 1);
+          const colChar = colLetter(cIdx + 1);
+          if (cIdx === 2) {
+            cell.value = `TOTAL (${records.length} Catatan)`;
+          } else if (cIdx === 6) {
+            cell.value = { formula: `SUM(${colChar}5:${colChar}${end2})`, result: sumRecordLate };
+          } else {
+            cell.value = '';
+          }
+          cell.font = EXCEL_FONT.BOLD;
+          cell.fill = EXCEL_FILL.TOTAL;
+          cell.border = EXCEL_BORDER.TOTAL;
+          cell.alignment = { vertical: 'middle', horizontal: c.align };
+          if (c.fmt) cell.numFmt = c.fmt;
+        });
+      }
+
+      applySheetLayout(ws2, {
+        freezeRow: 4,
+        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: cols2.length } },
+        orientation: 'landscape',
       });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Rekap_Absensi_Disiplin_Wiramart_${today}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
+
+      await downloadWorkbookBlob(wb, `Rekap_Absensi_Disiplin_Wiramart_${today}.xlsx`);
     } catch (e) {
       console.error(e);
       alert('Gagal mengekspor data absensi ke Excel.');

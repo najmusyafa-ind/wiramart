@@ -30,38 +30,56 @@ import {
 
 export const EXPORT_MAX_ROWS = 10_000;
 
-const RUPIAH_FMT = '"Rp "#,##0;[Red]-"Rp "#,##0;"Rp "0';
-const INT_FMT = '#,##0';
-const PCT_FMT = '0.0"%"';
+export const SERVER_EXCEL_COLOR = {
+  BANNER: 'FF1E3A5F',
+  HEADER: 'FF2B4C7E',
+  HEADER_SUB: 'FF334155',
+  SUBTITLE_BG: 'FFF1F5F9',
+  SUBTITLE_TEXT: 'FF475569',
+  BODY_TEXT: 'FF0F172A',
+  ZEBRA: 'FFF8FAFC',
+  TOTAL: 'FFE2E8F0',
+} as const;
 
-const THIN_BORDER: Partial<ExcelJS.Borders> = {
-  top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-  left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-  bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-  right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+export const RUPIAH_FMT = '"Rp "#,##0;[Red]-"Rp "#,##0;"Rp "0';
+export const INT_FMT = '#,##0';
+export const PCT_FMT = '0.0"%"';
+
+export const THIN_BORDER: Partial<ExcelJS.Borders> = {
+  top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
 };
 
-const TOTAL_BORDER: Partial<ExcelJS.Borders> = {
+export const HEADER_BORDER: Partial<ExcelJS.Borders> = {
+  top: { style: 'thin', color: { argb: 'FF1E3A5F' } },
+  left: { style: 'thin', color: { argb: 'FF475569' } },
+  bottom: { style: 'medium', color: { argb: 'FF0F172A' } },
+  right: { style: 'thin', color: { argb: 'FF475569' } },
+};
+
+export const TOTAL_BORDER: Partial<ExcelJS.Borders> = {
   top: { style: 'thin', color: { argb: 'FF0F172A' } },
   bottom: { style: 'double', color: { argb: 'FF0F172A' } },
-  left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
-  right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+  left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+  right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
 };
 
-const ZEBRA_FILL: ExcelJS.Fill = {
+export const ZEBRA_FILL: ExcelJS.Fill = {
   type: 'pattern',
   pattern: 'solid',
-  fgColor: { argb: 'FFF8FAFC' },
+  fgColor: { argb: SERVER_EXCEL_COLOR.ZEBRA },
 };
 
-const TOTAL_FILL: ExcelJS.Fill = {
+export const TOTAL_FILL: ExcelJS.Fill = {
   type: 'pattern',
   pattern: 'solid',
-  fgColor: { argb: 'FFEEF2FF' },
+  fgColor: { argb: SERVER_EXCEL_COLOR.TOTAL },
 };
 
-// ── Util Helpers ──────────────────────────────────────────────
-function sanitizeExcelText(v: string | null | undefined): string {
+// ── Util Helpers (SSOT Server Excel) ──────────────────────────
+export function sanitizeExcelText(v: string | null | undefined): string {
   const str = String(v ?? '').trim();
   if (!str) return '';
   if (/^[=+\-@\t\r]/.test(str)) {
@@ -70,12 +88,12 @@ function sanitizeExcelText(v: string | null | undefined): string {
   return str;
 }
 
-function toNum(val: string | number | null | undefined): number {
+export function toNum(val: string | number | null | undefined): number {
   const n = typeof val === 'number' ? val : Number(val ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-function fmtWibDateTime(d: Date | string | null | undefined): string {
+export function fmtWibDateTime(d: Date | string | null | undefined): string {
   if (!d) return '';
   const dateObj = typeof d === 'string' ? new Date(d) : d;
   if (Number.isNaN(dateObj.getTime())) return '';
@@ -91,7 +109,7 @@ function fmtWibDateTime(d: Date | string | null | undefined): string {
   }).format(dateObj);
 }
 
-function isExcludedTestAccount(name: string | null | undefined, nim: string | null | undefined): boolean {
+export function isExcludedTestAccount(name: string | null | undefined, nim: string | null | undefined): boolean {
   const lname = (name ?? '').toLowerCase();
   const lnim = (nim ?? '').toLowerCase();
   return (
@@ -102,7 +120,7 @@ function isExcludedTestAccount(name: string | null | undefined, nim: string | nu
   );
 }
 
-function colLetter(col1Based: number): string {
+export function colLetter(col1Based: number): string {
   let col = col1Based;
   let result = '';
   while (col > 0) {
@@ -113,44 +131,108 @@ function colLetter(col1Based: number): string {
   return result;
 }
 
-function addBannerBlock(
+export function chunkArray<T>(arr: readonly T[], size = 2000): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function normalizeArgb(hex: string): string {
+  const cleaned = hex.replace(/^#/, '');
+  return cleaned.length === 8 ? cleaned.toUpperCase() : `FF${cleaned.toUpperCase()}`;
+}
+
+export function applyServerPageSetup(
+  ws: ExcelJS.Worksheet,
+  orientation: 'landscape' | 'portrait' = 'landscape',
+): void {
+  ws.pageSetup = {
+    paperSize: 9, // A4
+    orientation,
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    margins: {
+      left: 0.35,
+      right: 0.35,
+      top: 0.45,
+      bottom: 0.45,
+      header: 0.25,
+      footer: 0.25,
+    },
+  };
+}
+
+export function calcServerWrapRowHeight(
+  cells: readonly { text: string; width: number }[],
+  minHeight = 21,
+  lineHeight = 14,
+): number {
+  let maxLines = 1;
+  for (const item of cells) {
+    if (!item.text) continue;
+    const usableChars = Math.max(8, Math.floor(item.width - 3));
+    const parts = item.text.split(/\r?\n/);
+    let lines = 0;
+    for (const part of parts) {
+      lines += Math.max(1, Math.ceil(part.length / usableChars));
+    }
+    if (lines > maxLines) maxLines = lines;
+  }
+  return Math.min(220, Math.max(minHeight, maxLines * lineHeight + 7));
+}
+
+export function addBannerBlock(
   ws: ExcelJS.Worksheet,
   title: string,
   subtitle: string,
   colSpan: number,
-  fillHex = '1E3A8A',
+  fillHex: string = SERVER_EXCEL_COLOR.BANNER,
+  orientation: 'landscape' | 'portrait' = 'landscape',
 ): void {
   const lastCol = colLetter(Math.max(1, colSpan));
+  const bannerArgb = normalizeArgb(fillHex);
   ws.mergeCells(`A1:${lastCol}1`);
   const titleCell = ws.getCell('A1');
-  titleCell.value = title;
-  titleCell.font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } };
-  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillHex } };
+  titleCell.value = sanitizeExcelText(title);
+  titleCell.font = { name: 'Calibri', bold: true, size: 13, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bannerArgb } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
-  ws.getRow(1).height = 28;
+  ws.getRow(1).height = 30;
 
   ws.mergeCells(`A2:${lastCol}2`);
   const subCell = ws.getCell('A2');
-  subCell.value = subtitle;
-  subCell.font = { size: 10, italic: true, color: { argb: 'FF334155' } };
-  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
-  subCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+  subCell.value = sanitizeExcelText(subtitle);
+  subCell.font = { name: 'Calibri', size: 9.5, italic: true, color: { argb: SERVER_EXCEL_COLOR.SUBTITLE_TEXT } };
+  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SERVER_EXCEL_COLOR.SUBTITLE_BG } };
+  subCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1, wrapText: true };
   ws.getRow(2).height = 20;
+  ws.getRow(3).height = 8;
+
+  applyServerPageSetup(ws, orientation);
 }
 
-function styleTableHeader(ws: ExcelJS.Worksheet, rowIdx: number, colCount: number, fillHex = '1D4ED8'): void {
+export function styleTableHeader(
+  ws: ExcelJS.Worksheet,
+  rowIdx: number,
+  colCount: number,
+  fillHex: string = SERVER_EXCEL_COLOR.HEADER,
+): void {
   const row = ws.getRow(rowIdx);
+  const headerArgb = normalizeArgb(fillHex);
   row.height = 26;
   for (let c = 1; c <= colCount; c++) {
     const cell = row.getCell(c);
-    cell.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillHex } };
+    cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerArgb } };
     cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-    cell.border = THIN_BORDER;
+    cell.border = HEADER_BORDER;
   }
 }
 
-function styleDataTable(
+export function styleDataTable(
   ws: ExcelJS.Worksheet,
   opts: {
     headerRowIdx: number;
@@ -164,6 +246,7 @@ function styleDataTable(
     sumLabelCol?: number;
     sumLabel?: string;
     customSumFormula?: (colIdx: number, colLtr: string) => string;
+    sumFilter?: { col: number; equals: string };
     freezeHeader?: boolean;
   },
 ): void {
@@ -179,25 +262,49 @@ function styleDataTable(
     sumLabelCol = 1,
     sumLabel = 'TOTAL',
     customSumFormula,
+    sumFilter,
     freezeHeader = true,
   } = opts;
 
   if (lastDataRow >= firstDataRow) {
+    const colSums = new Map<number, number>();
+    for (const sCol of sumCols) colSums.set(sCol, 0);
+
     for (let r = firstDataRow; r <= lastDataRow; r++) {
       const row = ws.getRow(r);
       const isZebra = (r - firstDataRow) % 2 === 1;
+      const matchesFilter =
+        !sumFilter || String(row.getCell(sumFilter.col).value ?? '') === sumFilter.equals;
+      const wrapCandidates: { text: string; width: number }[] = [];
+
       for (let c = 1; c <= colCount; c++) {
         const cell = row.getCell(c);
+        const isNumericCol = rupiahCols.includes(c) || intCols.includes(c) || pctCols.includes(c);
+        const colWidth = Number(ws.getColumn(c).width ?? 16);
+        const shouldWrap = !isNumericCol && colWidth >= 22;
+
+        cell.font = { name: 'Calibri', size: 10, color: { argb: SERVER_EXCEL_COLOR.BODY_TEXT } };
         cell.border = THIN_BORDER;
         cell.alignment = {
           vertical: 'middle',
-          horizontal: rupiahCols.includes(c) || intCols.includes(c) || pctCols.includes(c) ? 'right' : 'left',
+          horizontal: isNumericCol ? 'right' : 'left',
+          wrapText: shouldWrap,
         };
         if (isZebra) cell.fill = ZEBRA_FILL;
         if (rupiahCols.includes(c)) cell.numFmt = RUPIAH_FMT;
         if (intCols.includes(c)) cell.numFmt = INT_FMT;
         if (pctCols.includes(c)) cell.numFmt = PCT_FMT;
+
+        if (shouldWrap && typeof cell.value === 'string' && cell.value.length > 0) {
+          wrapCandidates.push({ text: cell.value, width: colWidth });
+        }
+
+        if (matchesFilter && sumCols.includes(c) && typeof cell.value === 'number' && Number.isFinite(cell.value)) {
+          colSums.set(c, (colSums.get(c) ?? 0) + cell.value);
+        }
       }
+
+      row.height = calcServerWrapRowHeight(wrapCandidates, 21, 14);
     }
 
     if (sumCols.length > 0) {
@@ -208,7 +315,7 @@ function styleDataTable(
         const cell = totRow.getCell(c);
         cell.border = TOTAL_BORDER;
         cell.fill = TOTAL_FILL;
-        cell.font = { bold: true, size: 10, color: { argb: 'FF0F172A' } };
+        cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: SERVER_EXCEL_COLOR.BODY_TEXT } };
         if (c === sumLabelCol) {
           cell.value = sumLabel;
           cell.alignment = { vertical: 'middle', horizontal: 'left' };
@@ -218,6 +325,7 @@ function styleDataTable(
             formula: customSumFormula
               ? customSumFormula(c, ltr)
               : `SUM(${ltr}${firstDataRow}:${ltr}${lastDataRow})`,
+            result: colSums.get(c) ?? 0,
           };
           cell.alignment = { vertical: 'middle', horizontal: 'right' };
           if (rupiahCols.includes(c)) cell.numFmt = RUPIAH_FMT;
@@ -228,7 +336,7 @@ function styleDataTable(
   }
 
   if (freezeHeader) {
-    ws.views = [{ state: 'frozen', ySplit: headerRowIdx }];
+    ws.views = [{ state: 'frozen', ySplit: headerRowIdx, showGridLines: true }];
     ws.autoFilter = {
       from: { row: headerRowIdx, column: 1 },
       to: { row: Math.max(headerRowIdx, lastDataRow), column: colCount },
@@ -236,20 +344,25 @@ function styleDataTable(
   }
 }
 
-function setWidths(ws: ExcelJS.Worksheet, widths: readonly number[]): void {
+export function setWidths(ws: ExcelJS.Worksheet, widths: readonly number[]): void {
   widths.forEach((w, idx) => {
     ws.getColumn(idx + 1).width = w;
   });
 }
 
-function writeRowValues(ws: ExcelJS.Worksheet, rowIdx: number, values: readonly (string | number | null)[]): void {
+export function writeRowValues(ws: ExcelJS.Worksheet, rowIdx: number, values: readonly (string | number | null)[]): void {
   const row = ws.getRow(rowIdx);
   values.forEach((v, idx) => {
     row.getCell(idx + 1).value = typeof v === 'string' ? sanitizeExcelText(v) : v;
   });
 }
 
-function setHeaderRow(ws: ExcelJS.Worksheet, rowIdx: number, headers: readonly string[], fillHex = '1D4ED8'): void {
+export function setHeaderRow(
+  ws: ExcelJS.Worksheet,
+  rowIdx: number,
+  headers: readonly string[],
+  fillHex: string = SERVER_EXCEL_COLOR.HEADER,
+): void {
   const row = ws.getRow(rowIdx);
   headers.forEach((h, idx) => {
     row.getCell(idx + 1).value = h;
@@ -270,6 +383,7 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Smartkasir Perwira — UKM Wiramart UNPERBA';
   wb.created = new Date();
+  wb.calcProperties.fullCalcOnLoad = true;
 
   const generatedWib = fmtWibDateTime(new Date());
   const report = await getFinancialReport(range);
@@ -278,21 +392,20 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
   const truncatedSheets: string[] = [];
 
   // ── Sheet 1: Ringkasan Hasil ────────────────────────────────
-  const wsSum = wb.addWorksheet('Ringkasan Hasil');
+  const wsSum = wb.addWorksheet('Ringkasan Hasil', { views: [{ showGridLines: true }] });
   addBannerBlock(
     wsSum,
     'LAPORAN HASIL PENJUALAN & KEUANGAN — UKM WIRAMART UNPERBA',
     `Periode: ${range.label} (${range.startDate} s/d ${range.endDate} WIB) | Dicetak: ${generatedWib} WIB`,
     4,
-    '0F766E',
   );
-  setWidths(wsSum, [38, 22, 20, 42]);
+  setWidths(wsSum, [38, 22, 20, 44]);
 
   const { summary, checks } = report;
   const marginPct = summary.omzet > 0 ? Math.round((summary.labaKotor / summary.omzet) * 1000) / 10 : 0;
 
   let sr = 4;
-  setHeaderRow(wsSum, sr, ['Indikator Keuangan', 'Nilai', 'Satuan / %', 'Keterangan'], '0F766E');
+  setHeaderRow(wsSum, sr, ['Indikator Keuangan', 'Nilai', 'Satuan / %', 'Keterangan']);
   sr += 1;
 
   const kpiRows: Array<{ label: string; val: number; isRp?: boolean; pct?: number; note: string; bold?: boolean }> = [
@@ -320,45 +433,68 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
       r.getCell(3).alignment = { horizontal: 'right', vertical: 'middle' };
     }
     r.getCell(4).value = item.note;
+    r.getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
+    r.getCell(4).alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
     for (let c = 1; c <= 4; c++) {
       r.getCell(c).border = THIN_BORDER;
+      r.getCell(c).font = {
+        name: 'Calibri',
+        size: 10,
+        bold: Boolean(item.bold),
+        color: { argb: SERVER_EXCEL_COLOR.BODY_TEXT },
+      };
       if (item.bold) {
-        r.getCell(c).font = { bold: true, color: { argb: 'FF0F172A' } };
         r.getCell(c).fill = TOTAL_FILL;
       }
     }
+    r.height = calcServerWrapRowHeight([{ text: item.note, width: 44 }], 21, 14);
     sr += 1;
   }
 
   sr += 1;
-  setHeaderRow(wsSum, sr, ['Kategori Biaya Operasional', 'Total (Rp)', 'Porsi (%)', 'Status Audit'], '334155');
+  setHeaderRow(wsSum, sr, ['Kategori Biaya Operasional', 'Total (Rp)', 'Porsi (%)', 'Status Audit'], SERVER_EXCEL_COLOR.HEADER_SUB);
   sr += 1;
   const catStart = sr;
   if (summary.biayaPerKategori.length === 0) {
     writeRowValues(wsSum, sr, ['Tidak ada biaya operasional tercatat pada periode ini', 0, 0, 'OK']);
     wsSum.getRow(sr).getCell(2).numFmt = RUPIAH_FMT;
+    wsSum.getRow(sr).height = 21;
+    for (let c = 1; c <= 4; c++) {
+      wsSum.getRow(sr).getCell(c).border = THIN_BORDER;
+      wsSum.getRow(sr).getCell(c).font = { name: 'Calibri', size: 10, color: { argb: SERVER_EXCEL_COLOR.BODY_TEXT } };
+    }
     sr += 1;
   } else {
     for (const cat of summary.biayaPerKategori) {
       const porsi = summary.biayaOperasional > 0 ? Math.round((cat.total / summary.biayaOperasional) * 1000) / 10 : 0;
       writeRowValues(wsSum, sr, [cat.category, cat.total, porsi, 'Terverifikasi']);
-      wsSum.getRow(sr).getCell(2).numFmt = RUPIAH_FMT;
-      wsSum.getRow(sr).getCell(3).numFmt = PCT_FMT;
-      for (let c = 1; c <= 4; c++) wsSum.getRow(sr).getCell(c).border = THIN_BORDER;
+      const row = wsSum.getRow(sr);
+      row.getCell(2).numFmt = RUPIAH_FMT;
+      row.getCell(2).alignment = { horizontal: 'right', vertical: 'middle' };
+      row.getCell(3).numFmt = PCT_FMT;
+      row.getCell(3).alignment = { horizontal: 'right', vertical: 'middle' };
+      row.height = 21;
+      for (let c = 1; c <= 4; c++) {
+        row.getCell(c).border = THIN_BORDER;
+        row.getCell(c).font = { name: 'Calibri', size: 10, color: { argb: SERVER_EXCEL_COLOR.BODY_TEXT } };
+      }
       sr += 1;
     }
   }
   const catEnd = sr - 1;
   if (summary.biayaPerKategori.length > 0) {
+    const catTotalSum = summary.biayaPerKategori.reduce((acc, cat) => acc + cat.total, 0);
     const rTot = wsSum.getRow(sr);
+    rTot.height = 24;
     rTot.getCell(1).value = 'TOTAL BIAYA';
-    rTot.getCell(2).value = { formula: `SUM(B${catStart}:B${catEnd})` };
+    rTot.getCell(2).value = { formula: `SUM(B${catStart}:B${catEnd})`, result: catTotalSum };
     rTot.getCell(2).numFmt = RUPIAH_FMT;
+    rTot.getCell(2).alignment = { horizontal: 'right', vertical: 'middle' };
     rTot.getCell(4).value = `Cek Integritas: Cash+QRIS=${checks.methodSplitMatches ? 'OK' : 'CEK'}, Harian=${checks.dailyMatchesSummary ? 'OK' : 'CEK'}`;
     for (let c = 1; c <= 4; c++) {
       rTot.getCell(c).border = TOTAL_BORDER;
       rTot.getCell(c).fill = TOTAL_FILL;
-      rTot.getCell(c).font = { bold: true };
+      rTot.getCell(c).font = { name: 'Calibri', size: 10, bold: true, color: { argb: SERVER_EXCEL_COLOR.BODY_TEXT } };
     }
   }
   rowCounts['Ringkasan Hasil'] = kpiRows.length;
@@ -370,7 +506,6 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     'REKAP PENJUALAN PER BULAN & HARIAN (WIB)',
     `Periode: ${range.label} | Komparasi Bulanan & Rincian Harian`,
     13,
-    '1E40AF',
   );
   setWidths(wsTime, [18, 10, 10, 10, 18, 16, 16, 16, 16, 10, 16, 16, 18]);
 
@@ -393,7 +528,6 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
       'Bagi Hasil 50% (Rp)',
       'Laba Bersih Toko (Rp)',
     ],
-    '1E40AF',
   );
   tr += 1;
   const mFirst = tr;
@@ -455,7 +589,7 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
       'Bagi Hasil (Rp)',
       'Laba Bersih (Rp)',
     ],
-    '0369A1',
+    SERVER_EXCEL_COLOR.HEADER_SUB,
   );
   tr += 1;
   const dFirst = tr;
@@ -637,7 +771,6 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     'REKAPITULASI PER KASIR & PER JAM PENJUALAN (WIB)',
     `Periode: ${range.label} | Atribusi akurat per kasir transaksi (termasuk co-cashier laci bersama)`,
     10,
-    '4338CA',
   );
   setWidths(wsKasirJam, [28, 16, 11, 10, 18, 17, 17, 17, 17, 12]);
 
@@ -646,7 +779,6 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     wsKasirJam,
     kr,
     ['Nama Kasir / Pelaku Transaksi', 'NIM', 'Tx Sukses', 'Void', 'Omzet (Rp)', 'Cash (Rp)', 'QRIS (Rp)', 'HPP (Rp)', 'Laba Kotor (Rp)', 'Porsi Omzet %'],
-    '4338CA',
   );
   kr += 1;
   const kFirst = kr;
@@ -680,7 +812,7 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     wsKasirJam,
     jamHeaderRow,
     ['Jam Operasional (WIB)', 'Kode Jam', 'Tx Sukses', 'Void', 'Omzet (Rp)', 'Cash (Rp)', 'QRIS (Rp)', 'HPP (Rp)', 'Laba Kotor (Rp)', 'Porsi Omzet %'],
-    '0F766E',
+    SERVER_EXCEL_COLOR.HEADER_SUB,
   );
   kr += 1;
   const jFirst = kr;
@@ -738,14 +870,12 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     'ANALISIS PENJUALAN PRODUK & LABA PER SKU',
     `Periode: ${range.label} | Diurutkan dari omzet tertinggi (Maks ${EXPORT_MAX_ROWS.toLocaleString('id-ID')} SKU)`,
     9,
-    'B45309',
   );
   setWidths(wsProd, [8, 34, 18, 12, 18, 18, 18, 12, 18]);
   setHeaderRow(
     wsProd,
     4,
     ['Rank', 'Nama Produk', 'Kategori', 'Qty Terjual', 'Omzet Jual (Rp)', 'HPP Verified (Rp)', 'Laba Kotor (Rp)', 'Margin %', 'Omzet Tanpa HPP (Rp)'],
-    'B45309',
   );
 
   let pr = 5;
@@ -868,14 +998,12 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     'AUDIT SHIFT, KAS LACI & KAS GERAK (WIB)',
     `Periode: ${range.label} | Waktu Masuk & Tutup lengkap dengan tanggal WIB`,
     13,
-    '334155',
   );
   setWidths(wsShift, [24, 14, 20, 20, 10, 9, 16, 16, 15, 15, 16, 16, 28]);
   setHeaderRow(
     wsShift,
     4,
     ['Penanggung Jawab Laci', 'NIM', 'Masuk Shift (WIB)', 'Tutup Shift (WIB)', 'Status', 'Trx', 'Modal Awal (Rp)', 'Penjualan Cash (Rp)', 'Kas Masuk (Rp)', 'Kas Keluar (Rp)', 'Kas Laci Fisik (Rp)', 'Selisih (Rp)', 'Audit Flags / Catatan'],
-    '334155',
   );
 
   let shr = 5;
@@ -975,14 +1103,12 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     'RINCIAN TRANSAKSI PENJUALAN (NON-TESTING)',
     `Periode: ${range.label} | Total baris diunduh: ${txList.length.toLocaleString('id-ID')} (Maks ${EXPORT_MAX_ROWS.toLocaleString('id-ID')}) | Baris TOTAL hanya menghitung status COMPLETED`,
     13,
-    '1D4ED8',
   );
   setWidths(wsTx, [22, 20, 24, 14, 11, 12, 16, 15, 15, 16, 16, 15, 28]);
   setHeaderRow(
     wsTx,
     4,
     ['Invoice', 'Tanggal (WIB)', 'Kasir', 'NIM', 'Metode', 'Status', 'Omzet (Rp)', 'Cash Tagihan (Rp)', 'QRIS Tagihan (Rp)', 'HPP Sistem (Rp)', 'Laba Sistem (Rp)', 'Kembalian (Rp)', 'Alasan Void'],
-    '1D4ED8',
   );
 
   let txr = 5;
@@ -1022,6 +1148,7 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     sumCols: [7, 8, 9, 10, 11, 12],
     sumLabel: 'TOTAL COMPLETED',
     customSumFormula: (_c, ltr) => `SUMIFS(${ltr}5:${ltr}${txLast},F5:F${txLast},"COMPLETED")`,
+    sumFilter: { col: 6, equals: 'COMPLETED' },
   });
   rowCounts['Detail Transaksi'] = txList.length;
 
@@ -1055,10 +1182,9 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     'RINCIAN BIAYA OPERASIONAL PERIODIK',
     `Periode: ${range.label} | Catatan: Biaya Paten Rp 50.000/bulan aktif sudah dimasukkan pada Sheet Ringkasan & Bulanan`,
     5,
-    '7C2D12',
   );
   setWidths(wsExp, [16, 18, 40, 18, 24]);
-  setHeaderRow(wsExp, 4, ['Tanggal Bisnis', 'Kategori', 'Keterangan Biaya', 'Nominal (Rp)', 'Dicatat Oleh'], '7C2D12');
+  setHeaderRow(wsExp, 4, ['Tanggal Bisnis', 'Kategori', 'Keterangan Biaya', 'Nominal (Rp)', 'Dicatat Oleh']);
 
   let er = 5;
   if (expRows.length === 0) {
@@ -1098,6 +1224,7 @@ export async function buildBackupWorkbook(params: {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Smartkasir Perwira — Export & Backup System';
   wb.created = new Date();
+  wb.calcProperties.fullCalcOnLoad = true;
 
   const rowCounts: Record<string, number> = {};
   const truncatedSheets: string[] = [];
@@ -1109,9 +1236,8 @@ export async function buildBackupWorkbook(params: {
     `BACKUP & ARSIP DATA — ${type.toUpperCase()} — SMARTKASIR PERWIRA`,
     `Periode Filter: ${range ? `${range.label} (${range.startDate} s/d ${range.endDate} WIB)` : 'Semua Waktu'} | Diekspor: ${generatedWib} WIB`,
     3,
-    '1E293B',
   );
-  setWidths(wsCover, [34, 24, 40]);
+  setWidths(wsCover, [34, 24, 44]);
 
   const txTimeWhere = range
     ? [eq(transactions.isTest, false), gte(transactions.createdAt, range.start), lt(transactions.createdAt, range.endExclusive)]
@@ -1140,14 +1266,12 @@ export async function buildBackupWorkbook(params: {
       'DATA TRANSAKSI PENJUALAN (NON-TESTING)',
       `Periode: ${range ? range.label : 'Semua Waktu (Maks 10.000 baris terbaru)'} | Baris TOTAL hanya menjumlahkan COMPLETED`,
       11,
-      '1D4ED8',
     );
     setWidths(ws, [22, 20, 24, 11, 12, 17, 16, 16, 16, 16, 30]);
     setHeaderRow(
       ws,
       4,
       ['Invoice', 'Tanggal (WIB)', 'Kasir', 'Metode', 'Status', 'Omzet (Rp)', 'HPP (Rp)', 'Laba (Rp)', 'Tunai Diterima (Rp)', 'Kembalian (Rp)', 'Alasan Void'],
-      '1D4ED8',
     );
 
     const rows = await db
@@ -1204,6 +1328,7 @@ export async function buildBackupWorkbook(params: {
       sumCols: [6, 7, 8, 9, 10],
       sumLabel: 'TOTAL COMPLETED',
       customSumFormula: (_c, ltr) => `SUMIFS(${ltr}5:${ltr}${lastRow},E5:E${lastRow},"COMPLETED")`,
+      sumFilter: { col: 5, equals: 'COMPLETED' },
     });
     rowCounts['Transaksi'] = rows.length;
 
@@ -1214,14 +1339,12 @@ export async function buildBackupWorkbook(params: {
       'DETAIL ITEM TRANSAKSI',
       `Periode: ${range ? range.label : 'Semua Waktu (Maks 10.000 baris terbaru)'} | Laba Item = Subtotal Jual - Subtotal HPP`,
       10,
-      '0369A1',
     );
     setWidths(wsItems, [22, 20, 32, 12, 9, 17, 17, 17, 17, 17]);
     setHeaderRow(
       wsItems,
       4,
       ['Invoice', 'Tanggal (WIB)', 'Nama Produk (Snapshot)', 'Status Trx', 'Qty', 'Harga Jual (Rp)', 'HPP (Rp)', 'Subtotal Jual (Rp)', 'Subtotal HPP (Rp)', 'Laba Item (Rp)'],
-      '0369A1',
     );
 
     const itemRows = await db
@@ -1278,6 +1401,7 @@ export async function buildBackupWorkbook(params: {
       sumCols: [5, 8, 9, 10],
       sumLabel: 'TOTAL COMPLETED',
       customSumFormula: (_c, ltr) => `SUMIFS(${ltr}5:${ltr}${iLast},D5:D${iLast},"COMPLETED")`,
+      sumFilter: { col: 4, equals: 'COMPLETED' },
     });
     rowCounts['Detail Item Transaksi'] = itemRows.length;
   }
@@ -1290,14 +1414,12 @@ export async function buildBackupWorkbook(params: {
       'MASTER PRODUK & VALUASI STOK SAAT INI',
       `Maks ${EXPORT_MAX_ROWS.toLocaleString('id-ID')} SKU | Nilai Aset = Stok x HPP | Potensi Jual = Stok x Harga Jual`,
       12,
-      'D97706',
     );
     setWidths(wsProd, [32, 16, 18, 15, 16, 11, 10, 10, 18, 18, 12, 20]);
     setHeaderRow(
       wsProd,
       4,
       ['Nama Produk', 'Barcode', 'Kategori', 'HPP (Rp)', 'Harga Jual (Rp)', 'Margin %', 'Stok', 'Satuan', 'Nilai Aset HPP (Rp)', 'Potensi Jual (Rp)', 'Status', 'Diupdate (WIB)'],
-      'D97706',
     );
 
     const pRows = await db
@@ -1369,14 +1491,12 @@ export async function buildBackupWorkbook(params: {
       'DATA KARYAWAN / KASIR MAHASISWA',
       `Maks ${EXPORT_MAX_ROWS.toLocaleString('id-ID')} karyawan | Tanpa data rahasia PIN hash`,
       8,
-      '6D28D9',
     );
     setWidths(wsEmp, [28, 16, 22, 16, 14, 14, 12, 20]);
     setHeaderRow(
       wsEmp,
       4,
       ['Nama Lengkap', 'NIM', 'Program Studi', 'Jabatan', 'Ketua Shift', 'Keamanan PIN', 'Status', 'Tanggal Daftar (WIB)'],
-      '6D28D9',
     );
 
     const eRows = await db
@@ -1433,14 +1553,12 @@ export async function buildBackupWorkbook(params: {
       'HISTORI SHIFT LACI KASIR',
       `Periode: ${range ? range.label : 'Semua Waktu (Maks 10.000 baris)'}`,
       9,
-      '475569',
     );
     setWidths(wsShift, [24, 14, 20, 20, 10, 16, 16, 16, 26]);
     setHeaderRow(
       wsShift,
       4,
       ['Kasir Pembuka Laci', 'NIM', 'Clock In (WIB)', 'Clock Out (WIB)', 'Status', 'Modal Awal (Rp)', 'Actual Cash (Rp)', 'Selisih Serah Terima (Rp)', 'Audit Flags / Catatan'],
-      '475569',
     );
 
     const shiftWhere = range
@@ -1505,14 +1623,12 @@ export async function buildBackupWorkbook(params: {
       'RIWAYAT PENYESUAIAN STOK GUDANG',
       `Periode: ${range ? range.label : 'Semua Waktu (Maks 10.000 baris)'}`,
       7,
-      '0F766E',
     );
     setWidths(wsAdj, [20, 30, 12, 12, 12, 34, 22]);
     setHeaderRow(
       wsAdj,
       4,
       ['Tanggal (WIB)', 'Produk', 'Qty Sebelum', 'Qty Sesudah', 'Selisih', 'Alasan Koreksi', 'Dicatat Oleh'],
-      '0F766E',
     );
 
     const adjWhere = range
@@ -1571,34 +1687,41 @@ export async function buildBackupWorkbook(params: {
   // Isi cover INFO & Ringkasan dengan ringkasan hasil + jumlah baris setiap sheet
   let cr = 4;
   if (summaryBlock.length > 0) {
-    setHeaderRow(wsCover, cr, ['Ringkasan Hasil Penjualan', 'Nilai (Rp)', 'Keterangan'], '0F766E');
+    setHeaderRow(wsCover, cr, ['Ringkasan Hasil Penjualan', 'Nilai (Rp)', 'Keterangan']);
     cr += 1;
     for (const [label, val, note] of summaryBlock) {
       writeRowValues(wsCover, cr, [label, val, note]);
       const row = wsCover.getRow(cr);
       row.getCell(2).numFmt = RUPIAH_FMT;
       row.getCell(2).alignment = { horizontal: 'right', vertical: 'middle' };
-      for (let c = 1; c <= 3; c++) row.getCell(c).border = THIN_BORDER;
+      row.getCell(3).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+      for (let c = 1; c <= 3; c++) {
+        row.getCell(c).border = THIN_BORDER;
+        row.getCell(c).font = { name: 'Calibri', size: 10, color: { argb: SERVER_EXCEL_COLOR.BODY_TEXT } };
+      }
+      row.height = calcServerWrapRowHeight([{ text: note, width: 44 }], 21, 14);
       cr += 1;
     }
     cr += 1;
   }
 
-  setHeaderRow(wsCover, cr, ['Nama Sheet / Arsip', 'Jumlah Baris', 'Catatan'], '334155');
+  setHeaderRow(wsCover, cr, ['Nama Sheet / Arsip', 'Jumlah Baris', 'Catatan'], SERVER_EXCEL_COLOR.HEADER_SUB);
   cr += 1;
   for (const [sheetName, count] of Object.entries(rowCounts)) {
     const isTruncated = truncatedSheets.includes(sheetName);
-    writeRowValues(wsCover, cr, [
-      sheetName,
-      count,
-      isTruncated
-        ? `Mencapai batas maks ${EXPORT_MAX_ROWS.toLocaleString('id-ID')} baris — gunakan filter rentang tanggal lebih sempit`
-        : 'Lengkap sesuai filter periode',
-    ]);
+    const noteText = isTruncated
+      ? `Mencapai batas maks ${EXPORT_MAX_ROWS.toLocaleString('id-ID')} baris — gunakan filter rentang tanggal lebih sempit`
+      : 'Lengkap sesuai filter periode';
+    writeRowValues(wsCover, cr, [sheetName, count, noteText]);
     const row = wsCover.getRow(cr);
     row.getCell(2).numFmt = INT_FMT;
     row.getCell(2).alignment = { horizontal: 'right', vertical: 'middle' };
-    for (let c = 1; c <= 3; c++) row.getCell(c).border = THIN_BORDER;
+    row.getCell(3).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    for (let c = 1; c <= 3; c++) {
+      row.getCell(c).border = THIN_BORDER;
+      row.getCell(c).font = { name: 'Calibri', size: 10, color: { argb: SERVER_EXCEL_COLOR.BODY_TEXT } };
+    }
+    row.height = calcServerWrapRowHeight([{ text: noteText, width: 44 }], 21, 14);
     cr += 1;
   }
 

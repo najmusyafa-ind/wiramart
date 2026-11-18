@@ -20,7 +20,22 @@ import {
 } from 'lucide-react';
 import { useTableSelection } from '@/hooks/useTableSelection';
 import { SelectedRowsBar, SelectAllCheckbox } from '@/components/admin/SelectedRowsBar';
-import { exportSelectedRowsToExcel, todayWibSlug } from '@/lib/utils/exportSelectedExcel';
+import {
+  EXCEL_BORDER,
+  EXCEL_FILL,
+  EXCEL_FMT,
+  EXCEL_FONT,
+  applySheetLayout,
+  calcWrapRowHeight,
+  colLetter,
+  createWiramartWorkbook,
+  downloadWorkbookBlob,
+  exportSelectedRowsToExcel,
+  formatWibDateTime,
+  sanitizeExcelText,
+  styleBannerBlock,
+  todayWibSlug,
+} from '@/lib/utils/exportSelectedExcel';
 
 // ─── Types ────────────────────────────────────────────────────
 type SelisihLaciCount = { hijau: number; kuning: number; merah: number; overage: number };
@@ -144,12 +159,6 @@ function fdt(iso: string | null): string {
     minute: '2-digit',
     hour12: false,
   });
-}
-
-function sanitizeText(val: string | null | undefined): string {
-  const str = String(val ?? '').trim();
-  if (!str) return '';
-  return /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
 }
 
 const TS: Record<string, { color: string; bg: string; border: string }> = {
@@ -403,110 +412,313 @@ export default function RekapKasir() {
   async function doExportAll(): Promise<void> {
     if (!data?.summary.length) return;
     try {
-      const EJS = (await import('exceljs')).default;
-      const wb = new EJS.Workbook();
-      wb.creator = 'Smartkasir Perwira - Wiramart UNPERBA';
-      wb.created = new Date();
+      const wb = await createWiramartWorkbook('Manager - Rekap Kinerja Kasir');
+      const printedWib = formatWibDateTime();
+      const subtitleBase = `Periode: ${data.dateFrom} s/d ${data.dateTo} • Dicetak: ${printedWib} WIB`;
 
+      // ── SHEET 1: REKAP KINERJA PER KASIR ────────────────────────
       const ws = wb.addWorksheet('Rekap Per Kasir');
-      ws.columns = [
-        { header: 'Nama Kasir', key: 'nama', width: 26 },
-        { header: 'NIM', key: 'nim', width: 15 },
-        { header: 'Jabatan', key: 'jab', width: 15 },
-        { header: 'Status', key: 'status', width: 12 },
-        { header: 'Shift', key: 'shift', width: 8 },
-        { header: 'Total Omzet (Rp)', key: 'omzet', width: 18 },
-        { header: 'Cash (Rp)', key: 'cash', width: 18 },
-        { header: 'QRIS (Rp)', key: 'qris', width: 18 },
-        { header: 'Avg/Shift (Rp)', key: 'avg', width: 18 },
-        { header: 'Laba Kotor (Rp)', key: 'laba', width: 18 },
-        { header: 'Trx', key: 'trx', width: 8 },
-        { header: 'Void', key: 'void', width: 8 },
-        { header: 'Top Produk', key: 'top', width: 28 },
-        { header: 'Laci H', key: 'sh', width: 8 },
-        { header: 'Laci K', key: 'sk', width: 8 },
-        { header: 'Laci M', key: 'sm', width: 8 },
+      const kasirCols = [
+        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Nama Kasir', width: 26, align: 'left' as const },
+        { header: 'NIM', width: 15, align: 'center' as const },
+        { header: 'Jabatan', width: 15, align: 'left' as const },
+        { header: 'Status', width: 12, align: 'center' as const },
+        { header: 'Jumlah Shift', width: 13, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Total Omzet (Rp)', width: 19, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Tunai / Cash (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'QRIS (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Rata-Rata / Shift (Rp)', width: 20, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Laba Kotor (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Transaksi', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Pembatalan', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Produk Terlaris', width: 28, align: 'left' as const },
+        { header: 'Laci Pas', width: 11, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Selisih Ringan', width: 14, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Selisih Berat', width: 13, align: 'right' as const, fmt: EXCEL_FMT.INT },
       ];
-      ws.getRow(1).eachCell((c) => {
-        c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } };
+
+      kasirCols.forEach((col, i) => {
+        ws.getColumn(i + 1).width = col.width;
       });
-      ws.getRow(1).height = 24;
 
-      for (const k of data.summary) {
-        const r = ws.addRow({
-          nama: sanitizeText(k.kasirName),
-          nim: sanitizeText(k.kasirNim),
-          jab: sanitizeText(k.jabatan),
-          status: k.isActive === false ? 'Non-Aktif' : 'Aktif',
-          shift: n(k.totalShift),
-          omzet: n(k.totalOmzet),
-          cash: n(k.totalPenjualanCash),
-          qris: n(k.totalPenjualanQris),
-          avg: n(k.avgOmzetPerShift),
-          laba: n(k.totalLabaKotor),
-          trx: n(k.totalTxCount),
-          void: n(k.totalVoidCount),
-          top: sanitizeText(k.topProduk),
-          sh: k.selisihLaciCount.hijau,
-          sk: k.selisihLaciCount.kuning,
-          sm: k.selisihLaciCount.merah,
-        });
-        (['omzet', 'cash', 'qris', 'avg', 'laba'] as const).forEach((key) => {
-          r.getCell(key).numFmt = '"Rp "#,##0';
-        });
-      }
+      styleBannerBlock(ws, {
+        title: 'LAPORAN REKAPITULASI KINERJA & PENJUALAN PER KASIR — WIRAMART UNPERBA',
+        subtitle: `${subtitleBase} • ${data.summary.length} Personel Kasir`,
+        endCol: kasirCols.length,
+        titleRow: 1,
+        subtitleRow: 2,
+      });
+      ws.getRow(3).height = 8;
 
+      const headerRow = ws.getRow(4);
+      headerRow.height = 26;
+      kasirCols.forEach((col, i) => {
+        const cell = headerRow.getCell(i + 1);
+        cell.value = col.header;
+        cell.font = EXCEL_FONT.HEADER;
+        cell.fill = EXCEL_FILL.HEADER;
+        cell.border = EXCEL_BORDER.HEADER;
+        cell.alignment = { vertical: 'middle', horizontal: col.align, wrapText: true };
+      });
+
+      const dataStart = 5;
+      let sumShift = 0;
+      let sumOmzet = 0;
+      let sumCash = 0;
+      let sumQris = 0;
+      let sumLaba = 0;
+      let sumTx = 0;
+      let sumVoid = 0;
+      let sumH = 0;
+      let sumK = 0;
+      let sumM = 0;
+
+      data.summary.forEach((k, idx) => {
+        const rowNum = dataStart + idx;
+        const shiftVal = Math.round(n(k.totalShift));
+        const omzetVal = Math.round(n(k.totalOmzet));
+        const cashVal = Math.round(n(k.totalPenjualanCash));
+        const qrisVal = Math.round(n(k.totalPenjualanQris));
+        const avgVal = shiftVal > 0 ? Math.round(omzetVal / shiftVal) : 0;
+        const labaVal = Math.round(n(k.totalLabaKotor));
+        const txVal = Math.round(n(k.totalTxCount));
+        const voidVal = Math.round(n(k.totalVoidCount));
+        const topVal = sanitizeExcelText(k.topProduk) || '—';
+        const hVal = Math.round(n(k.selisihLaciCount.hijau));
+        const kVal = Math.round(n(k.selisihLaciCount.kuning));
+        const mVal = Math.round(n(k.selisihLaciCount.merah));
+
+        sumShift += shiftVal;
+        sumOmzet += omzetVal;
+        sumCash += cashVal;
+        sumQris += qrisVal;
+        sumLaba += labaVal;
+        sumTx += txVal;
+        sumVoid += voidVal;
+        sumH += hVal;
+        sumK += kVal;
+        sumM += mVal;
+
+        const row = ws.getRow(rowNum);
+        const values: (string | number | { formula: string; result: number })[] = [
+          idx + 1,
+          sanitizeExcelText(k.kasirName) || '—',
+          sanitizeExcelText(k.kasirNim) || '—',
+          sanitizeExcelText(k.jabatan) || '—',
+          k.isActive === false ? 'Non-Aktif' : 'Aktif',
+          shiftVal,
+          omzetVal,
+          cashVal,
+          qrisVal,
+          { formula: `IF(F${rowNum}>0,G${rowNum}/F${rowNum},0)`, result: avgVal },
+          labaVal,
+          txVal,
+          voidVal,
+          topVal,
+          hVal,
+          kVal,
+          mVal,
+        ];
+
+        values.forEach((val, cIdx) => {
+          const cell = row.getCell(cIdx + 1);
+          const meta = kasirCols[cIdx];
+          cell.value = val;
+          cell.font = EXCEL_FONT.BODY;
+          cell.border = EXCEL_BORDER.THIN;
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: meta.align,
+            wrapText: cIdx === 1 || cIdx === 13,
+          };
+          if (meta.fmt) cell.numFmt = meta.fmt;
+          if (idx % 2 === 1) cell.fill = EXCEL_FILL.ZEBRA;
+        });
+
+        row.height = calcWrapRowHeight(
+          [
+            { text: String(values[1]), width: kasirCols[1].width },
+            { text: topVal, width: kasirCols[13].width },
+          ],
+          21,
+          14,
+        );
+      });
+
+      const dataEnd = dataStart + data.summary.length - 1;
+      const totalRowNum = dataEnd + 1;
+      const totalRow = ws.getRow(totalRowNum);
+      totalRow.height = 24;
+      const sumCols: Record<number, number> = {
+        5: sumShift,
+        6: sumOmzet,
+        7: sumCash,
+        8: sumQris,
+        10: sumLaba,
+        11: sumTx,
+        12: sumVoid,
+        14: sumH,
+        15: sumK,
+        16: sumM,
+      };
+      const avgAll = sumShift > 0 ? Math.round(sumOmzet / sumShift) : 0;
+
+      kasirCols.forEach((col, cIdx) => {
+        const cell = totalRow.getCell(cIdx + 1);
+        const colChar = colLetter(cIdx + 1);
+        if (cIdx === 1) {
+          cell.value = `TOTAL (${data.summary.length} Kasir)`;
+        } else if (cIdx === 9) {
+          cell.value = { formula: `IF(F${totalRowNum}>0,G${totalRowNum}/F${totalRowNum},0)`, result: avgAll };
+        } else if (cIdx in sumCols) {
+          cell.value = { formula: `SUM(${colChar}${dataStart}:${colChar}${dataEnd})`, result: sumCols[cIdx] };
+        } else {
+          cell.value = '';
+        }
+        cell.font = EXCEL_FONT.BOLD;
+        cell.fill = EXCEL_FILL.TOTAL;
+        cell.border = EXCEL_BORDER.TOTAL;
+        cell.alignment = { vertical: 'middle', horizontal: col.align };
+        if (col.fmt) cell.numFmt = col.fmt;
+      });
+
+      applySheetLayout(ws, {
+        freezeRow: 4,
+        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: kasirCols.length } },
+        orientation: 'landscape',
+      });
+
+      // ── SHEET 2: REKAP PER JAM WIB ──────────────────────────────
       if (hourlyRows.length > 0) {
         const wsH = wb.addWorksheet('Rekap Per Jam WIB');
-        wsH.columns = [
-          { header: 'Jam (WIB)', key: 'label', width: 20 },
-          { header: 'Kasir Bertugas', key: 'kasir', width: 14 },
-          { header: 'Transaksi', key: 'tx', width: 11 },
-          { header: 'Void', key: 'void', width: 9 },
-          { header: 'Omzet (Rp)', key: 'omzet', width: 18 },
-          { header: 'Cash (Rp)', key: 'cash', width: 18 },
-          { header: 'QRIS (Rp)', key: 'qris', width: 18 },
-          { header: 'HPP (Rp)', key: 'hpp', width: 18 },
-          { header: 'Laba Kotor (Rp)', key: 'laba', width: 18 },
+        const hourCols = [
+          { header: 'Jam Operasional (WIB)', width: 22, align: 'left' as const },
+          { header: 'Kasir Bertugas', width: 15, align: 'right' as const, fmt: EXCEL_FMT.INT },
+          { header: 'Transaksi', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
+          { header: 'Pembatalan', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
+          { header: 'Omzet Total (Rp)', width: 19, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+          { header: 'Tunai / Cash (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+          { header: 'QRIS (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+          { header: 'HPP (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+          { header: 'Laba Kotor (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
         ];
-        wsH.getRow(1).eachCell((c) => {
-          c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E40AF' } };
+
+        hourCols.forEach((col, i) => {
+          wsH.getColumn(i + 1).width = col.width;
         });
-        wsH.getRow(1).height = 24;
-        for (const h of hourlyRows) {
-          const r = wsH.addRow({
-            label: h.label,
-            kasir: n(h.activeKasirCount),
-            tx: n(h.txCount),
-            void: n(h.voidCount),
-            omzet: n(h.omzet),
-            cash: n(h.cash),
-            qris: n(h.qris),
-            hpp: n(h.hpp),
-            laba: n(h.labaKotor),
+
+        styleBannerBlock(wsH, {
+          title: 'REKAPITULASI PENJUALAN PER JAM (WIB) — WIRAMART UNPERBA',
+          subtitle: `${subtitleBase} • ${hourlyRows.length} Slot Jam Operasional`,
+          endCol: hourCols.length,
+          titleRow: 1,
+          subtitleRow: 2,
+        });
+        wsH.getRow(3).height = 8;
+
+        const hHeader = wsH.getRow(4);
+        hHeader.height = 26;
+        hourCols.forEach((col, i) => {
+          const cell = hHeader.getCell(i + 1);
+          cell.value = col.header;
+          cell.font = EXCEL_FONT.HEADER;
+          cell.fill = EXCEL_FILL.HEADER;
+          cell.border = EXCEL_BORDER.HEADER;
+          cell.alignment = { vertical: 'middle', horizontal: col.align, wrapText: true };
+        });
+
+        let sumH_tx = 0;
+        let sumH_void = 0;
+        let sumH_omzet = 0;
+        let sumH_cash = 0;
+        let sumH_qris = 0;
+        let sumH_hpp = 0;
+        let sumH_laba = 0;
+
+        hourlyRows.forEach((h, idx) => {
+          const rowNum = 5 + idx;
+          const row = wsH.getRow(rowNum);
+          row.height = 21;
+
+          const txV = Math.round(n(h.txCount));
+          const voidV = Math.round(n(h.voidCount));
+          const omzV = Math.round(n(h.omzet));
+          const cashV = Math.round(n(h.cash));
+          const qrisV = Math.round(n(h.qris));
+          const hppV = Math.round(n(h.hpp));
+          const labaV = Math.round(n(h.labaKotor));
+
+          sumH_tx += txV;
+          sumH_void += voidV;
+          sumH_omzet += omzV;
+          sumH_cash += cashV;
+          sumH_qris += qrisV;
+          sumH_hpp += hppV;
+          sumH_laba += labaV;
+
+          const rowValues: (string | number)[] = [
+            sanitizeExcelText(h.label) || '—',
+            Math.round(n(h.activeKasirCount)),
+            txV,
+            voidV,
+            omzV,
+            cashV,
+            qrisV,
+            hppV,
+            labaV,
+          ];
+
+          rowValues.forEach((val, cIdx) => {
+            const cell = row.getCell(cIdx + 1);
+            const meta = hourCols[cIdx];
+            cell.value = val;
+            cell.font = EXCEL_FONT.BODY;
+            cell.border = EXCEL_BORDER.THIN;
+            cell.alignment = { vertical: 'middle', horizontal: meta.align };
+            if (meta.fmt) cell.numFmt = meta.fmt;
+            if (idx % 2 === 1) cell.fill = EXCEL_FILL.ZEBRA;
           });
-          (['omzet', 'cash', 'qris', 'hpp', 'laba'] as const).forEach((key) => {
-            r.getCell(key).numFmt = '"Rp "#,##0';
-          });
-        }
+        });
+
+        const hEnd = 5 + hourlyRows.length - 1;
+        const hTotalRow = wsH.getRow(hEnd + 1);
+        hTotalRow.height = 24;
+        const hSumMap: Record<number, number> = {
+          2: sumH_tx,
+          3: sumH_void,
+          4: sumH_omzet,
+          5: sumH_cash,
+          6: sumH_qris,
+          7: sumH_hpp,
+          8: sumH_laba,
+        };
+
+        hourCols.forEach((col, cIdx) => {
+          const cell = hTotalRow.getCell(cIdx + 1);
+          const colChar = colLetter(cIdx + 1);
+          if (cIdx === 0) {
+            cell.value = `TOTAL (${hourlyRows.length} Jam)`;
+          } else if (cIdx in hSumMap) {
+            cell.value = { formula: `SUM(${colChar}5:${colChar}${hEnd})`, result: hSumMap[cIdx] };
+          } else {
+            cell.value = '';
+          }
+          cell.font = EXCEL_FONT.BOLD;
+          cell.fill = EXCEL_FILL.TOTAL;
+          cell.border = EXCEL_BORDER.TOTAL;
+          cell.alignment = { vertical: 'middle', horizontal: col.align };
+          if (col.fmt) cell.numFmt = col.fmt;
+        });
+
+        applySheetLayout(wsH, {
+          freezeRow: 4,
+          autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: hourCols.length } },
+          orientation: 'landscape',
+        });
       }
 
-      const buf = await wb.xlsx.writeBuffer();
-      const url = URL.createObjectURL(
-        new Blob([buf], {
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        }),
-      );
-      const a = Object.assign(document.createElement('a'), {
-        href: url,
-        download: `rekap-kasir-${data.dateFrom}-sd-${data.dateTo}.xlsx`,
-      });
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadWorkbookBlob(wb, `rekap-kasir-${data.dateFrom}-sd-${data.dateTo}.xlsx`);
     } catch {
       alert('Gagal mengekspor Excel.');
     }

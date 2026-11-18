@@ -21,6 +21,22 @@ import {
 } from 'lucide-react';
 import { formatRupiah } from '@/lib/utils/helpers';
 import type { StockMutationReportResult } from '@/lib/services/stockMutationReportService';
+import {
+  EXCEL_BORDER,
+  EXCEL_FILL,
+  EXCEL_FMT,
+  EXCEL_FONT,
+  applySheetLayout,
+  calcWrapRowHeight,
+  colLetter,
+  createWiramartWorkbook,
+  downloadCsvBlob,
+  downloadWorkbookBlob,
+  formatWibDateTime,
+  sanitizeExcelText,
+  styleBannerBlock,
+  toSafeExcelNum,
+} from '@/lib/utils/exportSelectedExcel';
 
 function getTodayWibDate(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
@@ -139,216 +155,160 @@ export default function LaporanMutasiStokSection() {
 
   const [exportingExcel, setExportingExcel] = useState(false);
 
-  // ── Ekspor ke Excel (.xlsx) Tabel Hitam Putih Clean (Fase 5.3) ──
+  // ── Ekspor ke Excel (.xlsx) Standar Akuntansi Wiramart ──
   async function handleExportExcel() {
     if (!reportData || reportData.items.length === 0) return;
     setExportingExcel(true);
     try {
-      const ExcelJS = (await import('exceljs')).default;
-      const wb = new ExcelJS.Workbook();
-      wb.creator = 'Wiramart UNPERBA';
-      wb.lastModifiedBy = 'Manager Gudang';
-      wb.created = new Date();
+      const wb = await createWiramartWorkbook('Manager Gudang - Mutasi Stok');
+      const ws = wb.addWorksheet('Mutasi Stok Gudang');
 
-      const ws = wb.addWorksheet('Mutasi Stok Gudang', {
-        views: [{ showGridLines: true }],
-      });
-
-      // ── BARIS 1: Header Utama Perusahaan (Hitam Elegan #18181B) ──
-      ws.mergeCells('A1:N1');
-      const r1 = ws.getCell('A1');
-      r1.value = 'WIRAMART — UKM KEWIRAUSAHAAN UNPERBA';
-      r1.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
-      r1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF18181B' } };
-      r1.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(1).height = 30;
-
-      // ── BARIS 2: Judul Laporan (Charcoal #27272A) ──
-      ws.mergeCells('A2:N2');
-      const r2 = ws.getCell('A2');
-      r2.value = 'LAPORAN REKONSILIASI MUTASI STOK GUDANG & KASIR';
-      r2.font = { name: 'Segoe UI', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
-      r2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF27272A' } };
-      r2.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(2).height = 24;
-
-      // ── BARIS 3: Metadata Periode & Tanggal Cetak ──
-      ws.mergeCells('A3:N3');
-      const r3 = ws.getCell('A3');
-      const nowWib = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
-      r3.value = `Periode: ${startDate} s/d ${endDate}   |   Dicetak: ${nowWib} WIB   |   Persamaan: Stok Akhir = Stok Awal + Masuk - Keluar - Musnah - Retur`;
-      r3.font = { name: 'Segoe UI', size: 9, italic: true, color: { argb: 'FF52525B' } };
-      r3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F4F5' } };
-      r3.border = { bottom: { style: 'thin', color: { argb: 'FFD4D4D8' } } };
-      r3.alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.getRow(3).height = 20;
-
-      // Spacer row
-      ws.getRow(4).height = 10;
-
-      // ── BARIS 5: Tabel Header Hitam Putih Clean ──
-      const headers = [
-        'No',
-        'Nama Produk',
-        'Kategori',
-        'Satuan',
-        'Stok Awal',
-        'Masuk (Supplier)',
-        'Nilai HPP Masuk (Rp)',
-        'Keluar (Kasir)',
-        'Total Bruto Keluar (Rp)',
-        'Promo FEFO',
-        'Musnah / Basi',
-        'Kerugian Musnah (Rp)',
-        'Retur Supplier',
-        'Stok Akhir',
+      const mutasiCols = [
+        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Nama Produk', width: 34, align: 'left' as const },
+        { header: 'Kategori', width: 16, align: 'center' as const },
+        { header: 'Satuan', width: 10, align: 'center' as const },
+        { header: 'Stok Awal', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Masuk (Supplier)', width: 15, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Nilai HPP Masuk (Rp)', width: 21, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Keluar (Kasir)', width: 14, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Total Bruto Keluar (Rp)', width: 21, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Promo FEFO', width: 13, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Musnah / Kedaluwarsa', width: 18, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Kerugian Musnah (Rp)', width: 21, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Retur Supplier', width: 14, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Stok Akhir', width: 14, align: 'right' as const, fmt: EXCEL_FMT.INT },
       ];
 
-      ws.columns = [
-        { key: 'no', width: 6 },
-        { key: 'productName', width: 36 },
-        { key: 'categoryName', width: 16 },
-        { key: 'unit', width: 10 },
-        { key: 'initialStock', width: 13 },
-        { key: 'qtyIn', width: 16 },
-        { key: 'totalHppIn', width: 22 },
-        { key: 'qtyOut', width: 15 },
-        { key: 'totalGrossOut', width: 22 },
-        { key: 'discountedQtyOut', width: 13 },
-        { key: 'qtyDestroyed', width: 14 },
-        { key: 'lossAmountDestroyed', width: 22 },
-        { key: 'qtyReturned', width: 14 },
-        { key: 'finalStock', width: 14 },
-      ];
-
-      const hRow = ws.getRow(5);
-      hRow.values = headers;
-      hRow.height = 26;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hRow.eachCell((cell: any) => {
-        cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FFFFFFFF' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF18181B' } };
-        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FF000000' } },
-          bottom: { style: 'medium', color: { argb: 'FF000000' } },
-          left: { style: 'thin', color: { argb: 'FF3F3F46' } },
-          right: { style: 'thin', color: { argb: 'FF3F3F46' } },
-        };
+      mutasiCols.forEach((col, i) => {
+        ws.getColumn(i + 1).width = col.width;
       });
 
-      // ── BARIS DATA (Hitam Putih Clean dengan Border Tipis) ──
+      styleBannerBlock(ws, {
+        title: 'LAPORAN REKONSILIASI MUTASI STOK GUDANG & KASIR — WIRAMART UNPERBA',
+        subtitle: `Periode: ${startDate} s/d ${endDate} • Dicetak: ${formatWibDateTime()} WIB • Stok Akhir = Stok Awal + Masuk - Keluar - Musnah - Retur`,
+        endCol: mutasiCols.length,
+        titleRow: 1,
+        subtitleRow: 2,
+      });
+      ws.getRow(3).height = 8;
+
+      const hRow = ws.getRow(4);
+      hRow.height = 28;
+      mutasiCols.forEach((col, i) => {
+        const cell = hRow.getCell(i + 1);
+        cell.value = col.header;
+        cell.font = EXCEL_FONT.HEADER;
+        cell.fill = EXCEL_FILL.HEADER;
+        cell.border = EXCEL_BORDER.HEADER;
+        cell.alignment = { vertical: 'middle', horizontal: col.align, wrapText: true };
+      });
+
+      const dataStart = 5;
+
       reportData.items.forEach((it, idx) => {
-        const row = ws.addRow({
-          no: idx + 1,
-          productName: it.productName,
-          categoryName: it.categoryName,
-          unit: it.unit,
-          initialStock: it.initialStock,
-          qtyIn: it.qtyIn,
-          totalHppIn: it.totalHppIn,
-          qtyOut: it.qtyOut,
-          totalGrossOut: it.totalGrossOut,
-          discountedQtyOut: it.discountedQtyOut,
-          qtyDestroyed: it.qtyDestroyed,
-          lossAmountDestroyed: it.lossAmountDestroyed,
-          qtyReturned: it.qtyReturned,
-          finalStock: it.finalStock,
-        });
+        const rowNum = dataStart + idx;
+        const row = ws.getRow(rowNum);
+        const prodName = sanitizeExcelText(it.productName) || '—';
+        const catName = sanitizeExcelText(it.categoryName) || '—';
+        const unitTxt = sanitizeExcelText(it.unit) || '—';
 
-        row.height = 20;
+        const initialN = Math.round(toSafeExcelNum(it.initialStock));
+        const inN = Math.round(toSafeExcelNum(it.qtyIn));
+        const hppInN = Math.round(toSafeExcelNum(it.totalHppIn));
+        const outN = Math.round(toSafeExcelNum(it.qtyOut));
+        const grossOutN = Math.round(toSafeExcelNum(it.totalGrossOut));
+        const promoN = Math.round(toSafeExcelNum(it.discountedQtyOut));
+        const destN = Math.round(toSafeExcelNum(it.qtyDestroyed));
+        const lossN = Math.round(toSafeExcelNum(it.lossAmountDestroyed));
+        const retN = Math.round(toSafeExcelNum(it.qtyReturned));
+        const finalN = Math.round(toSafeExcelNum(it.finalStock));
+
+        const rowValues: (string | number | { formula: string; result: number })[] = [
+          idx + 1,
+          prodName,
+          catName,
+          unitTxt,
+          initialN,
+          inN,
+          hppInN,
+          outN,
+          grossOutN,
+          promoN,
+          destN,
+          lossN,
+          retN,
+          { formula: `E${rowNum}+F${rowNum}-H${rowNum}-K${rowNum}-M${rowNum}`, result: finalN },
+        ];
+
         const isZebra = idx % 2 === 1;
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        row.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
-          cell.font = { name: 'Segoe UI', size: 9.5, color: { argb: 'FF18181B' } };
-          cell.border = {
-            top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-            bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-            left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-            right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        rowValues.forEach((val, cIdx) => {
+          const cell = row.getCell(cIdx + 1);
+          const meta = mutasiCols[cIdx];
+          cell.value = val;
+          cell.font = cIdx === 13 ? EXCEL_FONT.BOLD : EXCEL_FONT.BODY;
+          cell.border = EXCEL_BORDER.THIN;
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: meta.align,
+            wrapText: cIdx === 1,
           };
-          if (isZebra) {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9FAFB' } };
-          } else {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
-          }
-
-          // Alignment & Number format
-          if (colNumber === 1 || colNumber === 3 || colNumber === 4) {
-            cell.alignment = { horizontal: 'center', vertical: 'middle' };
-          } else if (colNumber === 2) {
-            cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-          } else if (colNumber === 7 || colNumber === 9 || colNumber === 12) {
-            cell.alignment = { horizontal: 'right', vertical: 'middle' };
-            cell.numFmt = '"Rp "#,##0';
-          } else {
-            cell.alignment = { horizontal: 'right', vertical: 'middle' };
-            cell.numFmt = '#,##0';
-          }
+          if (meta.fmt) cell.numFmt = meta.fmt;
+          if (isZebra) cell.fill = EXCEL_FILL.ZEBRA;
         });
 
-        // Highlight kolom Stok Akhir
-        const finalCell = row.getCell(14);
-        finalCell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF18181B' } };
+        row.height = calcWrapRowHeight(
+          [{ text: prodName, width: mutasiCols[1].width }],
+          21,
+          14,
+        );
       });
 
-      // ── BARIS SUMMARY TOTAL (Standar Akuntansi Double Line) ──
       const s = reportData.summary;
-      const totalRow = ws.addRow({
-        no: '',
-        productName: 'TOTAL MUTASI INVENTARIS',
-        categoryName: '',
-        unit: '',
-        initialStock: s.totalInitialStock,
-        qtyIn: s.totalQtyIn,
-        totalHppIn: s.totalHppIn,
-        qtyOut: s.totalQtyOut,
-        totalGrossOut: s.totalGrossOut,
-        discountedQtyOut: s.totalDiscountedQtyOut,
-        qtyDestroyed: s.totalDestroyedQty,
-        lossAmountDestroyed: s.totalLossAmount,
-        qtyReturned: s.totalReturnedQty,
-        finalStock: s.totalFinalStock,
-      });
-
+      const dataEnd = dataStart + reportData.items.length - 1;
+      const totalRow = ws.getRow(dataEnd + 1);
       totalRow.height = 25;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      totalRow.eachCell({ includeEmpty: true }, (cell: any, colNumber: number) => {
-        cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FF000000' } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE4E4E7' } };
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FF000000' } },
-          bottom: { style: 'double', color: { argb: 'FF000000' } },
-          left: { style: 'thin', color: { argb: 'FFD4D4D8' } },
-          right: { style: 'thin', color: { argb: 'FFD4D4D8' } },
-        };
 
-        if (colNumber === 2) {
-          cell.alignment = { horizontal: 'left', vertical: 'middle' };
-        } else if (colNumber === 7 || colNumber === 9 || colNumber === 12) {
-          cell.alignment = { horizontal: 'right', vertical: 'middle' };
-          cell.numFmt = '"Rp "#,##0';
-        } else if (colNumber >= 5) {
-          cell.alignment = { horizontal: 'right', vertical: 'middle' };
-          cell.numFmt = '#,##0';
+      const summaryMap: Record<number, number> = {
+        4: Math.round(toSafeExcelNum(s.totalInitialStock)),
+        5: Math.round(toSafeExcelNum(s.totalQtyIn)),
+        6: Math.round(toSafeExcelNum(s.totalHppIn)),
+        7: Math.round(toSafeExcelNum(s.totalQtyOut)),
+        8: Math.round(toSafeExcelNum(s.totalGrossOut)),
+        9: Math.round(toSafeExcelNum(s.totalDiscountedQtyOut)),
+        10: Math.round(toSafeExcelNum(s.totalDestroyedQty)),
+        11: Math.round(toSafeExcelNum(s.totalLossAmount)),
+        12: Math.round(toSafeExcelNum(s.totalReturnedQty)),
+        13: Math.round(toSafeExcelNum(s.totalFinalStock)),
+      };
+
+      mutasiCols.forEach((col, cIdx) => {
+        const cell = totalRow.getCell(cIdx + 1);
+        const colChar = colLetter(cIdx + 1);
+        if (cIdx === 1) {
+          cell.value = `TOTAL MUTASI INVENTARIS (${reportData.items.length} Produk)`;
+        } else if (cIdx in summaryMap) {
+          cell.value = {
+            formula: `SUM(${colChar}${dataStart}:${colChar}${dataEnd})`,
+            result: summaryMap[cIdx],
+          };
         } else {
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          cell.value = '';
         }
+        cell.font = EXCEL_FONT.BOLD;
+        cell.fill = EXCEL_FILL.TOTAL;
+        cell.border = EXCEL_BORDER.TOTAL;
+        cell.alignment = { vertical: 'middle', horizontal: col.align };
+        if (col.fmt) cell.numFmt = col.fmt;
       });
 
-      const buf = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buf], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      applySheetLayout(ws, {
+        freezeRow: 4,
+        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: mutasiCols.length } },
+        orientation: 'landscape',
       });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Laporan_Mutasi_Stok_Wiramart_${startDate}_sd_${endDate}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+
+      await downloadWorkbookBlob(wb, `Laporan_Mutasi_Stok_Wiramart_${startDate}_sd_${endDate}.xlsx`);
     } catch (err) {
       console.error(err);
       alert('Gagal mengekspor file Excel mutasi stok.');
@@ -357,7 +317,7 @@ export default function LaporanMutasiStokSection() {
     }
   }
 
-  // Ekspor ke CSV Cadangan
+  // Ekspor ke CSV Cadangan (UTF-8 BOM + Blob + Anti Formula-Injection)
   function handleExportCsv() {
     if (!reportData || reportData.items.length === 0) return;
 
@@ -365,14 +325,14 @@ export default function LaporanMutasiStokSection() {
       'No',
       'Nama Produk',
       'Kategori',
-      'Unit',
+      'Satuan',
       'Stok Awal',
       'Masuk (Supplier ACC)',
       'Nilai HPP Masuk (Rp)',
       'Keluar (Kasir)',
       'Total Bruto Keluar (Rp)',
-      'Obral Promo FEFO',
-      'Musnah/Basi (Write-Off)',
+      'Promo FEFO',
+      'Musnah / Kedaluwarsa',
       'Nilai Kerugian Musnah (Rp)',
       'Retur Supplier',
       'Stok Akhir',
@@ -380,8 +340,8 @@ export default function LaporanMutasiStokSection() {
 
     const rows = reportData.items.map((it, idx) => [
       idx + 1,
-      `"${it.productName.replace(/"/g, '""')}"`,
-      `"${it.categoryName.replace(/"/g, '""')}"`,
+      it.productName,
+      it.categoryName,
       it.unit,
       it.initialStock,
       it.qtyIn,
@@ -395,17 +355,7 @@ export default function LaporanMutasiStokSection() {
       it.finalStock,
     ]);
 
-    const csvContent =
-      'data:text/csv;charset=utf-8,\uFEFF' +
-      [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `mutasi_stok_wiramart_${startDate}_sd_${endDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadCsvBlob(`mutasi_stok_wiramart_${startDate}_sd_${endDate}.csv`, headers, rows);
   }
 
   const summary = reportData?.summary;
