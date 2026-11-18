@@ -57,15 +57,15 @@ interface ItemView {
 }
 
 const STATUS_UI: Record<Status, { label: string; hint: string; tone: '' | 'ok' | 'bad'; final: boolean }> = {
-  WAITING_PAYMENT_VERIFICATION: { label: 'Menunggu verifikasi bayar', hint: 'Admin akan memeriksa bukti transfer kamu.', tone: '', final: false },
-  WAITING_CONFIRMATION: { label: 'Menunggu konfirmasi', hint: 'Admin Wiramart sedang memeriksa pesananmu.', tone: '', final: false },
-  CONFIRMED: { label: 'Dikonfirmasi', hint: 'Pesanan diterima dan sebentar lagi disiapkan.', tone: 'ok', final: false },
-  PREPARING: { label: 'Sedang disiapkan', hint: 'Tim kami sedang menyiapkan pesananmu.', tone: 'ok', final: false },
-  OUT_FOR_DELIVERY: { label: 'Sedang diantar', hint: 'Runner menuju lokasimu. Siapkan PIN!', tone: 'ok', final: false },
-  COMPLETED: { label: 'Selesai', hint: 'Terima kasih sudah memesan di Wiramart!', tone: 'ok', final: true },
+  WAITING_PAYMENT_VERIFICATION: { label: 'Menunggu Verifikasi Pembayaran', hint: 'Pengelola akan memverifikasi bukti pembayaran Anda.', tone: '', final: false },
+  WAITING_CONFIRMATION: { label: 'Menunggu Konfirmasi', hint: 'Pengelola Wiramart sedang memverifikasi pesanan Anda.', tone: '', final: false },
+  CONFIRMED: { label: 'Dikonfirmasi', hint: 'Pesanan telah diterima dan sedang dijadwalkan untuk penyiapan.', tone: 'ok', final: false },
+  PREPARING: { label: 'Sedang Disiapkan', hint: 'Petugas sedang menyiapkan pesanan Anda.', tone: 'ok', final: false },
+  OUT_FOR_DELIVERY: { label: 'Sedang Diantar', hint: 'Petugas pengantar sedang menuju lokasi Anda. Mohon siapkan kode PIN serah terima.', tone: 'ok', final: false },
+  COMPLETED: { label: 'Selesai', hint: 'Terima kasih telah berbelanja di Wiramart UNPERBA.', tone: 'ok', final: true },
   CANCELLED: { label: 'Dibatalkan', hint: '', tone: 'bad', final: true },
   REJECTED: { label: 'Ditolak', hint: '', tone: 'bad', final: true },
-  EXPIRED: { label: 'Kedaluwarsa', hint: 'Pesanan tidak diproses dalam 2 jam. Silakan pesan ulang.', tone: 'bad', final: true },
+  EXPIRED: { label: 'Kedaluwarsa', hint: 'Pesanan melewati batas waktu pemrosesan 2 jam. Silakan lakukan pemesanan ulang.', tone: 'bad', final: true },
 };
 
 const PIN_VISIBLE: ReadonlySet<Status> = new Set(['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY']);

@@ -199,6 +199,19 @@ function computeProductSimilarity(rawQuery: string, product: ProductOption): num
   return matchedTokens / Math.max(qTokens.length, nameTokens.length * 0.65);
 }
 
+type SupplierOptionItem = {
+  id: string;
+  name: string;
+  contactPerson: string | null;
+  phone: string | null;
+};
+
+let suppliersMemCache: SupplierOptionItem[] = [];
+const penerimaanMemCache = new Map<
+  string,
+  { itemsData: DraftSummaryItem[]; tableData: SupplierInvoiceTableRow[] }
+>();
+
 export default function PenerimaanBarangSection({
   productsList,
   onDraftApproved,
@@ -209,13 +222,17 @@ export default function PenerimaanBarangSection({
   // State Mode Tampilan: 'cards' (Antrian Draft) | 'table' (Tabel Buku Nota Lengkap)
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
-  // State List Drafts & Tabel Buku Nota
-  const [drafts, setDrafts] = useState<DraftSummaryItem[]>([]);
-  const [tableRows, setTableRows] = useState<SupplierInvoiceTableRow[]>([]);
-  const [tableSearch, setTableSearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // State List Drafts & Tabel Buku Nota (inisialisasi instan dari memori cache)
   const [statusFilter, setStatusFilter] = useState<string>('semua');
+  const [drafts, setDrafts] = useState<DraftSummaryItem[]>(
+    () => penerimaanMemCache.get('semua')?.itemsData ?? [],
+  );
+  const [tableRows, setTableRows] = useState<SupplierInvoiceTableRow[]>(
+    () => penerimaanMemCache.get('semua')?.tableData ?? [],
+  );
+  const [tableSearch, setTableSearch] = useState('');
+  const [loading, setLoading] = useState<boolean>(() => !penerimaanMemCache.has('semua'));
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // State Modal Preview Foto Nota
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
@@ -230,9 +247,9 @@ export default function PenerimaanBarangSection({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [supplierName, setSupplierName] = useState('');
-  const [registeredSuppliers, setRegisteredSuppliers] = useState<
-    Array<{ id: string; name: string; contactPerson: string | null; phone: string | null }>
-  >([]);
+  const [registeredSuppliers, setRegisteredSuppliers] = useState<SupplierOptionItem[]>(
+    () => suppliersMemCache,
+  );
   const [deliveryNote, setDeliveryNote] = useState('');
   const [invoiceDate, setInvoiceDate] = useState<string>(() => getTodayWibStr());
   const [invoicePhotoUrl, setInvoicePhotoUrl] = useState<string | null>(null);
@@ -241,7 +258,7 @@ export default function PenerimaanBarangSection({
   const [submittingForm, setSubmittingForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // State Smart Auto-Match ("Ngepasin Nota Otomatis")
+  // State Pencocokan Otomatis Rincian Faktur
   const [isSmartMatcherOpen, setIsSmartMatcherOpen] = useState(false);
   const [smartPasteText, setSmartPasteText] = useState('');
   const [smartMatchFeedback, setSmartMatchFeedback] = useState<string | null>(null);
@@ -250,13 +267,14 @@ export default function PenerimaanBarangSection({
   const [productSearch, setProductSearch] = useState('');
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
 
-  // ── Load List Pemasok Terdaftar (sekali saat mount) ────────────
+  // ── Load List Pemasok Terdaftar (dengan Cache Memori Instan) ────
   useEffect(() => {
     const controller = new AbortController();
     fetch('/api/gudang/suppliers', { signal: controller.signal })
       .then((res) => res.json().then((json) => ({ ok: res.ok, json })))
       .then(({ ok, json }) => {
         if (!controller.signal.aborted && ok && json.success && Array.isArray(json.data)) {
+          suppliersMemCache = json.data;
           setRegisteredSuppliers(json.data);
         }
       })
@@ -266,15 +284,28 @@ export default function PenerimaanBarangSection({
     return () => controller.abort();
   }, []);
 
-  // ── Load List Drafts & Tabel Buku Nota ─────────────────────────
+  // ── Load List Drafts & Tabel Buku Nota (Stale-While-Revalidate Cache) ──
+  function handleSelectFilter(nextFilter: string) {
+    setStatusFilter(nextFilter);
+    const cached = penerimaanMemCache.get(nextFilter);
+    if (cached) {
+      setDrafts(cached.itemsData);
+      setTableRows(cached.tableData);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+  }
+
   async function fetchDrafts(filter = statusFilter) {
-    setLoading(true);
+    if (!penerimaanMemCache.has(filter)) setLoading(true);
     setErrorMsg(null);
     try {
       const [itemsData, tableData] = await Promise.all([
         requestDrafts(filter),
         requestInvoiceTableRows(filter),
       ]);
+      penerimaanMemCache.set(filter, { itemsData, tableData });
       setDrafts(itemsData);
       setTableRows(tableData);
     } catch (err) {
@@ -292,6 +323,7 @@ export default function PenerimaanBarangSection({
     ])
       .then(([itemsData, tableData]) => {
         if (controller.signal.aborted) return;
+        penerimaanMemCache.set(statusFilter, { itemsData, tableData });
         setErrorMsg(null);
         setDrafts(itemsData);
         setTableRows(tableData);
@@ -444,17 +476,17 @@ export default function PenerimaanBarangSection({
         qty: hist.qty > 0 ? hist.qty : 1,
         costPrice: hist.costPrice,
         expiryDate: prodMeta?.isPerishable ? addDaysToToday(1) : '',
-        conditionNote: 'Sesuai nota supplier (Auto-Fill)',
+        conditionNote: 'Sesuai riwayat faktur pemasok',
       });
     }
 
     if (newItems.length > 0) {
       setItems((prev) => [...prev, ...newItems]);
       setSmartMatchFeedback(
-        `⚡ Berhasil memuat otomatis ${newItems.length} barang langganan beserta harga beli terakhir dari "${supplierName}"! Silakan cek jumlah Qty & tanggal expired.`,
+        `Berhasil memuat otomatis ${newItems.length} item produk beserta harga beli terakhir dari pemasok "${supplierName}". Silakan periksa kembali kuantitas dan tanggal kedaluwarsa.`,
       );
     } else {
-      setSmartMatchFeedback('Seluruh barang langganan supplier ini sudah ada di daftar form.');
+      setSmartMatchFeedback('Seluruh item dari riwayat pemasok ini telah berada di dalam daftar formulir.');
     }
   }
 
@@ -574,21 +606,21 @@ export default function PenerimaanBarangSection({
         qty,
         costPrice,
         expiryDate: detectedExpiry || (bestProd.isPerishable ? addDaysToToday(1) : ''),
-        conditionNote: `Auto-Match dari nota ("${textOnly.slice(0, 40)}")`,
+        conditionNote: `Ekstraksi otomatis faktur ("${textOnly.slice(0, 40)}")`,
       });
       matchedCount += 1;
     }
 
     if (addedItems.length === 0) {
       setFormError(
-        'Tidak ada nama barang yang cocok dengan master produk Wiramart. Pastikan format per baris seperti: "Indomie Goreng 40 3100".',
+        'Tidak ditemukan nama produk yang sesuai dengan katalog master Wiramart. Gunakan format per baris: "Nama Produk [Kuantitas] [Harga Satuan]".',
       );
       return;
     }
 
     setItems((prev) => [...prev, ...addedItems]);
     setSmartMatchFeedback(
-      `🤖 Berhasil mencocokkan ("ngepasin") ${matchedCount} barang dari teks nota ke database produk Wiramart!`,
+      `Berhasil mencocokkan secara otomatis ${matchedCount} item produk dari teks faktur ke katalog produk Wiramart.`,
     );
     setSmartPasteText('');
     setIsSmartMatcherOpen(false);
@@ -991,7 +1023,7 @@ export default function PenerimaanBarangSection({
             <button
               key={f.id}
               type="button"
-              onClick={() => setStatusFilter(f.id)}
+              onClick={() => handleSelectFilter(f.id)}
               style={{
                 minHeight: 44,
                 padding: '8px 14px',
@@ -2123,8 +2155,8 @@ export default function PenerimaanBarangSection({
                 }}
               >
                 <div style={{ fontSize: '0.78rem', color: '#1e3a8a' }}>
-                  <strong>⚡ Otomatisasi Supplier:</strong> Ditemukan{' '}
-                  <strong>{supplierHistoryItems.length} barang langganan</strong> beserta harga beli terakhir dari{' '}
+                  <strong>Riwayat Faktur Pemasok:</strong> Tersedia{' '}
+                  <strong>{supplierHistoryItems.length} item produk terdaftar</strong> beserta harga beli terakhir dari{' '}
                   <strong>{supplierName}</strong>.
                 </div>
                 <button
@@ -2145,12 +2177,12 @@ export default function PenerimaanBarangSection({
                     gap: 6,
                   }}
                 >
-                  <Sparkles size={14} /> Muat Barang & Harga Otomatis
+                  <Sparkles size={14} /> Muat Daftar Produk Sebelumnya
                 </button>
               </div>
             )}
 
-            {/* ── OTOMATISASI 2: PANEL SMART AUTO-MATCH TEKS NOTA / WA ── */}
+            {/* ── OTOMATISASI 2: PANEL PENCOCOKAN OTOMATIS TEKS FAKTUR ── */}
             <div
               style={{
                 background: '#faf5ff',
@@ -2164,7 +2196,7 @@ export default function PenerimaanBarangSection({
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <div style={{ fontSize: '0.8rem', fontWeight: 800, color: '#581c87', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Sparkles size={15} color="#7e22ce" /> Smart Auto-Match (&ldquo;Ngepasin&rdquo; Teks Nota / Chat WA ke Produk)
+                  <Sparkles size={15} color="#7e22ce" /> Pencocokan Otomatis Rincian Faktur (Ekstraksi Teks ke Katalog Produk)
                 </div>
                 <button
                   type="button"
@@ -2181,18 +2213,18 @@ export default function PenerimaanBarangSection({
                     cursor: 'pointer',
                   }}
                 >
-                  {isSmartMatcherOpen ? 'Tutup Panel Auto-Match' : '⚡ Buka Auto-Match Teks Nota'}
+                  {isSmartMatcherOpen ? 'Tutup Panel Ekstraksi' : 'Buka Ekstraksi Teks Faktur'}
                 </button>
               </div>
 
               {isSmartMatcherOpen && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <p style={{ margin: 0, fontSize: '0.74rem', color: '#6b21a8' }}>
-                    Tempel (paste) daftar barang dari chat WA supplier atau hasil <em>Copy Text</em> foto nota HP (1 baris 1 barang, contoh: <code>Indomie Goreng 40 3100 2027-05-10</code>). Sistem akan otomatis mencocokkan nama produk, kuantiti, harga beli, dan expired!
+                    Tempelkan rincian daftar barang dari dokumen faktur pemasok (satu baris per produk, contoh: <code>Indomie Goreng 40 3100 2027-05-10</code>). Sistem akan memetakan nama produk, kuantitas, harga satuan, dan tanggal kedaluwarsa secara otomatis.
                   </p>
                   <textarea
                     rows={4}
-                    placeholder={'Contoh:\nSupplier: Toko Sembako Jaya\nNo Nota: FK-0912\nIndomie Goreng 40 3100 2027-05-10\nTeh Pucuk Harum 24 2800'}
+                    placeholder={'Contoh format baris:\nSupplier: PT Indofood Sukses Makmur\nNo Faktur: FK-2026-0912\nIndomie Goreng 40 3100 2027-05-10\nTeh Pucuk Harum 24 2800'}
                     value={smartPasteText}
                     onChange={(e) => setSmartPasteText(e.target.value)}
                     style={{
@@ -2224,7 +2256,7 @@ export default function PenerimaanBarangSection({
                         gap: 6,
                       }}
                     >
-                      <Sparkles size={14} /> Cocokkan & Masukkan ke Tabel Otomatis
+                      <Sparkles size={14} /> Proses & Petakan ke Tabel Produk
                     </button>
                   </div>
                 </div>

@@ -69,16 +69,35 @@ async function requestSwapPortalData(signal?: AbortSignal) {
   return { jadwalJson, historyJson };
 }
 
+type SwapPortalCachePayload = {
+  jadwalSaya: JadwalSaya[];
+  slotTersedia: SlotTersedia[];
+  history: SwapRequest[];
+  incoming: IncomingSwapRequest[];
+};
+
+let swapPortalMemCache: SwapPortalCachePayload | null = null;
+
 // ── Main Page ─────────────────────────────────────────────────────────────
 export default function TukarShiftPage() {
-  const [jadwalSaya, setJadwalSaya] = useState<JadwalSaya[]>([]);
-  const [slotTersedia, setSlotTersedia] = useState<SlotTersedia[]>([]);
-  const [history, setHistory] = useState<SwapRequest[]>([]);
-  const [incoming, setIncoming] = useState<IncomingSwapRequest[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [jadwalSaya, setJadwalSaya] = useState<JadwalSaya[]>(
+    () => swapPortalMemCache?.jadwalSaya ?? [],
+  );
+  const [slotTersedia, setSlotTersedia] = useState<SlotTersedia[]>(
+    () => swapPortalMemCache?.slotTersedia ?? [],
+  );
+  const [history, setHistory] = useState<SwapRequest[]>(
+    () => swapPortalMemCache?.history ?? [],
+  );
+  const [incoming, setIncoming] = useState<IncomingSwapRequest[]>(
+    () => swapPortalMemCache?.incoming ?? [],
+  );
+  const [loading, setLoading] = useState<boolean>(() => !swapPortalMemCache);
 
   // Form state
-  const [fromId, setFromId] = useState('');
+  const [fromId, setFromId] = useState<string>(
+    () => swapPortalMemCache?.jadwalSaya?.[0]?.id ?? '',
+  );
   const [toId, setToId] = useState('');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -87,28 +106,44 @@ export default function TukarShiftPage() {
 
   const applySwapPortalData = useCallback(
     ({ jadwalJson, historyJson }: Awaited<ReturnType<typeof requestSwapPortalData>>) => {
+      let nextJadwal: JadwalSaya[] = [];
+      let nextSlot: SlotTersedia[] = [];
+      let nextHistory: SwapRequest[] = [];
+      let nextIncoming: IncomingSwapRequest[] = [];
+
       if (jadwalJson.data) {
         const sorted = [...jadwalJson.data.jadwalSaya].sort(
           (a, b) => (HARI_ORDER[a.dayOfWeek] ?? 9) - (HARI_ORDER[b.dayOfWeek] ?? 9),
         );
+        nextJadwal = sorted;
+        nextSlot = jadwalJson.data.slotTersedia;
         setJadwalSaya(sorted);
         setSlotTersedia(jadwalJson.data.slotTersedia);
         if (sorted.length > 0) setFromId(sorted[0]!.id);
       }
       if (historyJson.data) {
         if (Array.isArray(historyJson.data)) {
+          nextHistory = historyJson.data;
           setHistory(historyJson.data);
         } else if (typeof historyJson.data === 'object') {
-          setHistory(historyJson.data.history ?? []);
-          setIncoming(historyJson.data.incoming ?? []);
+          nextHistory = historyJson.data.history ?? [];
+          nextIncoming = historyJson.data.incoming ?? [];
+          setHistory(nextHistory);
+          setIncoming(nextIncoming);
         }
       }
+      swapPortalMemCache = {
+        jadwalSaya: nextJadwal,
+        slotTersedia: nextSlot,
+        history: nextHistory,
+        incoming: nextIncoming,
+      };
     },
     [],
   );
 
   const fetchAll = useCallback(async () => {
-    setLoading(true);
+    if (!swapPortalMemCache) setLoading(true);
     try {
       const payload = await requestSwapPortalData();
       applySwapPortalData(payload);
@@ -349,18 +384,18 @@ export default function TukarShiftPage() {
               </section>
             )}
 
-            {/* Jadwal kamu */}
+            {/* Jadwal Anda */}
             <section className="card">
               <div className="card-body" style={{ padding: '16px 20px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                   <Calendar size={16} style={{ color: 'var(--color-primary)' }} />
                   <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', margin: 0 }}>
-                    Jadwal Shift Kamu
+                    Jadwal Shift Anda
                   </h2>
                 </div>
                 {jadwalSaya.length === 0 ? (
                   <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>
-                    Kamu belum memiliki jadwal shift. Hubungi Admin.
+                    Anda belum memiliki jadwal shift aktif. Silakan hubungi Pengelola.
                   </p>
                 ) : (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -388,7 +423,7 @@ export default function TukarShiftPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                     <ArrowLeftRight size={16} style={{ color: 'var(--color-primary)' }} />
                     <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', margin: 0 }}>
-                      Ajukan Pertukaran
+                      Formulir Pengajuan Pertukaran Jadwal
                     </h2>
                   </div>
 
@@ -396,7 +431,7 @@ export default function TukarShiftPage() {
                     {/* Dari jadwal mana */}
                     <div>
                       <label className="form-label" htmlFor="from-schedule">
-                        Jadwal yang ingin kamu tukar *
+                        Jadwal Shift yang Diajukan untuk Pertukaran *
                       </label>
                       <select
                         id="from-schedule"
@@ -416,11 +451,11 @@ export default function TukarShiftPage() {
                     {/* Ke jadwal mana */}
                     <div>
                       <label className="form-label" htmlFor="to-schedule">
-                        Jadwal tujuan (dari karyawan lain) *
+                        Jadwal Shift Tujuan (Milik Rekan Kerja) *
                       </label>
                       {filteredSlot.length === 0 ? (
                         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                          Tidak ada slot tersedia saat ini.
+                          Tidak terdapat slot jadwal tujuan yang tersedia saat ini.
                         </p>
                       ) : (
                         <select
@@ -430,7 +465,7 @@ export default function TukarShiftPage() {
                           onChange={e => setToId(e.target.value)}
                           required
                         >
-                          <option value="">-- Pilih jadwal tujuan --</option>
+                          <option value="">-- Pilih jadwal shift tujuan --</option>
                           {filteredSlot.map(s => (
                             <option key={s.id} value={s.id}>
                               {formatShiftLabel(s.dayOfWeek, s.slotStart, s.slotEnd)} — {s.employeeName}
@@ -443,13 +478,13 @@ export default function TukarShiftPage() {
                     {/* Alasan */}
                     <div>
                       <label className="form-label" htmlFor="reason">
-                        Alasan pengajuan * <span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}>(min. 10 karakter)</span>
+                        Alasan Pengajuan * <span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}>(min. 10 karakter)</span>
                       </label>
                       <textarea
                         id="reason"
                         className="form-input"
                         rows={3}
-                        placeholder="Contoh: Ada kegiatan keluarga pada hari tersebut..."
+                        placeholder="Contoh: Mengikuti kegiatan akademik / keperluan mendesak pada hari tersebut..."
                         value={reason}
                         onChange={e => setReason(e.target.value)}
                         required
@@ -469,8 +504,8 @@ export default function TukarShiftPage() {
                       style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                     >
                       {submitting
-                        ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Mengirim...</>
-                        : <><Send size={15} /> Kirim Pengajuan</>}
+                        ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Mengirim Pengajuan...</>
+                        : <><Send size={15} /> Kirim Pengajuan Pertukaran</>}
                     </button>
                   </form>
                 </div>
@@ -481,7 +516,7 @@ export default function TukarShiftPage() {
             <section className="card">
               <div className="card-body" style={{ padding: '16px 20px' }}>
                 <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', marginBottom: 14 }}>
-                  Riwayat Pengajuan Kamu
+                  Riwayat Pengajuan Pertukaran Jadwal Anda
                 </h2>
 
                 {history.length === 0 ? (

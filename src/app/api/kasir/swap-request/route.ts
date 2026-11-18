@@ -46,7 +46,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!rl.allowed) {
     const hariLagi = Math.ceil(rl.retryAfterSeconds / 86400);
     return apiError(
-      `Kamu sudah mencapai batas 3 pengajuan per minggu. Coba lagi dalam ${hariLagi} hari, atau minta Admin untuk membantu.`,
+      `Anda telah mencapai batas 3 pengajuan per minggu. Silakan coba kembali dalam ${hariLagi} hari, atau hubungi Pengelola untuk bantuan.`,
       429,
     );
   }
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   if (!fromSchedule) {
     return apiError(
-      'Jadwal asal tidak ditemukan atau bukan milikmu. Pastikan kamu memilih jadwal yang benar.',
+      'Jadwal asal tidak ditemukan atau bukan milik Anda. Pastikan Anda memilih jadwal yang sesuai.',
       404,
     );
   }
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   if (existingPending) {
     return apiError(
-      'Kamu sudah punya pengajuan swap yang masih menunggu untuk jadwal ini. Tunggu keputusan Admin terlebih dahulu.',
+      'Anda telah memiliki pengajuan pertukaran jadwal yang masih menunggu persetujuan pada slot ini.',
       409,
     );
   }

@@ -54,22 +54,34 @@ function StepDots({ total, current }: { total: number; current: number }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Shift Grid untuk pilih slot
+// Shift Grid untuk pilih slot (dengan In-Memory Cache & Prefetch)
 // ─────────────────────────────────────────────────────────────
+let scheduleSlotsMemCache: DayGroup[] = [];
+
 function ShiftGrid({ onSelect, selected }: {
   onSelect: (slotId: string) => void;
   selected: string | null;
 }) {
-  const [schedule, setSchedule] = useState<DayGroup[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [schedule, setSchedule] = useState<DayGroup[]>(() => scheduleSlotsMemCache);
+  const [loading, setLoading] = useState<boolean>(() => scheduleSlotsMemCache.length === 0);
 
   useEffect(() => {
-    fetch('/api/publik/jadwal-slot')
+    const controller = new AbortController();
+    fetch('/api/publik/jadwal-slot', { signal: controller.signal })
       .then(r => r.json())
       .then((j: { success: boolean; data?: { schedule: DayGroup[] } }) => {
-        if (j.success && j.data) setSchedule(j.data.schedule);
+        if (!controller.signal.aborted && j.success && j.data) {
+          scheduleSlotsMemCache = j.data.schedule;
+          setSchedule(j.data.schedule);
+        }
       })
-      .finally(() => setLoading(false));
+      .catch(() => {
+        // silent
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
   }, []);
 
   if (loading) return <div style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}><Loader2 size={20} className="spin-icon" style={{ display: 'inline' }} /></div>;
@@ -427,7 +439,7 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
 
       {/* Tab */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 0, marginBottom: 'var(--space-5)', borderBottom: '2px solid var(--color-border)' }}>
-        {([['daftar', '📝 Daftar Shift'], ['lupa-nim', '🔍 Lupa NIM / ID']] as [MahasiswaTab, string][]).map(([t, label]) => (
+        {([['daftar', 'Pendaftaran Jadwal Shift'], ['lupa-nim', 'Pencarian NIM / ID']] as [MahasiswaTab, string][]).map(([t, label]) => (
           <button
             type="button"
             aria-pressed={tab === t}
@@ -476,7 +488,7 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                   ))}
                 </select>
                 <p className="form-hint">
-                  Bagi penjaga dari luar kampus UNPERBA, pilih <strong>{EXTERNAL_PRODI_LABEL}</strong>.
+                  Bagi staf operasional dari luar lingkungan kampus UNPERBA, pilih kategori <strong>{EXTERNAL_PRODI_LABEL}</strong>.
                 </p>
               </div>
 
@@ -496,13 +508,13 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                 />
                 <p className="form-hint">
                   {isExternal
-                    ? 'Masukkan Nomor HP aktif (10–15 angka). Nomor ini digunakan sebagai pengganti NIM saat login kasir/gudang.'
-                    : 'Masukkan 8 digit Nomor Induk Mahasiswa UNPERBA.'}
+                    ? 'Masukkan Nomor HP aktif (10–15 angka). Nomor ini digunakan sebagai ID Pengguna saat masuk ke portal operasional.'
+                    : 'Masukkan 8 digit Nomor Induk Mahasiswa (NIM) resmi UNPERBA.'}
                 </p>
               </div>
 
               <div className="form-group">
-                <label htmlFor={`${uid}-pin`} className="form-label">Buat PIN Baru (8 Angka) *</label>
+                <label htmlFor={`${uid}-pin`} className="form-label">Buat PIN Keamanan (8 Angka) *</label>
                 <input
                   id={`${uid}-pin`}
                   type="password"
@@ -514,11 +526,11 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                   value={pin}
                   onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
                 />
-                <p className="form-hint">PIN keamanan untuk login Kasir POS, Gudang, dan Admin Shift (seragam 6–8 digit angka).</p>
+                <p className="form-hint">PIN keamanan digunakan untuk autentikasi pada Terminal Kasir POS, Portal Gudang, dan Admin Shift.</p>
               </div>
 
               <div className="form-group">
-                <label htmlFor={`${uid}-confirm-pin`} className="form-label">Konfirmasi PIN Baru *</label>
+                <label htmlFor={`${uid}-confirm-pin`} className="form-label">Konfirmasi PIN Keamanan *</label>
                 <input
                   id={`${uid}-confirm-pin`}
                   type="password"
@@ -526,7 +538,7 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                   maxLength={8}
                   className="form-input"
                   style={{ fontSize: 'var(--text-base)', minHeight: 44, letterSpacing: '0.15em' }}
-                  placeholder="Ulangi PIN angka yang sama"
+                  placeholder="Masukkan kembali PIN keamanan Anda"
                   value={confirmPin}
                   onChange={e => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
                 />
@@ -545,7 +557,7 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                 disabled={!nama.trim() || !nim.trim() || !prodi || !pin.trim() || !confirmPin.trim()}
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 44 }}
               >
-                Lanjut Pilih Shift <ChevronRight size={16} />
+                Lanjut Pilih Jadwal Shift <ChevronRight size={16} />
               </button>
             </div>
           )}
@@ -554,10 +566,10 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
               <div style={{ padding: 'var(--space-3)', background: 'var(--color-surface-muted)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
                 <span><strong>{nama}</strong> · {isExternal ? `No. HP ${nim}` : `NIM ${nim}`} · {prodi} · PIN {pin.length} digit</span>
-                <button type="button" onClick={() => setStep(1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)', fontSize: 'var(--text-xs)', fontWeight: 600, minHeight: 44, padding: '0 8px', display: 'inline-flex', alignItems: 'center' }}>ubah</button>
+                <button type="button" onClick={() => setStep(1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)', fontSize: 'var(--text-xs)', fontWeight: 600, minHeight: 44, padding: '0 8px', display: 'inline-flex', alignItems: 'center' }}>Ubah Data</button>
               </div>
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                Pilih slot jadwal yang <strong>kosong</strong>:
+                Pilih slot jadwal operasional yang <strong>tersedia</strong>:
               </p>
               <ShiftGrid onSelect={setSelectedSlot} selected={selectedSlot} />
               {error && (
@@ -574,7 +586,7 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
                   disabled={!selectedSlot || loading}
                   style={{ flex: 2, minWidth: 160, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                 >
-                  {loading ? <><Loader2 size={16} className="spin-icon" /> Mendaftar...</> : '✅ Daftar Sekarang'}
+                  {loading ? <><Loader2 size={16} className="spin-icon" /> Memproses Pendaftaran...</> : 'Selesaikan Pendaftaran'}
                 </button>
               </div>
             </div>
@@ -587,11 +599,11 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
               </div>
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text)', textAlign: 'center' }}>{successMsg}</p>
               <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'center' }}>
-                Silakan login menggunakan <strong>{isExternal ? `Nomor HP (${nim})` : `NIM (${nim})`}</strong> dan <strong>PIN {pin.length} angka</strong> yang baru Anda buat.
+                Silakan masuk menggunakan <strong>{isExternal ? `Nomor HP (${nim})` : `NIM (${nim})`}</strong> dan <strong>PIN {pin.length} digit</strong> yang telah Anda daftarkan.
               </p>
               <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', justifyContent: 'center', width: '100%' }}>
-                <a href="/kasir/login" className="btn btn-primary" style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 1, minWidth: 160 }}>Login Kasir POS →</a>
-                <a href="/login" className="btn btn-secondary" style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 1, minWidth: 160 }}>Login Admin →</a>
+                <a href="/kasir/login" className="btn btn-primary" style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 1, minWidth: 160 }}>Masuk ke Kasir POS →</a>
+                <a href="/login" className="btn btn-secondary" style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 1, minWidth: 160 }}>Masuk ke Portal Admin →</a>
               </div>
             </div>
           )}
@@ -602,8 +614,8 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
       {tab === 'lupa-nim' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-            Masukkan nama lengkap dan program studi — sistem akan menampilkan NIM kamu.
-            Jika masih tidak ditemukan, hubungi admin Wiramart atau kaprodi.
+            Masukkan Nama Lengkap dan Program Studi sesuai data akademik untuk menampilkan Nomor Induk Mahasiswa (NIM) atau ID Pengguna Anda.
+            Apabila data belum ditemukan, silakan hubungi Pengelola Wiramart atau Ketua Program Studi.
           </p>
           <div className="form-group">
             <label htmlFor={`${uid}-lupa-nama`} className="form-label">Nama Lengkap</label>
@@ -661,6 +673,23 @@ function PanelMahasiswa({ onBack }: { onBack: () => void }) {
 export default function DaftarPage() {
   const [mode, setMode] = useState<Mode>('choose');
 
+  // Prefetch jadwal slot saat halaman /daftar dibuka agar Langkah 2 tampil 0ms tanpa loading
+  useEffect(() => {
+    if (scheduleSlotsMemCache.length > 0) return;
+    const controller = new AbortController();
+    fetch('/api/publik/jadwal-slot', { signal: controller.signal })
+      .then((r) => r.json())
+      .then((j: { success: boolean; data?: { schedule: DayGroup[] } }) => {
+        if (!controller.signal.aborted && j.success && j.data) {
+          scheduleSlotsMemCache = j.data.schedule;
+        }
+      })
+      .catch(() => {
+        // silent prefetch
+      });
+    return () => controller.abort();
+  }, []);
+
   return (
     <div style={{
       minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -684,7 +713,11 @@ export default function DaftarPage() {
             Wiramart UNPERBA
           </h1>
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-            {mode === 'choose' ? 'Aktivasi akun atau daftar shift' : mode === 'dosen' ? 'Portal Dosen / Admin' : 'Portal Mahasiswa Kasir'}
+            {mode === 'choose'
+              ? 'Portal Registrasi & Aktivasi Akun Resmi'
+              : mode === 'dosen'
+                ? 'Portal Dosen Pembimbing & Pengelola'
+                : 'Portal Registrasi Mahasiswa & Staf Operasional'}
           </p>
         </div>
 
@@ -693,7 +726,7 @@ export default function DaftarPage() {
             {mode === 'choose' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
                 <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', textAlign: 'center', marginBottom: 'var(--space-2)' }}>
-                  Pilih peran kamu:
+                  Pilih Kategori Pendaftaran Pengguna:
                 </p>
                 <button
                   type="button"
@@ -713,8 +746,8 @@ export default function DaftarPage() {
                     <GraduationCap size={22} style={{ color: 'var(--color-primary)' }} />
                   </span>
                   <span style={{ display: 'block', minWidth: 0 }}>
-                    <span style={{ display: 'block', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', marginBottom: 2 }}>Dosen / Admin</span>
-                    <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Aktivasi akun atau reset password dengan NIDN/NIDK</span>
+                    <span style={{ display: 'block', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', marginBottom: 2 }}>Dosen Pembimbing / Pengelola</span>
+                    <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Aktivasi akun atau pengaturan ulang kata sandi menggunakan NIDN/NIDK</span>
                   </span>
                   <ChevronRight size={18} style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--color-text-muted)' }} />
                 </button>
@@ -737,15 +770,15 @@ export default function DaftarPage() {
                     <Users size={22} style={{ color: 'var(--color-info)' }} />
                   </span>
                   <span style={{ display: 'block', minWidth: 0 }}>
-                    <span style={{ display: 'block', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', marginBottom: 2 }}>Mahasiswa / Karyawan</span>
-                    <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Daftar shift atau cari NIM yang terlupakan</span>
+                    <span style={{ display: 'block', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', marginBottom: 2 }}>Mahasiswa & Staf Operasional</span>
+                    <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Pendaftaran jadwal shift operasional atau pencarian NIM/ID terdaftar</span>
                   </span>
                   <ChevronRight size={18} style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--color-text-muted)' }} />
                 </button>
 
                 <div style={{ textAlign: 'center', paddingTop: 'var(--space-2)' }}>
                   <a href="/login" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minHeight: 44, padding: '8px 12px', gap: 4 }}>
-                    Sudah punya akun? <span style={{ color: 'var(--color-primary)' }}>Login di sini</span>
+                    Sudah memiliki akun terdaftar? <span style={{ color: 'var(--color-primary)' }}>Masuk ke Portal</span>
                   </a>
                 </div>
               </div>

@@ -255,7 +255,7 @@ export default function ProfileClient({
               </div>
               <h3 className="pwa-empty-title">Belum Ada Pesanan</h3>
               <p className="pwa-empty-desc" style={{ marginBottom: 14 }}>
-                Pesanan yang kamu buat lewat Wiramart Delivery akan muncul di sini.
+                Riwayat pesanan yang Anda buat melalui layanan Wiramart Delivery akan ditampilkan di sini.
               </p>
               <Link href="/order" className="pwa-btn-primary">
                 <ShoppingBag size={16} aria-hidden="true" />

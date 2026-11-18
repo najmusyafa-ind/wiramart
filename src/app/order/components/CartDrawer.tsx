@@ -186,9 +186,9 @@ export default function CartDrawer() {
               <div className="pwa-empty-icon">
                 <ShoppingBag size={28} aria-hidden="true" />
               </div>
-              <h3 className="pwa-empty-title">Keranjang Kamu Kosong</h3>
+              <h3 className="pwa-empty-title">Keranjang Belanja Anda Kosong</h3>
               <p className="pwa-empty-desc">
-                Pilih snack, minuman, atau perlengkapan kampus dari katalog untuk memesan.
+                Pilih makanan ringan, minuman, atau perlengkapan kampus dari katalog untuk mulai memesan.
               </p>
             </div>
           ) : (

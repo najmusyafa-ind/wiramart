@@ -58,6 +58,12 @@ async function requestRecap(targetDate: string, shiftId: string, targetPage: num
   return { status: 'ok' as const, data: json.data as CashierRecapResponseDTO };
 }
 
+const recapMemCache = new Map<string, CashierRecapResponseDTO>();
+
+function makeRecapCacheKey(targetDate: string, shiftId: string, targetPage: number): string {
+  return `${targetDate}::${shiftId || 'default'}::${targetPage}`;
+}
+
 export default function CashierRecapPage() {
   const router = useRouter();
 
@@ -66,15 +72,18 @@ export default function CashierRecapPage() {
     return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
   })();
 
+  const initialCacheKey = makeRecapCacheKey(todayWIB, '', 1);
   const [tanggal, setTanggal] = useState(todayWIB);
   const [selectedShiftId, setSelectedShiftId] = useState<string>('');
   const [page, setPage] = useState(1);
-  const [data, setData] = useState<CashierRecapResponseDTO | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<CashierRecapResponseDTO | null>(
+    () => recapMemCache.get(initialCacheKey) ?? null,
+  );
+  const [loading, setLoading] = useState<boolean>(() => !recapMemCache.has(initialCacheKey));
   const [error, setError] = useState<string | null>(null);
 
   const applyRecapResult = useCallback(
-    (result: Awaited<ReturnType<typeof requestRecap>>) => {
+    (result: Awaited<ReturnType<typeof requestRecap>>, cacheKey?: string) => {
       if (result.status === 'unauthorized') {
         router.push('/kasir/login');
         return;
@@ -83,6 +92,9 @@ export default function CashierRecapPage() {
         setError(result.error);
         return;
       }
+      if (cacheKey) {
+        recapMemCache.set(cacheKey, result.data);
+      }
       setError(null);
       setData(result.data);
     },
@@ -90,13 +102,14 @@ export default function CashierRecapPage() {
   );
 
   const fetchRecap = useCallback(async (targetDate: string, shiftId: string, targetPage: number) => {
-    setLoading(true);
+    const cKey = makeRecapCacheKey(targetDate, shiftId, targetPage);
+    if (!recapMemCache.has(cKey)) setLoading(true);
     setError(null);
     try {
       const result = await requestRecap(targetDate, shiftId, targetPage);
-      applyRecapResult(result);
+      applyRecapResult(result, cKey);
     } catch {
-      setError('Terjadi kendala jaringan saat memuat rekap kasir.');
+      setError('Terjadi kendala jaringan saat memuat rekapitulasi kasir.');
     } finally {
       setLoading(false);
     }
@@ -104,16 +117,17 @@ export default function CashierRecapPage() {
 
   useEffect(() => {
     const controller = new AbortController();
+    const cKey = makeRecapCacheKey(tanggal, selectedShiftId, page);
 
     requestRecap(tanggal, selectedShiftId, page, controller.signal)
       .then((result) => {
         if (!controller.signal.aborted) {
-          applyRecapResult(result);
+          applyRecapResult(result, cKey);
         }
       })
       .catch(() => {
         if (!controller.signal.aborted) {
-          setError('Terjadi kendala jaringan saat memuat rekap kasir.');
+          setError('Terjadi kendala jaringan saat memuat rekapitulasi kasir.');
         }
       })
       .finally(() => {
@@ -129,11 +143,25 @@ export default function CashierRecapPage() {
     setTanggal(newDate);
     setSelectedShiftId('');
     setPage(1);
+    const cached = recapMemCache.get(makeRecapCacheKey(newDate, '', 1));
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
   };
 
   const handleShiftChange = (shiftId: string) => {
     setSelectedShiftId(shiftId);
     setPage(1);
+    const cached = recapMemCache.get(makeRecapCacheKey(tanggal, shiftId, 1));
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
   };
 
   const s = data?.summary;
@@ -850,7 +878,7 @@ export default function CashierRecapPage() {
               )}
             </div>
 
-            {/* ── BAGIAN TERAKHIR CLOSING: TABEL BARANG LAKU BERAPA & RETUR BERAPA ── */}
+            {/* ── BAGIAN TERAKHIR CLOSING: REKAPITULASI PERGERAKAN BARANG PENUTUPAN SHIFT ── */}
             {(() => {
               const itemsRecap = data.closingProductRecap ?? [];
               const totalMasuk = itemsRecap.reduce((acc, r) => acc + r.qtyReceived, 0);
@@ -883,10 +911,10 @@ export default function CashierRecapPage() {
                   >
                     <div>
                       <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--color-text)' }}>
-                        📦 Rekap Closing Barang: Laku Berapa & Retur Berapa
+                        📦 Rekapitulasi Pergerakan Barang Penutupan Shift (Penerimaan, Penjualan &amp; Retur Pemasok)
                       </h3>
                       <p style={{ margin: '4px 0 0 0', fontSize: 12, color: 'var(--color-text-muted)' }}>
-                        Ringkasan barang yang masuk dari nota supplier, laku terjual di kasir, diretur kembali, dan sisa stok akhir.
+                        Ringkasan kuantitas barang yang diterima berdasarkan faktur pemasok, terjual melalui terminal POS, diretur kembali ke pemasok, serta saldo stok akhir.
                       </p>
                     </div>
 
@@ -894,7 +922,7 @@ export default function CashierRecapPage() {
                       type="button"
                       onClick={() => router.push('/gudang')}
                       style={{
-                        minHeight: 40,
+                        minHeight: 44,
                         padding: '8px 14px',
                         borderRadius: 10,
                         border: '1px solid var(--color-primary)',
@@ -905,7 +933,7 @@ export default function CashierRecapPage() {
                         cursor: 'pointer',
                       }}
                     >
-                      🧾 Buka Arsip & Upload Nota Supplier →
+                      Buka Arsip &amp; Unggah Faktur Pemasok →
                     </button>
                   </div>
 
@@ -921,19 +949,19 @@ export default function CashierRecapPage() {
                     }}
                   >
                     <div style={{ padding: '10px 12px', background: 'var(--color-surface)', borderRadius: 10, border: '1px solid var(--color-border)' }}>
-                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Masuk dari Nota Supplier</div>
+                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Kuantitas Penerimaan Faktur</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: 'hsl(200 85% 32%)', marginTop: 2 }}>
                         {totalMasuk.toLocaleString('id-ID')} pcs
                       </div>
                     </div>
                     <div style={{ padding: '10px 12px', background: 'var(--color-surface)', borderRadius: 10, border: '1px solid var(--color-border)' }}>
-                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Total Barang Laku Terjual</div>
+                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Total Kuantitas Terjual (POS)</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: 'hsl(150 75% 28%)', marginTop: 2 }}>
                         {totalLaku.toLocaleString('id-ID')} pcs <span style={{ fontSize: 12, fontWeight: 600 }}>({rp(totalOmzetBarang)})</span>
                       </div>
                     </div>
                     <div style={{ padding: '10px 12px', background: 'var(--color-surface)', borderRadius: 10, border: '1px solid var(--color-border)' }}>
-                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Total Barang Diretur / Cut-Off</div>
+                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Total Kuantitas Retur &amp; Kedaluwarsa</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: totalRetur > 0 ? 'hsl(0 75% 42%)' : 'var(--color-text)', marginTop: 2 }}>
                         {totalRetur.toLocaleString('id-ID')} pcs
                       </div>
@@ -942,19 +970,19 @@ export default function CashierRecapPage() {
 
                   {itemsRecap.length === 0 ? (
                     <div style={{ padding: '32px 20px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
-                      Belum ada pergerakan barang (masuk nota, laku terjual, atau retur) pada tanggal ini.
+                      Belum terdapat pergerakan barang (penerimaan faktur, penjualan POS, maupun retur pemasok) pada tanggal ini.
                     </div>
                   ) : (
                     <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
                         <thead>
                           <tr style={{ background: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)', textAlign: 'left', color: 'var(--color-text-secondary)' }}>
-                            <th style={{ padding: '12px 18px', fontWeight: 700 }}>Nama Barang & Supplier</th>
-                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Masuk (Nota)</th>
-                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Laku Terjual</th>
+                            <th style={{ padding: '12px 18px', fontWeight: 700 }}>Nama Produk &amp; Pemasok</th>
+                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Diterima (Faktur)</th>
+                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Terjual (POS)</th>
                             <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Diretur</th>
-                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Nilai Laku (Rp)</th>
-                            <th style={{ padding: '12px 18px', fontWeight: 700, textAlign: 'right' }}>Sisa Stok</th>
+                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Nilai Penjualan (Rp)</th>
+                            <th style={{ padding: '12px 18px', fontWeight: 700, textAlign: 'right' }}>Saldo Stok Akhir</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -964,7 +992,7 @@ export default function CashierRecapPage() {
                                 <div style={{ fontWeight: 700, color: 'var(--color-text)' }}>{item.productName}</div>
                                 {item.supplierName && (
                                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                                    Supplier: {item.supplierName}
+                                    Pemasok: {item.supplierName}
                                   </div>
                                 )}
                               </td>
@@ -988,7 +1016,7 @@ export default function CashierRecapPage() {
                         </tbody>
                         <tfoot>
                           <tr style={{ background: 'var(--color-surface-muted)', borderTop: '2px solid var(--color-border)', fontWeight: 800 }}>
-                            <td style={{ padding: '12px 18px' }}>TOTAL CLOSING BARANG ({itemsRecap.length} produk)</td>
+                            <td style={{ padding: '12px 18px' }}>TOTAL REKAPITULASI BARANG ({itemsRecap.length} produk)</td>
                             <td style={{ padding: '12px 14px', textAlign: 'right', color: 'hsl(200 85% 32%)' }}>
                               {totalMasuk} pcs
                             </td>

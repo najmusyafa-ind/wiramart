@@ -59,7 +59,7 @@ export default function BuyerAuthPage() {
       await refreshBuyer();
       router.replace(safeNext());
     } catch {
-      setError('Koneksi bermasalah. Periksa internet kamu lalu coba lagi.');
+      setError('Terjadi kendala koneksi jaringan. Periksa koneksi internet Anda lalu coba kembali.');
     } finally {
       setLoading(false);
     }

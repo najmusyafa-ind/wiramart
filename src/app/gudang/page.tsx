@@ -98,21 +98,58 @@ declare class BarcodeDetector {
   detect(source: HTMLVideoElement): Promise<{ rawValue: string }[]>;
 }
 
+type WarehousePayloadData = {
+  employee: WarehouseEmployee;
+  summary: WarehouseSummary;
+  items: WarehouseProduct[];
+  activities: ActivityLog[];
+};
+
+const warehouseDataMemCache = new Map<string, WarehousePayloadData>();
+
+function makeWarehouseCacheKey(targetFilter: string, targetSearch: string): string {
+  const filterParam =
+    targetFilter === 'aktivitas' || targetFilter === 'penerimaan' ? 'semua' : targetFilter;
+  return `${filterParam}::${targetSearch.trim().toLowerCase()}`;
+}
+
 export default function GudangPortalPage() {
   const router = useRouter();
   const searchInputId = useId();
 
-  // State Data
-  const [employee, setEmployee] = useState<WarehouseEmployee | null>(null);
-  const [summary, setSummary] = useState<WarehouseSummary | null>(null);
-  const [products, setProducts] = useState<WarehouseProduct[]>([]);
-  const [activities, setActivities] = useState<ActivityLog[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialCache = warehouseDataMemCache.get(makeWarehouseCacheKey('semua', ''));
+
+  // State Data (inisialisasi instan dari memori cache)
+  const [employee, setEmployee] = useState<WarehouseEmployee | null>(
+    () => initialCache?.employee ?? null,
+  );
+  const [summary, setSummary] = useState<WarehouseSummary | null>(
+    () => initialCache?.summary ?? null,
+  );
+  const [products, setProducts] = useState<WarehouseProduct[]>(
+    () => initialCache?.items ?? [],
+  );
+  const [activities, setActivities] = useState<ActivityLog[]>(
+    () => initialCache?.activities ?? [],
+  );
+  const [loading, setLoading] = useState<boolean>(() => !initialCache);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // State Filter & Pencarian
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'semua' | 'kritis' | 'fefo' | 'perishable' | 'habis' | 'aktivitas' | 'penerimaan'>('semua');
+
+  function handleSelectTab(nextTab: 'semua' | 'kritis' | 'fefo' | 'perishable' | 'habis' | 'aktivitas' | 'penerimaan') {
+    setActiveTab(nextTab);
+    const cached = warehouseDataMemCache.get(makeWarehouseCacheKey(nextTab, search));
+    if (cached) {
+      setEmployee(cached.employee);
+      setSummary(cached.summary);
+      setProducts(cached.items);
+      setActivities(cached.activities);
+      setLoading(false);
+    }
+  }
 
   const canMutateStock = Boolean(
     employee && (employee.canMutateStock ?? employee.actorRole !== 'ADMIN_SHIFT'),
@@ -170,14 +207,12 @@ export default function GudangPortalPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Load Data Awal ───────────────────────────────────────────
+  // ── Load Data Awal (dengan In-Memory SWR Cache) ──────────────
   const applyWarehouseData = useCallback(
-    (data: {
-      employee: WarehouseEmployee;
-      summary: WarehouseSummary;
-      items: WarehouseProduct[];
-      activities: ActivityLog[];
-    }) => {
+    (data: WarehousePayloadData, cacheKey?: string) => {
+      if (cacheKey) {
+        warehouseDataMemCache.set(cacheKey, data);
+      }
       setErrorMsg(null);
       setEmployee(data.employee);
       setSummary(data.summary);
@@ -203,12 +238,7 @@ export default function GudangPortalPage() {
 
       const json = (await res.json()) as {
         success: boolean;
-        data?: {
-          employee: WarehouseEmployee;
-          summary: WarehouseSummary;
-          items: WarehouseProduct[];
-          activities: ActivityLog[];
-        };
+        data?: WarehousePayloadData;
         error?: string;
       };
 
@@ -226,7 +256,8 @@ export default function GudangPortalPage() {
   );
 
   async function loadData(targetFilter = activeTab, targetSearch = search) {
-    setLoading(true);
+    const cKey = makeWarehouseCacheKey(targetFilter, targetSearch);
+    if (!warehouseDataMemCache.has(cKey)) setLoading(true);
     setErrorMsg(null);
     try {
       const result = await fetchWarehouseData(targetFilter, targetSearch);
@@ -235,7 +266,7 @@ export default function GudangPortalPage() {
         setErrorMsg(result.error);
         return;
       }
-      applyWarehouseData(result.data);
+      applyWarehouseData(result.data, cKey);
     } catch {
       setErrorMsg('Gagal terhubung ke server.');
     } finally {
@@ -252,6 +283,7 @@ export default function GudangPortalPage() {
     const searchChanged = lastExecutedSearchRef.current !== search;
     const delayMs = tabChanged || !searchChanged ? 0 : 300;
     prevTabRef.current = activeTab;
+    const cKey = makeWarehouseCacheKey(activeTab, search);
 
     const timer = setTimeout(() => {
       lastExecutedSearchRef.current = search;
@@ -262,7 +294,7 @@ export default function GudangPortalPage() {
             setErrorMsg(result.error);
             return;
           }
-          applyWarehouseData(result.data);
+          applyWarehouseData(result.data, cKey);
         })
         .catch(() => {
           if (!controller.signal.aborted) {
@@ -818,27 +850,27 @@ export default function GudangPortalPage() {
           }}
         >
           {[
-            { id: 'semua', label: summary ? `Semua Produk (${summary.totalSku})` : 'Semua Produk' },
-            { id: 'penerimaan', label: '🧾 Nota Supplier & Barang Masuk' },
+            { id: 'semua', label: summary ? `Seluruh Produk (${summary.totalSku})` : 'Seluruh Produk' },
+            { id: 'penerimaan', label: 'Faktur Pemasok & Penerimaan' },
             {
               id: 'fefo',
               label: summary
-                ? `${isReadOnlyAdminShift ? '🚨 Pantau FEFO' : '🚨 To-Do FEFO & Diskon'} (${summary.expiringSoonSku})`
+                ? `${isReadOnlyAdminShift ? 'Pemantauan FEFO' : 'Tindakan FEFO & Diskon'} (${summary.expiringSoonSku})`
                 : isReadOnlyAdminShift
-                ? '🚨 Pantau FEFO'
-                : '🚨 To-Do FEFO & Diskon',
+                ? 'Pemantauan FEFO'
+                : 'Tindakan FEFO & Diskon',
             },
-            { id: 'kritis', label: summary ? `⚠️ Stok Kritis (${summary.lowStockSku})` : '⚠️ Stok Kritis' },
-            { id: 'perishable', label: summary?.perishableSku !== undefined ? `🥪 Makanan Basah (${summary.perishableSku})` : '🥪 Makanan Basah' },
-            { id: 'habis', label: summary ? `🔴 Stok Habis (${summary.outOfStockSku})` : '🔴 Stok Habis' },
-            { id: 'aktivitas', label: summary ? `📋 Riwayat Restock (${summary.todayRestockCount})` : '📋 Riwayat Restock' },
+            { id: 'kritis', label: summary ? `Stok Menipis (${summary.lowStockSku})` : 'Stok Menipis' },
+            { id: 'perishable', label: summary?.perishableSku !== undefined ? `Produk Konsumsi Harian (${summary.perishableSku})` : 'Produk Konsumsi Harian' },
+            { id: 'habis', label: summary ? `Stok Habis (${summary.outOfStockSku})` : 'Stok Habis' },
+            { id: 'aktivitas', label: summary ? `Riwayat Penambahan Stok (${summary.todayRestockCount})` : 'Riwayat Penambahan Stok' },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id as typeof activeTab)}
+                onClick={() => handleSelectTab(tab.id as typeof activeTab)}
                 style={{
                   minHeight: 44,
                   padding: '8px 14px',
