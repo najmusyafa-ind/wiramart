@@ -25,9 +25,9 @@ Setiap agent yang bekerja pada proyek ini **WAJIB secara otomatis menerapkan 4 s
 
 | Komponen | Versi / Detail |
 |---|---|
-| Framework | **Next.js 16.4.3** App Router — `proxy.ts` menggantikan `middleware.ts` |
+| Framework | **Next.js 16.4.6** App Router — `proxy.ts` menggantikan `middleware.ts` |
 | Runtime | Node.js 20+ (`export const runtime = 'nodejs'` di semua route) |
-| React | 19.2.8 |
+| React | 19.3.1 |
 | Database | Supabase PostgreSQL via **Drizzle ORM** (`src/lib/db/schema.ts`) |
 | Auth | JWT custom: `jose` + `bcryptjs`, **bukan** NextAuth / Supabase Auth |
 | Deploy | Vercel + Vercel Cron |

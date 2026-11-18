@@ -1,7 +1,7 @@
 # 🏪 Smartkasir Perwira — Ekosistem Digital Wiramart UNPERBA
 
-![Next.js](https://img.shields.io/badge/Next.js-16.4.3-black?logo=next.js)
-![React](https://img.shields.io/badge/React-19.2.8-61DAFB?logo=react&logoColor=black)
+![Next.js](https://img.shields.io/badge/Next.js-16.4.6-black?logo=next.js)
+![React](https://img.shields.io/badge/React-19.3.1-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.x_Strict-3178C6?logo=typescript&logoColor=white)
 ![Supabase](https://img.shields.io/badge/PostgreSQL-Supabase_RLS-3ECF8E?logo=supabase&logoColor=white)
 ![Drizzle ORM](https://img.shields.io/badge/Drizzle_ORM-0.45-C5F74F?logo=drizzle&logoColor=black)
@@ -34,7 +34,7 @@ Sistem Point of Sale (POS), Manajemen Gudang Terintegrasi (FEFO), Pesanan Online
 
 | Lapisan | Teknologi |
 |---|---|
-| **Framework** | **Next.js 16.4.3** (App Router, React 19.2.8, Node.js 20+ Runtime) — menggunakan `src/proxy.ts` sebagai pengganti `middleware.ts` |
+| **Framework** | **Next.js 16.4.6** (App Router, React 19.3.1, Node.js 20+ Runtime) — menggunakan `src/proxy.ts` sebagai pengganti `middleware.ts` |
 | **Bahasa & Validasi** | TypeScript Strict Mode + **Zod** (100% validasi DTO runtime di setiap endpoint) |
 | **Database & ORM** | **Supabase PostgreSQL** (33 tabel dengan **100% Row-Level Security / RLS**) + **Drizzle ORM** (`src/lib/db/schema.ts`) |
 | **Autentikasi** | Custom JWT (`jose` + `bcryptjs` 12 rounds) di dalam Cookie `HttpOnly`, `SameSite=Lax` |
