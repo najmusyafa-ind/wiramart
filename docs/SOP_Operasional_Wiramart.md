@@ -9,7 +9,7 @@ Dokumen ini berlaku mutlak bagi seluruh petugas shift Wiramart UNPERBA. Seluruh 
 Setiap shift wajib membagi peran saat absen di `/kasir/login`:
 
 1. **Admin Shift (Maksimal 1 orang/shift):** Login di `/login` (Tab Admin Shift, NIM + PIN 6 digit). Bertanggung jawab atas input, edit, koreksi stok, dan hapus barang di `/admin/produk`, konfirmasi pesanan online di `/admin/pesanan-online`, serta persetujuan tukar shift di `/admin/swap-request`. Dilarang merangkap kasir dan tidak bisa menyetujui barang masuk gudang.
-2. **Kasir (Maksimal 1 orang/shift):** Login di `/kasir/login` (Tab Login POS). Bertanggung jawab penuh atas laci kas tunggal, buka/tutup shift, transaksi di `/kasir/pos`, pencatatan kas gerak, laporan sisa makanan basah pukul 15:00 WIB, serta pengecekan `/kasir/riwayat` dan `/kasir/rekap`.
+2. **Kasir (Maksimal 1 orang/shift):** Login di `/kasir/login` (Tab Login POS). Bertanggung jawab penuh atas laci kas tunggal, buka/tutup shift, transaksi di `/kasir/pos`, pencatatan kas gerak, laporan sisa makanan harian pukul 15:00 WIB, serta pengecekan `/kasir/riwayat` dan `/kasir/rekap`.
 3. **Gudang (Minimal 1 orang/shift):** Otomatis masuk ke `/kasir/gudang` setelah absen. Bertanggung jawab atas pengecekan stok fisik setiap shift, pengajuan draft barang masuk ke Manager, pemindaian FEFO Radar, dan penempelan barcode diskon.
 4. **CS Pelayan (Minimal 1 orang/shift):** Bertanggung jawab atas kerapian rak lantai 1 dan pengantaran pesanan online kampus melalui `/kasir/pengiriman`.
 
@@ -82,9 +82,10 @@ Petugas gudang wajib menjalankan 4 prosedur ini di `/kasir/gudang` pada setiap s
    - Jika terjadi salah input transaksi, kasir tidak dapat menghapus sendiri. Catat nomor `INV...` di `/kasir/riwayat` dan segera lapor ke Admin atau Manager untuk dilakukan VOID resmi.
 4. **Kas Gerak (Uang Masuk/Keluar Laci):**
    - Setiap pengambilan uang dari laci untuk operasional toko (galon, plastik, es batu, tukar receh) wajib dicatat saat itu juga melalui tombol Kas Gerak (`CASH_OUT` atau `CASH_IN`) disertai keterangan jelas dan penyimpanan nota fisik di laci.
-5. **Cut-Off Makanan Basah Pukul 15:00 WIB (Khusus Shift Siang/Sore):**
+   - **Produk Paket Permen Eceran (`Rp 500 / 2 pcs`):** Untuk produk permen yang berharga satuan Rp 250 (`Permen Relaxa`, `permen antangin`), sistem POS otomatis menambahkan kelipatan 2 pcs (`Rp 500 / 2 pcs`, `Rp 1.000 / 4 pcs`) guna menghindari uang kembalian Rp 250.
+5. **Cut-Off Makanan Harian Pukul 15:00 WIB (Khusus Shift Siang/Sore):**
    - Pukul 15:00 WIB, kasir wajib membuka menu Sisa Makanan di POS dan menginput jumlah sisa fisik seluruh makanan harian/konsinyasi beserta statusnya (`HABIS`, `RETUR`, `BUANG_BASI`, `MAKAN_PETUGAS`, `OBRAL`, atau `SIMPAN`).
-   - Jika tidak dilaporkan, pukul 00:00 WIB sistem otomatis mereset stok ke 0 dengan catatan pelanggaran `[AUTO-CRON-MIDNIGHT] Kasir tidak melapor`.
+   - Jika tidak dilaporkan, pukul 00:00 WIB sistem otomatis mereset stok ke 0 dengan catatan pelanggaran `[AUTO-CRON-MIDNIGHT] Kasir tidak melapor`. (Jika cron malam terlewat, sapuan pagi otomatis berjalan saat katalog dibuka).
 6. **Tutup Shift (Hitung Buta / Blind Count):**
    - Periksa ringkasan di `/kasir/rekap`, lalu buka menu Tutup Shift.
    - Pisahkan uang modal Rp 100.000 untuk shift berikutnya, lalu hitung uang tunai aktual di laci per pecahan.
