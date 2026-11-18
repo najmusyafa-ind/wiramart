@@ -610,6 +610,19 @@ export default function PesananOnlinePage() {
                     </>
                   )}
 
+                  {/* PREPARING / OUT_FOR_DELIVERY: Tetap tampilkan identitas CS Runner yang bertugas */}
+                  {(r.status === 'PREPARING' || r.status === 'OUT_FOR_DELIVERY') &&
+                    r.deliveryType === 'DELIVERY' &&
+                    r.assignedCsId && (
+                      <span
+                        className="badge badge-info"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: 36 }}
+                      >
+                        <User size={12} />
+                        <span>Runner: {r.csName ?? 'Ditugaskan'}</span>
+                      </span>
+                    )}
+
                   {/* Tombol Tolak untuk status menunggu */}
                   {waiting && (
                     <button

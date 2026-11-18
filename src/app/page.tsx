@@ -230,12 +230,20 @@ export default function LandingPage() {
             <Link href="#tentang" className="lp-nav__link">Tentang</Link>
             <Link href="#divisi" className="lp-nav__link">9 Divisi</Link>
             <Link href="#ekosistem" className="lp-nav__link">Ekosistem</Link>
+            <Link href="/order" className="btn btn-secondary btn-sm">
+              <ShoppingBag size={15} aria-hidden="true" />
+              <span>Pesan Antar</span>
+            </Link>
+            <Link href="/gudang/login" className="btn btn-secondary btn-sm">
+              <Layers size={15} aria-hidden="true" />
+              <span>Gudang</span>
+            </Link>
             <Link href="/daftar" className="btn btn-secondary btn-sm">
               <Calendar size={15} aria-hidden="true" />
               <span>Daftar Shift</span>
             </Link>
             <Link href="/kasir/login" prefetch={false} className="btn btn-primary btn-sm lp-nav__cta" suppressHydrationWarning>
-              <ShoppingBag size={15} aria-hidden="true" />
+              <Store size={15} aria-hidden="true" />
               <span>Buka Kasir</span>
             </Link>
             <Link href="/login" className="lp-nav__admin" title="Portal Admin / Dosen">
@@ -300,6 +308,14 @@ export default function LandingPage() {
                 <Store size={20} aria-hidden="true" />
                 <span>Masuk Terminal Kasir POS</span>
                 <ArrowRight size={18} aria-hidden="true" />
+              </Link>
+              <Link href="/order" className="btn lp-hero__cta-secondary btn-lg">
+                <ShoppingBag size={18} aria-hidden="true" />
+                <span>Pesan Antar Kampus (Delivery)</span>
+              </Link>
+              <Link href="/gudang/login" className="btn lp-hero__cta-secondary btn-lg">
+                <Layers size={18} aria-hidden="true" />
+                <span>Portal Gudang &amp; FEFO</span>
               </Link>
               <Link href="/daftar" className="btn lp-hero__cta-secondary btn-lg">
                 <Calendar size={18} aria-hidden="true" />
@@ -541,6 +557,14 @@ export default function LandingPage() {
                   <Store size={18} aria-hidden="true" />
                   <span>Buka Terminal Kasir</span>
                 </Link>
+                <Link href="/order" className="btn btn-lg lp-cta__btn-glass">
+                  <ShoppingBag size={18} aria-hidden="true" />
+                  <span>Pesan Antar Kampus</span>
+                </Link>
+                <Link href="/gudang/login" className="btn btn-lg lp-cta__btn-glass">
+                  <Layers size={18} aria-hidden="true" />
+                  <span>Portal Gudang &amp; FEFO</span>
+                </Link>
                 <Link href="/daftar" className="btn btn-lg lp-cta__btn-glass">
                   <Calendar size={18} aria-hidden="true" />
                   <span>Registrasi &amp; Shift Mahasiswa</span>
@@ -588,7 +612,9 @@ export default function LandingPage() {
               <div className="lp-footer__link-group">
                 <div className="lp-footer__link-title">Layanan Utama</div>
                 <ul>
+                  <li><Link href="/order">Katalog Pesan Antar (Delivery)</Link></li>
                   <li><Link href="/kasir/login" prefetch={false} suppressHydrationWarning>Terminal Kasir POS</Link></li>
+                  <li><Link href="/gudang/login">Portal Petugas Gudang &amp; FEFO</Link></li>
                   <li><Link href="/daftar">Pendaftaran &amp; Jadwal Shift</Link></li>
                   <li><Link href="/login">Masuk Portal Dosen / Admin</Link></li>
                 </ul>

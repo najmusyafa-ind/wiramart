@@ -2237,8 +2237,11 @@ export default function PosPage() {
     isAfterCutOff15Wib &&
     perishableRemainingCount > 0 &&
     !isCutOffCompletedToday;
-  // True jika belum ada shift aktif ATAU modal awal belum diisi → tampilkan overlay Buka Shift
-  const shiftPerluModal = session !== null && (session.shift === null || session.shift.modalAwal === null);
+  // True jika belum ada shift aktif ATAU modal awal belum diisi (kecuali saat modal ringkasan Tutup Shift masih tampil) → tampilkan overlay Buka Shift
+  const shiftPerluModal =
+    session !== null &&
+    tutupResult === null &&
+    (session.shift === null || session.shift.modalAwal === null);
   const isShiftModalOpen = forceShowBukaShift || shiftPerluModal;
   const canCloseShiftModal = forceShowBukaShift && session?.shift !== null && session?.shift?.modalAwal !== null;
 

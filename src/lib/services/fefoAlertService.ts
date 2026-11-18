@@ -275,9 +275,31 @@ export async function getConditionReports(options: {
     .limit(limit)
     .offset(offset);
 
+  const reportIds = rows.map((r) => r.id);
+  const barcodeRows =
+    reportIds.length > 0
+      ? await db
+          .select({
+            conditionReportId: discountPolicies.conditionReportId,
+            barcode: discountBarcodes.barcode,
+          })
+          .from(discountPolicies)
+          .innerJoin(discountBarcodes, eq(discountBarcodes.policyId, discountPolicies.id))
+          .where(inArray(discountPolicies.conditionReportId, reportIds))
+          .orderBy(desc(discountBarcodes.createdAt))
+      : [];
+
+  const barcodeByReportId = new Map<string, string>();
+  for (const b of barcodeRows) {
+    if (!barcodeByReportId.has(b.conditionReportId)) {
+      barcodeByReportId.set(b.conditionReportId, b.barcode);
+    }
+  }
+
   const formattedRows = rows.map((r) => ({
     ...r,
     alertLevel: mapToClientAlertLevel(r.alertLevel),
+    discountBarcode: barcodeByReportId.get(r.id) ?? null,
   }));
 
   return {
