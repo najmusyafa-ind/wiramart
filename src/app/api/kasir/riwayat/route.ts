@@ -9,7 +9,7 @@
 
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { employees, transactions, transactionItems, transactionPayments, shifts } from '@/lib/db/schema';
+import { employees, transactions, transactionItems, transactionPayments, shifts, shiftCashMovements } from '@/lib/db/schema';
 import { eq, and, desc, gte, lte } from 'drizzle-orm';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
@@ -88,6 +88,7 @@ export async function GET(req: NextRequest) {
             columns: {
               id: true, productNameSnapshot: true,
               qty: true, sellingPriceSnapshot: true, subtotalSell: true,
+              discountPolicyId: true,
             },
           }),
           db.query.transactionPayments.findMany({
@@ -114,6 +115,29 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // 7b. Potongan Bayar Supplier / Kas Gerak pada shift hari ini
+    const cashMovements = shiftHariIni
+      ? await db
+          .select({
+            id: shiftCashMovements.id,
+            movementType: shiftCashMovements.movementType,
+            category: shiftCashMovements.category,
+            amount: shiftCashMovements.amount,
+            notes: shiftCashMovements.notes,
+            createdAt: shiftCashMovements.createdAt,
+          })
+          .from(shiftCashMovements)
+          .where(eq(shiftCashMovements.shiftId, shiftHariIni.id))
+          .orderBy(desc(shiftCashMovements.createdAt))
+      : [];
+
+    const totalCashOut = cashMovements
+      .filter((m) => m.movementType === 'CASH_OUT')
+      .reduce((acc, m) => acc + parseFloat(m.amount ?? '0'), 0);
+    const totalCashIn = cashMovements
+      .filter((m) => m.movementType === 'CASH_IN')
+      .reduce((acc, m) => acc + parseFloat(m.amount ?? '0'), 0);
+
     return apiOk({
       kasir: {
         namaLengkap: kasir.fullName,
@@ -126,12 +150,15 @@ export async function GET(req: NextRequest) {
         totalOmzet,
         totalCash,
         totalQris,
+        totalCashOut,
+        totalCashIn,
         modalAwal:    shiftHariIni?.modalAwal  ? parseFloat(shiftHariIni.modalAwal)  : null,
         aktualKas:    shiftHariIni?.actualCash ? parseFloat(shiftHariIni.actualCash) : null,
         statusShift:  shiftHariIni?.status  ?? null,
         clockIn:      shiftHariIni?.clockIn  ?? null,
         clockOut:     shiftHariIni?.clockOut ?? null,
       },
+      cashMovements,
       transaksi: enriched,
     });
   } catch (err) {

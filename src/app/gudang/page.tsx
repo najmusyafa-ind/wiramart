@@ -34,6 +34,8 @@ import {
   Bell,
   XCircle,
   AlertTriangle,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import PenerimaanBarangSection from './components/PenerimaanBarangSection';
 import FEFOActionSection from './components/FEFOActionSection';
@@ -227,22 +229,29 @@ export default function GudangPortalPage() {
     }
   }
 
-  const canMutateStock = Boolean(
-    employee && (employee.canMutateStock ?? employee.actorRole !== 'ADMIN_SHIFT'),
-  );
-  const isReadOnlyAdminShift = Boolean(
-    employee && (employee.actorRole === 'ADMIN_SHIFT' || employee.canMutateStock === false),
-  );
+  const canMutateStock = Boolean(employee && employee.canMutateStock !== false);
+  const isReadOnlyAdminShift = Boolean(employee && employee.canMutateStock === false);
   const lowStockThreshold = summary?.lowStockThreshold ?? 5;
 
   // State Modal Restock
   const [selectedProduct, setSelectedProduct] = useState<WarehouseProduct | null>(null);
   const [restockQty, setRestockQty] = useState<number>(1);
+  const [restockBonusQty, setRestockBonusQty] = useState<number>(0);
   const [expiryDate, setExpiryDate] = useState<string>('');
   const [batchCode, setBatchCode] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [submittingRestock, setSubmittingRestock] = useState(false);
   const [restockSuccessMsg, setRestockSuccessMsg] = useState<string | null>(null);
+
+  // State Modal Edit Produk Langsung (Opsi B: Gudang + Admin Shift saling backup)
+  const [editingProduct, setEditingProduct] = useState<WarehouseProduct | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editBarcode, setEditBarcode] = useState('');
+  const [editUnit, setEditUnit] = useState('pcs');
+  const [editStockQty, setEditStockQty] = useState<number>(0);
+  const [editReason, setEditReason] = useState('');
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   // State Modal Rincian Multi-Batch FEFO
   const [viewingBatchProduct, setViewingBatchProduct] = useState<WarehouseProduct | null>(null);
@@ -429,10 +438,76 @@ export default function GudangPortalPage() {
     if (!canMutateStock) return;
     setSelectedProduct(prod);
     setRestockQty(1);
+    setRestockBonusQty(0);
     setExpiryDate(prod.isPerishable ? getTodayWibStr() : '');
     setBatchCode('');
     setNotes('');
     setRestockSuccessMsg(null);
+  }
+
+  function openEditModal(prod: WarehouseProduct) {
+    if (!canMutateStock) return;
+    setEditingProduct(prod);
+    setEditName(prod.name);
+    setEditBarcode(prod.barcode ?? '');
+    setEditUnit(prod.unit || 'pcs');
+    setEditStockQty(prod.stockQty);
+    setEditReason('');
+    setEditError(null);
+  }
+
+  async function handleEditProductSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingProduct || !canMutateStock) return;
+    setEditError(null);
+    if (!editName.trim() || editName.trim().length < 2) {
+      setEditError('Nama produk minimal 2 karakter.');
+      return;
+    }
+    setSubmittingEdit(true);
+    try {
+      const res = await fetch(`/api/gudang/produk/${editingProduct.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim(),
+          barcode: editBarcode.trim() || null,
+          unit: editUnit.trim() || 'pcs',
+          stockQty: Math.max(0, Math.floor(Number(editStockQty))),
+          reason: editReason.trim() || undefined,
+        }),
+      });
+      const json = (await res.json()) as { success: boolean; error?: string };
+      if (!res.ok || !json.success) {
+        setEditError(json.error ?? 'Gagal menyimpan perubahan produk.');
+        return;
+      }
+      setEditingProduct(null);
+      await loadData();
+    } catch {
+      setEditError('Koneksi terputus saat memperbarui produk.');
+    } finally {
+      setSubmittingEdit(false);
+    }
+  }
+
+  async function handleDeleteProduct(prod: WarehouseProduct) {
+    if (!canMutateStock) return;
+    const confirmed = window.confirm(
+      `Hapus produk "${prod.name}" dari katalog aktif Kasir & Gudang? (Soft-delete, histori transaksi tetap aman.)`,
+    );
+    if (!confirmed) return;
+    try {
+      const res = await fetch(`/api/gudang/produk/${prod.id}`, { method: 'DELETE' });
+      const json = (await res.json()) as { success: boolean; error?: string };
+      if (!res.ok || !json.success) {
+        alert(json.error ?? 'Gagal menghapus produk.');
+        return;
+      }
+      await loadData();
+    } catch {
+      alert('Koneksi terputus saat menghapus produk.');
+    }
   }
 
   function openNewProductModal() {
@@ -558,6 +633,7 @@ export default function GudangPortalPage() {
         body: JSON.stringify({
           productId: selectedProduct.id,
           qtyAdd: Number(restockQty),
+          bonusQty: Math.max(0, Math.floor(Number(restockBonusQty || 0))),
           expiryDate,
           batchCode: batchCode.trim() ? batchCode.trim() : null,
           notes: notes.trim() ? notes.trim() : null,
@@ -588,8 +664,10 @@ export default function GudangPortalPage() {
             `Pengajuan restock +${restockQty} ${selectedProduct.unit} ${selectedProduct.name} (#${json.data.receiveNumber}) berhasil dikirim ke antrian Approval Manager. Stok di Kasir akan bertambah setelah di-ACC Manager.`,
         );
       } else {
+        const totalAdded = Number(restockQty) + Math.max(0, Math.floor(Number(restockBonusQty || 0)));
         setRestockSuccessMsg(
-          `Sukses! Stok ${selectedProduct.name} bertambah +${restockQty} ${selectedProduct.unit}. Total sekarang: ${json.data?.qtyAfter ?? selectedProduct.stockQty + restockQty} ${selectedProduct.unit}.`,
+          json.data?.message ??
+            `Sukses! Stok ${selectedProduct.name} bertambah +${totalAdded} ${selectedProduct.unit}. Total sekarang: ${json.data?.qtyAfter ?? selectedProduct.stockQty + totalAdded} ${selectedProduct.unit}.`,
         );
       }
 
@@ -1852,28 +1930,74 @@ export default function GudangPortalPage() {
                           <span>Rincian Batch ({item.activeBatchesCount})</span>
                         </button>
                         {canMutateStock && (
-                          <button
-                            type="button"
-                            onClick={() => openRestockModal(item)}
-                            className="btn btn-primary"
-                            style={{
-                              minHeight: 44,
-                              padding: '10px 14px',
-                              borderRadius: 8,
-                              fontSize: '0.8rem',
-                              fontWeight: 700,
-                              backgroundColor: 'hsl(217 91% 60%)',
-                              color: '#fff',
-                              border: 'none',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 5,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            <Plus size={14} />
-                            <span>Restock / Barang Masuk</span>
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(item)}
+                              style={{
+                                minHeight: 44,
+                                padding: '10px 12px',
+                                borderRadius: 8,
+                                fontSize: '0.8rem',
+                                fontWeight: 600,
+                                backgroundColor: '#ffffff',
+                                border: '1px solid #cbd5e1',
+                                color: '#334155',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                cursor: 'pointer',
+                              }}
+                              title="Edit nama, barcode, atau stok produk"
+                            >
+                              <Pencil size={14} />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProduct(item)}
+                              style={{
+                                minHeight: 44,
+                                padding: '10px 12px',
+                                borderRadius: 8,
+                                fontSize: '0.8rem',
+                                fontWeight: 600,
+                                backgroundColor: '#fef2f2',
+                                border: '1px solid #fecaca',
+                                color: '#b91c1c',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                cursor: 'pointer',
+                              }}
+                              title="Hapus produk dari katalog aktif"
+                            >
+                              <Trash2 size={14} />
+                              <span>Hapus</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openRestockModal(item)}
+                              className="btn btn-primary"
+                              style={{
+                                minHeight: 44,
+                                padding: '10px 14px',
+                                borderRadius: 8,
+                                fontSize: '0.8rem',
+                                fontWeight: 700,
+                                backgroundColor: 'hsl(217 91% 60%)',
+                                color: '#fff',
+                                border: 'none',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 5,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <Plus size={14} />
+                              <span>Restock / Barang Masuk</span>
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -2235,9 +2359,7 @@ export default function GudangPortalPage() {
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <h3 style={{ fontSize: '0.95rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                    {employee?.actorRole === 'MANAGER'
-                      ? 'Input Restock Langsung (Manager)'
-                      : 'Ajukan Restock Barang ke Manager'}
+                    Input Restock / Barang Masuk Langsung
                   </h3>
                   <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
                     Tercatat atas nama: {employee?.name || 'Petugas Gudang'}
@@ -2288,24 +2410,22 @@ export default function GudangPortalPage() {
               </div>
             </div>
 
-            {/* Info Approval 2-Layer untuk Petugas Gudang */}
-            {employee?.actorRole === 'EMPLOYEE' && (
-              <div
-                style={{
-                  padding: '9px 12px',
-                  borderRadius: 8,
-                  backgroundColor: '#eff6ff',
-                  border: '1px solid #93c5fd',
-                  color: '#1e40af',
-                  fontSize: '0.74rem',
-                  fontWeight: 600,
-                  marginBottom: 12,
-                  lineHeight: 1.45,
-                }}
-              >
-                🛡️ <strong>Alur Approval Manager:</strong> Pengajuan ini akan masuk antrian persetujuan Manager. Stok di Kasir POS akan otomatis bertambah setelah di-ACC Manager.
-              </div>
-            )}
+            {/* Info Opsi B: Restok Langsung Aktif + Wajib Expired Date */}
+            <div
+              style={{
+                padding: '9px 12px',
+                borderRadius: 8,
+                backgroundColor: '#f0fdf4',
+                border: '1px solid #86efac',
+                color: '#166534',
+                fontSize: '0.74rem',
+                fontWeight: 600,
+                marginBottom: 12,
+                lineHeight: 1.45,
+              }}
+            >
+              <strong>Restok Langsung Aktif:</strong> Stok langsung masuk ke Kasir & Gudang beserta jejak audit. Keputusan diskon FEFO & keuangan tetap memerlukan persetujuan Manager.
+            </div>
 
             {/* Feedback Sukses */}
             {restockSuccessMsg ? (
@@ -2409,6 +2529,35 @@ export default function GudangPortalPage() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* Input Bonus / Barang Gratis Supplier (Contoh Ades 10 dus + 1 bonus) */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                    Bonus / Barang Gratis Supplier ({selectedProduct.unit}) <span style={{ color: '#64748b', fontWeight: 500 }}>(Opsional)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100000}
+                    value={restockBonusQty}
+                    onChange={(e) => setRestockBonusQty(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                    placeholder="0 (contoh: 24 botol jika dapat bonus 1 dus gratis)"
+                    style={{
+                      width: '100%',
+                      minHeight: 44,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: '1px solid #cbd5e1',
+                      fontSize: '0.95rem',
+                      fontWeight: 700,
+                    }}
+                  />
+                  {restockBonusQty > 0 && (
+                    <div style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 700, marginTop: 4 }}>
+                      Total masuk fisik: {restockQty + restockBonusQty} {selectedProduct.unit} ({restockQty} beli + {restockBonusQty} bonus gratis — HPP efektif otomatis menyesuaikan)
+                    </div>
+                  )}
                 </div>
 
                 {/* Input Tanggal Expired (FEFO — WAJIB SEMUA PRODUK) */}
@@ -3439,6 +3588,134 @@ export default function GudangPortalPage() {
                 Tutup
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL EDIT PRODUK LANGSUNG (OPSI B: GUDANG + ADMIN SHIFT SALING BACKUP) ── */}
+      {canMutateStock && editingProduct && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 70,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 480,
+              backgroundColor: '#ffffff',
+              borderRadius: 16,
+              padding: 20,
+              boxShadow: '0 20px 40px rgb(0 0 0 / 0.25)',
+              maxHeight: '90dvh',
+              overflowY: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 800, color: '#0f172a' }}>
+                Edit Produk (Opsi B)
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingProduct(null)}
+                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: 6 }}
+                aria-label="Tutup modal edit produk"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            {editError && (
+              <div style={{ padding: '8px 12px', borderRadius: 8, backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '0.78rem', fontWeight: 600, marginBottom: 10 }}>
+                {editError}
+              </div>
+            )}
+            <form onSubmit={handleEditProductSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                  Nama Produk
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  style={{ width: '100%', minHeight: 42, padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.9rem' }}
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: 8 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                    Barcode (Kosongkan jika Non-Barcode)
+                  </label>
+                  <input
+                    type="text"
+                    value={editBarcode}
+                    onChange={(e) => setEditBarcode(e.target.value)}
+                    placeholder="EAN-13 / kosong"
+                    style={{ width: '100%', minHeight: 42, padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.88rem' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                    Satuan
+                  </label>
+                  <input
+                    type="text"
+                    value={editUnit}
+                    onChange={(e) => setEditUnit(e.target.value)}
+                    style={{ width: '100%', minHeight: 42, padding: '8px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.88rem' }}
+                  />
+                </div>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                  Koreksi Stok Fisik (Saat ini: {editingProduct.stockQty} {editingProduct.unit})
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={editStockQty}
+                  onChange={(e) => setEditStockQty(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                  style={{ width: '100%', minHeight: 42, padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.95rem', fontWeight: 700 }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                  Alasan Perubahan (Opsional)
+                </label>
+                <input
+                  type="text"
+                  value={editReason}
+                  onChange={(e) => setEditReason(e.target.value)}
+                  placeholder="Contoh: Koreksi stok opname / perbaikan nama"
+                  style={{ width: '100%', minHeight: 42, padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setEditingProduct(null)}
+                  style={{ minHeight: 42, padding: '8px 14px', borderRadius: 8, border: '1px solid #cbd5e1', backgroundColor: '#ffffff', color: '#334155', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingEdit}
+                  style={{ minHeight: 42, padding: '8px 16px', borderRadius: 8, border: 'none', backgroundColor: '#2563eb', color: '#ffffff', fontWeight: 700, cursor: submittingEdit ? 'not-allowed' : 'pointer' }}
+                >
+                  {submittingEdit ? 'Menyimpan...' : 'Simpan Perubahan'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

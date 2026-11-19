@@ -33,6 +33,9 @@ import {
   Wallet,
   Award,
   Receipt,
+  Copy,
+  Check,
+  Printer,
 } from 'lucide-react';
 import { formatRupiah } from './shared';
 import type { PeriodKey as ReportPeriodKey } from '@/lib/finance/report';
@@ -95,6 +98,8 @@ export type ShiftRow = {
   discrepancy?: number | null;
   shortageDeduction?: number;
   gajiBersih?: number;
+  auditFlags?: string | null;
+  notes?: string | null;
   personnelCount: number;
   nominalPerOrang: number;
   personnel: AttendeeRow[];
@@ -170,6 +175,8 @@ type DailyShiftSession = {
   discrepancy?: number | null;
   shortageDeduction?: number;
   upahBersih: number;
+  auditFlags?: string | null;
+  notes?: string | null;
   personnel: AttendeeRow[];
 };
 
@@ -278,6 +285,111 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
     error: string;
   } | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
+  const [copiedSlipKey, setCopiedSlipKey] = useState<string | null>(null);
+
+  function computeGroupMemberBreakdown(g: ShiftTeamGroup) {
+    const map = new Map<
+      string,
+      { fullName: string; nim: string; jabatan: string; hadir: number; telatMenit: number; nominal: number }
+    >();
+    for (const sess of g.sessions) {
+      for (const p of sess.personnel) {
+        const cur = map.get(p.employeeId) ?? {
+          fullName: p.fullName,
+          nim: p.nim,
+          jabatan: p.jabatan,
+          hadir: 0,
+          telatMenit: 0,
+          nominal: 0,
+        };
+        cur.hadir += 1;
+        cur.telatMenit += p.lateMinutes || 0;
+        cur.nominal += p.nominalBagiHasil || 0;
+        map.set(p.employeeId, cur);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.nominal - a.nominal || a.fullName.localeCompare(b.fullName));
+  }
+
+  function buildGroupSlipWaText(g: ShiftTeamGroup): string {
+    const periodLabel = data?.range.label ?? '-';
+    const members = computeGroupMemberBreakdown(g);
+    const lines = [
+      `SLIP GAJI KELOMPOK SHIFT - WIRAMART UNPERBA`,
+      `Periode: ${periodLabel}`,
+      `Kelompok: ${g.hari} ${g.sesi} (${g.waktuLabel} WIB)`,
+      `Tanggal Shift: ${g.shiftTglSummary || '-'} (${g.totalShiftCount}x pertemuan)`,
+      `Total Transaksi: ${g.totalTx} | Omzet: ${formatRupiah(g.totalOmzet)} | Laba Kotor: ${formatRupiah(g.totalLabaKotor)}`,
+      `Total Upah Tim (50%): ${formatRupiah(g.upahBersih)}`,
+      ``,
+      `Rincian Per Anggota:`,
+      ...members.map(
+        (m, idx) =>
+          `${idx + 1}. ${m.fullName} (${m.hadir}x hadir${m.telatMenit > 0 ? `, telat ${m.telatMenit} mnt` : ''}) = ${formatRupiah(m.nominal)}`,
+      ),
+    ];
+    return lines.join('\n');
+  }
+
+  function buildAllShiftsWaText(): string {
+    const periodLabel = data?.range.label ?? '-';
+    const lines: string[] = [
+      `REKAP GAJI BULANAN PER SHIFT - WIRAMART UNPERBA`,
+      `Periode: ${periodLabel}`,
+      `Total Pool Gaji Mahasiswa (50%): ${formatRupiah(data?.grandTotal.poolGaji ?? 0)}`,
+      `========================================`,
+    ];
+    for (const g of filteredGroups) {
+      const members = computeGroupMemberBreakdown(g);
+      lines.push(`\n[${g.hari} ${g.sesi}] ${g.totalShiftCount}x shift | Total Tim: ${formatRupiah(g.upahBersih)}`);
+      for (const m of members) {
+        lines.push(`- ${m.fullName} (${m.hadir}x): ${formatRupiah(m.nominal)}`);
+      }
+    }
+    if (data?.summaryPerEmployee && data.summaryPerEmployee.length > 0) {
+      lines.push(`\n========================================`);
+      lines.push(`TOTAL DITERIMA PER MAHASISWA (TERMASUK DOBEL SHIFT):`);
+      data.summaryPerEmployee.forEach((emp, i) => {
+        lines.push(`${i + 1}. ${emp.fullName} (${emp.totalHadir}x hadir): ${formatRupiah(emp.totalNominal)}`);
+      });
+    }
+    return lines.join('\n');
+  }
+
+  async function handleCopySlip(key: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedSlipKey(key);
+      window.setTimeout(() => setCopiedSlipKey((prev) => (prev === key ? null : prev)), 2500);
+    } catch {
+      window.alert('Gagal menyalin teks ke clipboard browser.');
+    }
+  }
+
+  function handlePrintGroupSlip(g: ShiftTeamGroup) {
+    const periodLabel = data?.range.label ?? '-';
+    const members = computeGroupMemberBreakdown(g);
+    const esc = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const rowsHtml = members
+      .map(
+        (m, i) =>
+          `<tr><td>${i + 1}</td><td>${esc(m.fullName)}</td><td>${esc(m.nim)}</td><td style="text-align:center">${m.hadir}x</td><td style="text-align:center">${m.telatMenit > 0 ? `${m.telatMenit} mnt` : 'Tepat'}</td><td style="text-align:right;font-weight:700">${esc(formatRupiah(m.nominal))}</td></tr>`,
+      )
+      .join('');
+    const sessHtml = g.sessions
+      .map(
+        (s) =>
+          `<tr><td>${esc(s.tanggal)}</td><td>${esc(formatTime(s.clockIn))} - ${s.clockOut ? esc(formatTime(s.clockOut)) : 'Aktif'}</td><td style="text-align:center">${s.txCount}</td><td style="text-align:right">${esc(formatRupiah(s.omzet))}</td><td style="text-align:right">${esc(formatRupiah(s.labaKotor))}</td><td style="text-align:right;font-weight:700">${esc(formatRupiah(s.upahBersih))}</td></tr>`,
+      )
+      .join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slip Gaji ${esc(g.hari)} ${esc(g.sesi)}</title><style>body{font-family:Arial,sans-serif;color:#111;padding:24px;max-width:760px;margin:0 auto}h1{font-size:18px;margin:0 0 4px}p{margin:2px 0;font-size:12px;color:#333}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border:1px solid #cbd5e1;padding:6px 8px}th{background:#f1f5f9;text-align:left}.meta{display:flex;justify-content:space-between;margin:12px 0;padding:10px;border:1px solid #cbd5e1;font-size:12px}@media print{button{display:none}}</style></head><body><h1>SLIP GAJI KELOMPOK SHIFT - WIRAMART UNPERBA</h1><p>Periode: ${esc(periodLabel)} | Kelompok: ${esc(g.hari)} ${esc(g.sesi)} (${esc(g.waktuLabel)} WIB)</p><div class="meta"><div><strong>Jumlah Pertemuan:</strong> ${g.totalShiftCount}x</div><div><strong>Total Omzet:</strong> ${esc(formatRupiah(g.totalOmzet))}</div><div><strong>Laba Kotor:</strong> ${esc(formatRupiah(g.totalLabaKotor))}</div><div><strong>Total Upah Tim:</strong> ${esc(formatRupiah(g.upahBersih))}</div></div><h2 style="font-size:14px;margin-top:16px">Rincian Per Anggota</h2><table><thead><tr><th>No</th><th>Nama</th><th>NIM</th><th style="text-align:center">Hadir</th><th style="text-align:center">Disiplin</th><th style="text-align:right">Nominal</th></tr></thead><tbody>${rowsHtml}</tbody></table><h2 style="font-size:14px;margin-top:16px">Rincian Pertemuan Shift</h2><table><thead><tr><th>Tanggal</th><th>Jam</th><th style="text-align:center">Trx</th><th style="text-align:right">Omzet</th><th style="text-align:right">Laba Kotor</th><th style="text-align:right">Upah Shift</th></tr></thead><tbody>${sessHtml}</tbody></table><div style="margin-top:18px"><button onclick="window.print()">Cetak / Simpan PDF</button></div></body></html>`;
+    const win = window.open('', '_blank', 'width=820,height=720');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
+  }
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -393,6 +505,8 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           discrepancy: s.discrepancy,
           shortageDeduction: s.shortageDeduction ?? 0,
           upahBersih: gaji,
+          auditFlags: s.auditFlags ?? null,
+          notes: s.notes ?? null,
           personnel: [...s.personnel],
         });
       } else {
@@ -1917,26 +2031,52 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleExportExcel}
-          disabled={exportLoading || filteredGroups.length === 0}
-          className="btn btn-primary btn-sm"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            backgroundColor: '#166534',
-            borderColor: '#166534',
-            minHeight: 44,
-            padding: '8px 16px',
-            fontWeight: 700,
-            fontSize: '0.82rem',
-          }}
-        >
-          {exportLoading ? <Loader2 size={14} className="spin-icon" /> : <Download size={14} />}
-          <span>Export Shift (.xlsx)</span>
-        </button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => handleCopySlip('__ALL__', buildAllShiftsWaText())}
+            disabled={filteredGroups.length === 0}
+            className="btn btn-sm"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: copiedSlipKey === '__ALL__' ? '#15803d' : '#ffffff',
+              color: copiedSlipKey === '__ALL__' ? '#ffffff' : '#0f172a',
+              border: '1px solid #cbd5e1',
+              minHeight: 44,
+              padding: '8px 14px',
+              fontWeight: 700,
+              fontSize: '0.82rem',
+              borderRadius: '8px',
+              cursor: filteredGroups.length === 0 ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {copiedSlipKey === '__ALL__' ? <Check size={14} /> : <Copy size={14} />}
+            <span>{copiedSlipKey === '__ALL__' ? 'Rekap WA Tersalin' : 'Salin Rekap WA (Grup Karyawan)'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={exportLoading || filteredGroups.length === 0}
+            className="btn btn-primary btn-sm"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: '#166534',
+              borderColor: '#166534',
+              minHeight: 44,
+              padding: '8px 16px',
+              fontWeight: 700,
+              fontSize: '0.82rem',
+            }}
+          >
+            {exportLoading ? <Loader2 size={14} className="spin-icon" /> : <Download size={14} />}
+            <span>Export Shift (.xlsx)</span>
+          </button>
+        </div>
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
@@ -2344,6 +2484,48 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                         )}{' '}
                                         / shift
                                       </div>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCopySlip(g.groupKey, buildGroupSlipWaText(g))}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '5px',
+                                          padding: '7px 11px',
+                                          borderRadius: '7px',
+                                          border: '1px solid #cbd5e1',
+                                          backgroundColor: copiedSlipKey === g.groupKey ? '#15803d' : '#ffffff',
+                                          color: copiedSlipKey === g.groupKey ? '#ffffff' : '#0f172a',
+                                          fontSize: '12px',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        {copiedSlipKey === g.groupKey ? <Check size={13} /> : <Copy size={13} />}
+                                        <span>{copiedSlipKey === g.groupKey ? 'Slip Tersalin' : 'Salin Slip WA'}</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handlePrintGroupSlip(g)}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '5px',
+                                          padding: '7px 11px',
+                                          borderRadius: '7px',
+                                          border: '1px solid #166534',
+                                          backgroundColor: '#f0fdf4',
+                                          color: '#166534',
+                                          fontSize: '12px',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        <Printer size={13} />
+                                        <span>Cetak Slip</span>
+                                      </button>
                                     </div>
                                   </div>
 

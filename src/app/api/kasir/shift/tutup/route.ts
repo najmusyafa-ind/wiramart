@@ -18,7 +18,7 @@ import { z } from 'zod';
 import { eq, and, desc, isNull, sql } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { shifts, transactions, transactionPayments } from '@/lib/db/schema';
+import { shifts, transactions, transactionPayments, shiftCashMovements, employees } from '@/lib/db/schema';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
 
@@ -28,6 +28,7 @@ const tutupShiftSchema = z.object({
   actualCash: z.number().min(0, 'Saldo fisik kas tidak boleh negatif').max(50_000_000, 'Nilai terlalu besar').optional(),
   breakdown: z.record(z.string(), z.number()).optional(),
   notes: z.string().max(500).optional(),
+  earlyCloseReason: z.enum(['NORMAL', 'KULIAH', 'IZIN_DOSEN']).optional().default('NORMAL'),
   pinKetuaShift: z.string().min(1, 'PIN tidak boleh kosong').max(20).optional(),
   pin: z.string().min(1, 'PIN tidak boleh kosong').max(20).optional(),
 });
@@ -58,7 +59,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  const { notes, actualCash, breakdown } = parsed.data;
+  const { notes, actualCash, breakdown, earlyCloseReason } = parsed.data;
 
   // 3. Cari shift aktif (milik kasir ini ATAU shift aktif toko saat ini — Cacat 1 Opsi A)
   let activeShift = await db.query.shifts.findFirst({
@@ -90,7 +91,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     .from(transactions)
     .where(eq(transactions.shiftId, activeShift.id));
 
-  // 5b. Hitung omzet TUNAI murni dari transaction_payments (Split Payment aware — Cacat 3 Opsi A)
+  // 5b. Hitung omzet TUNAI & QRIS murni dari transaction_payments (Split Payment aware)
   const [paySummary] = await db
     .select({
       payCash: sql<string>`COALESCE(
@@ -98,12 +99,17 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactionPayments.paymentMethod} = 'CASH' AND ${transactions.isTest} = false),
         0
       )`,
+      payQris: sql<string>`COALESCE(
+        SUM(${transactionPayments.amount})
+        FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactionPayments.paymentMethod} = 'QRIS' AND ${transactions.isTest} = false),
+        0
+      )`,
     })
     .from(transactionPayments)
     .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
     .where(eq(transactions.shiftId, activeShift.id));
 
-  // 5c. Transaksi tunai langsung legacy (jika ada baris transaksi tanpa transaction_payments)
+  // 5c. Transaksi langsung legacy (jika ada baris transaksi tanpa transaction_payments)
   const [directSummary] = await db
     .select({
       directCash: sql<string>`COALESCE(
@@ -118,15 +124,59 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         ),
         0
       )`,
+      directQris: sql<string>`COALESCE(
+        SUM(${transactions.grossAmount})
+        FILTER (
+          WHERE ${transactions.status} = 'COMPLETED'
+          AND ${transactions.paymentMethod} = 'QRIS'
+          AND ${transactions.isTest} = false
+          AND NOT EXISTS (
+            SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id}
+          )
+        ),
+        0
+      )`,
     })
     .from(transactions)
     .where(eq(transactions.shiftId, activeShift.id));
 
+  // 5d. Ambil potongan bayar supplier / kas gerak pada shift ini + nama kasir
+  const [movements, kasirRow] = await Promise.all([
+    db
+      .select({
+        id: shiftCashMovements.id,
+        movementType: shiftCashMovements.movementType,
+        category: shiftCashMovements.category,
+        amount: shiftCashMovements.amount,
+        notes: shiftCashMovements.notes,
+      })
+      .from(shiftCashMovements)
+      .where(eq(shiftCashMovements.shiftId, activeShift.id)),
+    db.query.employees.findFirst({
+      where: eq(employees.id, employeeId),
+      columns: { fullName: true },
+    }),
+  ]);
+
   const totalOmzetCash = Number(paySummary?.payCash ?? 0) + Number(directSummary?.directCash ?? 0);
+  const totalOmzetQris = Number(paySummary?.payQris ?? 0) + Number(directSummary?.directQris ?? 0);
+  const totalPenjualan = totalOmzetCash + totalOmzetQris;
   const txCount = Number(summary?.txCount ?? 0);
   const nowWib  = new Date();
 
-  // 6. Kontrol Fraud K3: Penjualan tunai > 0 tetapi laci masih persis modal awal
+  const potonganSupplier = movements
+    .filter((m) => m.movementType === 'CASH_OUT')
+    .map((m) => ({
+      category: m.category,
+      notes: m.notes,
+      amount: Number(m.amount ?? 0),
+    }));
+  const totalCashOut = potonganSupplier.reduce((acc, x) => acc + x.amount, 0);
+  const totalCashIn = movements
+    .filter((m) => m.movementType === 'CASH_IN')
+    .reduce((acc, m) => acc + Number(m.amount ?? 0), 0);
+
+  // 6. Kontrol Fraud K3 + Penanda Tutup Awal Kuliah (Audio 4)
   let newAuditFlags = activeShift.auditFlags || 'NORMAL';
   if (
     totalOmzetCash > 0 &&
@@ -135,7 +185,19 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     Math.abs(actualCash - Number(activeShift.modalAwal)) < 1
   ) {
     newAuditFlags = 'FRAUD_CASH_SUSPICIOUS';
+  } else if (earlyCloseReason === 'KULIAH') {
+    newAuditFlags = 'EARLY_CLOSE_KULIAH';
+  } else if (earlyCloseReason === 'IZIN_DOSEN') {
+    newAuditFlags = 'EARLY_CLOSE_IZIN_DOSEN';
   }
+
+  const earlyPrefix =
+    earlyCloseReason === 'KULIAH'
+      ? '[TUTUP AWAL RESMI: ADA MATA KULIAH]'
+      : earlyCloseReason === 'IZIN_DOSEN'
+        ? '[TUTUP AWAL RESMI: IZIN DOSEN]'
+        : '';
+  const finalNotes = [earlyPrefix, notes?.trim() ?? ''].filter(Boolean).join(' ') || null;
 
   // 7. Tutup shift — guard status ACTIVE
   const closed = await db
@@ -145,7 +207,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
       clockOut:           nowWib,
       actualCash:         actualCash !== undefined ? actualCash.toString() : null,
       cashBreakdownClose: breakdown ?? null,
-      notes:              notes ?? null,
+      notes:              finalNotes,
       auditFlags:         newAuditFlags,
     })
     .where(and(eq(shifts.id, activeShift.id), eq(shifts.status, 'ACTIVE')))
@@ -159,12 +221,25 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  // Zero-Trust: Respons TIDAK memuat expected cash atau laba ke kasir
+  // Zero-Trust: Blind Count sudah terkunci di DB (status CLOSED).
+  // Kirim ringkasan serah terima kas standar Bu Dyah (TANPA HPP / Laba / Expected selisih).
   return apiOk({
     message:  'Shift berhasil ditutup.',
     shiftId:  activeShift.id,
     clockIn:  activeShift.clockIn,
     clockOut: nowWib.toISOString(),
     txCount,
+    handoverSummary: {
+      kasirName: kasirRow?.fullName ?? 'Kasir',
+      modalAwal: activeShift.modalAwal !== null ? Number(activeShift.modalAwal) : 0,
+      cashMasuk: totalOmzetCash,
+      qrisMasuk: totalOmzetQris,
+      totalPenjualan,
+      potonganSupplier,
+      totalCashOut,
+      totalCashIn,
+      sisaCashKotakUang: actualCash !== undefined ? actualCash : null,
+      earlyCloseReason,
+    },
   });
 }

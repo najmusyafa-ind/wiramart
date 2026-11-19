@@ -15,6 +15,16 @@ type ItemTrx = {
   qty: number;
   sellingPriceSnapshot: string;
   subtotalSell: string;
+  discountPolicyId?: string | null;
+};
+
+type CashMovement = {
+  id: string;
+  movementType: string;
+  category: string;
+  amount: string;
+  notes: string;
+  createdAt: string;
 };
 
 type PaymentTrx = {
@@ -42,6 +52,8 @@ type Summary = {
   totalOmzet: number;
   totalCash: number;
   totalQris: number;
+  totalCashOut?: number;
+  totalCashIn?: number;
   modalAwal: number | null;
   aktualKas: number | null;
   statusShift: string | null;
@@ -53,6 +65,7 @@ type RiwayatData = {
   kasir: { namaLengkap: string; jabatan: string; nim: string };
   tanggal: string;
   summary: Summary;
+  cashMovements?: CashMovement[];
   transaksi: Transaksi[];
 };
 
@@ -108,6 +121,10 @@ function TrxRow({ trx }: { trx: Transaksi }) {
   const badgeColor = isSplit ? '#8b5cf6' : hasCash ? '#16a34a' : '#0ea5e9';
   const badgeLabel = isSplit ? 'SPLIT' : hasCash ? 'CASH' : 'QRIS';
   const BadgeIcon  = isSplit ? Banknote : hasCash ? Banknote : QrCode;
+  const hasFefoDiscount = trx.items.some((item) => Boolean(item.discountPolicyId));
+  const inlineItemsPreview = trx.items
+    .map((item) => `${item.productNameSnapshot} ×${item.qty}`)
+    .join(', ');
 
   return (
     <div style={{
@@ -136,13 +153,30 @@ function TrxRow({ trx }: { trx: Transaksi }) {
           <BadgeIcon size={16} color={badgeColor} />
         </div>
 
-        {/* Info */}
+        {/* Info — tampilkan ringkasan item langsung tanpa harus klik panah (Masukan Tim Audio 6) */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)', marginBottom: 2 }}>
-            {trx.invoiceNumber}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 2 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)' }}>
+              {trx.invoiceNumber}
+            </span>
+            {hasFefoDiscount && (
+              <span style={{
+                fontSize: 10, fontWeight: 700, color: '#b45309',
+                background: '#fef3c7', border: '1px solid #fcd34d',
+                borderRadius: 4, padding: '1px 5px',
+              }}>
+                Diskon FEFO (Tempel Stiker)
+              </span>
+            )}
+          </div>
+          <div style={{
+            fontSize: 12, fontWeight: 600, color: 'var(--color-text)',
+            lineHeight: 1.35, marginBottom: 2,
+          }}>
+            {inlineItemsPreview || `${trx.items.length} item`}
           </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-            {fmtWaktu(trx.createdAt)} · {trx.items.length} item
+            {fmtWaktu(trx.createdAt)} · {trx.items.length} item · Klik untuk rincian harga
           </div>
         </div>
 
@@ -258,6 +292,7 @@ export default function KasirRiwayatPage() {
   });
 
   const [tanggal, setTanggal] = useState(todayWIB);
+  const [copiedHandover, setCopiedHandover] = useState(false);
   const [data, setData] = useState<RiwayatData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -440,12 +475,88 @@ export default function KasirRiwayatPage() {
             )}
 
             {/* Summary cards 2x2 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))', gap: 10, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))', gap: 10, marginBottom: 14 }}>
               <SummaryCard label="Total Struk" value={`${s?.jumlahStruk ?? 0} transaksi`} icon={ShoppingBag} color="hsl(220 80% 55%)" />
               <SummaryCard label="Total Omzet" value={rp(s?.totalOmzet ?? 0)} icon={TrendingUp} color="hsl(142 60% 38%)" />
               <SummaryCard label="Tunai (Cash)" value={rp(s?.totalCash ?? 0)} icon={Banknote} color="hsl(35 90% 50%)" />
               <SummaryCard label="QRIS" value={rp(s?.totalQris ?? 0)} icon={QrCode} color="hsl(262 80% 58%)" />
             </div>
+
+            {/* Ringkasan Serah Terima Kas & Potongan Supplier (Permintaan Bu Dyah) */}
+            {s?.statusShift && (
+              <div style={{
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 12, padding: '12px 14px', marginBottom: 16,
+                fontSize: 12,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <strong style={{ color: 'var(--color-text)' }}>Ringkasan Serah Terima Kas Shift</strong>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const potongan = (data.cashMovements ?? []).filter((m) => m.movementType === 'CASH_OUT');
+                      const lines = [
+                        `SERAH TERIMA KAS SHIFT - WIRAMART UNPERBA`,
+                        `Tanggal: ${fmtTanggal(data.tanggal)}`,
+                        `Kasir: ${data.kasir.namaLengkap}`,
+                        `Total Struk: ${s.jumlahStruk} transaksi`,
+                        `Modal Awal Kotak: ${s.modalAwal !== null ? rp(s.modalAwal) : '-'}`,
+                        `Cash Masuk: ${rp(s.totalCash)}`,
+                        `QRIS Masuk: ${rp(s.totalQris)}`,
+                        `Total Penjualan: ${rp(s.totalOmzet)}`,
+                        ...(potongan.length > 0
+                          ? [
+                              `Potongan Bayar Supplier / Kas Keluar:`,
+                              ...potongan.map((m) => `- ${m.notes}: ${rp(parseFloat(m.amount ?? '0'))}`),
+                            ]
+                          : ['Potongan Bayar Supplier: Rp 0']),
+                        `Sisa Cash di Kotak Uang: ${s.aktualKas !== null ? rp(s.aktualKas) : 'Belum tutup shift'}`,
+                      ];
+                      try {
+                        await navigator.clipboard.writeText(lines.join('\n'));
+                        setCopiedHandover(true);
+                        window.setTimeout(() => setCopiedHandover(false), 2500);
+                      } catch {
+                        window.alert('Gagal menyalin laporan serah terima.');
+                      }
+                    }}
+                    style={{
+                      padding: '6px 10px', borderRadius: 8,
+                      border: '1px solid var(--color-border)',
+                      background: copiedHandover ? '#15803d' : 'var(--color-bg)',
+                      color: copiedHandover ? '#ffffff' : 'var(--color-text)',
+                      fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                    }}
+                  >
+                    {copiedHandover ? 'Tersalin ke WA' : 'Salin Laporan WA'}
+                  </button>
+                </div>
+                {(data.cashMovements ?? []).filter((m) => m.movementType === 'CASH_OUT').length > 0 ? (
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontWeight: 600, color: '#b91c1c', marginBottom: 3 }}>
+                      Potongan Bayar Supplier / Kas Keluar ({rp(s.totalCashOut ?? 0)}):
+                    </div>
+                    {(data.cashMovements ?? [])
+                      .filter((m) => m.movementType === 'CASH_OUT')
+                      .map((m) => (
+                        <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--color-text-muted)', marginBottom: 2 }}>
+                          <span>• {m.notes}</span>
+                          <span>-{rp(parseFloat(m.amount ?? '0'))}</span>
+                        </div>
+                      ))}
+                  </div>
+                ) : (
+                  <div style={{ color: 'var(--color-text-muted)', marginBottom: 6 }}>
+                    Potongan Bayar Supplier / Kas Keluar: Rp 0
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--color-border)', paddingTop: 6, fontWeight: 700, color: '#15803d' }}>
+                  <span>Sisa Cash Fisik di Kotak Uang</span>
+                  <span>{s.aktualKas !== null ? rp(s.aktualKas) : 'Menunggu tutup shift'}</span>
+                </div>
+              </div>
+            )}
 
             {/* List transaksi */}
             {data.transaksi.length === 0 ? (

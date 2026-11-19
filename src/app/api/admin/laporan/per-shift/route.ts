@@ -219,6 +219,8 @@ export async function GET(req: NextRequest): Promise<Response> {
         modalAwal: shifts.modalAwal,
         actualCash: shifts.actualCash,
         serahTerimaDiff: shifts.serahTerimaDiff,
+        auditFlags: shifts.auditFlags,
+        notes: shifts.notes,
         employeeId: shifts.employeeId,
         kasirName: employees.fullName,
         kasirNim: employees.nim,
@@ -408,39 +410,108 @@ export async function GET(req: NextRequest): Promise<Response> {
       const dayOfWeekNum = wibDayOfWeek(key);
       const dayEnum = HARI_TO_ENUM[dayOfWeekNum] ?? '';
 
-      // Penentuan Sesi Shift:
-      // 1. Kamis: Wiramart HANYA punya jadwal sesi Siang (11:00-15:00)
-      // 2. Jam buka >= 11:00 WIB -> Siang
-      // 3. Jam buka >= 10:30 WIB dan kasir punya jadwal resmi Siang pada hari tsb -> Siang
-      // 4. Selain itu -> Pagi (07:30-11:30)
-      let sesi: 'Pagi' | 'Siang';
-      if (dayOfWeekNum === 4) {
-        sesi = 'Siang';
-      } else {
-        const inParts = new Intl.DateTimeFormat('en-US', {
-          timeZone: 'Asia/Jakarta',
-          hour: 'numeric',
-          minute: 'numeric',
-          hour12: false,
-        }).formatToParts(s.clockIn);
-        const inHour = parseInt(inParts.find((p) => p.type === 'hour')?.value ?? '8', 10);
-        const inMinute = parseInt(inParts.find((p) => p.type === 'minute')?.value ?? '0', 10);
-        const clockMinutes = inHour * 60 + inMinute;
+      // Penentuan Sesi Shift (mendukung jadwal Pagi & Siang penuh Senin-Jumat termasuk Kamis Pagi):
+      // 1. Jam buka >= 11:00 WIB -> Siang
+      // 2. Jam buka 10:30-10:59 WIB -> ikuti jadwal resmi kasir pada hari tsb jika ada
+      // 3. Selain itu -> Pagi (07:30-11:30)
+      const inParts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Jakarta',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false,
+      }).formatToParts(s.clockIn);
+      const inHour = parseInt(inParts.find((p) => p.type === 'hour')?.value ?? '8', 10);
+      const inMinute = parseInt(inParts.find((p) => p.type === 'minute')?.value ?? '0', 10);
+      const clockMinutes = inHour * 60 + inMinute;
 
-        if (clockMinutes >= 11 * 60) {
-          sesi = 'Siang';
-        } else if (clockMinutes >= 10 * 60 + 30) {
-          const empScheds = empScheduleMap.get(s.employeeId) ?? [];
-          const matchSched = empScheds.find((sch) => sch.dayOfWeek === dayEnum);
-          const schedHour = matchSched ? parseInt(matchSched.slotStart.split(':')[0] ?? '11', 10) : 8;
-          sesi = schedHour >= 11 ? 'Siang' : 'Pagi';
-        } else {
-          sesi = 'Pagi';
-        }
+      let sesi: 'Pagi' | 'Siang';
+      if (clockMinutes >= 11 * 60) {
+        sesi = 'Siang';
+      } else if (clockMinutes >= 9 * 60 + 45) {
+        const empScheds = empScheduleMap.get(s.employeeId) ?? [];
+        const matchSched = empScheds.find((sch) => sch.dayOfWeek === dayEnum);
+        const schedHour = matchSched ? parseInt(matchSched.slotStart.split(':')[0] ?? '8', 10) : 8;
+        sesi = schedHour >= 11 ? 'Siang' : 'Pagi';
+      } else {
+        sesi = 'Pagi';
       }
 
       sesiByShift.set(s.id, sesi);
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // 2c. Konsolidasi Sub-Shift POS dalam (Tanggal, Sesi) yang sama
+    //     Mencegah kredit AutoKasir ganda saat kasir tutup-buka ulang POS
+    //     di tengah sesi yang sama (mis. 07:51-10:23 & 10:24-13:13).
+    // ─────────────────────────────────────────────────────────────
+    const canonicalShiftIdOf = new Map<string, string>();
+    const consolidatedShifts: typeof shiftRows = [];
+    const sessionGroupMap = new Map<string, typeof shiftRows>();
+
+    for (const s of shiftRows) {
+      const sesi = sesiByShift.get(s.id) ?? 'Pagi';
+      const sKey = `${wibDateOf(s.clockIn)}__${sesi}`;
+      const arr = sessionGroupMap.get(sKey) ?? [];
+      arr.push(s);
+      sessionGroupMap.set(sKey, arr);
+    }
+
+    for (const [, group] of sessionGroupMap) {
+      // Pilih shift utama berdasarkan transaksi terbanyak (tie-breaker: paling awal buka)
+      const primary = [...group].sort((a, b) => {
+        const txDiff = (finByShift.get(b.id)?.txCount ?? 0) - (finByShift.get(a.id)?.txCount ?? 0);
+        if (txDiff !== 0) return txDiff;
+        return a.clockIn.getTime() - b.clockIn.getTime();
+      })[0]!;
+
+      let aggOmzet = 0;
+      let aggLaba = 0;
+      let aggTx = 0;
+      let aggCashSales = 0;
+      let aggCashOut = 0;
+      let aggCashIn = 0;
+      let earliestIn = group[0]!.clockIn;
+      let latestOut: Date | null = group[0]!.clockOut;
+      let latestActualCash = group[0]!.actualCash;
+      let combinedFlags = primary.auditFlags;
+      let combinedNotes = primary.notes;
+
+      for (const item of group) {
+        canonicalShiftIdOf.set(item.id, primary.id);
+        const f = finByShift.get(item.id);
+        if (f) {
+          aggOmzet += f.omzet;
+          aggLaba += f.labaKotor;
+          aggTx += f.txCount;
+        }
+        aggCashSales += cashSalesMap.get(item.id) ?? 0;
+        aggCashOut += cashOutMap.get(item.id) ?? 0;
+        aggCashIn += cashInMap.get(item.id) ?? 0;
+        if (item.clockIn.getTime() < earliestIn.getTime()) earliestIn = item.clockIn;
+        if (item.clockOut && (!latestOut || item.clockOut.getTime() > latestOut.getTime())) {
+          latestOut = item.clockOut;
+        }
+        if (item.actualCash !== null) latestActualCash = item.actualCash;
+        if (item.auditFlags && item.auditFlags !== 'NORMAL') combinedFlags = item.auditFlags;
+        if (item.notes && !combinedNotes) combinedNotes = item.notes;
+      }
+
+      finByShift.set(primary.id, { omzet: aggOmzet, labaKotor: aggLaba, txCount: aggTx });
+      cashSalesMap.set(primary.id, aggCashSales);
+      cashOutMap.set(primary.id, aggCashOut);
+      cashInMap.set(primary.id, aggCashIn);
+
+      consolidatedShifts.push({
+        ...primary,
+        clockIn: earliestIn,
+        clockOut: latestOut,
+        actualCash: latestActualCash,
+        auditFlags: combinedFlags,
+        notes: combinedNotes,
+      });
+    }
+    consolidatedShifts.sort((a, b) => a.clockIn.getTime() - b.clockIn.getTime());
+    const effectiveShifts = consolidatedShifts;
 
     // ─────────────────────────────────────────────────────────────
     // 3. Ambil absensi yang hadir pada rentang ini
@@ -474,60 +545,95 @@ export async function GET(req: NextRequest): Promise<Response> {
       }
     }
 
-    // Index absensi per shift (tier 1: shiftId FK langsung)
+    // Index absensi per shift (tier 1: shiftId FK langsung -> petakan ke canonicalShiftId)
     const attByShift = new Map<string, typeof attRows>();
     const attOrphan: typeof attRows = [];
 
     for (const att of attRows) {
       if (att.shiftId) {
-        const list = attByShift.get(att.shiftId) ?? [];
+        const canonId = canonicalShiftIdOf.get(att.shiftId) ?? att.shiftId;
+        const list = attByShift.get(canonId) ?? [];
         list.push(att);
-        attByShift.set(att.shiftId, list);
+        attByShift.set(canonId, list);
       } else {
         attOrphan.push(att);
       }
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 4. Matching absensi orphan ke shift via heuristik (Tier 2-5)
+    // 4. Matching absensi orphan ke shift — STRICT SESSION BOUNDARY
+    //    Mencegah bug "7-9 orang di 1 shift" (Tim Siang absen cepat 10:25
+    //    tidak boleh pernah tersedot ke Shift Pagi!) & menjaga dobel shift
+    //    di hari yang sama agar kedua sesi terhitung utuh.
     // ─────────────────────────────────────────────────────────────
+    const sesiOfSlot = (slotStart?: string | null): 'Pagi' | 'Siang' | null => {
+      if (!slotStart) return null;
+      const h = parseInt(slotStart.split(':')[0] ?? '', 10);
+      if (Number.isNaN(h)) return null;
+      return h >= 11 ? 'Siang' : 'Pagi';
+    };
+
+    const wibHourOf = (d: Date): number =>
+      parseInt(
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Jakarta',
+          hour: 'numeric',
+          hour12: false,
+        }).format(d),
+        10,
+      );
+
     for (const att of attOrphan) {
       const attDate = att.attendanceDate;
-      const candidates = shiftRows.filter((s) => wibDateOf(s.clockIn) === attDate);
+      const candidates = effectiveShifts.filter((s) => wibDateOf(s.clockIn) === attDate);
       if (candidates.length === 0) continue;
+
+      const attSesi = sesiOfSlot(att.schedule?.slotStart);
+      const sameSessionCandidates = attSesi
+        ? candidates.filter((s) => sesiByShift.get(s.id) === attSesi)
+        : candidates;
 
       let matched: typeof candidates[0] | undefined;
 
-      // Tier 2: Employee owns the shift
-      if (!matched) {
+      if (sameSessionCandidates.length > 0) {
+        // Tier 2: Owner di sesi yang SAMA (aman untuk dobel shift hari yang sama)
+        matched = sameSessionCandidates.find((s) => s.employeeId === att.employeeId);
+
+        // Tier 3: ClockInActual overlap di dalam sesi yang SAMA
+        if (!matched && att.clockInActual) {
+          const attMs = new Date(att.clockInActual).getTime();
+          matched = sameSessionCandidates.find((s) => {
+            const sIn = s.clockIn.getTime();
+            const sOut = s.clockOut ? s.clockOut.getTime() : sIn + 4 * 3600 * 1000;
+            return attMs >= sIn - 45 * 60 * 1000 && attMs <= sOut + 30 * 60 * 1000;
+          });
+        }
+
+        // Tier 4: Shift resmi sesi yang sama pada hari tersebut
+        if (!matched) {
+          matched = sameSessionCandidates[0];
+        }
+      } else if (!attSesi) {
+        // Hanya jika absensi tidak memiliki slot jadwal sama sekali
         matched = candidates.find((s) => s.employeeId === att.employeeId);
-      }
-
-      // Tier 3: ClockInActual overlap
-      if (!matched && att.clockInActual) {
-        const attMs = new Date(att.clockInActual).getTime();
-        matched = candidates.find((s) => {
-          const sIn = s.clockIn.getTime();
-          const sOut = s.clockOut ? s.clockOut.getTime() : sIn + 4 * 3600 * 1000;
-          return attMs >= sIn - 30 * 60 * 1000 && attMs <= sOut + 30 * 60 * 1000;
-        });
-      }
-
-      // Tier 4: Schedule slot heuristic (Pagi < 11:00, Siang >= 11:00)
-      if (!matched && att.schedule?.slotStart) {
-        const slotH = parseInt(att.schedule.slotStart.split(':')[0] ?? '8', 10);
-        const isAfternoon = slotH >= 11;
-        matched = candidates.find((s) => {
-          const sHour = new Intl.DateTimeFormat('en-US', {
-            timeZone: 'Asia/Jakarta', hour: 'numeric', hour12: false,
-          }).format(s.clockIn);
-          return isAfternoon ? parseInt(sHour, 10) >= 11 : parseInt(sHour, 10) < 11;
-        });
-      }
-
-      // Tier 5: single shift fallback
-      if (!matched && candidates.length === 1) {
-        matched = candidates[0];
+        if (!matched && att.clockInActual) {
+          const attMs = new Date(att.clockInActual).getTime();
+          matched = candidates.find((s) => {
+            const sIn = s.clockIn.getTime();
+            const sOut = s.clockOut ? s.clockOut.getTime() : sIn + 4 * 3600 * 1000;
+            return attMs >= sIn - 30 * 60 * 1000 && attMs <= sOut + 30 * 60 * 1000;
+          });
+        }
+        if (!matched && candidates.length === 1) {
+          matched = candidates[0];
+        }
+      } else if (candidates.length === 1) {
+        // Satu POS dipakai seharian penuh (buka pagi, tutup sore >= 13:00 WIB)
+        const onlyShift = candidates[0]!;
+        const closedAfternoon = !onlyShift.clockOut || wibHourOf(onlyShift.clockOut) >= 13;
+        if (attSesi === 'Siang' && closedAfternoon) {
+          matched = onlyShift;
+        }
       }
 
       if (matched) {
@@ -540,7 +646,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     // ─────────────────────────────────────────────────────────────
     // 4b. Integrasi Kasir Shift & Deduplikasi per Shift
     // ─────────────────────────────────────────────────────────────
-    for (const s of shiftRows) {
+    for (const s of effectiveShifts) {
       const rawList = attByShift.get(s.id) ?? [];
       const deduped: typeof attRows = [];
       const seenEmp = new Set<string>();
@@ -575,7 +681,7 @@ export async function GET(req: NextRequest): Promise<Response> {
             jabatan: s.kasirJabatan || 'Kasir',
           },
           schedule: {
-            slotStart: sesiByShift.get(s.id) === 'Siang' ? '11:30' : '07:00',
+            slotStart: sesiByShift.get(s.id) === 'Siang' ? '11:00' : '07:30',
             slotEnd: sesiByShift.get(s.id) === 'Siang' ? '15:00' : '11:30',
             dayOfWeek: 'SENIN',
           },
@@ -586,25 +692,13 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     // ─────────────────────────────────────────────────────────────
     // 4c. Alokasi Pool Shift — Rumus Hybrid 70/30 (Fair & Transparan)
-    //
-    //  70% → "Jatah Hadir" (Attendance Pool)
-    //         Dibagi proporsional ke tiap shift berdasarkan total poin
-    //         disiplin seluruh personelnya. Tiap orang hadir = 1 unit
-    //         × faktor disiplin ketepatan waktu × bobot sesi.
-    //
-    //  30% → "Bonus Produktivitas" (Performance Pool)
-    //         Dibagi proporsional ke shift berdasarkan laba kotor shift.
-    //         Shift 0 transaksi = 0 bonus (tapi tetap dapat bagian 70%).
-    //
-    //  Hasilnya: Shift Selasa Siang 0-tx tidak lagi dapat Rp 0.
-    //            Total pool 50% tetap terdistribusi tuntas (closed-loop).
     // ─────────────────────────────────────────────────────────────
     const poolShiftMahasiswa = poolHakMahasiswa;
     const ATTENDANCE_RATIO = 0.70;
     const PERFORMANCE_RATIO = 0.30;
 
     // Hitung total poin disiplin seluruh shift (untuk normalisasi Pool A)
-    const shiftAttPoints: number[] = shiftRows.map((s) => {
+    const shiftAttPoints: number[] = effectiveShifts.map((s) => {
       const atts = attByShift.get(s.id) ?? [];
       if (atts.length === 0) return 0;
       let sum = 0;
@@ -622,18 +716,14 @@ export async function GET(req: NextRequest): Promise<Response> {
     const totalAttPoints = shiftAttPoints.reduce((a, b) => a + b, 0);
 
     // Hitung total laba kotor seluruh shift (untuk normalisasi Pool B)
-    const shiftLabaKotor: number[] = shiftRows.map((s) => {
+    const shiftLabaKotor: number[] = effectiveShifts.map((s) => {
       const atts = attByShift.get(s.id) ?? [];
       if (atts.length === 0) return 0;
       return Math.max(0, finByShift.get(s.id)?.labaKotor ?? 0);
     });
     const totalLabaKotorAllShifts = shiftLabaKotor.reduce((a, b) => a + b, 0);
 
-    // Gabungkan bobot: 70% attendance + 30% performance
-    // Menggunakan cross-multiply agar tidak ada pembagian 0:
-    //   combinedWeight[i] = attPoin[i] × totalLk + (lk[i] / totalLk × totalAttPoin) × totalLk
-    //   Disederhanakan: (0.70 × attPoin[i] × totalLk) + (0.30 × lk[i] × totalAttPoin)
-    const shiftWeights = shiftRows.map((_, idx) => {
+    const shiftWeights = effectiveShifts.map((_, idx) => {
       const att = shiftAttPoints[idx] ?? 0;
       const lk = shiftLabaKotor[idx] ?? 0;
       if (att === 0) return 0; // shift tanpa personel sah → dapat Rp 0
@@ -644,7 +734,7 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     const shiftShares = allocateProportional(poolShiftMahasiswa, shiftWeights);
     const poolByShift = new Map<string, number>();
-    shiftRows.forEach((s, idx) => {
+    effectiveShifts.forEach((s, idx) => {
       poolByShift.set(s.id, shiftShares[idx] ?? 0);
     });
 
@@ -671,7 +761,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       tanggal: string;       // 'YYYY-MM-DD' WIB
       hari: string;          // 'Senin', 'Selasa', …
       sesi: 'Pagi' | 'Siang';
-      slotLabel: string;     // '07:00-11:30' | '11:30-15:00'
+      slotLabel: string;     // '07:30-11:30' | '11:00-15:00'
       clockIn: string;
       clockOut: string | null;
       kasirName: string;
@@ -686,6 +776,8 @@ export async function GET(req: NextRequest): Promise<Response> {
       discrepancy: number | null;
       shortageDeduction: number;
       gajiBersih: number;
+      auditFlags: string | null;
+      notes: string | null;
       personnelCount: number;
       nominalPerOrang: number;
       personnel: AttendeeRow[];
@@ -709,10 +801,10 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     const builtShifts: ShiftRow[] = [];
 
-    for (const s of shiftRows) {
+    for (const s of effectiveShifts) {
       const wibDate = wibDateOf(s.clockIn);
       const sesi = sesiByShift.get(s.id) ?? 'Pagi';
-      const slotLabel = sesi === 'Siang' ? '11:30-15:00' : '07:00-11:30';
+      const slotLabel = sesi === 'Siang' ? '11:00-15:00' : '07:30-11:30';
 
       const fin = finByShift.get(s.id) ?? { omzet: 0, labaKotor: 0, txCount: 0 };
       const poolGaji = poolByShift.get(s.id) ?? 0;
@@ -837,6 +929,8 @@ export async function GET(req: NextRequest): Promise<Response> {
         discrepancy,
         shortageDeduction,
         gajiBersih,
+        auditFlags: s.auditFlags ?? null,
+        notes: s.notes ?? null,
         personnelCount: count,
         nominalPerOrang,
         personnel,

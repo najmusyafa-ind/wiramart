@@ -83,6 +83,8 @@ export interface WarehouseProductDto {
 export interface RestockInputDto {
   productId: string;
   qtyAdd: number;
+  bonusQty?: number;
+  unitCostPrice?: number;
   expiryDate?: string | null; // Format YYYY-MM-DD
   batchCode?: string | null;
   notes?: string | null;
@@ -95,6 +97,8 @@ export interface RestockResultDto {
   qtyBefore: number;
   qtyAfter: number;
   qtyDiff: number;
+  bonusQty: number;
+  effectiveCostPrice: number;
   batchId?: string;
   adjustmentId: string;
   restockedAt: string;
@@ -521,15 +525,17 @@ export async function restockProductByWarehouse(
   input: RestockInputDto,
 ): Promise<RestockResultDto> {
   const { productId, qtyAdd, expiryDate, batchCode, notes, employeeId } = input;
+  const safeBonusQty = Math.max(0, Math.floor(input.bonusQty ?? 0));
+  const totalAdded = qtyAdd + safeBonusQty;
 
   if (!Number.isInteger(qtyAdd) || qtyAdd <= 0) {
     throw new Error('Jumlah restock harus berupa bilangan bulat positif.');
   }
 
-  // 1. Verifikasi Petugas (Karyawan Gudang atau Manager aktif)
+  // 1. Verifikasi Petugas (Opsi B: Petugas Gudang, Admin Shift, atau Manager aktif)
   let actorName = '';
   let actorNim = '';
-  let callerManagerId: string | null = null;
+  let callerAdminId: string | null = null;
 
   const emp = await db.query.employees.findFirst({
     where: and(
@@ -553,12 +559,9 @@ export async function restockProductByWarehouse(
       columns: { id: true, fullName: true, nidn: true, role: true },
     });
     if (adm) {
-      if (adm.role !== 'MANAGER') {
-        throw new Error('Admin Shift tidak memiliki izin melakukan restock stok langsung.');
-      }
       actorName = adm.fullName;
-      actorNim = adm.nidn ? `ID ${adm.nidn}` : 'MANAGER';
-      callerManagerId = adm.id;
+      actorNim = adm.nidn ? `ID ${adm.nidn} (${adm.role})` : adm.role;
+      callerAdminId = adm.id;
     } else {
       throw new Error('Petugas tidak terdaftar atau tidak aktif.');
     }
@@ -566,7 +569,7 @@ export async function restockProductByWarehouse(
 
   // 2. Cari Admin Aktif untuk FK Audit Trail stockAdjustments
   const auditAdminId =
-    callerManagerId ??
+    callerAdminId ??
     (
       await db.query.admins.findFirst({
         where: and(
@@ -612,6 +615,7 @@ export async function restockProductByWarehouse(
   let productName = '';
   let qtyBefore = 0;
   let qtyAfter = 0;
+  let effectiveCostPrice = 0;
   let createdBatchId: string | undefined;
   let createdAdjId = '';
 
@@ -638,16 +642,30 @@ export async function restockProductByWarehouse(
 
     productName = lockedProduct.name;
     qtyBefore = lockedProduct.stockQty;
-    qtyAfter = qtyBefore + qtyAdd;
+    qtyAfter = qtyBefore + totalAdded;
+
+    const baseUnitCost =
+      input.unitCostPrice !== undefined && input.unitCostPrice >= 0
+        ? input.unitCostPrice
+        : Number(lockedProduct.costPrice ?? 0);
+    effectiveCostPrice =
+      safeBonusQty > 0 && totalAdded > 0
+        ? Math.round((qtyAdd * baseUnitCost) / totalAdded)
+        : baseUnitCost;
 
     // A. Update Master Stok Produk secara atomik pada baris terkunci
     await tx
       .update(products)
       .set({
-        stockQty: sql`${products.stockQty} + ${qtyAdd}`,
+        stockQty: sql`${products.stockQty} + ${totalAdded}`,
         updatedAt: nowWib,
       })
       .where(eq(products.id, productId));
+
+    const bonusLabel =
+      safeBonusQty > 0
+        ? ` (${qtyAdd} beli + ${safeBonusQty} bonus gratis supplier; HPP efektif Rp ${effectiveCostPrice.toLocaleString('id-ID')})`
+        : '';
 
     // B. Buat Stock Batch baru (FEFO/FIFO tracking)
     const [batchRecord] = await tx
@@ -655,15 +673,15 @@ export async function restockProductByWarehouse(
       .values({
         productId,
         batchCode: autoBatchCode,
-        costPrice: lockedProduct.costPrice, // Menggunakan HPP internal produk
-        initialQty: qtyAdd,
-        currentQty: qtyAdd,
+        costPrice: effectiveCostPrice.toString(),
+        initialQty: totalAdded,
+        currentQty: totalAdded,
         expiryDate: cleanExpiryDate,
         expiryClass: computedExpiryClass,
         receivedAt: nowWib,
         notes: notes
-          ? `Diterima oleh ${actorName} (${actorNim}): ${notes}`
-          : `Restock gudang oleh ${actorName} (${actorNim})`,
+          ? `Diterima oleh ${actorName} (${actorNim})${bonusLabel}: ${notes}`
+          : `Restock gudang oleh ${actorName} (${actorNim})${bonusLabel}`,
         createdAt: nowWib,
         updatedAt: nowWib,
       })
@@ -721,8 +739,12 @@ export async function restockProductByWarehouse(
 
     // D. Insert ke Audit Log Stock Adjustments
     const expInfo = cleanExpiryDate ? ` Exp: ${cleanExpiryDate}` : '';
+    const bonusInfo =
+      safeBonusQty > 0
+        ? ` [${qtyAdd} beli + ${safeBonusQty} bonus gratis; HPP efektif Rp ${effectiveCostPrice.toLocaleString('id-ID')}]`
+        : '';
     const noteInfo = notes ? ` Catatan: ${notes}` : '';
-    const reasonText = `[RESTOCK GUDANG${shiftInfoText} • Petugas: ${actorName} (${actorNim}) • ${timeStr} WIB] Masuk +${qtyAdd} ${lockedProduct.unit} (Batch: ${autoBatchCode}${expInfo}).${noteInfo}`.trim();
+    const reasonText = `[RESTOCK GUDANG${shiftInfoText} • Petugas: ${actorName} (${actorNim}) • ${timeStr} WIB] Masuk +${totalAdded} ${lockedProduct.unit}${bonusInfo} (Batch: ${autoBatchCode}${expInfo}).${noteInfo}`.trim();
 
     const [adjRecord] = await tx
       .insert(stockAdjustments)
@@ -731,7 +753,7 @@ export async function restockProductByWarehouse(
         batchId: createdBatchId ?? null,
         qtyBefore,
         qtyAfter,
-        qtyDiff: qtyAdd,
+        qtyDiff: totalAdded,
         reason: reasonText,
         adjustedByAdminId: auditAdminId,
         createdAt: nowWib,
@@ -746,7 +768,9 @@ export async function restockProductByWarehouse(
     productName,
     qtyBefore,
     qtyAfter,
-    qtyDiff: qtyAdd,
+    qtyDiff: totalAdded,
+    bonusQty: safeBonusQty,
+    effectiveCostPrice,
     batchId: createdBatchId,
     adjustmentId: createdAdjId,
     restockedAt: nowWib.toISOString(),

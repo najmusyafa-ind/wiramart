@@ -19,22 +19,15 @@ export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || (payload.role !== 'employee' && payload.role !== 'admin')) {
-    return apiError('Unauthorized: Akses khusus Petugas Gudang atau Manager.', 401);
+    return apiError('Unauthorized: Akses khusus Petugas Gudang, Admin Shift, atau Manager.', 401);
   }
 
-  if (payload.role === 'admin' && payload.adminRole && payload.adminRole !== 'MANAGER') {
-    return apiError(
-      'Forbidden: Admin Shift hanya memiliki akses pantau gudang (read-only).',
-      403,
-    );
-  }
-
-  // Anti-spam rate limit untuk pengajuan produk baru oleh petugas gudang
+  // Opsi B: Petugas Gudang, Admin Shift, & Manager berwenang menambah produk baru langsung (saling backup).
   if (payload.role === 'employee') {
     const rateLimit = stockSubmitLimiter.check(`newprod:${payload.sub}`, true);
     if (!rateLimit.allowed) {
       return apiError(
-        `Batas pengajuan produk baru harian tercapai. Coba lagi dalam ${Math.ceil(rateLimit.retryAfterSeconds / 60)} menit.`,
+        `Batas input produk baru harian tercapai. Coba lagi dalam ${Math.ceil(rateLimit.retryAfterSeconds / 60)} menit.`,
         429,
       );
     }
@@ -46,7 +39,7 @@ export async function POST(req: NextRequest) {
     const result = await proposeNewProductByWarehouse(payload.sub, validated, payload.role);
     return apiOk(
       {
-        message: `Usulan produk baru "${validated.name}" (#${result.receiveNumber}) berhasil dikirim ke antrian Approval Manager. Produk akan tampil di Kasir setelah di-ACC Manager.`,
+        message: `Produk baru "${validated.name}" (#${result.receiveNumber}) berhasil ditambahkan dan langsung aktif di katalog Kasir & Gudang.`,
         data: result,
       },
       201,

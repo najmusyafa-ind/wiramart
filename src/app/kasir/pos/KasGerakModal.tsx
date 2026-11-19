@@ -89,12 +89,13 @@ async function requestKasGerakSummary(signal?: AbortSignal): Promise<FetchKasGer
 }
 
 const CATEGORIES_OUT = [
-  { value: 'TITIPAN_MAKANAN', label: '🍱 Titipan Makanan / Beli Lepas', desc: 'Bayar titipan kue/snack supplier' },
-  { value: 'KONSUMSI_GALON', label: '🚰 Galon / Konsumsi', desc: 'Beli air galon toko' },
-  { value: 'BENSIN',         label: '🛵 Bensin & Transport', desc: 'Bensin motor / kurir toko' },
-  { value: 'ATK_KRESEK',     label: '📦 Kresek & ATK',      desc: 'Plastik kresek, lakban, kertas' },
-  { value: 'PARKIR_KEBERSIHAN', label: '🧹 Parkir / Kebersihan', desc: 'Uang kebersihan / parkir' },
-  { value: 'OPERASIONAL',    label: '⚙️ Operasional Lain',  desc: 'Biaya tak terduga toko' },
+  { value: 'BAYAR_SUPPLIER',  label: 'Bayar Supplier / Nota Barang', desc: 'Potongan cash bayar supplier (tulis nama supplier & nominal)' },
+  { value: 'TITIPAN_MAKANAN', label: 'Titipan Makanan / Beli Lepas', desc: 'Bayar titipan kue/snack mitra' },
+  { value: 'KONSUMSI_GALON',  label: 'Galon / Konsumsi',             desc: 'Beli air galon toko' },
+  { value: 'BENSIN',          label: 'Bensin & Transport',           desc: 'Bensin motor / kurir toko' },
+  { value: 'ATK_KRESEK',      label: 'Kresek & ATK',                 desc: 'Plastik kresek, lakban, kertas' },
+  { value: 'PARKIR_KEBERSIHAN', label: 'Parkir / Kebersihan',        desc: 'Uang kebersihan / parkir' },
+  { value: 'OPERASIONAL',     label: 'Operasional Lain',             desc: 'Biaya tak terduga toko' },
 ];
 
 const CATEGORIES_IN = [

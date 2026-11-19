@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { NextRequest } from 'next/server';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import { db } from '@/lib/db/client';
-import { employees, admins, products } from '@/lib/db/schema';
+import { employees, admins } from '@/lib/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 import {
   getWarehouseSummary,
@@ -19,7 +19,6 @@ import {
   restockProductByWarehouse,
   getWarehouseActivityLogs,
 } from '@/lib/services/warehouseService';
-import { createStockReceiveDraft } from '@/lib/services/stockReceiveService';
 import { AppError, getTodayWib } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
@@ -92,8 +91,8 @@ export async function GET(req: NextRequest) {
       id: adminRow.id,
       name: adminRow.fullName,
       nim: adminRow.nidn ?? 'ADMIN',
-      jabatan: isManager ? 'Manager (Dosen)' : 'Admin Shift (Pantau)',
-      canMutateStock: isManager,
+      jabatan: isManager ? 'Manager (Dosen)' : 'Admin Shift (Backup Gudang)',
+      canMutateStock: true,
       actorRole: isManager ? 'MANAGER' : 'ADMIN_SHIFT',
       sessionIssuedAtMs,
     };
@@ -133,10 +132,11 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── POST: Inbound Restock Barang Masuk oleh Petugas Gudang (Approval Manager) / Manager (Langsung) ──
+// ── POST: Inbound Restock Barang Masuk Langsung (Opsi B: Petugas Gudang, Admin Shift, & Manager) ──
 const restockSchema = z.object({
   productId: z.string().uuid('ID produk tidak valid'),
   qtyAdd: z.number().int().min(1, 'Jumlah restock minimal 1').max(100_000, 'Maksimal 100.000'),
+  bonusQty: z.number().int().min(0, 'Qty bonus tidak boleh negatif').max(100_000).optional().default(0),
   expiryDate: z
     .string({ message: 'Tanggal kedaluwarsa wajib diisi untuk semua barang masuk' })
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal kedaluwarsa harus YYYY-MM-DD'),
@@ -147,10 +147,11 @@ const restockSchema = z.object({
 export async function POST(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || (payload.role !== 'employee' && payload.role !== 'admin')) {
-    return apiError('Unauthorized: Akses khusus petugas gudang / Manager', 401);
+    return apiError('Unauthorized: Akses khusus Petugas Gudang / Admin Shift / Manager', 401);
   }
 
-  // Separation of Duty: ADMIN_SHIFT hanya akses baca (monitoring); mutasi langsung hanya MANAGER / Petugas Gudang
+  // Opsi B (Keputusan Rapat Tim): Petugas Gudang, Admin Shift, & Manager sama-sama berwenang restok langsung.
+  // FEFO diskon & keuangan tetap eksklusif Manager.
   if (payload.role === 'admin') {
     const adminRow = await db.query.admins.findFirst({
       where: and(
@@ -162,12 +163,6 @@ export async function POST(req: NextRequest) {
     });
     if (!adminRow) {
       return apiError('Akun admin tidak aktif atau tidak ditemukan', 403);
-    }
-    if (adminRow.role !== 'MANAGER') {
-      return apiError(
-        'Akses ditolak: Admin Shift hanya memiliki akses pantau gudang (read-only). Persetujuan barang masuk/restock langsung hanya oleh Manager (Dosen).',
-        403,
-      );
     }
   } else {
     const employee = await db.query.employees.findFirst({
@@ -205,82 +200,30 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 2-Layer Approval Guard (Evaluasi Pak Afif):
-    // Petugas Gudang (employee) WAJIB melalui antrian Approval Manager -> stok di Kasir tidak naik sebelum di-ACC Manager!
-    if (payload.role === 'employee') {
-      const [prod] = await db
-        .select({
-          id: products.id,
-          name: products.name,
-          costPrice: products.costPrice,
-          stockQty: products.stockQty,
-          isActive: products.isActive,
-        })
-        .from(products)
-        .where(and(eq(products.id, parsed.data.productId), isNull(products.deletedAt)))
-        .limit(1);
-
-      if (!prod || !prod.isActive) {
-        return apiError('Produk tidak ditemukan atau nonaktif.', 404);
-      }
-
-      const compactDate = todayStr.replace(/-/g, '');
-      const resolvedBatchCode =
-        parsed.data.batchCode?.trim() ||
-        `IN-${compactDate}-${String(Math.floor(1000 + Math.random() * 9000))}`;
-
-      const draft = await createStockReceiveDraft(
-        payload.sub,
-        {
-          supplierName: 'Restock Gudang',
-          deliveryNote: parsed.data.notes?.trim()
-            ? `[RESTOCK CEPAT] ${parsed.data.notes.trim()}`
-            : `[RESTOCK CEPAT] Pengajuan stok masuk ${prod.name}`,
-          invoiceDate: todayStr,
-          autoSubmit: true,
-          items: [
-            {
-              productId: prod.id,
-              productName: prod.name,
-              batchCode: resolvedBatchCode,
-              qty: parsed.data.qtyAdd,
-              costPrice: Number(prod.costPrice ?? 0),
-              expiryDate: parsed.data.expiryDate,
-              conditionNote: parsed.data.notes?.trim() || 'Pengajuan restock cepat dari portal gudang',
-            },
-          ],
-        },
-        'employee',
-      );
-
-      return apiOk(
-        {
-          mode: 'SUBMITTED_FOR_APPROVAL',
-          draftId: draft.id,
-          receiveNumber: draft.receiveNumber,
-          productId: prod.id,
-          productName: prod.name,
-          qtyBefore: prod.stockQty,
-          qtyAfter: prod.stockQty,
-          qtyDiff: parsed.data.qtyAdd,
-          expiryDate: parsed.data.expiryDate,
-          message: `Pengajuan restock +${parsed.data.qtyAdd} ${prod.name} (#${draft.receiveNumber}) berhasil dikirim ke antrian Approval Manager. Stok di Kasir akan bertambah setelah di-ACC Manager.`,
-        },
-        201,
-      );
-    }
-
-    // Jika pemanggil adalah MANAGER langsung -> eksekusi restock instan dengan validasi ED wajib
+    // Opsi B: Restock langsung masuk ke stok kasir & batch FEFO (tetap tercatat penuh di audit stock_adjustments)
     const result = await restockProductByWarehouse({
       productId: parsed.data.productId,
       qtyAdd: parsed.data.qtyAdd,
+      bonusQty: parsed.data.bonusQty,
       expiryDate: parsed.data.expiryDate,
       batchCode: parsed.data.batchCode,
       notes: parsed.data.notes,
       employeeId: payload.sub,
     });
 
-    return apiOk({ ...result, mode: 'APPROVED_DIRECT' }, 201);
+    const bonusText =
+      parsed.data.bonusQty > 0
+        ? ` (${parsed.data.qtyAdd} beli + ${parsed.data.bonusQty} bonus gratis)`
+        : '';
+
+    return apiOk(
+      {
+        ...result,
+        mode: 'APPROVED_DIRECT',
+        message: `Restock +${result.qtyDiff}${bonusText} ${result.productName} berhasil masuk ke stok Kasir & Gudang.`,
+      },
+      201,
+    );
   } catch (err: unknown) {
     if (err instanceof AppError) {
       return apiError(err.message, err.statusCode);

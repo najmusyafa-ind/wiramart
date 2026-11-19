@@ -267,7 +267,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         });
       }
 
-      // Petakan absensi ke shift pada tanggal tersebut
+      // Petakan absensi ke shift pada tanggal tersebut (STRICT SESSION BOUNDARY — anti 7-orang bug & aman dobel shift)
       const unmatchedAttendees: typeof rawAttendees = [];
       for (const att of rawAttendees) {
         let matchedShift: typeof shiftsOnDate[0] | undefined;
@@ -275,27 +275,48 @@ export async function GET(req: NextRequest): Promise<Response> {
         if (att.shiftId) {
           matchedShift = shiftsOnDate.find((s) => s.id === att.shiftId);
         }
+
         if (!matchedShift) {
-          matchedShift = shiftsOnDate.find((s) => s.employeeId === att.employeeId);
-        }
-        if (!matchedShift && att.clockInActual) {
-          const attTime = new Date(att.clockInActual).getTime();
-          matchedShift = shiftsOnDate.find((s) => {
-            const sIn = s.clockIn.getTime();
-            const sOut = s.clockOut ? s.clockOut.getTime() : sIn + 4 * 3600 * 1000;
-            return attTime >= sIn - 30 * 60 * 1000 && attTime <= sOut + 30 * 60 * 1000;
-          });
-        }
-        if (!matchedShift && att.schedule?.slotStart) {
-          const slotHour = parseInt(att.schedule.slotStart.split(':')[0] ?? '8', 10);
-          const isAfternoon = slotHour >= 11;
-          matchedShift = shiftsOnDate.find((s) => {
-            const isSiang = sesiOfShift(s.clockIn) === 'Siang';
-            return isAfternoon === isSiang;
-          });
-        }
-        if (!matchedShift && shiftsOnDate.length === 1) {
-          matchedShift = shiftsOnDate[0];
+          const attSlotHour = att.schedule?.slotStart
+            ? parseInt(att.schedule.slotStart.split(':')[0] ?? '', 10)
+            : Number.NaN;
+          const attSesi: 'Pagi' | 'Siang' | null = Number.isNaN(attSlotHour)
+            ? null
+            : attSlotHour >= 11
+              ? 'Siang'
+              : 'Pagi';
+
+          const sameSessionShifts = attSesi
+            ? shiftsOnDate.filter((s) => sesiOfShift(s.clockIn) === attSesi)
+            : shiftsOnDate;
+
+          if (sameSessionShifts.length > 0) {
+            matchedShift = sameSessionShifts.find((s) => s.employeeId === att.employeeId);
+            if (!matchedShift && att.clockInActual) {
+              const attTime = new Date(att.clockInActual).getTime();
+              matchedShift = sameSessionShifts.find((s) => {
+                const sIn = s.clockIn.getTime();
+                const sOut = s.clockOut ? s.clockOut.getTime() : sIn + 4 * 3600 * 1000;
+                return attTime >= sIn - 45 * 60 * 1000 && attTime <= sOut + 30 * 60 * 1000;
+              });
+            }
+            if (!matchedShift) {
+              matchedShift = sameSessionShifts[0];
+            }
+          } else if (!attSesi) {
+            matchedShift = shiftsOnDate.find((s) => s.employeeId === att.employeeId);
+            if (!matchedShift && att.clockInActual) {
+              const attTime = new Date(att.clockInActual).getTime();
+              matchedShift = shiftsOnDate.find((s) => {
+                const sIn = s.clockIn.getTime();
+                const sOut = s.clockOut ? s.clockOut.getTime() : sIn + 4 * 3600 * 1000;
+                return attTime >= sIn - 30 * 60 * 1000 && attTime <= sOut + 30 * 60 * 1000;
+              });
+            }
+            if (!matchedShift && shiftsOnDate.length === 1) {
+              matchedShift = shiftsOnDate[0];
+            }
+          }
         }
 
         if (matchedShift && shiftPoolMap.has(matchedShift.id)) {

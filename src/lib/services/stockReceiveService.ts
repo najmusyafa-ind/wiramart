@@ -48,6 +48,7 @@ export const ProposeNewProductSchema = z.object({
   costPrice: z.number().min(0, 'Harga beli / HPP tidak boleh negatif'),
   sellingPrice: z.number().positive('Usulan harga jual harus lebih dari 0'),
   initialQty: z.number().int('Jumlah awal harus bilangan bulat').min(1, 'Jumlah awal minimal 1').max(100_000),
+  bonusQty: z.number().int('Qty bonus harus bilangan bulat').min(0).max(100_000).optional().default(0),
   expiryDate: z
     .string({ message: 'Tanggal kedaluwarsa wajib diisi (termasuk makanan harian)' })
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal kedaluwarsa harus YYYY-MM-DD'),
@@ -392,37 +393,49 @@ export async function proposeNewProductByWarehouse(
     throw new AppError('INTERNAL_ERROR', 'Tidak ada akun Manager aktif di sistem.', 500);
   }
 
+  const safeBonusQty = Math.max(0, Math.floor(input.bonusQty ?? 0));
+  const totalInitialQty = input.initialQty + safeBonusQty;
+  const effectiveCostPrice =
+    safeBonusQty > 0 && totalInitialQty > 0
+      ? Math.round((input.initialQty * input.costPrice) / totalInitialQty)
+      : input.costPrice;
+  const bonusLabel =
+    safeBonusQty > 0
+      ? ` (${input.initialQty} beli + ${safeBonusQty} bonus gratis; HPP efektif Rp ${effectiveCostPrice.toLocaleString('id-ID')})`
+      : '';
+
   const receiveNumber = await generateReceiveNumber();
   const compactDate = todayStr.replace(/-/g, '');
   const batchCode = `NEW-${compactDate}-${String(Math.floor(1000 + Math.random() * 9000))}`;
   const noteText = input.notes?.trim()
-    ? `[USULAN PRODUK BARU] ${input.notes.trim()}`
-    : `[USULAN PRODUK BARU] Pengajuan SKU baru "${cleanName}" (${cat.name})`;
+    ? `[PRODUK BARU LANGSUNG] ${input.notes.trim()}`
+    : `[PRODUK BARU LANGSUNG] Tambah SKU baru "${cleanName}" (${cat.name})${bonusLabel}`;
+  const now = new Date();
 
   const createdDraft = await db.transaction(async (tx) => {
     const resolvedSupplierId = await resolveNormalizedSupplierId(tx, {
       supplierName: input.supplierName?.trim() || undefined,
     });
 
-    // A. Insert produk dalam status PENDING (isActive = false, stockQty = 0) -> tidak tampil di POS/PWA sampai di-ACC Manager
-    const [pendingProduct] = await tx
+    // Opsi B: Produk langsung aktif & tersedia di POS Kasir dengan batch FEFO & audit trail lengkap
+    const [activeProduct] = await tx
       .insert(products)
       .values({
         categoryId: input.categoryId,
         name: cleanName,
         barcode: cleanBarcode,
-        costPrice: input.costPrice.toString(),
+        costPrice: effectiveCostPrice.toString(),
         sellingPrice: input.sellingPrice.toString(),
-        stockQty: 0,
+        stockQty: totalInitialQty,
         unit: input.unit.trim() || 'pcs',
-        isActive: false,
+        isActive: true,
         isPerishable: input.isPerishable,
         perishableType: input.isPerishable ? input.perishableType : null,
         createdByAdminId: fallbackAdmin.id,
       })
       .returning();
 
-    // B. Insert draft penerimaan berstatus SUBMITTED langsung ke antrian Approval Manager
+    // B. Catat penerimaan berstatus APPROVED di Buku Nota Supplier
     const [draft] = await tx
       .insert(stockReceiveDrafts)
       .values({
@@ -431,20 +444,56 @@ export async function proposeNewProductByWarehouse(
         supplierId: resolvedSupplierId,
         deliveryNote: noteText,
         invoiceDate: todayStr,
-        status: 'SUBMITTED',
-        submittedAt: new Date(),
+        status: 'APPROVED',
+        submittedAt: now,
+        approvedAt: now,
+        approvedByAdminId: fallbackAdmin.id,
+        managerNote: 'Opsi B: Input produk baru langsung aktif oleh Gudang / Admin Shift',
       })
       .returning();
 
-    // C. Insert item stok awal & ED wajib
-    await tx.insert(stockReceiveItems).values({
-      draftId: draft.id,
-      productId: pendingProduct.id,
-      batchCode,
-      qty: input.initialQty,
-      costPrice: input.costPrice.toString(),
-      expiryDate: input.expiryDate,
-      conditionNote: `[PRODUK BARU] Kategori: ${cat.name} | Usulan Harga Jual: Rp ${Math.round(input.sellingPrice).toLocaleString('id-ID')}${input.notes?.trim() ? ` | ${input.notes.trim()}` : ''}`,
+    // C. Insert item penerimaan
+    const [receiveItem] = await tx
+      .insert(stockReceiveItems)
+      .values({
+        draftId: draft.id,
+        productId: activeProduct.id,
+        batchCode,
+        qty: totalInitialQty,
+        costPrice: effectiveCostPrice.toString(),
+        expiryDate: input.expiryDate,
+        conditionNote: `[PRODUK BARU] Kategori: ${cat.name} | Harga Jual: Rp ${Math.round(input.sellingPrice).toLocaleString('id-ID')}${bonusLabel}${input.notes?.trim() ? ` | ${input.notes.trim()}` : ''}`,
+      })
+      .returning();
+
+    // D. Buat batch FEFO awal
+    const [batch] = await tx
+      .insert(stockBatches)
+      .values({
+        productId: activeProduct.id,
+        receiveItemId: receiveItem.id,
+        supplierId: resolvedSupplierId,
+        batchCode,
+        costPrice: effectiveCostPrice.toString(),
+        initialQty: totalInitialQty,
+        currentQty: totalInitialQty,
+        expiryDate: input.expiryDate,
+        expiryClass: computeExpiryClass(input.expiryDate),
+        receivedAt: now,
+        notes: `Stok awal produk baru (${receiveNumber})${bonusLabel}`,
+      })
+      .returning();
+
+    // E. Audit Trail stockAdjustments
+    await tx.insert(stockAdjustments).values({
+      productId: activeProduct.id,
+      batchId: batch.id,
+      qtyBefore: 0,
+      qtyAfter: totalInitialQty,
+      qtyDiff: totalInitialQty,
+      reason: `[RESTOCK GUDANG • PRODUK BARU] ${cleanName} +${totalInitialQty} ${input.unit}${bonusLabel} (Batch: ${batchCode} Exp: ${input.expiryDate})`,
+      adjustedByAdminId: fallbackAdmin.id,
+      createdAt: now,
     });
 
     return draft;

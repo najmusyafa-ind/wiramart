@@ -1595,9 +1595,25 @@ export default function PosPage() {
   const [tutupActualCash, setTutupActualCash] = useState<string>('');
   const [tutupBreakdown, setTutupBreakdown]   = useState<DenominasiMap>({});
   const [tutupNotes, setTutupNotes]           = useState<string>('');
+  const [tutupEarlyReason, setTutupEarlyReason] = useState<'NORMAL' | 'KULIAH' | 'IZIN_DOSEN'>('NORMAL');
+  const [handoverCopied, setHandoverCopied]   = useState(false);
   const [tutupMode, setTutupMode]             = useState<'QUICK' | 'CALCULATOR'>('QUICK');
   const [tutupResult, setTutupResult] = useState<{
     txCount: number;
+    clockIn?: string;
+    clockOut?: string;
+    handoverSummary?: {
+      kasirName: string;
+      modalAwal: number;
+      cashMasuk: number;
+      qrisMasuk: number;
+      totalPenjualan: number;
+      potonganSupplier: Array<{ category: string; notes: string; amount: number }>;
+      totalCashOut: number;
+      totalCashIn: number;
+      sisaCashKotakUang: number | null;
+      earlyCloseReason: 'NORMAL' | 'KULIAH' | 'IZIN_DOSEN';
+    };
   } | null>(null);
   const [lastTx, setLastTx] = useState<{
     invoiceNumber: string;
@@ -2194,12 +2210,27 @@ export default function PosPage() {
           actualCash: nominalFisik !== undefined && !isNaN(nominalFisik) ? nominalFisik : undefined,
           breakdown: Object.keys(tutupBreakdown).length > 0 ? tutupBreakdown : undefined,
           notes: tutupNotes.trim() ? tutupNotes.trim() : undefined,
+          earlyCloseReason: tutupEarlyReason,
         }),
       });
       const json = await res.json() as {
         success: boolean;
         data?: {
           txCount: number;
+          clockIn?: string;
+          clockOut?: string;
+          handoverSummary?: {
+            kasirName: string;
+            modalAwal: number;
+            cashMasuk: number;
+            qrisMasuk: number;
+            totalPenjualan: number;
+            potonganSupplier: Array<{ category: string; notes: string; amount: number }>;
+            totalCashOut: number;
+            totalCashIn: number;
+            sisaCashKotakUang: number | null;
+            earlyCloseReason: 'NORMAL' | 'KULIAH' | 'IZIN_DOSEN';
+          };
         };
         error?: string;
       };
@@ -2208,10 +2239,12 @@ export default function PosPage() {
         return;
       }
       setTutupResult(json.data ?? null);
+      setHandoverCopied(false);
       setShowTutupConfirm(false);
       setTutupActualCash('');
       setTutupBreakdown({});
       setTutupNotes('');
+      setTutupEarlyReason('NORMAL');
       // Update session: shift = null setelah tutup
       setSession((prev) => prev ? { ...prev, shift: null } : prev);
     } catch {
@@ -2420,6 +2453,27 @@ export default function PosPage() {
                 />
               </div>
 
+              {/* Status Tutup Shift (Mendukung Tutup Awal Resmi karena Mata Kuliah — Audio 4) */}
+              <div>
+                <label
+                  htmlFor="tutup-early-reason"
+                  style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: 'var(--color-text)', marginBottom: 4 }}
+                >
+                  Status Waktu Tutup Shift
+                </label>
+                <select
+                  id="tutup-early-reason"
+                  className="form-input"
+                  value={tutupEarlyReason}
+                  onChange={(e) => setTutupEarlyReason(e.target.value as 'NORMAL' | 'KULIAH' | 'IZIN_DOSEN')}
+                  style={{ width: '100%', minHeight: 42, fontSize: '0.85rem' }}
+                >
+                  <option value="NORMAL">Normal (Sesuai Jadwal Shift)</option>
+                  <option value="KULIAH">Tutup Awal Resmi — Ada Mata Kuliah (Bebas Penalti)</option>
+                  <option value="IZIN_DOSEN">Tutup Awal Resmi — Izin Dosen / Pembina</option>
+                </select>
+              </div>
+
               {/* Reminder Sisa Makanan Sore (aktif hanya >= 15:00 WIB & stok sisa > 0) */}
               {shouldRemindTutupShift && (
                 <div
@@ -2517,38 +2571,106 @@ export default function PosPage() {
                 <span style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>{tutupResult.txCount} txn</span>
               </div>
 
-              {/* Status Operasional Shift (K2: Laba & Bagi Hasil hanya dikelola Manajer/Dosen) */}
-              <div style={{
-                padding: 'var(--space-3)',
-                background: 'var(--color-surface-muted, #f8fafc)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--color-border)',
-                fontSize: '0.78rem',
-                color: 'var(--color-text-secondary)',
-                lineHeight: 1.5,
-              }}>
-                <div style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)', marginBottom: 2 }}>
-                  📋 Status Operasional
+              {/* Blok Ringkasan Serah Terima Kas & Potongan Supplier (Standar Bu Dyah) */}
+              {tutupResult.handoverSummary && (
+                <div style={{
+                  padding: '12px',
+                  background: '#f8fafc',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '0.8rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}>
+                  <div style={{ fontWeight: 800, color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: 6 }}>
+                    Laporan Serah Terima Kas Shift
+                    {tutupResult.handoverSummary.earlyCloseReason === 'KULIAH' && (
+                      <span style={{ marginLeft: 6, fontSize: '0.7rem', padding: '2px 6px', borderRadius: 4, background: '#dbeafe', color: '#1d4ed8' }}>
+                        Tutup Awal Kuliah
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#475569' }}>Cash Masuk (Penjualan)</span>
+                    <strong>Rp {Math.round(tutupResult.handoverSummary.cashMasuk).toLocaleString('id-ID')}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#475569' }}>QRIS Masuk</span>
+                    <strong>Rp {Math.round(tutupResult.handoverSummary.qrisMasuk).toLocaleString('id-ID')}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: 4 }}>
+                    <span style={{ color: '#0f172a', fontWeight: 700 }}>Total Penjualan Shift</span>
+                    <strong>Rp {Math.round(tutupResult.handoverSummary.totalPenjualan).toLocaleString('id-ID')}</strong>
+                  </div>
+                  {tutupResult.handoverSummary.potonganSupplier.length > 0 && (
+                    <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: 4 }}>
+                      <div style={{ fontWeight: 700, color: '#b91c1c', marginBottom: 3 }}>
+                        Potongan Bayar Supplier / Kas Keluar (-Rp {Math.round(tutupResult.handoverSummary.totalCashOut).toLocaleString('id-ID')}):
+                      </div>
+                      {tutupResult.handoverSummary.potonganSupplier.map((p, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#334155' }}>
+                          <span>• {p.notes}</span>
+                          <span>-Rp {Math.round(p.amount).toLocaleString('id-ID')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    borderTop: '1.5px solid #0f172a',
+                    paddingTop: 6,
+                    marginTop: 2,
+                    fontSize: '0.86rem',
+                    fontWeight: 800,
+                    color: '#15803d',
+                  }}>
+                    <span>Sisa Cash di Kotak Uang</span>
+                    <span>
+                      {tutupResult.handoverSummary.sisaCashKotakUang !== null
+                        ? `Rp ${Math.round(tutupResult.handoverSummary.sisaCashKotakUang).toLocaleString('id-ID')}`
+                        : 'Belum diisi'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const h = tutupResult.handoverSummary!;
+                      const tgl = new Date().toLocaleDateString('id-ID', { timeZone: 'Asia/Jakarta', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+                      const lines = [
+                        `SERAH TERIMA KAS SHIFT - WIRAMART UNPERBA`,
+                        `Tanggal: ${tgl}`,
+                        `Kasir: ${h.kasirName}${h.earlyCloseReason === 'KULIAH' ? ' (Tutup Awal Resmi - Mata Kuliah)' : ''}`,
+                        `Jumlah Transaksi: ${tutupResult.txCount} struk`,
+                        `Modal Awal Kotak: Rp ${Math.round(h.modalAwal).toLocaleString('id-ID')}`,
+                        `Cash Masuk: Rp ${Math.round(h.cashMasuk).toLocaleString('id-ID')}`,
+                        `QRIS Masuk: Rp ${Math.round(h.qrisMasuk).toLocaleString('id-ID')}`,
+                        `Total Penjualan: Rp ${Math.round(h.totalPenjualan).toLocaleString('id-ID')}`,
+                        ...(h.potonganSupplier.length > 0
+                          ? [
+                              `Potongan Bayar Supplier / Kas Keluar:`,
+                              ...h.potonganSupplier.map((p) => `- ${p.notes}: Rp ${Math.round(p.amount).toLocaleString('id-ID')}`),
+                            ]
+                          : ['Potongan Bayar Supplier: Rp 0']),
+                        `Sisa Cash Fisik di Kotak Uang: ${h.sisaCashKotakUang !== null ? `Rp ${Math.round(h.sisaCashKotakUang).toLocaleString('id-ID')}` : '-'}`,
+                        `(Lampirkan foto bukti QRIS di grup khusus karyawan)`,
+                      ];
+                      try {
+                        await navigator.clipboard.writeText(lines.join('\n'));
+                        setHandoverCopied(true);
+                      } catch {
+                        alert('Gagal menyalin teks serah terima.');
+                      }
+                    }}
+                    className="btn btn-secondary"
+                    style={{ minHeight: 40, marginTop: 4, fontSize: '0.78rem', fontWeight: 700 }}
+                  >
+                    {handoverCopied ? 'Laporan Serah Terima WA Tersalin' : 'Salin Laporan Serah Terima WA (Grup Karyawan)'}
+                  </button>
                 </div>
-                Sesi shift telah ditutup. Seluruh data transaksi tersimpan aman di server untuk rekapitulasi berkala Manajer.
-              </div>
+              )}
 
-              {/* Instruksi Blind Count — D2 Fix: angka expected TIDAK ditampilkan ke kasir */}
-              <div style={{
-                padding: 'var(--space-3)',
-                background: 'var(--color-warning-light, #fffbeb)',
-                border: '1.5px solid var(--color-warning, #f59e0b)',
-                borderRadius: 'var(--radius-md)',
-                textAlign: 'center',
-              }}>
-                <div style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-warning, #92400e)', marginBottom: 4 }}>
-                  ⚠️ Hitung Uang di Laci
-                </div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-                  Hitung uang secara fisik, lalu laporkan jumlahnya ke Manajer.
-                  Jangan cocokkan dengan angka di sistem.
-                </div>
-              </div>
               <button
                 onClick={() => { setTutupResult(null); handleLogout(); }}
                 className="btn btn-primary"
