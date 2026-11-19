@@ -3844,9 +3844,212 @@ button:not(:disabled):not(.no-tactile):active,
   .lp-mobile-nav {
     display: none !important;
   }
+  .lp-header__mobile-actions {
+    display: none !important;
+  }
   /* Desktop: no extra footer padding for mobile nav */
   .lp-footer {
     padding-bottom: var(--space-8);
   }
 }
+
+/* ── LANDING PAGE PWA DOWNLOAD & BUYER ORDER BUTTONS ───────── */
+.lp-header__mobile-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lp-mobile-install-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, hsl(40, 96%, 52%), hsl(32, 95%, 44%));
+  color: hsl(145, 75%, 10%);
+  border: none;
+  font-size: 11.5px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(234, 179, 8, 0.32);
+}
+
+.lp-mobile-order-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.lp-hero__cta-pwa {
+  background: linear-gradient(135deg, hsl(42, 96%, 54%), hsl(34, 95%, 46%));
+  color: hsl(145, 80%, 10%);
+  border: 1.5px solid hsla(45, 100%, 82%, 0.65);
+  font-weight: 800;
+  box-shadow: 0 8px 28px hsla(40, 96%, 50%, 0.42);
+}
+
+.lp-hero__cta-pwa:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 32px hsla(40, 96%, 50%, 0.55);
+}
+
+.lp-hero__cta-order {
+  background: linear-gradient(135deg, hsl(145, 65%, 30%), hsl(145, 70%, 22%));
+  color: #ffffff;
+  border: 1.5px solid hsla(145, 70%, 65%, 0.45);
+  font-weight: 700;
+  box-shadow: 0 6px 24px hsla(145, 63%, 28%, 0.45);
+}
+
+.lp-hero__cta-order:hover {
+  transform: translateY(-2px);
+}
+
+.lp-pwa-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(8, 28, 16, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.lp-pwa-modal-card {
+  width: 100%;
+  max-width: 420px;
+  background: #ffffff;
+  color: hsl(145, 35%, 14%);
+  border-radius: 22px;
+  padding: 20px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.38);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+
+.lp-pwa-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.lp-pwa-modal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: hsl(145, 50%, 93%);
+  color: hsl(145, 70%, 24%);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.lp-pwa-modal-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid hsl(145, 20%, 86%);
+  background: hsl(145, 25%, 96%);
+  color: hsl(145, 35%, 18%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.lp-pwa-modal-title {
+  font-size: 18px;
+  font-weight: 800;
+  margin: 0 0 6px 0;
+  line-height: 1.25;
+}
+
+.lp-pwa-modal-desc {
+  font-size: 12.5px;
+  color: hsl(145, 15%, 38%);
+  margin: 0 0 14px 0;
+  line-height: 1.45;
+}
+
+.lp-pwa-modal-primary-btn {
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, hsl(145, 65%, 28%), hsl(145, 70%, 20%));
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  box-shadow: 0 6px 18px rgba(27, 122, 66, 0.25);
+}
+
+.lp-pwa-modal-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.lp-pwa-modal-step-box {
+  background: hsl(145, 25%, 97%);
+  border: 1px solid hsl(145, 25%, 86%);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.lp-pwa-modal-step-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 800;
+  color: hsl(145, 70%, 22%);
+  margin-bottom: 6px;
+}
+
+.lp-pwa-modal-step-box ol {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  line-height: 1.42;
+}
+
+.lp-pwa-modal-copy-btn {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: hsl(145, 45%, 93%);
+  color: hsl(145, 70%, 22%);
+  border: 1px solid hsl(145, 45%, 78%);
+  font-size: 12.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
 

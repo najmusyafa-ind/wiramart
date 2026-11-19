@@ -26,7 +26,46 @@ import {
   MapPin,
   Phone,
   Star,
+  Download,
+  Smartphone,
+  CheckCircle2,
+  X,
+  Copy,
 } from 'lucide-react';
+
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: string[];
+  readonly userChoice: Promise<{
+    outcome: 'accepted' | 'dismissed';
+    platform: string;
+  }>;
+  prompt(): Promise<void>;
+}
+
+let landingDeferredPrompt: BeforeInstallPromptEvent | null = null;
+let landingSwInitialized = false;
+
+function ensureLandingPwaInit(onUpdate?: () => void) {
+  if (typeof window === 'undefined') return;
+  if (!landingSwInitialized) {
+    landingSwInitialized = true;
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => undefined);
+    }
+    window.addEventListener('beforeinstallprompt', (e: Event) => {
+      e.preventDefault();
+      landingDeferredPrompt = e as BeforeInstallPromptEvent;
+      window.dispatchEvent(new Event('wiramart-lp-pwa-ready'));
+    });
+    window.addEventListener('appinstalled', () => {
+      landingDeferredPrompt = null;
+      window.dispatchEvent(new Event('wiramart-lp-pwa-ready'));
+    });
+  }
+  if (onUpdate) {
+    onUpdate();
+  }
+}
 
 /* ── TYPE DEFINITIONS ───────────────────────────────────────── */
 interface DivisionItem {
@@ -183,12 +222,51 @@ const STATS = [
 /* ── COMPONENT ──────────────────────────────────────────────── */
 export default function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
+  const [hasInstallPrompt, setHasInstallPrompt] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [copiedToast, setCopiedToast] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 60);
     window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
+
+    const syncPrompt = () => setHasInstallPrompt(landingDeferredPrompt !== null);
+    ensureLandingPwaInit(syncPrompt);
+    window.addEventListener('wiramart-lp-pwa-ready', syncPrompt);
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('wiramart-lp-pwa-ready', syncPrompt);
+    };
   }, []);
+
+  const handleInstallPwa = async () => {
+    if (landingDeferredPrompt) {
+      try {
+        await landingDeferredPrompt.prompt();
+        const choice = await landingDeferredPrompt.userChoice;
+        if (choice.outcome === 'accepted') {
+          landingDeferredPrompt = null;
+          setHasInstallPrompt(false);
+        }
+        return;
+      } catch {
+        // fallback ke modal panduan
+      }
+    }
+    setShowInstallModal(true);
+  };
+
+  const handleCopyAppUrl = async () => {
+    try {
+      const url = typeof window !== 'undefined' ? `${window.location.origin}/order` : 'https://wiramart.vercel.app/order';
+      await navigator.clipboard.writeText(url);
+      setCopiedToast(true);
+      window.setTimeout(() => setCopiedToast(false), 2400);
+    } catch {
+      // ignore
+    }
+  };
 
   return (
     <div className="lp-root">
@@ -225,11 +303,37 @@ export default function LandingPage() {
             </div>
           </Link>
 
+          {/* Mobile Quick Actions (Selalu Tampil di HP di Kanan Header) */}
+          <div className="lp-header__mobile-actions">
+            <button
+              type="button"
+              onClick={handleInstallPwa}
+              className="lp-mobile-install-btn"
+              aria-label="Download dan Install Aplikasi Wiramart di HP"
+            >
+              <Download size={14} aria-hidden="true" />
+              <span>Download App</span>
+            </button>
+            <Link href="/order" className="lp-mobile-order-btn">
+              <ShoppingBag size={14} aria-hidden="true" />
+              <span>Belanja</span>
+            </Link>
+          </div>
+
           {/* Desktop Nav */}
           <nav className="lp-nav" aria-label="Navigasi utama">
             <Link href="#tentang" className="lp-nav__link">Tentang</Link>
             <Link href="#divisi" className="lp-nav__link">9 Divisi</Link>
             <Link href="#ekosistem" className="lp-nav__link">Ekosistem</Link>
+            <button
+              type="button"
+              onClick={handleInstallPwa}
+              className="btn btn-secondary btn-sm"
+              style={{ gap: 6 }}
+            >
+              <Download size={14} aria-hidden="true" />
+              <span>Download PWA</span>
+            </button>
             <Link href="/daftar" className="btn btn-secondary btn-sm">
               <Calendar size={15} aria-hidden="true" />
               <span>Daftar Shift</span>
@@ -296,6 +400,23 @@ export default function LandingPage() {
 
             {/* CTA Buttons */}
             <div className="lp-hero__ctas">
+              <button
+                type="button"
+                onClick={handleInstallPwa}
+                className="btn btn-lg lp-hero__cta-pwa"
+              >
+                <Download size={20} aria-hidden="true" />
+                <span>
+                  {hasInstallPrompt
+                    ? 'Download & Install Aplikasi Wiramart (PWA)'
+                    : 'Download Aplikasi Wiramart di HP (PWA)'}
+                </span>
+              </button>
+              <Link href="/order" className="btn btn-lg lp-hero__cta-order">
+                <ShoppingBag size={19} aria-hidden="true" />
+                <span>Buka Aplikasi Pesan Antar (Buyer)</span>
+                <ArrowRight size={18} aria-hidden="true" />
+              </Link>
               <Link href="/kasir/login" prefetch={false} className="btn btn-primary btn-lg lp-hero__cta-primary" suppressHydrationWarning>
                 <Store size={20} aria-hidden="true" />
                 <span>Masuk Terminal Kasir POS</span>
@@ -610,6 +731,87 @@ export default function LandingPage() {
           </div>
         </div>
       </footer>
+
+      {/* ── MODAL PANDUAN DOWNLOAD & INSTALL PWA DI HP ───────── */}
+      {showInstallModal && (
+        <div
+          className="lp-pwa-modal-backdrop"
+          onClick={() => setShowInstallModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="lp-pwa-modal-title"
+        >
+          <div className="lp-pwa-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="lp-pwa-modal-header">
+              <div className="lp-pwa-modal-badge">
+                <Smartphone size={15} />
+                <span>INSTAL APLIKASI WIRAMART DI HP</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInstallModal(false)}
+                className="lp-pwa-modal-close"
+                aria-label="Tutup panduan download aplikasi"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <h3 id="lp-pwa-modal-title" className="lp-pwa-modal-title">
+              Download &amp; Pasang Aplikasi Wiramart
+            </h3>
+            <p className="lp-pwa-modal-desc">
+              Pasang aplikasi pesan antar Wiramart ke layar utama HP Anda agar bisa dibuka langsung dengan layar sambutan penuh seperti aplikasi native.
+            </p>
+
+            <Link
+              href="/order"
+              onClick={() => setShowInstallModal(false)}
+              className="lp-pwa-modal-primary-btn"
+            >
+              <ShoppingBag size={18} />
+              <span>Buka Aplikasi Pesan Antar (/order) Sekarang</span>
+              <ArrowRight size={17} />
+            </Link>
+
+            <div className="lp-pwa-modal-steps">
+              <div className="lp-pwa-modal-step-box">
+                <div className="lp-pwa-modal-step-heading">
+                  <CheckCircle2 size={16} />
+                  <span>Jika Membuka dari WhatsApp / Chrome Android:</span>
+                </div>
+                <ol>
+                  <li>Ketuk ikon <strong>Titik Tiga (⋮)</strong> di pojok kanan atas layar HP Anda.</li>
+                  <li>Jika masih di dalam WhatsApp, pilih <strong>&ldquo;Buka di Chrome&rdquo;</strong> terlebih dahulu.</li>
+                  <li>Di menu titik tiga (⋮) Chrome, ketuk <strong>&ldquo;Instal aplikasi&rdquo; (Install app)</strong> atau <strong>&ldquo;Tambahkan ke Layar Utama&rdquo;</strong>.</li>
+                </ol>
+              </div>
+
+              <div className="lp-pwa-modal-step-box">
+                <div className="lp-pwa-modal-step-heading">
+                  <CheckCircle2 size={16} />
+                  <span>Jika Menggunakan iPhone (Safari):</span>
+                </div>
+                <ol>
+                  <li>Buka di browser <strong>Safari</strong>, lalu ketuk ikon <strong>Bagikan (Share)</strong> di bawah layar.</li>
+                  <li>Pilih <strong>&ldquo;Tambahkan ke Layar Utama&rdquo; (Add to Home Screen)</strong>.</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="lp-pwa-modal-actions">
+              <button
+                type="button"
+                onClick={handleCopyAppUrl}
+                className="lp-pwa-modal-copy-btn"
+              >
+                <Copy size={15} />
+                <span>{copiedToast ? 'Link Aplikasi (/order) Tersalin!' : 'Salin Link Aplikasi untuk Dibuka di Chrome'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
