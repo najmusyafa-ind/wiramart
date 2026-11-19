@@ -7,12 +7,14 @@
 
 import React, { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { ShoppingBag, Search, X, User, Footprints, ArrowRight } from 'lucide-react';
+import Image from 'next/image';
+import { ShoppingBag, Search, X, User, Footprints, ArrowRight, Sparkles } from 'lucide-react';
 import { useCart } from '@/features/order/cart.context';
 
 interface KatalogHeaderProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  onOpenWelcome?: () => void;
 }
 
 const BANNER_KEY = 'wiramart_banner_dismissed_v1';
@@ -39,7 +41,11 @@ function getBannerSnapshot(): boolean {
   }
 }
 
-export default function KatalogHeader({ searchQuery, onSearchChange }: KatalogHeaderProps) {
+export default function KatalogHeader({
+  searchQuery,
+  onSearchChange,
+  onOpenWelcome,
+}: KatalogHeaderProps) {
   const { buyer, isLoadingBuyer } = useCart();
   const [dismissedInSession, setDismissedInSession] = useState(false);
   const storedBannerVisible = useSyncExternalStore(subscribeBanner, getBannerSnapshot, () => false);
@@ -71,7 +77,19 @@ export default function KatalogHeader({ searchQuery, onSearchChange }: KatalogHe
           </div>
         </Link>
 
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {onOpenWelcome && (
+            <button
+              type="button"
+              onClick={onOpenWelcome}
+              className="pwa-welcome-trigger"
+              title="Tampilkan layar sambutan Wiramart"
+              aria-label="Sambutan Wiramart"
+            >
+              <Sparkles size={13} />
+              <span>Sambutan</span>
+            </button>
+          )}
           {isLoadingBuyer ? (
             <div style={{ width: 80, height: 28, background: 'var(--pwa-surface-muted)', borderRadius: 999 }} />
           ) : buyer ? (
@@ -88,15 +106,28 @@ export default function KatalogHeader({ searchQuery, onSearchChange }: KatalogHe
         </div>
       </div>
 
-      {/* Campus Reality Banner — dismissible */}
+      {/* Campus Hero Showcase Banner — dismissible */}
       {bannerVisible && (
-        <div className="pwa-campus-banner">
+        <div className="pwa-campus-banner pwa-campus-banner--hero">
+          <div className="pwa-campus-banner-bg" aria-hidden="true">
+            <Image
+              src="/wiramart_showcase.jpg"
+              alt=""
+              fill
+              sizes="480px"
+              style={{ objectFit: 'cover', opacity: 0.22 }}
+            />
+          </div>
           <div className="pwa-campus-banner-icon">
             <Footprints size={18} />
           </div>
           <div className="pwa-campus-banner-content">
-            <strong>Layanan Antar Sampai Kelas</strong>
-            Gedung tanpa lift? Runner kami antarkan pesanan naik tangga ke Lantai 2, 3, 4 &amp; Auditorium.
+            <div className="pwa-hero-pill-tag">
+              <Sparkles size={11} />
+              <span>RUNNER KAMPUS SIAP ANTAR</span>
+            </div>
+            <strong>Pesan dari Kelas, Diantar Naik Tangga!</strong>
+            <span>Lt. 1 Ambil Gratis &bull; Lt. 2 Rp 1.000 &bull; Lt. 3, 4 &amp; Aud Rp 2.000</span>
           </div>
           <button
             type="button"

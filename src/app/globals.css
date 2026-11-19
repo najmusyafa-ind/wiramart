@@ -309,8 +309,28 @@ p, h1, h2, h3, h4, h5, h6 {
   -webkit-tap-highlight-color: transparent;
 }
 
-.btn:active {
-  transform: scale(0.97);
+.btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.95) translateY(0);
+}
+
+/* Global Tactile Micro-Interaction Engine untuk tombol & tab di seluruh Web Utama */
+button:not(:disabled):not(.no-tactile),
+[role="tab"]:not(:disabled) {
+  transition:
+    transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+button:not(:disabled):not(.no-tactile):active,
+[role="tab"]:not(:disabled):active {
+  transform: scale(0.95);
 }
 
 /* Primary Button */

@@ -378,23 +378,56 @@
 
 .pwa-card {
   background-color: var(--pwa-surface);
-  border-radius: var(--pwa-radius-lg);
-  border: 1px solid var(--pwa-border);
+  border-radius: 20px;
+  border: 1.5px solid var(--pwa-border);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: transform 0.2s var(--pwa-ease), box-shadow 0.2s var(--pwa-ease);
+  transition:
+    transform 0.28s var(--pwa-ease),
+    box-shadow 0.28s var(--pwa-ease),
+    border-color 0.28s var(--pwa-ease);
   position: relative;
+  animation: pwaCardEnter 0.42s var(--pwa-ease) both;
 }
 
 .pwa-card:hover {
-  box-shadow: var(--pwa-shadow-md);
+  transform: translateY(-4px);
+  box-shadow: var(--pwa-shadow-lg);
+  border-color: hsl(145, 45%, 72%);
+}
+
+.pwa-card--in-cart {
+  border-color: var(--pwa-primary);
+  box-shadow: 0 6px 18px rgba(27, 122, 66, 0.14);
+}
+
+.pwa-card--pop {
+  animation: pwaCartPop 0.42s var(--pwa-ease);
+}
+
+@keyframes pwaCardEnter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pwaCartPop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.04) translateY(-3px); }
+  70% { transform: scale(0.985); }
+  100% { transform: scale(1); }
 }
 
 .pwa-card-image-wrap {
   width: 100%;
-  aspect-ratio: 1 / 1;
-  background: linear-gradient(135deg, hsl(145, 20%, 96%), hsl(145, 15%, 92%));
+  aspect-ratio: 1 / 0.92;
+  background: linear-gradient(135deg, hsl(145, 28%, 95%), hsl(145, 22%, 89%));
   position: relative;
   overflow: hidden;
   display: flex;
@@ -402,25 +435,68 @@
   justify-content: center;
 }
 
+.pwa-card-image-wrap.pwa-visual-drink {
+  background: radial-gradient(circle at 30% 25%, hsl(172, 65%, 93%), hsl(152, 48%, 85%));
+}
+
+.pwa-card-image-wrap.pwa-visual-food {
+  background: radial-gradient(circle at 30% 25%, hsl(38, 92%, 93%), hsl(24, 78%, 86%));
+}
+
+.pwa-card-image-wrap.pwa-visual-snack {
+  background: radial-gradient(circle at 30% 25%, hsl(45, 95%, 93%), hsl(145, 45%, 87%));
+}
+
+.pwa-card-image-wrap.pwa-visual-general {
+  background: radial-gradient(circle at 30% 25%, hsl(145, 50%, 94%), hsl(160, 38%, 86%));
+}
+
 .pwa-card-image {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.3s var(--pwa-ease);
+  transition: transform 0.38s var(--pwa-ease);
 }
 
 .pwa-card:hover .pwa-card-image {
-  transform: scale(1.05);
+  transform: scale(1.07);
 }
 
 .pwa-card-fallback-icon {
-  color: hsl(145, 25%, 70%);
+  color: hsl(145, 45%, 28%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.pwa-card-fallback-orb {
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 20px rgba(15, 55, 30, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  transition: transform 0.32s var(--pwa-ease);
+}
+
+.pwa-visual-food .pwa-card-fallback-icon {
+  color: hsl(24, 75%, 34%);
+}
+
+.pwa-visual-drink .pwa-card-fallback-icon {
+  color: hsl(168, 72%, 26%);
+}
+
+.pwa-card:hover .pwa-card-fallback-orb {
+  transform: translateY(-4px) scale(1.08) rotate(-4deg);
 }
 
 .pwa-card-badge {
@@ -1283,6 +1359,630 @@ textarea.pwa-input { padding: 12px 14px; min-height: 76px; resize: vertical; }
 }
 .pwa-status-chip.ok  { background: var(--pwa-primary-light); color: var(--pwa-primary-text); }
 .pwa-status-chip.bad { background: hsl(0, 85%, 96%); color: hsl(0, 65%, 35%); }
+
+/* ── Welcome Splash Screen (Onboarding PWA) & Hero Additions ── */
+
+.pwa-welcome-trigger {
+  min-height: 34px;
+  padding: 6px 11px;
+  border-radius: var(--pwa-radius-full);
+  background: var(--pwa-accent-light);
+  color: var(--pwa-accent-text);
+  border: 1px solid hsla(40, 90%, 45%, 0.35);
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: transform 0.2s var(--pwa-ease), background-color 0.2s var(--pwa-ease), box-shadow 0.2s var(--pwa-ease);
+}
+
+.pwa-welcome-trigger:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px hsla(40, 90%, 45%, 0.22);
+}
+
+.pwa-welcome-trigger:active {
+  transform: scale(0.93);
+}
+
+.pwa-campus-banner--hero {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 8px 22px rgba(15, 55, 30, 0.22);
+}
+
+.pwa-campus-banner-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pwa-hero-pill-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--pwa-radius-full);
+  background: rgba(255, 255, 255, 0.18);
+  color: hsl(45, 100%, 78%);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.pwa-refresh-btn {
+  background: var(--pwa-primary-subtle);
+  border: 1px solid var(--pwa-border);
+  border-radius: var(--pwa-radius-full);
+  padding: 5px 11px;
+  color: var(--pwa-primary);
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: transform 0.18s var(--pwa-ease), background-color 0.18s var(--pwa-ease);
+}
+
+.pwa-refresh-btn:hover:not(:disabled) {
+  background: var(--pwa-primary-light);
+  transform: translateY(-1px);
+}
+
+.pwa-refresh-btn:active:not(:disabled) {
+  transform: scale(0.93);
+}
+
+.pwa-qty-bounce {
+  animation: pwaQtyPop 0.35s var(--pwa-ease);
+}
+
+@keyframes pwaQtyPop {
+  0% { transform: scale(0.6); }
+  50% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
+/* ── Native PWA Launch Splash Screen (Gaya Kasir.in Frame 00:03 — Enhanced & Longer) ── */
+
+.pwa-native-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: radial-gradient(circle at 50% 35%, hsl(145, 65%, 33%) 0%, hsl(145, 72%, 22%) 55%, hsl(148, 78%, 14%) 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(36px, env(safe-area-inset-top, 36px)) 24px calc(36px + env(safe-area-inset-bottom, 0px)) 24px;
+  user-select: none;
+  cursor: pointer;
+  overflow: hidden;
+  transition: opacity 0.34s var(--pwa-ease);
+}
+
+.pwa-native-splash--closing {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pwa-native-splash--closing .pwa-native-splash__center,
+.pwa-native-splash--closing .pwa-native-splash__top-pill,
+.pwa-native-splash--closing .pwa-native-splash__footer {
+  transform: scale(0.96) translateY(-6px);
+  transition: transform 0.34s var(--pwa-ease);
+}
+
+.pwa-splash-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(48px);
+  pointer-events: none;
+  opacity: 0.45;
+  animation: pwaOrbFloat 4s ease-in-out infinite alternate;
+}
+
+.pwa-splash-orb--top {
+  width: 260px;
+  height: 260px;
+  top: -60px;
+  right: -60px;
+  background: hsla(45, 96%, 58%, 0.45);
+}
+
+.pwa-splash-orb--bottom {
+  width: 280px;
+  height: 280px;
+  bottom: -80px;
+  left: -70px;
+  background: hsla(160, 85%, 45%, 0.45);
+  animation-delay: 1s;
+}
+
+@keyframes pwaOrbFloat {
+  from { transform: translate(0, 0) scale(1); }
+  to { transform: translate(12px, -16px) scale(1.12); }
+}
+
+.pwa-native-splash__top-pill {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--pwa-radius-full);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(8px);
+  color: hsl(45, 100%, 82%);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  animation: pwaSplashTextIn 0.55s var(--pwa-ease) both;
+}
+
+.pwa-native-splash__center {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.pwa-native-splash__ring-wrap {
+  position: relative;
+  width: 112px;
+  height: 112px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pwa-native-splash__pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 30px;
+  border: 2px solid rgba(255, 255, 255, 0.38);
+  animation: pwaSplashRipple 2.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.pwa-native-splash__pulse-ring--2 {
+  animation-delay: 0.75s;
+}
+
+@keyframes pwaSplashRipple {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+.pwa-native-splash__icon-box {
+  position: relative;
+  z-index: 2;
+  width: 104px;
+  height: 104px;
+  border-radius: 26px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    0 22px 48px rgba(4, 24, 12, 0.42),
+    0 0 0 6px rgba(255, 255, 255, 0.18);
+  animation: pwaSplashIconPop 0.7s var(--pwa-ease) both;
+}
+
+@keyframes pwaSplashIconPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.6) translateY(16px);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.06) translateY(-3px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.pwa-native-splash__brand-block {
+  text-align: center;
+  max-width: 300px;
+  animation: pwaSplashTextIn 0.6s 0.18s var(--pwa-ease) both;
+}
+
+.pwa-native-splash__title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #ffffff;
+  margin-bottom: 6px;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.22);
+}
+
+.pwa-native-splash__tagline {
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.pwa-native-splash__footer {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 260px;
+  text-align: center;
+  color: #ffffff;
+  animation: pwaSplashTextIn 0.6s 0.28s var(--pwa-ease) both;
+}
+
+.pwa-native-splash__progress-track {
+  width: 100%;
+  height: 6px;
+  border-radius: var(--pwa-radius-full);
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.pwa-native-splash__progress-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: var(--pwa-radius-full);
+  background: linear-gradient(90deg, hsl(45, 98%, 60%), #ffffff, hsl(145, 80%, 72%));
+  transform-origin: left center;
+  animation: pwaSplashProgress 2.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes pwaSplashProgress {
+  0% { transform: scaleX(0.06); }
+  45% { transform: scaleX(0.58); }
+  80% { transform: scaleX(0.88); }
+  100% { transform: scaleX(1); }
+}
+
+@keyframes pwaSplashTextIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pwa-native-splash__sub {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.pwa-welcome-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  background: rgba(10, 30, 18, 0.68);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: pwaFadeIn 0.28s var(--pwa-ease) both;
+  transition: opacity 0.26s var(--pwa-ease);
+}
+
+.pwa-welcome-overlay--closing {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pwa-welcome-overlay--closing .pwa-welcome-card {
+  transform: translateY(14px) scale(0.95);
+  opacity: 0;
+  transition:
+    transform 0.26s var(--pwa-ease),
+    opacity 0.26s var(--pwa-ease);
+}
+
+.pwa-welcome-card {
+  width: 100%;
+  max-width: 420px;
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: var(--pwa-surface);
+  border-radius: 26px;
+  box-shadow: 0 24px 60px rgba(5, 25, 12, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  animation: pwaWelcomeCardIn 0.48s var(--pwa-ease) both;
+}
+
+.pwa-welcome-card::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+@keyframes pwaWelcomeCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.pwa-welcome-hero {
+  position: relative;
+  height: 175px;
+  background: linear-gradient(135deg, hsl(145, 65%, 24%), hsl(145, 70%, 14%));
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.pwa-welcome-hero-gradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(10, 38, 20, 0.35) 0%,
+    rgba(10, 42, 22, 0.78) 75%,
+    var(--pwa-surface) 100%
+  );
+}
+
+.pwa-welcome-floating-badge {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 5px 12px;
+  border-radius: var(--pwa-radius-full);
+  background: rgba(15, 45, 25, 0.72);
+  backdrop-filter: blur(8px);
+  color: hsl(45, 100%, 82%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  z-index: 2;
+}
+
+.pwa-welcome-logo-orb {
+  position: relative;
+  z-index: 2;
+  width: 74px;
+  height: 74px;
+  border-radius: 22px;
+  background: var(--pwa-surface);
+  box-shadow: 0 10px 28px rgba(15, 55, 30, 0.24), 0 0 0 5px rgba(27, 122, 66, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: -10px;
+  animation: pwaLogoFloat 3s ease-in-out infinite;
+}
+
+@keyframes pwaLogoFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.pwa-welcome-body {
+  padding: 22px 20px 20px 20px;
+  text-align: center;
+}
+
+.pwa-welcome-greeting {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: var(--pwa-radius-full);
+  background: var(--pwa-primary-light);
+  color: var(--pwa-primary-text);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.pwa-welcome-title {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--pwa-text-main);
+  margin: 0 0 8px 0;
+  letter-spacing: -0.02em;
+}
+
+.pwa-welcome-highlight {
+  color: var(--pwa-primary);
+}
+
+.pwa-welcome-desc {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--pwa-text-muted);
+  margin: 0 0 16px 0;
+}
+
+.pwa-welcome-features {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  margin-bottom: 18px;
+}
+
+.pwa-welcome-feature-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--pwa-bg);
+  border: 1px solid var(--pwa-border);
+  transition: transform 0.2s var(--pwa-ease), border-color 0.2s var(--pwa-ease);
+}
+
+.pwa-welcome-feature-item:hover {
+  transform: translateX(3px);
+  border-color: var(--pwa-primary);
+}
+
+.pwa-welcome-feature-item strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--pwa-text-main);
+  margin-bottom: 2px;
+}
+
+.pwa-welcome-feature-item span {
+  display: block;
+  font-size: 11.5px;
+  color: var(--pwa-text-muted);
+}
+
+.pwa-welcome-feature-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pwa-welcome-feature-icon--green {
+  background: var(--pwa-primary-light);
+  color: var(--pwa-primary);
+}
+
+.pwa-welcome-feature-icon--amber {
+  background: var(--pwa-accent-light);
+  color: var(--pwa-accent-text);
+}
+
+.pwa-welcome-feature-icon--blue {
+  background: hsl(210, 85%, 94%);
+  color: hsl(215, 75%, 42%);
+}
+
+.pwa-welcome-cta {
+  width: 100%;
+  min-height: 50px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--pwa-primary), hsl(145, 68%, 24%));
+  color: var(--pwa-text-inverse);
+  font-size: 15px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(27, 122, 66, 0.32);
+  transition: transform 0.2s var(--pwa-ease), box-shadow 0.2s var(--pwa-ease), filter 0.2s var(--pwa-ease);
+}
+
+.pwa-welcome-cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px rgba(27, 122, 66, 0.4);
+  filter: brightness(1.05);
+}
+
+.pwa-welcome-cta:active {
+  transform: scale(0.96);
+}
+
+.pwa-welcome-cta-arrow {
+  transition: transform 0.22s var(--pwa-ease);
+}
+
+.pwa-welcome-cta:hover .pwa-welcome-cta-arrow {
+  transform: translateX(4px);
+}
+
+/* ── Mobile HP Viewport & Touch Safeguards (320px–430px & Short Screens) ── */
+@media (max-height: 720px) {
+  .pwa-welcome-hero {
+    height: 132px;
+  }
+  .pwa-welcome-logo-orb {
+    width: 62px;
+    height: 62px;
+    border-radius: 18px;
+  }
+  .pwa-welcome-body {
+    padding: 16px 16px 16px 16px;
+  }
+  .pwa-welcome-title {
+    font-size: 18px;
+    margin-bottom: 6px;
+  }
+  .pwa-welcome-desc {
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+  .pwa-welcome-features {
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .pwa-welcome-feature-item {
+    padding: 8px 10px;
+  }
+}
+
+@media (max-width: 380px) {
+  .pwa-welcome-trigger {
+    padding: 6px 9px;
+  }
+  .pwa-welcome-trigger span {
+    display: none;
+  }
+  .pwa-welcome-floating-badge {
+    font-size: 9.5px;
+    padding: 4px 9px;
+  }
+  .pwa-welcome-title {
+    font-size: 17.5px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .pwa-card:hover {
+    transform: none;
+  }
+  .pwa-card:active {
+    transform: scale(0.98);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .pwa-floating-bar, .pwa-drawer-panel, .pwa-drawer-backdrop { animation: none; }

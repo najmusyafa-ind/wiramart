@@ -5,23 +5,158 @@
 // Client view interaktif untuk search, filter kategori & grid produk.
 // =============================================================
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useSyncExternalStore } from 'react';
+import Image from 'next/image';
 import type { KatalogItem } from '@/features/order/katalog.service';
 import KatalogHeader from './components/KatalogHeader';
 import CategoryBar, { type CategoryInfo } from './components/CategoryBar';
 import ProductCard from './components/ProductCard';
 import CartFloatingBar from './components/CartFloatingBar';
-import { SearchX, RefreshCw } from 'lucide-react';
+import {
+  SearchX,
+  RefreshCw,
+  Sparkles,
+  Footprints,
+  ShieldCheck,
+  Store,
+  ArrowRight,
+} from 'lucide-react';
 
 interface KatalogClientProps {
   initialItems: KatalogItem[];
 }
+
+const WELCOME_SEEN_KEY = 'wiramart_pwa_intro_seen_v3';
+const INTRO_EVENT = 'wiramart-pwa-intro-seen-change';
+const SPLASH_DURATION_MS = 2700;
+
+// In-memory guard agar navigasi client-side (/order <-> /order/login <-> /order/profile) tidak pernah memicu ulang splash
+let hasPlayedIntroInRuntime = false;
+
+function subscribeIntroSeen(callback: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  window.addEventListener(INTRO_EVENT, callback);
+  return () => window.removeEventListener(INTRO_EVENT, callback);
+}
+
+function getIntroSeenSnapshot(): boolean {
+  if (hasPlayedIntroInRuntime) return true;
+  try {
+    return sessionStorage.getItem(WELCOME_SEEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markIntroAsSeen(): void {
+  hasPlayedIntroInRuntime = true;
+  try {
+    sessionStorage.setItem(WELCOME_SEEN_KEY, '1');
+    window.dispatchEvent(new Event(INTRO_EVENT));
+  } catch {
+    // ignore
+  }
+}
+
+function getTimeGreetingWib(): string {
+  const hour = new Date().getHours();
+  if (hour >= 4 && hour < 11) return 'Selamat Pagi';
+  if (hour >= 11 && hour < 15) return 'Selamat Siang';
+  if (hour >= 15 && hour < 18) return 'Selamat Sore';
+  return 'Selamat Malam';
+}
+
+const emptySubscribe = () => () => {};
+
+type IntroPhase = 'splash' | 'welcome' | 'closed';
 
 export default function KatalogClient({ initialItems }: KatalogClientProps) {
   const [items, setItems] = useState<KatalogItem[]>(initialItems);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('ALL');
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Mengecek apakah intro sudah pernah tampil di sesi tab ini (SSR default: true/closed agar tidak berkedip saat balik dari /order/login atau /order/profile)
+  const hasSeenIntro = useSyncExternalStore(subscribeIntroSeen, getIntroSeenSnapshot, () => true);
+
+  // manualPhase dipakai hanya saat pertama kali auto-run atau saat tombol "Sambutan" diklik manual
+  const [manualPhase, setManualPhase] = useState<IntroPhase | null>(null);
+  const [isTransitioningSplash, setIsTransitioningSplash] = useState(false);
+  const [isClosingWelcome, setIsClosingWelcome] = useState(false);
+
+  const greeting = useSyncExternalStore(emptySubscribe, getTimeGreetingWib, () => 'Selamat Datang');
+  const introPhase: IntroPhase = manualPhase ?? (hasSeenIntro ? 'closed' : 'splash');
+
+  useEffect(() => {
+    if (introPhase !== 'splash') return;
+
+    // Begitu splash mulai berjalan pertama kali, langsung kunci sesi agar saat pindah ke /order/login atau /order/profile lalu kembali ke /order TIDAK muncul splash lagi
+    const fadeTimer = window.setTimeout(() => {
+      setIsTransitioningSplash(true);
+    }, SPLASH_DURATION_MS - 340);
+
+    const nextTimer = window.setTimeout(() => {
+      markIntroAsSeen();
+      setIsTransitioningSplash(false);
+      setManualPhase('welcome');
+    }, SPLASH_DURATION_MS);
+
+    return () => {
+      markIntroAsSeen();
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(nextTimer);
+    };
+  }, [introPhase]);
+
+  const handleSkipSplashToWelcome = () => {
+    setManualPhase('splash');
+    markIntroAsSeen();
+    setIsTransitioningSplash(true);
+    window.setTimeout(() => {
+      setIsTransitioningSplash(false);
+      setManualPhase('welcome');
+    }, 260);
+  };
+
+  const handleCloseWelcome = () => {
+    markIntroAsSeen();
+    setIsClosingWelcome(true);
+    window.setTimeout(() => {
+      setManualPhase('closed');
+      setIsClosingWelcome(false);
+    }, 280);
+  };
+
+  useEffect(() => {
+    if (introPhase === 'closed') return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && introPhase === 'welcome') {
+        markIntroAsSeen();
+        setIsClosingWelcome(true);
+        window.setTimeout(() => {
+          setManualPhase('closed');
+          setIsClosingWelcome(false);
+        }, 280);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [introPhase]);
+
+  // Tombol "Sambutan" di header: putar ulang rangkaian lengkap (Fullscreen Splash -> Kartu Sambutan), tetapi tetap terkunci di sessionStorage agar navigasi ke halaman lain tidak mengulanginya lagi
+  const handleReplayFullIntro = () => {
+    markIntroAsSeen();
+    setIsClosingWelcome(false);
+    setIsTransitioningSplash(false);
+    setManualPhase('splash');
+  };
 
   // Dynamic Categories from available products
   const categories: CategoryInfo[] = useMemo(() => {
@@ -79,8 +214,164 @@ export default function KatalogClient({ initialItems }: KatalogClientProps) {
 
   return (
     <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {/* TAHAP 1: Fullscreen Animated Launch Splash (~2.7 detik) */}
+      {introPhase === 'splash' && (
+        <div
+          className={`pwa-native-splash${isTransitioningSplash ? ' pwa-native-splash--closing' : ''}`}
+          onClick={handleSkipSplashToWelcome}
+          role="status"
+          aria-live="polite"
+          aria-label="Memuat Wiramart Campus Delivery"
+        >
+          {/* Ambient Glow Orbs */}
+          <div className="pwa-splash-orb pwa-splash-orb--top" aria-hidden="true" />
+          <div className="pwa-splash-orb pwa-splash-orb--bottom" aria-hidden="true" />
+
+          {/* Top Official Pill */}
+          <div className="pwa-native-splash__top-pill">
+            <Sparkles size={13} />
+            <span>OFFICIAL CAMPUS DELIVERY &bull; UNPERBA</span>
+          </div>
+
+          {/* Center Animated Logo & Ripple Rings */}
+          <div className="pwa-native-splash__center">
+            <div className="pwa-native-splash__ring-wrap">
+              <span className="pwa-native-splash__pulse-ring pwa-native-splash__pulse-ring--1" aria-hidden="true" />
+              <span className="pwa-native-splash__pulse-ring pwa-native-splash__pulse-ring--2" aria-hidden="true" />
+              <div className="pwa-native-splash__icon-box">
+                <Image
+                  src="/logo.png"
+                  alt="Logo Wiramart UNPERBA"
+                  width={74}
+                  height={74}
+                  priority
+                  style={{ objectFit: 'contain' }}
+                />
+              </div>
+            </div>
+
+            <div className="pwa-native-splash__brand-block">
+              <div className="pwa-native-splash__title">WIRAMART UNPERBA</div>
+              <div className="pwa-native-splash__tagline">
+                Pesan Antar Makanan, Minuman &amp; Jajanan Sampai Kelas
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Animated Progress Bar & Footer */}
+          <div className="pwa-native-splash__footer">
+            <div className="pwa-native-splash__progress-track" aria-hidden="true">
+              <div className="pwa-native-splash__progress-fill" />
+            </div>
+            <div className="pwa-native-splash__sub">
+              Menghubungkan Katalog Realtime ({items.length} Produk Aktif)...
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAHAP 2: Kartu Sambutan Interaktif (Muncul Otomatis Setelah Splash Selesai) */}
+      {introPhase === 'welcome' && (
+        <div
+          className={`pwa-welcome-overlay${isClosingWelcome ? ' pwa-welcome-overlay--closing' : ''}`}
+          onClick={handleCloseWelcome}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pwa-welcome-title"
+        >
+          <div className="pwa-welcome-card" onClick={(e) => e.stopPropagation()}>
+            {/* Hero Visual Header */}
+            <div className="pwa-welcome-hero">
+              <Image
+                src="/unperba_campus.jpg"
+                alt="Kampus Universitas Perwira Purbalingga (UNPERBA)"
+                fill
+                sizes="440px"
+                style={{ objectFit: 'cover' }}
+                priority
+              />
+              <div className="pwa-welcome-hero-gradient" />
+
+              <div className="pwa-welcome-floating-badge">
+                <Sparkles size={13} />
+                <span>RESMI &bull; UKM KEWIRAUSAHAAN UNPERBA</span>
+              </div>
+
+              <div className="pwa-welcome-logo-orb">
+                <Image
+                  src="/logo.png"
+                  alt="Logo Wiramart UNPERBA"
+                  width={54}
+                  height={54}
+                  style={{ objectFit: 'contain' }}
+                />
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="pwa-welcome-body">
+              <span className="pwa-welcome-greeting">{greeting}, Warga UNPERBA! 👋</span>
+              <h2 id="pwa-welcome-title" className="pwa-welcome-title">
+                Belanja Jajanan &amp; Minuman,{' '}
+                <span className="pwa-welcome-highlight">Diantar Sampai Kelas</span>
+              </h2>
+              <p className="pwa-welcome-desc">
+                Tidak perlu turun tangga saat jeda kuliah. Pilih menu favoritmu dari katalog
+                <strong> {items.length} produk</strong> Wiramart yang siap diantar Runner kami.
+              </p>
+
+              {/* 3 Interactive Feature Highlights */}
+              <div className="pwa-welcome-features">
+                <div className="pwa-welcome-feature-item">
+                  <div className="pwa-welcome-feature-icon pwa-welcome-feature-icon--green">
+                    <Footprints size={18} />
+                  </div>
+                  <div>
+                    <strong>Runner Antar ke Lantai 2, 3, 4 &amp; Auditorium</strong>
+                    <span>Ongkir hemat Rp 1.000 (Lt. 2) &bull; Rp 2.000 (Lt. 3–4 &amp; Aud)</span>
+                  </div>
+                </div>
+
+                <div className="pwa-welcome-feature-item">
+                  <div className="pwa-welcome-feature-icon pwa-welcome-feature-icon--amber">
+                    <Store size={18} />
+                  </div>
+                  <div>
+                    <strong>Ambil Sendiri di Store Lantai 1 (Gratis Rp 0)</strong>
+                    <span>Pesan dulu dari HP, tinggal ambil tanpa antre lama</span>
+                  </div>
+                </div>
+
+                <div className="pwa-welcome-feature-item">
+                  <div className="pwa-welcome-feature-icon pwa-welcome-feature-icon--blue">
+                    <ShieldCheck size={18} />
+                  </div>
+                  <div>
+                    <strong>Transaksi Aman dengan PIN Serah Terima 6-Digit</strong>
+                    <span>Bayar via QRIS / Transfer, barang tiba tepat di tanganmu</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCloseWelcome}
+                className="pwa-welcome-cta"
+              >
+                <span>Mulai Belanja Sekarang</span>
+                <ArrowRight size={18} className="pwa-welcome-cta-arrow" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sticky Header with Search */}
-      <KatalogHeader searchQuery={searchQuery} onSearchChange={setSearchQuery} />
+      <KatalogHeader
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onOpenWelcome={handleReplayFullIntro}
+      />
 
       {/* Categories Horizontal Scroll */}
       <CategoryBar
@@ -106,17 +397,7 @@ export default function KatalogClient({ initialItems }: KatalogClientProps) {
           type="button"
           onClick={handleRefresh}
           disabled={isRefreshing}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--pwa-primary)',
-            fontSize: 12,
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            cursor: 'pointer',
-          }}
+          className="pwa-refresh-btn"
           title="Segarkan data stok"
         >
           <RefreshCw
@@ -143,9 +424,9 @@ export default function KatalogClient({ initialItems }: KatalogClientProps) {
           </p>
         </div>
       ) : (
-        <div className="pwa-product-grid">
-          {filteredProducts.map((product) => (
-            <ProductCard key={product.id} product={product} />
+        <div className="pwa-product-grid" key={`${selectedCategoryId}-${searchQuery.slice(0, 12)}`}>
+          {filteredProducts.map((product, index) => (
+            <ProductCard key={product.id} product={product} index={index} />
           ))}
         </div>
       )}

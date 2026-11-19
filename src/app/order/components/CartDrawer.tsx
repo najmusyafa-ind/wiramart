@@ -193,6 +193,7 @@ export default function CartDrawer() {
             </div>
           ) : (
             items.map((item) => {
+              const bundleStep = item.price === 250 ? 2 : 1;
               const itemTotal = item.price * item.quantity;
               const formattedItemTotal = new Intl.NumberFormat('id-ID', {
                 style: 'currency',
@@ -207,7 +208,9 @@ export default function CartDrawer() {
                     <div className="pwa-drawer-item-sub">
                       {formattedItemTotal}{' '}
                       <span style={{ fontSize: 12, color: 'var(--pwa-text-muted)', fontWeight: 400 }}>
-                        (@ Rp {item.price.toLocaleString('id-ID')})
+                        {bundleStep === 2
+                          ? `(@ Rp ${(item.price * 2).toLocaleString('id-ID')} / 2 pcs)`
+                          : `(@ Rp ${item.price.toLocaleString('id-ID')})`}
                       </span>
                     </div>
                   </div>
@@ -225,7 +228,7 @@ export default function CartDrawer() {
                       <button
                         type="button"
                         className="pwa-stepper-compact-btn"
-                        onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                        onClick={() => updateQuantity(item.productId, item.quantity - bundleStep)}
                         aria-label={`Kurangi jumlah ${item.name}`}
                       >
                         <Minus size={14} aria-hidden="true" />
@@ -236,8 +239,8 @@ export default function CartDrawer() {
                       <button
                         type="button"
                         className="pwa-stepper-compact-btn"
-                        onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                        disabled={item.quantity >= item.stockQty}
+                        onClick={() => updateQuantity(item.productId, item.quantity + bundleStep)}
+                        disabled={item.quantity + bundleStep > item.stockQty}
                         aria-label={`Tambah jumlah ${item.name}`}
                       >
                         <Plus size={14} aria-hidden="true" />
