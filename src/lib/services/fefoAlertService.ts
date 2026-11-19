@@ -17,7 +17,7 @@ import {
   employees,
   auditLogs,
 } from '@/lib/db/schema';
-import { eq, and, gt, lte, isNull, desc, asc, count, or, ilike, inArray } from 'drizzle-orm';
+import { eq, and, gt, lt, lte, isNull, desc, asc, count, or, ilike, inArray, notInArray } from 'drizzle-orm';
 import {
   AppError,
   getTodayWib,
@@ -108,6 +108,53 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
 }> {
   const todayStr = getTodayWib();
   const in7Days = getOffsetDateWib(7);
+  const now = new Date();
+
+  // 0A. Auto-nonaktifkan seluruh kebijakan & barcode diskon yang sudah melewati masa berlaku (validUntil < todayStr)
+  const expiredPolicies = await db
+    .update(discountPolicies)
+    .set({ isActive: false, updatedAt: now })
+    .where(and(eq(discountPolicies.isActive, true), lt(discountPolicies.validUntil, todayStr)))
+    .returning({ id: discountPolicies.id });
+
+  if (expiredPolicies.length > 0) {
+    await db
+      .update(discountBarcodes)
+      .set({ isActive: false, remainingQty: 0 })
+      .where(
+        and(
+          inArray(
+            discountBarcodes.policyId,
+            expiredPolicies.map((p) => p.id),
+          ),
+          eq(discountBarcodes.isActive, true),
+        ),
+      );
+  }
+
+  // 0B. Tutup otomatis (CLOSED) alert terbuka yang batch-nya sudah berstok 0 (hapus alert hantu)
+  const zeroQtyReports = await db
+    .select({ id: productConditionReports.id })
+    .from(productConditionReports)
+    .innerJoin(stockBatches, eq(productConditionReports.batchId, stockBatches.id))
+    .where(
+      and(
+        lte(stockBatches.currentQty, 0),
+        inArray(productConditionReports.status, ['ALERT_ONLY', 'SUBMITTED', 'MANAGER_REVIEW', 'APPROVED']),
+      ),
+    );
+
+  if (zeroQtyReports.length > 0) {
+    await db
+      .update(productConditionReports)
+      .set({ status: 'CLOSED', updatedAt: now })
+      .where(
+        inArray(
+          productConditionReports.id,
+          zeroQtyReports.map((r) => r.id),
+        ),
+      );
+  }
 
   // Cari seluruh batch aktif dengan sisa stok > 0 yang expired dalam <= 7 hari (atau sudah lewat)
   const expiringBatches = await db
@@ -138,10 +185,15 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
 
     const daysRemaining = calculateDaysDifference(b.expiryDate, todayStr);
     const alertLevel = classifyAlertLevel(daysRemaining);
+    const isAlreadyExpired = b.expiryDate < todayStr;
 
     // Cek apakah batch sudah memiliki condition report
     const [existingReport] = await db
-      .select({ id: productConditionReports.id, status: productConditionReports.status })
+      .select({
+        id: productConditionReports.id,
+        status: productConditionReports.status,
+        managerDecision: productConditionReports.managerDecision,
+      })
       .from(productConditionReports)
       .where(eq(productConditionReports.batchId, b.batchId))
       .limit(1);
@@ -164,7 +216,27 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
           alertLevel,
           qtyAtAlert: b.currentQty,
           daysRemainingAtAlert: daysRemaining,
-          updatedAt: new Date(),
+          updatedAt: now,
+        })
+        .where(eq(productConditionReports.id, existingReport.id));
+      updatedAlerts++;
+    } else if (
+      isAlreadyExpired &&
+      existingReport.status === 'APPROVED' &&
+      (existingReport.managerDecision === 'DISCOUNT' || existingReport.managerDecision === 'DISPLAY_FRONT')
+    ) {
+      // Jika sebelumnya disetujui DISKON/DISPLAY_FRONT tetapi kini SUDAH EXPIRED dan masih ada stok -> cabut diskon & wajib tarik/musnahkan
+      await db
+        .update(productConditionReports)
+        .set({
+          status: 'ALERT_ONLY',
+          alertLevel: 'H1_KRITIS',
+          qtyAtAlert: b.currentQty,
+          daysRemainingAtAlert: daysRemaining,
+          managerDecision: null,
+          approvedDiscountPct: null,
+          managerNote: '[AUTO-BLOKIR EXPIRED] Batch melewati tanggal kedaluwarsa. Diskon dinonaktifkan otomatis; wajib tarik & musnahkan/retur.',
+          updatedAt: now,
         })
         .where(eq(productConditionReports.id, existingReport.id));
       updatedAlerts++;
@@ -210,11 +282,24 @@ export async function getConditionReports(options: {
 }) {
   const { status, alertLevel, search, page = 1, limit = 20 } = options;
   const offset = (Math.max(1, page) - 1) * limit;
+  const todayStr = getTodayWib();
 
-  const conditions = [];
+  const conditions = [isNull(products.deletedAt), eq(products.isActive, true)];
 
   if (status && status !== 'semua') {
     conditions.push(eq(productConditionReports.status, status as ConditionReportStatus));
+    if (status !== 'EXECUTED' && status !== 'CLOSED') {
+      conditions.push(gt(stockBatches.currentQty, 0));
+    }
+  } else {
+    // Default "semua" hanya tampilkan alert aktif berstok > 0 dan non-CLOSED (hilangkan alert hantu 0 pcs)
+    conditions.push(notInArray(productConditionReports.status, ['CLOSED']));
+    conditions.push(
+      or(
+        gt(stockBatches.currentQty, 0),
+        eq(productConditionReports.status, 'EXECUTED'),
+      )!,
+    );
   }
 
   const dbAlertLevel = mapToDbAlertLevel(alertLevel);
@@ -224,7 +309,8 @@ export async function getConditionReports(options: {
 
   if (search && search.trim()) {
     const q = `%${search.trim()}%`;
-    conditions.push(or(ilike(products.name, q), ilike(stockBatches.batchCode, q)));
+    const searchCond = or(ilike(products.name, q), ilike(stockBatches.batchCode, q));
+    if (searchCond) conditions.push(searchCond);
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -296,11 +382,20 @@ export async function getConditionReports(options: {
     }
   }
 
-  const formattedRows = rows.map((r) => ({
-    ...r,
-    alertLevel: mapToClientAlertLevel(r.alertLevel),
-    discountBarcode: barcodeByReportId.get(r.id) ?? null,
-  }));
+  const formattedRows = rows.map((r) => {
+    const liveDaysRemaining = r.expiryDate
+      ? calculateDaysDifference(r.expiryDate, todayStr)
+      : r.daysRemainingAtAlert;
+    const isExpired = Boolean(r.expiryDate && r.expiryDate < todayStr);
+    const effectiveLevel = isExpired ? 'H1' : mapToClientAlertLevel(r.alertLevel);
+    return {
+      ...r,
+      alertLevel: effectiveLevel,
+      daysRemainingAtAlert: liveDaysRemaining,
+      isExpired,
+      discountBarcode: barcodeByReportId.get(r.id) ?? null,
+    };
+  });
 
   return {
     items: formattedRows,
@@ -350,13 +445,49 @@ export async function submitConditionReport(
     );
   }
 
+  // Zero-Trust Expiry Guard: Ambil data batch & blokir keras usulan DISKON / DISPLAY untuk barang SUDAH EXPIRED
+  const [batch] = await db
+    .select({ id: stockBatches.id, currentQty: stockBatches.currentQty, expiryDate: stockBatches.expiryDate })
+    .from(stockBatches)
+    .where(eq(stockBatches.id, report.batchId))
+    .limit(1);
+
+  if (!batch || batch.currentQty <= 0) {
+    throw new AppError('BAD_REQUEST', 'Stok batch ini sudah 0 unit sehingga tidak memerlukan pelaporan lagi.', 400);
+  }
+
+  const todayStr = getTodayWib();
+  const isAlreadyExpired = Boolean(batch.expiryDate && batch.expiryDate < todayStr);
+  const suggestionUpper = (input.gudangSuggestion || '').trim().toUpperCase();
+
+  if (isAlreadyExpired) {
+    if (
+      suggestionUpper === 'DISCOUNT' ||
+      suggestionUpper === 'RELOCATE' ||
+      suggestionUpper === 'DISPLAY_FRONT' ||
+      suggestionUpper.includes('DISKON') ||
+      suggestionUpper.includes('DISPLAY') ||
+      suggestionUpper.includes('RAK DEPAN') ||
+      (input.suggestedDiscountPct !== null && input.suggestedDiscountPct !== undefined && input.suggestedDiscountPct > 0)
+    ) {
+      throw new AppError(
+        'BAD_REQUEST',
+        'Batch ini SUDAH KEDALUWARSA. Barang kedaluwarsa DILARANG diusulkan diskon atau dipajang; pilih Musnahkan (DISPOSE) atau Retur Supplier (RETURN).',
+        400,
+      );
+    }
+  }
+
   const [updated] = await db
     .update(productConditionReports)
     .set({
       status: 'SUBMITTED',
       physicalCondition: input.physicalCondition.trim(),
       gudangSuggestion: input.gudangSuggestion?.trim() || null,
-      suggestedDiscountPct: input.suggestedDiscountPct ? input.suggestedDiscountPct.toString() : null,
+      suggestedDiscountPct:
+        !isAlreadyExpired && input.suggestedDiscountPct
+          ? input.suggestedDiscountPct.toString()
+          : null,
       submittedByEmployeeId: emp.id,
       submittedAt: new Date(),
       updatedAt: new Date(),
@@ -421,21 +552,27 @@ export async function decideConditionReport(
 
     let createdPolicyId: string | undefined;
     let createdDiscountBarcode: string | undefined;
+    const todayStr = getTodayWib();
+
+    // Blokir keputusan DISPLAY_FRONT / DISCOUNT jika batch SUDAH KEDALUWARSA
+    if (
+      (input.decision === 'DISCOUNT' || input.decision === 'DISPLAY_FRONT') &&
+      batch.expiryDate &&
+      batch.expiryDate < todayStr
+    ) {
+      throw new AppError(
+        'BAD_REQUEST',
+        'Batch sudah melewati tanggal kedaluwarsa dan diblokir untuk didiskon atau dipajang. Pilih DESTROY (Musnahkan) atau RETURN_SUPPLIER (Retur).',
+        400,
+      );
+    }
 
     // JIKA KEPUTUSAN ADALAH DISCOUNT (Obral Darurat FEFO)
     if (input.decision === 'DISCOUNT' && input.approvedDiscountPct) {
-      const todayStr = getTodayWib();
       if (batch.currentQty <= 0) {
         throw new AppError(
           'BAD_REQUEST',
           'Stok batch sudah habis (0 unit) sehingga tidak dapat dibuat kebijakan diskon.',
-          400,
-        );
-      }
-      if (batch.expiryDate && batch.expiryDate < todayStr) {
-        throw new AppError(
-          'BAD_REQUEST',
-          'Batch sudah melewati tanggal kedaluwarsa dan diblokir untuk dijual diskon. Pilih DESTROY atau RETURN_SUPPLIER.',
           400,
         );
       }

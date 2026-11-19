@@ -10,8 +10,10 @@ import {
   stockReceiveDrafts,
   stockReceiveItems,
   stockBatches,
+  stockAdjustments,
   suppliers,
   products,
+  categories,
   employees,
   admins,
   auditLogs,
@@ -19,7 +21,7 @@ import {
   type ExpiryClass,
 } from '@/lib/db/schema';
 import { eq, and, desc, isNull, inArray, sql, count } from 'drizzle-orm';
-import { AppError } from '@/lib/utils/helpers';
+import { AppError, getTodayWib } from '@/lib/utils/helpers';
 import { ManagerDutyService } from '@/lib/services/managerDutyService';
 import { resolveNormalizedSupplierId } from '@/lib/services/supplierResolver';
 
@@ -33,12 +35,42 @@ export const StockReceiveItemInputSchema = z.object({
   qty: z.number().int('Jumlah harus bulat').min(1, 'Jumlah minimal 1').max(100_000, 'Jumlah maksimal 100.000'),
   costPrice: z.number().min(0, 'HPP tidak boleh negatif'),
   expiryDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal kadaluarsa harus YYYY-MM-DD')
-    .optional()
-    .nullable(),
+    .string({ message: 'Tanggal kedaluwarsa wajib diisi untuk setiap produk' })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal kadaluarsa harus YYYY-MM-DD'),
   conditionNote: z.string().trim().max(500, 'Catatan fisik maksimal 500 karakter').optional().nullable(),
 });
+
+export const ProposeNewProductSchema = z.object({
+  name: z.string().trim().min(2, 'Nama produk minimal 2 karakter').max(200, 'Nama produk maksimal 200 karakter'),
+  categoryId: z.string().uuid('Kategori produk wajib dipilih'),
+  barcode: z.string().trim().max(100).optional().nullable(),
+  unit: z.string().trim().min(1, 'Satuan wajib diisi').max(20).default('pcs'),
+  costPrice: z.number().min(0, 'Harga beli / HPP tidak boleh negatif'),
+  sellingPrice: z.number().positive('Usulan harga jual harus lebih dari 0'),
+  initialQty: z.number().int('Jumlah awal harus bilangan bulat').min(1, 'Jumlah awal minimal 1').max(100_000),
+  expiryDate: z
+    .string({ message: 'Tanggal kedaluwarsa wajib diisi (termasuk makanan harian)' })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal kedaluwarsa harus YYYY-MM-DD'),
+  isPerishable: z.boolean().optional().default(false),
+  perishableType: z.enum(['KONSINYASI', 'BELI_LEPAS']).optional().default('KONSINYASI'),
+  supplierName: z.string().trim().max(200).optional().nullable(),
+  notes: z.string().trim().max(500).optional().nullable(),
+});
+
+export const ApprovePriceOverrideSchema = z.object({
+  priceOverrides: z
+    .array(
+      z.object({
+        productId: z.string().uuid(),
+        sellingPrice: z.number().positive('Harga jual harus lebih dari 0').optional(),
+        costPrice: z.number().min(0, 'HPP tidak boleh negatif').optional(),
+      }),
+    )
+    .optional(),
+});
+
+export type ProposeNewProductInput = z.infer<typeof ProposeNewProductSchema>;
+export type ApprovePriceOverrideItem = NonNullable<z.infer<typeof ApprovePriceOverrideSchema>['priceOverrides']>[number];
 
 export const CreateStockReceiveDraftSchema = z.object({
   supplierId: z.string().uuid('ID supplier tidak valid').optional().nullable(),
@@ -86,9 +118,9 @@ export type CreateStockReceiveDraftInput = z.infer<typeof CreateStockReceiveDraf
 
 export function computeExpiryClass(expiryDateStr: string | null | undefined): ExpiryClass {
   if (!expiryDateStr) return 'PANJANG';
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const exp = new Date(expiryDateStr);
+  const todayStr = getTodayWib();
+  const today = new Date(`${todayStr}T00:00:00Z`);
+  const exp = new Date(`${expiryDateStr}T00:00:00Z`);
   const diffTime = exp.getTime() - today.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
@@ -211,15 +243,15 @@ export async function createStockReceiveDraft(
     throw new AppError('BAD_REQUEST', `Produk "${inactiveProd.name}" sedang nonaktif.`, 400);
   }
 
-  // Validasi Tanggal Expired: Produk perishable wajib ada tanggal kadaluarsa & tidak boleh masa lampau
-  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+  // Validasi Tanggal Expired WAJIB untuk SEMUA produk (termasuk makanan harian) & tidak boleh masa lampau
+  const todayStr = getTodayWib();
   for (const item of input.items) {
     const prodMeta = foundProducts.find((p) => p.id === item.productId);
     const prodLabel = prodMeta?.name || item.productName || item.productId;
-    if (prodMeta?.isPerishable && !item.expiryDate) {
-      throw new AppError('BAD_REQUEST', `Produk basah/perishable "${prodLabel}" wajib memiliki tanggal kadaluarsa.`, 400);
+    if (!item.expiryDate) {
+      throw new AppError('BAD_REQUEST', `Produk "${prodLabel}" wajib memiliki tanggal kedaluwarsa.`, 400);
     }
-    if (item.expiryDate && item.expiryDate < todayStr) {
+    if (item.expiryDate < todayStr) {
       throw new AppError('BAD_REQUEST', `Tanggal kadaluarsa "${prodLabel}" (${item.expiryDate}) sudah terlewat. Tidak bisa menerima barang expired.`, 400);
     }
   }
@@ -268,6 +300,160 @@ export async function createStockReceiveDraft(
 }
 
 // =============================================================
+// 1b. GUDANG: Usulan Produk Baru + Stok Awal -> Antrian Approval Manager
+// Produk disimpan dengan isActive = false & stockQty = 0 hingga di-ACC Manager
+// =============================================================
+
+export async function proposeNewProductByWarehouse(
+  actorId: string,
+  rawInput: ProposeNewProductInput,
+  actorRole: 'employee' | 'admin' = 'employee',
+) {
+  const input = ProposeNewProductSchema.parse(rawInput);
+  const { employeeId, isAdminActor } = await resolveCreatorEmployeeId(actorId, actorRole);
+
+  const todayStr = getTodayWib();
+  if (input.expiryDate < todayStr) {
+    throw new AppError(
+      'BAD_REQUEST',
+      `Tanggal kedaluwarsa (${input.expiryDate}) sudah terlewat. Masukkan tanggal hari ini atau mendatang.`,
+      400,
+    );
+  }
+
+  const cleanName = input.name.trim();
+  const cleanBarcode = input.barcode?.trim() || null;
+
+  // 1. Validasi kategori aktif
+  const [cat] = await db
+    .select({ id: categories.id, name: categories.name })
+    .from(categories)
+    .where(and(eq(categories.id, input.categoryId), eq(categories.isActive, true), isNull(categories.deletedAt)))
+    .limit(1);
+
+  if (!cat) {
+    throw new AppError('BAD_REQUEST', 'Kategori produk tidak valid atau nonaktif.', 400);
+  }
+
+  // 2. Cek duplikat nama produk (case-insensitive)
+  const [dupName] = await db
+    .select({ id: products.id, name: products.name, isActive: products.isActive })
+    .from(products)
+    .where(
+      and(
+        isNull(products.deletedAt),
+        sql`LOWER(TRIM(${products.name})) = ${cleanName.toLowerCase()}`,
+      ),
+    )
+    .limit(1);
+
+  if (dupName) {
+    throw new AppError(
+      'CONFLICT',
+      dupName.isActive
+        ? `Produk "${dupName.name}" sudah terdaftar di katalog. Gunakan menu Restock pada produk tersebut.`
+        : `Usulan produk "${dupName.name}" sudah diajukan dan sedang menunggu persetujuan Manager.`,
+      409,
+    );
+  }
+
+  // 3. Cek duplikat barcode jika diisi
+  if (cleanBarcode) {
+    const [dupBarcode] = await db
+      .select({ id: products.id, name: products.name })
+      .from(products)
+      .where(and(eq(products.barcode, cleanBarcode), isNull(products.deletedAt)))
+      .limit(1);
+
+    if (dupBarcode) {
+      throw new AppError(
+        'CONFLICT',
+        `Barcode "${cleanBarcode}" sudah dipakai produk "${dupBarcode.name}". Setiap varian rasa/produk harus memiliki barcode berbeda.`,
+        409,
+      );
+    }
+  }
+
+  // 4. Resolusi Admin FK untuk products.createdByAdminId
+  const [managerAdmin] = await db
+    .select({ id: admins.id })
+    .from(admins)
+    .where(and(eq(admins.isActive, true), isNull(admins.deletedAt), eq(admins.role, 'MANAGER')))
+    .limit(1);
+  const [fallbackAdmin] = !managerAdmin
+    ? await db
+        .select({ id: admins.id })
+        .from(admins)
+        .where(and(eq(admins.isActive, true), isNull(admins.deletedAt)))
+        .limit(1)
+    : [managerAdmin];
+
+  if (!fallbackAdmin) {
+    throw new AppError('INTERNAL_ERROR', 'Tidak ada akun Manager aktif di sistem.', 500);
+  }
+
+  const receiveNumber = await generateReceiveNumber();
+  const compactDate = todayStr.replace(/-/g, '');
+  const batchCode = `NEW-${compactDate}-${String(Math.floor(1000 + Math.random() * 9000))}`;
+  const noteText = input.notes?.trim()
+    ? `[USULAN PRODUK BARU] ${input.notes.trim()}`
+    : `[USULAN PRODUK BARU] Pengajuan SKU baru "${cleanName}" (${cat.name})`;
+
+  const createdDraft = await db.transaction(async (tx) => {
+    const resolvedSupplierId = await resolveNormalizedSupplierId(tx, {
+      supplierName: input.supplierName?.trim() || undefined,
+    });
+
+    // A. Insert produk dalam status PENDING (isActive = false, stockQty = 0) -> tidak tampil di POS/PWA sampai di-ACC Manager
+    const [pendingProduct] = await tx
+      .insert(products)
+      .values({
+        categoryId: input.categoryId,
+        name: cleanName,
+        barcode: cleanBarcode,
+        costPrice: input.costPrice.toString(),
+        sellingPrice: input.sellingPrice.toString(),
+        stockQty: 0,
+        unit: input.unit.trim() || 'pcs',
+        isActive: false,
+        isPerishable: input.isPerishable,
+        perishableType: input.isPerishable ? input.perishableType : null,
+        createdByAdminId: fallbackAdmin.id,
+      })
+      .returning();
+
+    // B. Insert draft penerimaan berstatus SUBMITTED langsung ke antrian Approval Manager
+    const [draft] = await tx
+      .insert(stockReceiveDrafts)
+      .values({
+        receiveNumber,
+        createdByEmployeeId: employeeId,
+        supplierId: resolvedSupplierId,
+        deliveryNote: noteText,
+        invoiceDate: todayStr,
+        status: 'SUBMITTED',
+        submittedAt: new Date(),
+      })
+      .returning();
+
+    // C. Insert item stok awal & ED wajib
+    await tx.insert(stockReceiveItems).values({
+      draftId: draft.id,
+      productId: pendingProduct.id,
+      batchCode,
+      qty: input.initialQty,
+      costPrice: input.costPrice.toString(),
+      expiryDate: input.expiryDate,
+      conditionNote: `[PRODUK BARU] Kategori: ${cat.name} | Usulan Harga Jual: Rp ${Math.round(input.sellingPrice).toLocaleString('id-ID')}${input.notes?.trim() ? ` | ${input.notes.trim()}` : ''}`,
+    });
+
+    return draft;
+  });
+
+  return getStockReceiveDraftDetail(createdDraft.id, isAdminActor ? undefined : employeeId);
+}
+
+// =============================================================
 // 2. GUDANG / ADMIN KASIR: Update Draft (Hanya saat status DRAFT / REVISED)
 // =============================================================
 
@@ -300,9 +486,12 @@ export async function updateStockReceiveDraft(
     throw new AppError('BAD_REQUEST', `Draft tidak dapat diubah karena berstatus ${existing.status}.`, 400);
   }
 
-  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+  const todayStr = getTodayWib();
   for (const item of input.items) {
-    if (item.expiryDate && item.expiryDate < todayStr) {
+    if (!item.expiryDate) {
+      throw new AppError('BAD_REQUEST', `Tanggal kedaluwarsa "${item.productName || item.productId}" wajib diisi.`, 400);
+    }
+    if (item.expiryDate < todayStr) {
       throw new AppError('BAD_REQUEST', `Tanggal kadaluarsa "${item.productName || item.productId}" sudah lewat.`, 400);
     }
   }
@@ -408,7 +597,11 @@ export async function submitStockReceiveDraft(
 // 4. MANAGER ONLY: Approve Penerimaan Barang (ACID 2-Layer Approval)
 // =============================================================
 
-export async function approveStockReceiveDraft(draftId: string, managerAdminId: string) {
+export async function approveStockReceiveDraft(
+  draftId: string,
+  managerAdminId: string,
+  priceOverrides?: ApprovePriceOverrideItem[],
+) {
   // Verifikasi Manager
   const [manager] = await db
     .select({ id: admins.id, role: admins.role, fullName: admins.fullName })
@@ -429,6 +622,13 @@ export async function approveStockReceiveDraft(draftId: string, managerAdminId: 
       'ACC belum dapat dilakukan karena belum ada Manager yang memulai Sesi Kerja Hari Ini. Silakan mulai sesi kerja terlebih dahulu melalui tombol di header.',
       403,
     );
+  }
+
+  const overrideMap = new Map<string, ApprovePriceOverrideItem>();
+  if (priceOverrides) {
+    for (const ov of priceOverrides) {
+      overrideMap.set(ov.productId, ov);
+    }
   }
 
   // Eksekusi ACID Transaction
@@ -453,6 +653,12 @@ export async function approveStockReceiveDraft(draftId: string, managerAdminId: 
       );
     }
 
+    const [creatorEmp] = await tx
+      .select({ fullName: employees.fullName, nim: employees.nim })
+      .from(employees)
+      .where(eq(employees.id, draft.createdByEmployeeId))
+      .limit(1);
+
     // 2. Ambil seluruh item dalam draft
     const items = await tx
       .select()
@@ -463,32 +669,103 @@ export async function approveStockReceiveDraft(draftId: string, managerAdminId: 
       throw new AppError('BAD_REQUEST', 'Penerimaan barang tidak memiliki daftar produk.', 400);
     }
 
-    // 3. Atomik: Masukkan tiap item ke stock_batches & tambahkan stock_qty produk
+    const now = new Date();
+    const todayStr = getTodayWib(now);
+    let activatedNewProductsCount = 0;
+
+    // 3. Atomik: Lock produk -> aktifkan bila produk baru -> insert stock_batches -> tambah stock_qty -> catat stock_adjustments
     for (const item of items) {
+      if (item.expiryDate && item.expiryDate < todayStr) {
+        throw new AppError(
+          'BAD_REQUEST',
+          `Item dengan kode batch ${item.batchCode} memiliki tanggal kedaluwarsa yang sudah terlewat (${item.expiryDate}). Tolak atau minta revisi.`,
+          400,
+        );
+      }
+
+      const [lockedProd] = await tx
+        .select({
+          id: products.id,
+          name: products.name,
+          stockQty: products.stockQty,
+          unit: products.unit,
+          isActive: products.isActive,
+          costPrice: products.costPrice,
+          sellingPrice: products.sellingPrice,
+        })
+        .from(products)
+        .where(and(eq(products.id, item.productId), isNull(products.deletedAt)))
+        .for('update')
+        .limit(1);
+
+      if (!lockedProd) {
+        throw new AppError('BAD_REQUEST', 'Salah satu produk di draft tidak ditemukan atau telah dihapus.', 400);
+      }
+
+      const override = overrideMap.get(item.productId);
+      const effectiveCostPrice =
+        override?.costPrice !== undefined ? override.costPrice.toString() : item.costPrice;
+      const effectiveSellingPrice =
+        override?.sellingPrice !== undefined ? override.sellingPrice.toString() : lockedProd.sellingPrice;
+
+      const wasPendingNewProduct = !lockedProd.isActive;
+      if (wasPendingNewProduct) {
+        activatedNewProductsCount += 1;
+      }
+
       const expClass = computeExpiryClass(item.expiryDate);
+      const qtyBefore = lockedProd.stockQty;
+      const qtyAfter = qtyBefore + item.qty;
 
       // Insert baris batch baru terhubung ke receive_item_id & supplier_id (3NF)
-      await tx.insert(stockBatches).values({
-        productId: item.productId,
-        receiveItemId: item.id,
-        supplierId: draft.supplierId ?? null,
-        batchCode: item.batchCode,
-        costPrice: item.costPrice,
-        initialQty: item.qty,
-        currentQty: item.qty,
-        expiryDate: item.expiryDate || null,
-        expiryClass: expClass,
-        notes: `Penerimaan #${draft.receiveNumber} disetujui oleh ${manager.fullName}`,
-      });
+      const [insertedBatch] = await tx
+        .insert(stockBatches)
+        .values({
+          productId: item.productId,
+          receiveItemId: item.id,
+          supplierId: draft.supplierId ?? null,
+          batchCode: item.batchCode,
+          costPrice: effectiveCostPrice,
+          initialQty: item.qty,
+          currentQty: item.qty,
+          expiryDate: item.expiryDate || todayStr,
+          expiryClass: expClass,
+          notes: `Penerimaan #${draft.receiveNumber} disetujui oleh ${manager.fullName}`,
+        })
+        .returning({ id: stockBatches.id });
 
-      // Update total stok produk di tabel master
+      // Update total stok produk di tabel master (+ aktifkan jika usulan produk baru & terapkan override harga)
       await tx
         .update(products)
         .set({
           stockQty: sql`${products.stockQty} + ${item.qty}`,
-          updatedAt: new Date(),
+          isActive: true,
+          ...(wasPendingNewProduct || override?.costPrice !== undefined
+            ? { costPrice: effectiveCostPrice }
+            : {}),
+          ...(override?.sellingPrice !== undefined
+            ? { sellingPrice: effectiveSellingPrice }
+            : {}),
+          updatedAt: now,
         })
         .where(eq(products.id, item.productId));
+
+      // Catat ke stock_adjustments agar tampil di Riwayat Penambahan Stok Gudang & Laporan Mutasi Stok
+      const creatorLabel = creatorEmp
+        ? `${creatorEmp.fullName} (NIM ${creatorEmp.nim})`
+        : 'Petugas Gudang';
+      const expText = item.expiryDate ? ` Exp: ${item.expiryDate}` : '';
+      const newProdTag = wasPendingNewProduct ? ' [PRODUK BARU DIAKTIFKAN]' : '';
+      await tx.insert(stockAdjustments).values({
+        productId: item.productId,
+        batchId: insertedBatch?.id ?? null,
+        qtyBefore,
+        qtyAfter,
+        qtyDiff: item.qty,
+        reason: `[RESTOCK GUDANG • PENERIMAAN ACC #${draft.receiveNumber}${newProdTag} • Petugas: ${creatorLabel} • Disetujui: ${manager.fullName}] Masuk +${item.qty} ${lockedProd.unit} (Batch: ${item.batchCode}${expText}).`,
+        adjustedByAdminId: manager.id,
+        createdAt: now,
+      });
     }
 
     // 4. Update status draft ke APPROVED
@@ -497,8 +774,8 @@ export async function approveStockReceiveDraft(draftId: string, managerAdminId: 
       .set({
         status: 'APPROVED',
         approvedByAdminId: manager.id,
-        approvedAt: new Date(),
-        updatedAt: new Date(),
+        approvedAt: now,
+        updatedAt: now,
       })
       .where(eq(stockReceiveDrafts.id, draftId))
       .returning();
@@ -514,6 +791,7 @@ export async function approveStockReceiveDraft(draftId: string, managerAdminId: 
         approvedByAdminId: manager.id,
         receiveNumber: draft.receiveNumber,
         itemCount: items.length,
+        activatedNewProductsCount,
       }),
       actorType: 'ADMIN',
       actorId: manager.id,
@@ -607,17 +885,45 @@ export async function rejectStockReceiveDraft(
     throw new AppError('BAD_REQUEST', `Draft tidak dapat ditolak karena berstatus ${draft.status}.`, 400);
   }
 
-  const [rejected] = await db
-    .update(stockReceiveDrafts)
-    .set({
-      status: 'REJECTED',
-      managerNote: alasan,
-      rejectedByAdminId: manager.id,
-      rejectedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(stockReceiveDrafts.id, draftId))
-    .returning();
+  const rejected = await db.transaction(async (tx) => {
+    const now = new Date();
+    const [rejRow] = await tx
+      .update(stockReceiveDrafts)
+      .set({
+        status: 'REJECTED',
+        managerNote: alasan,
+        rejectedByAdminId: manager.id,
+        rejectedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(stockReceiveDrafts.id, draftId))
+      .returning();
+
+    // Jika draft yang ditolak memuat usulan produk baru (isActive=false, stockQty=0), soft-delete agar nama & barcode bebas kembali
+    const items = await tx
+      .select({ productId: stockReceiveItems.productId })
+      .from(stockReceiveItems)
+      .where(eq(stockReceiveItems.draftId, draftId));
+
+    if (items.length > 0) {
+      await tx
+        .update(products)
+        .set({ deletedAt: now, updatedAt: now })
+        .where(
+          and(
+            inArray(
+              products.id,
+              items.map((i) => i.productId),
+            ),
+            eq(products.isActive, false),
+            eq(products.stockQty, 0),
+            isNull(products.deletedAt),
+          ),
+        );
+    }
+
+    return rejRow;
+  });
 
   return rejected;
 }
@@ -667,6 +973,7 @@ export async function getStockReceiveDrafts(options: {
       createdAt: stockReceiveDrafts.createdAt,
       creatorName: employees.fullName,
       creatorNim: employees.nim,
+      hasNewProductProposal: sql<boolean>`COALESCE(${stockReceiveDrafts.deliveryNote} ILIKE '[USULAN PRODUK BARU]%', false)`,
     })
     .from(stockReceiveDrafts)
     .innerJoin(employees, eq(stockReceiveDrafts.createdByEmployeeId, employees.id))
@@ -735,6 +1042,12 @@ export async function getStockReceiveDraftDetail(
       id: stockReceiveItems.id,
       productId: stockReceiveItems.productId,
       productName: products.name,
+      productIsActive: products.isActive,
+      productSellingPrice: products.sellingPrice,
+      productBarcode: products.barcode,
+      productUnit: products.unit,
+      productIsPerishable: products.isPerishable,
+      productCategoryName: categories.name,
       batchCode: stockReceiveItems.batchCode,
       qty: stockReceiveItems.qty,
       costPrice: stockReceiveItems.costPrice,
@@ -744,6 +1057,7 @@ export async function getStockReceiveDraftDetail(
     })
     .from(stockReceiveItems)
     .innerJoin(products, eq(stockReceiveItems.productId, products.id))
+    .leftJoin(categories, eq(products.categoryId, categories.id))
     .where(eq(stockReceiveItems.draftId, draftId))
     .orderBy(stockReceiveItems.createdAt);
 

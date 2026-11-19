@@ -52,8 +52,9 @@ export async function GET(req: NextRequest) {
 
   try {
     if (view === 'table') {
+      // Tabel Buku Nota Supplier menampilkan seluruh arsip nota toko agar petugas shift bergantian tetap melihat histori nota resmi
       const tableRows = await getSupplierInvoiceTableRows({
-        employeeId,
+        employeeId: undefined,
         status,
         limit,
       });

@@ -103,7 +103,18 @@ type WarehousePayloadData = {
   summary: WarehouseSummary;
   items: WarehouseProduct[];
   activities: ActivityLog[];
+  categories?: Array<{ id: string; name: string }>;
 };
+
+function getTodayWibStr(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
+}
+
+function addDaysWibStr(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
+}
 
 const warehouseDataMemCache = new Map<string, WarehousePayloadData>();
 
@@ -132,8 +143,29 @@ export default function GudangPortalPage() {
   const [activities, setActivities] = useState<ActivityLog[]>(
     () => initialCache?.activities ?? [],
   );
+  const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string }>>(
+    () => initialCache?.categories ?? [],
+  );
   const [loading, setLoading] = useState<boolean>(() => !initialCache);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // State Modal Ajukan Produk Baru (Evaluasi Pak Afif: Gudang ajukan -> ACC Manager)
+  const [showNewProductModal, setShowNewProductModal] = useState(false);
+  const [newProdName, setNewProdName] = useState('');
+  const [newProdCategoryId, setNewProdCategoryId] = useState('');
+  const [newProdBarcode, setNewProdBarcode] = useState('');
+  const [newProdUnit, setNewProdUnit] = useState('pcs');
+  const [newProdCostPrice, setNewProdCostPrice] = useState<string>('0');
+  const [newProdSellingPrice, setNewProdSellingPrice] = useState<string>('');
+  const [newProdInitialQty, setNewProdInitialQty] = useState<number>(1);
+  const [newProdExpiryDate, setNewProdExpiryDate] = useState<string>('');
+  const [newProdIsPerishable, setNewProdIsPerishable] = useState(false);
+  const [newProdPerishableType, setNewProdPerishableType] = useState<'KONSINYASI' | 'BELI_LEPAS'>('KONSINYASI');
+  const [newProdSupplier, setNewProdSupplier] = useState('');
+  const [newProdNotes, setNewProdNotes] = useState('');
+  const [submittingNewProd, setSubmittingNewProd] = useState(false);
+  const [newProdError, setNewProdError] = useState<string | null>(null);
+  const [newProdSuccessMsg, setNewProdSuccessMsg] = useState<string | null>(null);
 
   // State Filter & Pencarian
   const [search, setSearch] = useState('');
@@ -218,6 +250,9 @@ export default function GudangPortalPage() {
       setSummary(data.summary);
       setProducts(data.items);
       setActivities(data.activities);
+      if (data.categories) {
+        setCategoriesList(data.categories);
+      }
     },
     [],
   );
@@ -319,16 +354,124 @@ export default function GudangPortalPage() {
     if (!canMutateStock) return;
     setSelectedProduct(prod);
     setRestockQty(1);
-    setExpiryDate('');
+    setExpiryDate(prod.isPerishable ? getTodayWibStr() : '');
     setBatchCode('');
     setNotes('');
     setRestockSuccessMsg(null);
   }
 
-  // ── Submit Restock Mutasi Stok (ACID) ─────────────────────────
+  function openNewProductModal() {
+    if (!canMutateStock) return;
+    setNewProdName('');
+    setNewProdCategoryId(categoriesList[0]?.id ?? '');
+    setNewProdBarcode('');
+    setNewProdUnit('pcs');
+    setNewProdCostPrice('0');
+    setNewProdSellingPrice('');
+    setNewProdInitialQty(1);
+    setNewProdExpiryDate(addDaysWibStr(30));
+    setNewProdIsPerishable(false);
+    setNewProdPerishableType('KONSINYASI');
+    setNewProdSupplier('');
+    setNewProdNotes('');
+    setNewProdError(null);
+    setNewProdSuccessMsg(null);
+    setShowNewProductModal(true);
+  }
+
+  async function handleProposeNewProductSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canMutateStock) return;
+    setNewProdError(null);
+
+    const todayStr = getTodayWibStr();
+    if (!newProdName.trim() || newProdName.trim().length < 2) {
+      setNewProdError('Nama produk/varian wajib diisi minimal 2 karakter.');
+      return;
+    }
+    if (!newProdCategoryId) {
+      setNewProdError('Kategori produk wajib dipilih.');
+      return;
+    }
+    const sellNum = Number(newProdSellingPrice);
+    const costNum = Number(newProdCostPrice || '0');
+    if (!Number.isFinite(sellNum) || sellNum <= 0) {
+      setNewProdError('Usulan harga jual wajib lebih dari Rp 0.');
+      return;
+    }
+    if (!Number.isFinite(costNum) || costNum < 0) {
+      setNewProdError('Harga beli (HPP) tidak boleh negatif.');
+      return;
+    }
+    if (!newProdExpiryDate) {
+      setNewProdError('Tanggal kedaluwarsa (Expired Date) wajib diisi untuk semua produk baru.');
+      return;
+    }
+    if (newProdExpiryDate < todayStr) {
+      setNewProdError(`Tanggal kedaluwarsa (${newProdExpiryDate}) sudah terlewat.`);
+      return;
+    }
+
+    setSubmittingNewProd(true);
+    try {
+      const res = await fetch('/api/gudang/produk-baru', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newProdName.trim(),
+          categoryId: newProdCategoryId,
+          barcode: newProdBarcode.trim() || null,
+          unit: newProdUnit.trim() || 'pcs',
+          costPrice: costNum,
+          sellingPrice: sellNum,
+          initialQty: Math.max(1, Number(newProdInitialQty)),
+          expiryDate: newProdExpiryDate,
+          isPerishable: newProdIsPerishable,
+          perishableType: newProdPerishableType,
+          supplierName: newProdSupplier.trim() || null,
+          notes: newProdNotes.trim() || null,
+        }),
+      });
+      const json = (await res.json()) as {
+        success: boolean;
+        data?: { message?: string };
+        error?: string;
+      };
+      if (!res.ok || !json.success) {
+        setNewProdError(json.error ?? 'Gagal mengajukan produk baru.');
+        return;
+      }
+
+      setNewProdSuccessMsg(
+        json.data?.message ??
+          `Usulan produk baru "${newProdName.trim()}" berhasil dikirim ke Approval Manager! Produk akan aktif di Kasir setelah di-ACC Manager.`,
+      );
+      await loadData();
+      setTimeout(() => {
+        setShowNewProductModal(false);
+        setNewProdSuccessMsg(null);
+      }, 2200);
+    } catch {
+      setNewProdError('Koneksi terputus saat mengajukan produk baru.');
+    } finally {
+      setSubmittingNewProd(false);
+    }
+  }
+
+  // ── Submit Restock Mutasi Stok (2-Layer Approval untuk Petugas Gudang) ──
   async function handleRestockSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canMutateStock || !selectedProduct || restockQty <= 0) return;
+
+    const todayStr = getTodayWibStr();
+    if (!expiryDate) {
+      alert('Tanggal kedaluwarsa (Expired Date) wajib diisi untuk semua barang masuk (termasuk makanan harian).');
+      return;
+    }
+    if (expiryDate < todayStr) {
+      alert(`Tanggal kedaluwarsa (${expiryDate}) sudah terlewat. Tidak dapat menerima barang kedaluwarsa.`);
+      return;
+    }
 
     setSubmittingRestock(true);
     setErrorMsg(null);
@@ -340,7 +483,7 @@ export default function GudangPortalPage() {
         body: JSON.stringify({
           productId: selectedProduct.id,
           qtyAdd: Number(restockQty),
-          expiryDate: expiryDate ? expiryDate : null,
+          expiryDate,
           batchCode: batchCode.trim() ? batchCode.trim() : null,
           notes: notes.trim() ? notes.trim() : null,
         }),
@@ -348,7 +491,14 @@ export default function GudangPortalPage() {
 
       const json = (await res.json()) as {
         success: boolean;
-        data?: { qtyBefore: number; qtyAfter: number; productName: string };
+        data?: {
+          mode?: 'SUBMITTED_FOR_APPROVAL' | 'APPROVED_DIRECT';
+          receiveNumber?: string;
+          message?: string;
+          qtyBefore: number;
+          qtyAfter: number;
+          productName: string;
+        };
         error?: string;
       };
 
@@ -357,9 +507,16 @@ export default function GudangPortalPage() {
         return;
       }
 
-      setRestockSuccessMsg(
-        `Sukses! Stok ${selectedProduct.name} bertambah +${restockQty} ${selectedProduct.unit}. Total sekarang: ${json.data?.qtyAfter ?? selectedProduct.stockQty + restockQty} ${selectedProduct.unit}.`,
-      );
+      if (json.data?.mode === 'SUBMITTED_FOR_APPROVAL') {
+        setRestockSuccessMsg(
+          json.data.message ??
+            `Pengajuan restock +${restockQty} ${selectedProduct.unit} ${selectedProduct.name} (#${json.data.receiveNumber}) berhasil dikirim ke antrian Approval Manager. Stok di Kasir akan bertambah setelah di-ACC Manager.`,
+        );
+      } else {
+        setRestockSuccessMsg(
+          `Sukses! Stok ${selectedProduct.name} bertambah +${restockQty} ${selectedProduct.unit}. Total sekarang: ${json.data?.qtyAfter ?? selectedProduct.stockQty + restockQty} ${selectedProduct.unit}.`,
+        );
+      }
 
       // Refresh data di background
       await loadData();
@@ -368,7 +525,7 @@ export default function GudangPortalPage() {
       setTimeout(() => {
         setSelectedProduct(null);
         setRestockSuccessMsg(null);
-      }, 1500);
+      }, 2000);
     } catch {
       alert('Koneksi terputus saat menyimpan restock.');
     } finally {
@@ -718,7 +875,7 @@ export default function GudangPortalPage() {
             <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#c2410c', lineHeight: 1.2, marginTop: 2 }}>
               {summary ? summary.expiringSoonSku : '0'}
             </div>
-            <div style={{ fontSize: '0.62rem', color: '#64748b', marginTop: 2 }}>&lt; 30 Hari</div>
+            <div style={{ fontSize: '0.62rem', color: '#64748b', marginTop: 2 }}>&le; 7 Hari / Exp</div>
           </button>
 
           {/* Card 4: Restock Hari Ini */}
@@ -747,10 +904,10 @@ export default function GudangPortalPage() {
           </button>
         </section>
 
-        {/* ── BAR PENCARIAN & SCANNER KAMERA ── */}
+        {/* ── BAR PENCARIAN, SCANNER KAMERA & USULAN PRODUK BARU ── */}
         <section style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <div style={{ position: 'relative', flex: 1 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ position: 'relative', flex: '1 1 220px' }}>
               <Search
                 size={16}
                 style={{
@@ -835,6 +992,34 @@ export default function GudangPortalPage() {
               <Camera size={16} />
               <span>Scan Kamera</span>
             </button>
+
+            {canMutateStock && (
+              <button
+                type="button"
+                onClick={openNewProductModal}
+                className="btn btn-primary"
+                style={{
+                  minHeight: 44,
+                  height: 44,
+                  padding: '0 14px',
+                  borderRadius: 10,
+                  backgroundColor: '#059669',
+                  color: '#fff',
+                  border: 'none',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  boxShadow: '0 2px 6px -1px rgba(5, 150, 105, 0.38)',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <Plus size={16} />
+                <span>Ajukan Produk Baru</span>
+              </button>
+            )}
           </div>
         </section>
 
@@ -842,11 +1027,10 @@ export default function GudangPortalPage() {
         <section
           style={{
             display: 'flex',
+            flexWrap: 'wrap',
             gap: 6,
-            overflowX: 'auto',
             paddingBottom: 6,
             marginBottom: 12,
-            scrollbarWidth: 'none',
           }}
         >
           {[
@@ -1629,9 +1813,34 @@ export default function GudangPortalPage() {
                           </div>
                           <div>
                             {isExpired ? (
-                              <span style={{ color: '#dc2626', fontWeight: 700 }}>
-                                Kedaluwarsa ({Math.abs(b.daysRemaining || 0)} hr lalu)
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                <span style={{ color: '#dc2626', fontWeight: 700 }}>
+                                  Kedaluwarsa ({Math.abs(b.daysRemaining || 0)} hr lalu)
+                                </span>
+                                {b.currentQty > 0 && canMutateStock && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const prodName = viewingBatchProduct?.name || '';
+                                      setViewingBatchProduct(null);
+                                      setSearch(prodName);
+                                      setActiveTab('fefo');
+                                    }}
+                                    style={{
+                                      padding: '4px 10px',
+                                      borderRadius: 6,
+                                      border: '1px solid #ef4444',
+                                      background: '#dc2626',
+                                      color: '#ffffff',
+                                      fontSize: '0.72rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    Tarik / Musnahkan di Tab FEFO
+                                  </button>
+                                )}
+                              </div>
                             ) : isCritical ? (
                               <span style={{ color: '#d97706', fontWeight: 700 }}>
                                 Sisa {b.daysRemaining} hari (FEFO Kritis)
@@ -1733,7 +1942,9 @@ export default function GudangPortalPage() {
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <h3 style={{ fontSize: '0.95rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                    Input Restock Barang
+                    {employee?.actorRole === 'MANAGER'
+                      ? 'Input Restock Langsung (Manager)'
+                      : 'Ajukan Restock Barang ke Manager'}
                   </h3>
                   <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
                     Tercatat atas nama: {employee?.name || 'Petugas Gudang'}
@@ -1783,6 +1994,25 @@ export default function GudangPortalPage() {
                 </strong>
               </div>
             </div>
+
+            {/* Info Approval 2-Layer untuk Petugas Gudang */}
+            {employee?.actorRole === 'EMPLOYEE' && (
+              <div
+                style={{
+                  padding: '9px 12px',
+                  borderRadius: 8,
+                  backgroundColor: '#eff6ff',
+                  border: '1px solid #93c5fd',
+                  color: '#1e40af',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  marginBottom: 12,
+                  lineHeight: 1.45,
+                }}
+              >
+                🛡️ <strong>Alur Approval Manager:</strong> Pengajuan ini akan masuk antrian persetujuan Manager. Stok di Kasir POS akan otomatis bertambah setelah di-ACC Manager.
+              </div>
+            )}
 
             {/* Feedback Sukses */}
             {restockSuccessMsg ? (
@@ -1888,13 +2118,43 @@ export default function GudangPortalPage() {
                   </div>
                 </div>
 
-                {/* Input Tanggal Expired (FEFO) */}
+                {/* Input Tanggal Expired (FEFO — WAJIB SEMUA PRODUK) */}
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
-                    Tanggal Kedaluwarsa / Expired (Wajib untuk Makanan/Minuman)
-                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155' }}>
+                      Tanggal Kedaluwarsa / Expired <span style={{ color: '#ef4444' }}>* Wajib Semua Produk</span>
+                    </label>
+                    <div style={{ display: 'inline-flex', gap: 4 }}>
+                      {[
+                        { d: 0, label: 'Hari Ini' },
+                        { d: 1, label: 'Besok' },
+                        { d: 7, label: '+7h' },
+                        { d: 30, label: '+30h' },
+                      ].map(({ d, label }) => (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => setExpiryDate(addDaysWibStr(d))}
+                          style={{
+                            border: '1px solid #cbd5e1',
+                            backgroundColor: '#f8fafc',
+                            color: '#334155',
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            padding: '3px 7px',
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <input
                     type="date"
+                    required
+                    min={getTodayWibStr()}
                     value={expiryDate}
                     onChange={(e) => setExpiryDate(e.target.value)}
                     style={{
@@ -1903,12 +2163,12 @@ export default function GudangPortalPage() {
                       height: 'auto',
                       padding: '10px 12px',
                       borderRadius: 10,
-                      border: '1px solid #cbd5e1',
+                      border: !expiryDate ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
                       fontSize: '1rem',
                     }}
                   />
                   <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: 2 }}>
-                    Membantu sistem menyusun antrean display FEFO (First Expired First Out).
+                    Wajib diisi termasuk untuk makanan harian/basah (pilih &ldquo;Hari Ini&rdquo; jika wajib habis 1 hari).
                   </div>
                 </div>
 
@@ -1948,7 +2208,11 @@ export default function GudangPortalPage() {
                     justifyContent: 'space-between',
                   }}
                 >
-                  <span>Stok Sistem Setelah Restock:</span>
+                  <span>
+                    {employee?.actorRole === 'MANAGER'
+                      ? 'Stok Sistem Setelah Restock:'
+                      : 'Estimasi Stok Setelah Di-ACC Manager:'}
+                  </span>
                   <strong>
                     {selectedProduct.stockQty + Number(restockQty)} {selectedProduct.unit}
                   </strong>
@@ -2002,7 +2266,483 @@ export default function GudangPortalPage() {
                     ) : (
                       <>
                         <CheckCircle2 size={16} />
-                        <span>Simpan Stok Masuk</span>
+                        <span>
+                          {employee?.actorRole === 'MANAGER'
+                            ? 'Simpan Stok Masuk'
+                            : 'Ajukan Restock ke Manager'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL AJUKAN PRODUK BARU (GUDANG -> APPROVAL MANAGER) ── */}
+      {canMutateStock && showNewProductModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 65,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 14,
+          }}
+          onClick={() => !submittingNewProd && setShowNewProductModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 540,
+              backgroundColor: '#ffffff',
+              borderRadius: 16,
+              padding: '20px 18px',
+              boxShadow: '0 20px 30px -5px rgba(0, 0, 0, 0.25)',
+              maxHeight: '92dvh',
+              overflowY: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    backgroundColor: '#dcfce7',
+                    color: '#15803d',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Plus size={20} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '0.98rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                    Ajukan Produk Baru ke Manager
+                  </h3>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                    Usulan SKU/varian baru (misal: Sendok, Aoka Vanila) — aktif di Kasir setelah di-ACC Manager.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !submittingNewProd && setShowNewProductModal(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  minWidth: 40,
+                  minHeight: 40,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                aria-label="Tutup modal produk baru"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {newProdError && (
+              <div
+                role="alert"
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  backgroundColor: '#fef2f2',
+                  border: '1px solid #ef4444',
+                  color: '#991b1b',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  marginBottom: 12,
+                }}
+              >
+                {newProdError}
+              </div>
+            )}
+
+            {newProdSuccessMsg ? (
+              <div
+                style={{
+                  padding: '16px',
+                  borderRadius: 10,
+                  backgroundColor: '#dcfce7',
+                  border: '1px solid #22c55e',
+                  color: '#15803d',
+                  fontSize: '0.84rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                }}
+              >
+                <CheckCircle2 size={20} style={{ flexShrink: 0 }} />
+                <span>{newProdSuccessMsg}</span>
+              </div>
+            ) : (
+              <form onSubmit={handleProposeNewProductSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                    Nama Produk &amp; Varian Spesifik <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newProdName}
+                    onChange={(e) => setNewProdName(e.target.value)}
+                    placeholder="Contoh: Sendok Plastik / Aoka Rasa Vanila"
+                    style={{
+                      width: '100%',
+                      minHeight: 42,
+                      padding: '8px 12px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      fontSize: '0.95rem',
+                    }}
+                  />
+                  <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: 2 }}>
+                    1 varian rasa / ukuran = 1 produk terpisah agar stok &amp; barcode tidak tertukar.
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Kategori <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <select
+                      required
+                      value={newProdCategoryId}
+                      onChange={(e) => setNewProdCategoryId(e.target.value)}
+                      style={{
+                        width: '100%',
+                        minHeight: 42,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.9rem',
+                        backgroundColor: '#fff',
+                      }}
+                    >
+                      <option value="">-- Pilih Kategori --</option>
+                      {categoriesList.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Barcode Produk (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newProdBarcode}
+                      onChange={(e) => setNewProdBarcode(e.target.value)}
+                      placeholder="Scan / ketik barcode"
+                      style={{
+                        width: '100%',
+                        minHeight: 42,
+                        padding: '8px 12px',
+                        borderRadius: 8,
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.9rem',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 90px', gap: 8 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      HPP / Harga Beli (Rp) <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      required
+                      value={newProdCostPrice}
+                      onChange={(e) => setNewProdCostPrice(e.target.value)}
+                      style={{
+                        width: '100%',
+                        minHeight: 42,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.95rem',
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Usulan Harga Jual (Rp) <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      required
+                      value={newProdSellingPrice}
+                      onChange={(e) => setNewProdSellingPrice(e.target.value)}
+                      placeholder="Misal: 3000"
+                      style={{
+                        width: '100%',
+                        minHeight: 42,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.95rem',
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Satuan
+                    </label>
+                    <input
+                      type="text"
+                      value={newProdUnit}
+                      onChange={(e) => setNewProdUnit(e.target.value)}
+                      placeholder="pcs"
+                      style={{
+                        width: '100%',
+                        minHeight: 42,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.9rem',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Qty Awal <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100000}
+                      required
+                      value={newProdInitialQty}
+                      onChange={(e) => setNewProdInitialQty(Math.max(1, Number(e.target.value)))}
+                      style={{
+                        width: '100%',
+                        minHeight: 42,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.95rem',
+                        fontWeight: 700,
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155' }}>
+                        Tanggal Expired <span style={{ color: '#ef4444' }}>*Wajib</span>
+                      </label>
+                      <div style={{ display: 'inline-flex', gap: 3 }}>
+                        {[
+                          { d: 0, label: 'Hari Ini' },
+                          { d: 7, label: '+7h' },
+                          { d: 30, label: '+30h' },
+                          { d: 365, label: '+1th' },
+                        ].map(({ d, label }) => (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => setNewProdExpiryDate(addDaysWibStr(d))}
+                            style={{
+                              border: '1px solid #cbd5e1',
+                              backgroundColor: '#f8fafc',
+                              color: '#334155',
+                              fontSize: '0.64rem',
+                              fontWeight: 700,
+                              padding: '2px 5px',
+                              borderRadius: 4,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <input
+                      type="date"
+                      required
+                      min={getTodayWibStr()}
+                      value={newProdExpiryDate}
+                      onChange={(e) => setNewProdExpiryDate(e.target.value)}
+                      style={{
+                        width: '100%',
+                        minHeight: 42,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: !newProdExpiryDate ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
+                        fontSize: '0.95rem',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Tipe Produk: Makanan Harian */}
+                <div
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    backgroundColor: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem', fontWeight: 700, color: '#1e293b', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={newProdIsPerishable}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setNewProdIsPerishable(checked);
+                        if (checked) {
+                          setNewProdExpiryDate(getTodayWibStr());
+                        }
+                      }}
+                    />
+                    <span>Tandai sebagai Makanan Harian / Basah (Wajib habis hari ini)</span>
+                  </label>
+
+                  {newProdIsPerishable && (
+                    <select
+                      value={newProdPerishableType}
+                      onChange={(e) => setNewProdPerishableType(e.target.value as 'KONSINYASI' | 'BELI_LEPAS')}
+                      style={{
+                        width: '100%',
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.8rem',
+                        backgroundColor: '#fff',
+                      }}
+                    >
+                      <option value="KONSINYASI">Konsinyasi (Titip Jual Mitra / Ibu Kantin)</option>
+                      <option value="BELI_LEPAS">Beli Lepas (Modal Toko)</option>
+                    </select>
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Nama Supplier (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newProdSupplier}
+                      onChange={(e) => setNewProdSupplier(e.target.value)}
+                      placeholder="Contoh: Toko Grosir Maju"
+                      style={{
+                        width: '100%',
+                        minHeight: 40,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.88rem',
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
+                      Catatan untuk Manager (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newProdNotes}
+                      onChange={(e) => setNewProdNotes(e.target.value)}
+                      placeholder="Contoh: Banyak diminta mahasiswa"
+                      style={{
+                        width: '100%',
+                        minHeight: 40,
+                        padding: '8px 10px',
+                        borderRadius: 8,
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.88rem',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                  <button
+                    type="button"
+                    disabled={submittingNewProd}
+                    onClick={() => setShowNewProductModal(false)}
+                    className="btn btn-secondary"
+                    style={{
+                      flex: 1,
+                      height: 44,
+                      borderRadius: 10,
+                      border: '1px solid #cbd5e1',
+                      backgroundColor: '#f1f5f9',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingNewProd}
+                    className="btn btn-primary"
+                    style={{
+                      flex: 2,
+                      height: 44,
+                      borderRadius: 10,
+                      backgroundColor: '#059669',
+                      color: '#fff',
+                      border: 'none',
+                      fontSize: '0.85rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    {submittingNewProd ? (
+                      <>
+                        <RefreshCw size={16} className="spin-icon" />
+                        <span>Mengirim Usulan...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 size={16} />
+                        <span>Kirim Usulan ke Manager</span>
                       </>
                     )}
                   </button>

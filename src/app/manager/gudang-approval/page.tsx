@@ -67,12 +67,18 @@ type SubmissionItem = {
   createdAt: string;
   creatorName: string;
   creatorNim: string;
+  hasNewProductProposal?: boolean;
 };
 
 type ItemDetail = {
   id: string;
   productId: string;
   productName: string;
+  productIsActive?: boolean;
+  productSellingPrice?: number | string;
+  productBarcode?: string | null;
+  productUnit?: string;
+  productCategoryName?: string | null;
   batchCode: string;
   qty: number;
   costPrice: number | string;
@@ -114,9 +120,14 @@ export type ConditionReportItem = {
   executedAt: string | null;
   executionNote: string | null;
   createdAt: string;
+  isExpired?: boolean;
   discountBarcode?: string | null;
   discountedPrice?: number | null;
 };
+
+function getTodayWibIsoManager(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
+}
 
 type ModTodayStatus = {
   isCheckedIn: boolean;
@@ -212,6 +223,8 @@ export default function GudangApprovalPage() {
   // State Modal Aksi Manager (Penerimaan)
   const [actionType, setActionType] = useState<'APPROVE' | 'REVISI' | 'TOLAK' | null>(null);
   const [selectedSub, setSelectedSub] = useState<SubmissionItem | null>(null);
+  const [approvePreviewItems, setApprovePreviewItems] = useState<ItemDetail[]>([]);
+  const [approvePriceEdits, setApprovePriceEdits] = useState<Record<string, { sellingPrice: string; costPrice: string }>>({});
   const [actionNote, setActionNote] = useState('');
   const [processingAction, setProcessingAction] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -708,11 +721,36 @@ export default function GudangApprovalPage() {
   }
 
   // ── Buka Modal Aksi ──────────────────────────────────────────
-  function openActionModal(sub: SubmissionItem, type: 'APPROVE' | 'REVISI' | 'TOLAK') {
+  async function openActionModal(sub: SubmissionItem, type: 'APPROVE' | 'REVISI' | 'TOLAK') {
     setSelectedSub(sub);
     setActionType(type);
     setActionNote('');
     setActionError(null);
+    setApprovePreviewItems([]);
+    setApprovePriceEdits({});
+
+    if (type === 'APPROVE') {
+      try {
+        const res = await fetch(`/api/gudang/penerimaan/${sub.id}`);
+        const json = await res.json();
+        if (res.ok && json.success && json.data?.items) {
+          const detailItems = json.data.items as ItemDetail[];
+          setApprovePreviewItems(detailItems);
+          const initEdits: Record<string, { sellingPrice: string; costPrice: string }> = {};
+          for (const it of detailItems) {
+            if (it.productIsActive === false) {
+              initEdits[it.productId] = {
+                sellingPrice: String(Math.round(Number(it.productSellingPrice ?? 0))),
+                costPrice: String(Math.round(Number(it.costPrice ?? 0))),
+              };
+            }
+          }
+          setApprovePriceEdits(initEdits);
+        }
+      } catch {
+        // non-blocking preview fetch
+      }
+    }
   }
 
   // ── Eksekusi Aksi Manager ─────────────────────────────────────
@@ -728,10 +766,20 @@ export default function GudangApprovalPage() {
     setProcessingAction(true);
     try {
       let endpoint = '';
-      let body: Record<string, string> | undefined = undefined;
+      let body: Record<string, unknown> | undefined = undefined;
 
       if (actionType === 'APPROVE') {
         endpoint = `/api/admin/gudang/penerimaan/${selectedSub.id}/approve`;
+        const overrides = Object.entries(approvePriceEdits)
+          .map(([productId, vals]) => ({
+            productId,
+            sellingPrice: Number(vals.sellingPrice),
+            costPrice: Number(vals.costPrice),
+          }))
+          .filter((o) => Number.isFinite(o.sellingPrice) && o.sellingPrice > 0 && Number.isFinite(o.costPrice) && o.costPrice >= 0);
+        if (overrides.length > 0) {
+          body = { priceOverrides: overrides };
+        }
       } else if (actionType === 'REVISI') {
         endpoint = `/api/admin/gudang/penerimaan/${selectedSub.id}/revisi`;
         body = { catatan: actionNote.trim() };
@@ -753,7 +801,7 @@ export default function GudangApprovalPage() {
 
       setSuccessToast(
         actionType === 'APPROVE'
-          ? `✅ Penerimaan #${selectedSub.receiveNumber} disetujui! Stok telah ditambahkan ke kasir.`
+          ? `✅ Penerimaan #${selectedSub.receiveNumber} disetujui! Produk & stok telah aktif di kasir.`
           : actionType === 'REVISI'
             ? `🔄 Draft #${selectedSub.receiveNumber} dikembalikan ke petugas gudang untuk direvisi.`
             : `❌ Penerimaan #${selectedSub.receiveNumber} ditolak. Stok dibatalkan.`,
@@ -761,6 +809,8 @@ export default function GudangApprovalPage() {
 
       setActionType(null);
       setSelectedSub(null);
+      setApprovePreviewItems([]);
+      setApprovePriceEdits({});
       fetchSubmissions(activeTab);
 
       setTimeout(() => {
@@ -1370,8 +1420,25 @@ export default function GudangApprovalPage() {
                       <strong style={{ color: '#0f172a' }}>{sub.supplierName || '— (Umum)'}</strong>
                     </div>
                     <div>
-                      <span style={{ color: '#64748b' }}>No. Surat Jalan: </span>
+                      <span style={{ color: '#64748b' }}>No. Surat Jalan / Jenis: </span>
                       <strong style={{ color: '#0f172a' }}>{sub.deliveryNote || '—'}</strong>
+                      {(sub.hasNewProductProposal || sub.deliveryNote?.startsWith('[USULAN PRODUK BARU]')) && (
+                        <span
+                          style={{
+                            marginLeft: 6,
+                            padding: '2px 8px',
+                            borderRadius: 999,
+                            background: '#ede9fe',
+                            color: '#6d28d9',
+                            border: '1px solid #c4b5fd',
+                            fontSize: '0.68rem',
+                            fontWeight: 800,
+                            display: 'inline-block',
+                          }}
+                        >
+                          ✨ USULAN PRODUK BARU
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -1530,7 +1597,33 @@ export default function GudangApprovalPage() {
                                 return (
                                   <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0', background: '#ffffff' }}>
                                     <td style={{ padding: '10px 10px', fontWeight: 700, color: '#0f172a' }}>
-                                      {it.productName}
+                                      <div>{it.productName}</div>
+                                      {it.productIsActive === false && (
+                                        <div style={{ marginTop: 3, display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                                          <span
+                                            style={{
+                                              padding: '2px 6px',
+                                              borderRadius: 4,
+                                              background: '#ede9fe',
+                                              color: '#6d28d9',
+                                              fontSize: '0.66rem',
+                                              fontWeight: 800,
+                                            }}
+                                          >
+                                            ✨ PRODUK BARU (Menunggu ACC)
+                                          </span>
+                                          {it.productCategoryName && (
+                                            <span style={{ fontSize: '0.68rem', color: '#475569' }}>
+                                              Kategori: {it.productCategoryName}
+                                            </span>
+                                          )}
+                                          {it.productSellingPrice !== undefined && (
+                                            <span style={{ fontSize: '0.68rem', color: '#047857', fontWeight: 700 }}>
+                                              Usulan Harga Jual: Rp {Math.round(Number(it.productSellingPrice)).toLocaleString('id-ID')}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
                                     </td>
                                     <td style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 800, color: '#0284c7' }}>
                                       {it.qty}
@@ -1798,9 +1891,25 @@ export default function GudangApprovalPage() {
                         <button
                           type="button"
                           onClick={() => {
+                            const expiredNow = Boolean(
+                              rep.isExpired ||
+                                (rep.expiryDate && rep.expiryDate < getTodayWibIsoManager()),
+                            );
+                            const sug = (rep.gudangSuggestion || '').toUpperCase();
                             setSelectedFefo(rep);
+                            setFefoDecisionError(null);
                             setApprovedDiscountPct(Number(rep.suggestedDiscountPct) || 30);
-                            setFefoDecision(rep.gudangSuggestion === 'DISCOUNT' ? 'DISCOUNT' : 'DISCOUNT');
+                            if (expiredNow) {
+                              setFefoDecision(sug.includes('RETUR') ? 'RETURN_SUPPLIER' : 'DESTROY');
+                            } else if (sug.includes('MUSNAH') || sug.includes('DISPOSE') || sug.includes('WRITE-OFF')) {
+                              setFefoDecision('DESTROY');
+                            } else if (sug.includes('RETUR') || sug.includes('RETURN')) {
+                              setFefoDecision('RETURN_SUPPLIER');
+                            } else if (sug.includes('PINDAH') || sug.includes('RAK DEPAN') || sug.includes('RELOCATE')) {
+                              setFefoDecision('DISPLAY_FRONT');
+                            } else {
+                              setFefoDecision('DISCOUNT');
+                            }
                           }}
                           style={{
                             padding: '9px 18px',
@@ -2227,15 +2336,87 @@ export default function GudangApprovalPage() {
 
             {/* Content Text / Instructions */}
             {actionType === 'APPROVE' ? (
-              <div style={{ fontSize: '0.85rem', color: '#334155', lineHeight: 1.5, background: '#f8fafc', padding: 14, borderRadius: 10 }}>
-                <p style={{ margin: '0 0 8px 0' }}>
-                  Dengan menyetujui penerimaan barang ini:
-                </p>
-                <ul style={{ margin: 0, paddingLeft: 18, color: '#475569' }}>
-                  <li>Batch stok baru akan dibuat secara atomik di tabel <code>stock_batches</code>.</li>
-                  <li>Kuantitas stok produk di kasir akan <strong>langsung bertambah</strong>.</li>
-                  <li>Tindakan Anda akan tercatat permanen di <code>audit_logs</code>.</li>
-                </ul>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: '0.85rem', color: '#334155', lineHeight: 1.5, background: '#f8fafc', padding: 14, borderRadius: 10 }}>
+                  <p style={{ margin: '0 0 8px 0' }}>
+                    Dengan menyetujui penerimaan barang ini:
+                  </p>
+                  <ul style={{ margin: 0, paddingLeft: 18, color: '#475569' }}>
+                    <li>Batch stok baru akan dibuat secara atomik di tabel <code>stock_batches</code>.</li>
+                    <li>Usulan produk baru (jika ada) akan <strong>langsung diaktifkan</strong> &amp; stok produk di kasir <strong>langsung bertambah</strong>.</li>
+                    <li>Tindakan Anda tercatat permanen di <code>stock_adjustments</code> &amp; <code>audit_logs</code>.</li>
+                  </ul>
+                </div>
+
+                {/* Penyesuaian Harga Jual Final untuk Usulan Produk Baru */}
+                {approvePreviewItems.some((it) => it.productIsActive === false) && (
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: 10,
+                      background: '#f5f3ff',
+                      border: '1px solid #c4b5fd',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ fontSize: '0.8rem', fontWeight: 800, color: '#5b21b6' }}>
+                      ✨ Konfirmasi Harga Usulan Produk Baru Sebelum Diaktifkan di Kasir:
+                    </div>
+                    {approvePreviewItems
+                      .filter((it) => it.productIsActive === false)
+                      .map((it) => {
+                        const edit = approvePriceEdits[it.productId] ?? {
+                          sellingPrice: String(Math.round(Number(it.productSellingPrice ?? 0))),
+                          costPrice: String(Math.round(Number(it.costPrice ?? 0))),
+                        };
+                        return (
+                          <div key={it.productId} style={{ background: '#ffffff', padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd6fe' }}>
+                            <div style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a', marginBottom: 6 }}>
+                              {it.productName} ({it.qty} {it.productUnit || 'pcs'} &bull; ED: {it.expiryDate || '—'})
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: '#475569', marginBottom: 2 }}>
+                                  HPP Final (Rp)
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={edit.costPrice}
+                                  onChange={(e) =>
+                                    setApprovePriceEdits((prev) => ({
+                                      ...prev,
+                                      [it.productId]: { ...edit, costPrice: e.target.value },
+                                    }))
+                                  }
+                                  style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.84rem' }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: '#047857', marginBottom: 2 }}>
+                                  Harga Jual Kasir (Rp) *
+                                </label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={edit.sellingPrice}
+                                  onChange={(e) =>
+                                    setApprovePriceEdits((prev) => ({
+                                      ...prev,
+                                      [it.productId]: { ...edit, sellingPrice: e.target.value },
+                                    }))
+                                  }
+                                  style={{ width: '100%', padding: '7px 9px', borderRadius: 6, border: '1.5px solid #10b981', fontSize: '0.84rem', fontWeight: 700 }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
               </div>
             ) : (
               <div>
@@ -2402,6 +2583,24 @@ export default function GudangApprovalPage() {
               </div>
             </div>
 
+            {/* Peringatan Keras Jika Batch Sudah Kedaluwarsa */}
+            {(selectedFefo.isExpired || (selectedFefo.expiryDate && selectedFefo.expiryDate < getTodayWibIsoManager())) && (
+              <div
+                role="alert"
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  background: '#fef2f2',
+                  border: '1.5px solid #ef4444',
+                  color: '#991b1b',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                }}
+              >
+                ⛔ BATCH SUDAH KEDALUWARSA (ED: {selectedFefo.expiryDate}). Opsi Diskon &amp; Rak Depan dikunci otomatis; pilih <strong>Pemusnahan (DESTROY)</strong> atau <strong>Retur Supplier (RETURN_SUPPLIER)</strong> agar stok dinolkan.
+              </div>
+            )}
+
             {/* Pilihan Keputusan */}
             <div>
               <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: 4 }}>
@@ -2419,16 +2618,21 @@ export default function GudangApprovalPage() {
                   fontWeight: 700,
                 }}
               >
-                <option value="DISCOUNT">🏷️ ACC Diskon Obral Darurat (Auto-Generate Barcode Kasir)</option>
-                <option value="DISPLAY_FRONT">➡️ Pindahkan ke Rak Depan Kasir (Jual Normal)</option>
-                <option value="DESTROY">🗑️ ACC Pemusnahan / Write-Off (Barang Rusak/Basi)</option>
-                <option value="RETURN_SUPPLIER">↩️ ACC Retur ke Supplier</option>
+                {!(selectedFefo.isExpired || (selectedFefo.expiryDate && selectedFefo.expiryDate < getTodayWibIsoManager())) && (
+                  <>
+                    <option value="DISCOUNT">🏷️ ACC Diskon Obral Darurat (Auto-Generate Barcode Kasir)</option>
+                    <option value="DISPLAY_FRONT">➡️ Pindahkan ke Rak Depan Kasir (Jual Normal)</option>
+                  </>
+                )}
+                <option value="DESTROY">🗑️ ACC Pemusnahan / Write-Off (Tarik &amp; Nol-kan Stok)</option>
+                <option value="RETURN_SUPPLIER">↩️ ACC Retur ke Supplier (Tarik &amp; Nol-kan Stok)</option>
                 <option value="HOLD">⏸️ Tahan Sementara (Pantau Kondisi)</option>
               </select>
             </div>
 
-            {/* Jika Keputusan DISCOUNT: Input Persentase & Preview Barcode */}
-            {fefoDecision === 'DISCOUNT' && (
+            {/* Jika Keputusan DISCOUNT & BELUM expired: Input Persentase & Preview Barcode */}
+            {fefoDecision === 'DISCOUNT' &&
+              !(selectedFefo.isExpired || (selectedFefo.expiryDate && selectedFefo.expiryDate < getTodayWibIsoManager())) && (
               <div style={{ background: '#fef2f2', padding: '12px 14px', borderRadius: 10, border: '1px solid #fecaca' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                   <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#991b1b' }}>

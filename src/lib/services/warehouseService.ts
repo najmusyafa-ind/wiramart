@@ -11,10 +11,12 @@ import {
   categories,
   stockBatches,
   stockAdjustments,
+  productConditionReports,
   admins,
   employees,
   shifts,
   shiftSchedules,
+  type ExpiryClass,
 } from '@/lib/db/schema';
 import {
   eq,
@@ -28,12 +30,23 @@ import {
   lte,
   gt,
   inArray,
+  notInArray,
   exists,
   sql,
   type SQL,
 } from 'drizzle-orm';
 import { getTodayWib, getOffsetDateWib } from '@/lib/utils/helpers';
 import { getLowStockThreshold } from '@/lib/services/operationalSettingsService';
+
+function deriveExpiryClass(expiryDateStr: string): ExpiryClass {
+  const todayStr = getTodayWib();
+  const today = new Date(`${todayStr}T00:00:00Z`);
+  const exp = new Date(`${expiryDateStr}T00:00:00Z`);
+  const diffDays = Math.ceil((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (diffDays <= 2) return 'HARIAN';
+  if (diffDays <= 14) return 'PENDEK';
+  return 'PANJANG';
+}
 
 // ── Tipe Data DTO (Clean Architecture) ─────────────────────────
 
@@ -43,6 +56,7 @@ export interface WarehouseSummaryDto {
   lowStockSku: number;
   lowStockThreshold: number;
   expiringSoonSku: number;
+  activeFefoAlertCount: number;
   todayRestockCount: number;
   perishableSku: number;
 }
@@ -107,17 +121,16 @@ export interface WarehouseActivityDto {
 export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
   const nowWib = new Date();
   const todayStr = getTodayWib(nowWib);
-  const in30Days = getOffsetDateWib(30, nowWib);
+  const in7Days = getOffsetDateWib(7, nowWib);
   const lowStockThreshold = await getLowStockThreshold();
 
-  // 1. Total SKU aktif & stok + batch FEFO + restock hari ini secara paralel
-  const [activeProducts, expiringBatches, [todayAdjustmentStats]] = await Promise.all([
+  // 1. Total SKU aktif & stok + batch FEFO (<= 7 hari / expired) + alert FEFO terbuka + restock hari ini secara paralel
+  const [activeProducts, expiringBatches, [openAlertStats], [todayAdjustmentStats]] = await Promise.all([
     db
       .select({
         id: products.id,
         stockQty: products.stockQty,
         isPerishable: products.isPerishable,
-        barcode: products.barcode,
       })
       .from(products)
       .where(and(eq(products.isActive, true), isNull(products.deletedAt))),
@@ -133,7 +146,22 @@ export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
           isNull(products.deletedAt),
           isNotNull(stockBatches.expiryDate),
           gt(stockBatches.currentQty, 0),
-          lte(stockBatches.expiryDate, in30Days),
+          lte(stockBatches.expiryDate, in7Days),
+        ),
+      ),
+    db
+      .select({
+        count: sql<number>`COALESCE(COUNT(*), 0)::int`,
+      })
+      .from(productConditionReports)
+      .innerJoin(stockBatches, eq(productConditionReports.batchId, stockBatches.id))
+      .innerJoin(products, eq(stockBatches.productId, products.id))
+      .where(
+        and(
+          eq(products.isActive, true),
+          isNull(products.deletedAt),
+          gt(stockBatches.currentQty, 0),
+          notInArray(productConditionReports.status, ['EXECUTED', 'CLOSED']),
         ),
       ),
     db
@@ -143,7 +171,10 @@ export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
       .from(stockAdjustments)
       .where(
         and(
-          ilike(stockAdjustments.reason, '%RESTOCK GUDANG%'),
+          or(
+            ilike(stockAdjustments.reason, '%RESTOCK GUDANG%'),
+            ilike(stockAdjustments.reason, '%PENERIMAAN ACC%'),
+          ),
           sql`DATE(${stockAdjustments.createdAt} AT TIME ZONE 'Asia/Jakarta') = ${todayStr}::date`,
         ),
       ),
@@ -154,7 +185,8 @@ export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
   let perishableSku = 0;
 
   for (const p of activeProducts) {
-    if (p.isPerishable || !p.barcode) {
+    // Murni produk yang ditandai is_perishable = true (bukan semua non-barcode)
+    if (p.isPerishable) {
       perishableSku++;
     }
     if (p.stockQty <= 0) {
@@ -165,16 +197,26 @@ export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
   }
 
   const uniqueExpiringProductIds = new Set(expiringBatches.map((b) => b.productId));
+  const activeFefoAlertCount = openAlertStats?.count ?? 0;
 
   return {
     totalSku: activeProducts.length,
     outOfStockSku,
     lowStockSku,
     lowStockThreshold,
-    expiringSoonSku: uniqueExpiringProductIds.size,
+    expiringSoonSku: Math.max(uniqueExpiringProductIds.size, activeFefoAlertCount),
+    activeFefoAlertCount,
     todayRestockCount: todayAdjustmentStats?.count ?? 0,
     perishableSku,
   };
+}
+
+export async function getActiveWarehouseCategories(): Promise<Array<{ id: string; name: string }>> {
+  return db
+    .select({ id: categories.id, name: categories.name })
+    .from(categories)
+    .where(and(eq(categories.isActive, true), isNull(categories.deletedAt)))
+    .orderBy(asc(categories.name));
 }
 
 // =============================================================
@@ -220,7 +262,7 @@ export async function getWarehouseProducts(options: {
       lte(products.stockQty, lowStockThreshold),
     );
   } else if (filter === 'perishable') {
-    conditions.push(or(eq(products.isPerishable, true), isNull(products.barcode), eq(products.barcode, ''))!);
+    conditions.push(eq(products.isPerishable, true));
   } else if (filter === 'fefo') {
     // Dorong filter FEFO ke SQL agar tidak terpotong LIMIT/OFFSET produk abjad awal
     conditions.push(
@@ -438,6 +480,14 @@ export async function restockProductByWarehouse(
   const autoBatchCode =
     batchCode?.trim() || `IN-${todayCompact}-${randomInt(1000, 10000)}`;
   const cleanExpiryDate = expiryDate?.trim() || null;
+  const todayStrWib = getTodayWib(nowWib);
+  if (!cleanExpiryDate || !/^\d{4}-\d{2}-\d{2}$/.test(cleanExpiryDate)) {
+    throw new Error('Tanggal kedaluwarsa (Expired Date) wajib diisi untuk semua barang masuk (termasuk makanan harian).');
+  }
+  if (cleanExpiryDate < todayStrWib) {
+    throw new Error(`Tanggal kedaluwarsa (${cleanExpiryDate}) sudah terlewat. Tidak dapat menerima barang kedaluwarsa.`);
+  }
+  const computedExpiryClass = deriveExpiryClass(cleanExpiryDate);
 
   let productName = '';
   let qtyBefore = 0;
@@ -489,7 +539,7 @@ export async function restockProductByWarehouse(
         initialQty: qtyAdd,
         currentQty: qtyAdd,
         expiryDate: cleanExpiryDate,
-        expiryClass: cleanExpiryDate ? 'PENDEK' : 'PANJANG',
+        expiryClass: computedExpiryClass,
         receivedAt: nowWib,
         notes: notes
           ? `Diterima oleh ${actorName} (${actorNim}): ${notes}`
@@ -586,7 +636,7 @@ export async function restockProductByWarehouse(
 // =============================================================
 // 4. Log Aktivitas Restock Gudang Terbaru
 // =============================================================
-export async function getWarehouseActivityLogs(limit = 30): Promise<WarehouseActivityDto[]> {
+export async function getWarehouseActivityLogs(limit = 50): Promise<WarehouseActivityDto[]> {
   const rows = await db
     .select({
       id: stockAdjustments.id,
@@ -600,7 +650,12 @@ export async function getWarehouseActivityLogs(limit = 30): Promise<WarehouseAct
     .from(stockAdjustments)
     .leftJoin(products, eq(stockAdjustments.productId, products.id))
     .leftJoin(categories, eq(products.categoryId, categories.id))
-    .where(ilike(stockAdjustments.reason, '%RESTOCK GUDANG%'))
+    .where(
+      or(
+        ilike(stockAdjustments.reason, '%RESTOCK GUDANG%'),
+        ilike(stockAdjustments.reason, '%PENERIMAAN ACC%'),
+      ),
+    )
     .orderBy(desc(stockAdjustments.createdAt))
     .limit(limit);
 

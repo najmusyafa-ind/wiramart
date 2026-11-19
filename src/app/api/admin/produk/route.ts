@@ -256,6 +256,26 @@ export async function POST(req: NextRequest) {
 
   if (!cat) return apiError('Kategori tidak valid', 400);
 
+  // Guard Anti-Duplikat Case-Insensitive (mencegah "ayam geprek" vs "Ayam Geprek")
+  const normalizedName = name.trim().toLowerCase();
+  const [dupName] = await db
+    .select({ id: products.id, name: products.name })
+    .from(products)
+    .where(
+      and(
+        isNull(products.deletedAt),
+        sql`LOWER(TRIM(${products.name})) = ${normalizedName}`,
+      ),
+    )
+    .limit(1);
+
+  if (dupName) {
+    return apiError(
+      `Produk dengan nama "${dupName.name}" sudah terdaftar di katalog (pencocokan tidak membedakan huruf besar/kecil). Gunakan nama varian yang spesifik, misal tambahkan rasa/ukuran.`,
+      409,
+    );
+  }
+
   let created: (typeof products.$inferSelect) | undefined;
   try {
     created = await db.transaction(async (tx) => {

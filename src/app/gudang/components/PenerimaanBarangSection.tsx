@@ -687,6 +687,14 @@ export default function PenerimaanBarangSection({
         setFormError(`Item #${index + 1} (${it.productName}): Kode batch wajib diisi.`);
         return;
       }
+      if (!it.expiryDate || !/^\d{4}-\d{2}-\d{2}$/.test(it.expiryDate)) {
+        setFormError(`Item #${index + 1} (${it.productName}): Tanggal kedaluwarsa (Expired Date) wajib diisi untuk semua barang masuk.`);
+        return;
+      }
+      if (it.expiryDate < getTodayWibStr()) {
+        setFormError(`Item #${index + 1} (${it.productName}): Tanggal kedaluwarsa (${it.expiryDate}) sudah terlewat.`);
+        return;
+      }
     }
 
     setSubmittingForm(true);
@@ -994,7 +1002,7 @@ export default function PenerimaanBarangSection({
               transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           >
-            <Plus size={16} /> + Upload & Input Nota
+            <Plus size={16} /> Upload &amp; Input Nota
           </button>
         </div>
       </div>
@@ -2467,15 +2475,20 @@ export default function PenerimaanBarangSection({
 
                           <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                              <label style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                                Tanggal Expired {isPerishable && <span style={{ color: '#ef4444' }}>*Wajib</span>}
+                              <label style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 700 }}>
+                                Tanggal Expired <span style={{ color: '#ef4444' }}>*Wajib</span>
                               </label>
                               <div style={{ display: 'inline-flex', gap: 3 }}>
-                                {[1, 2, 7].map((dNum) => (
+                                {[
+                                  { d: 0, label: 'Hari Ini' },
+                                  { d: 1, label: '+1h' },
+                                  { d: 7, label: '+7h' },
+                                  { d: 30, label: '+30h' },
+                                ].map(({ d, label }) => (
                                   <button
-                                    key={dNum}
+                                    key={d}
                                     type="button"
-                                    onClick={() => handleUpdateItem(idx, 'expiryDate', addDaysToToday(dNum))}
+                                    onClick={() => handleUpdateItem(idx, 'expiryDate', addDaysToToday(d))}
                                     style={{
                                       border: '1px solid #cbd5e1',
                                       background: '#f8fafc',
@@ -2486,15 +2499,17 @@ export default function PenerimaanBarangSection({
                                       borderRadius: 4,
                                       cursor: 'pointer',
                                     }}
-                                    title={`Isi otomatis +${dNum} hari dari hari ini`}
+                                    title={d === 0 ? 'Isi tanggal hari ini (H+0)' : `Isi otomatis +${d} hari dari hari ini`}
                                   >
-                                    +{dNum}h
+                                    {label}
                                   </button>
                                 ))}
                               </div>
                             </div>
                             <input
                               type="date"
+                              required
+                              min={getTodayWibStr()}
                               value={it.expiryDate || ''}
                               onChange={(e) => handleUpdateItem(idx, 'expiryDate', e.target.value)}
                               style={{
@@ -2502,7 +2517,7 @@ export default function PenerimaanBarangSection({
                                 minHeight: 44,
                                 padding: '8px 10px',
                                 borderRadius: 6,
-                                border: isPerishable && !it.expiryDate ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
+                                border: !it.expiryDate ? '1.5px solid #ef4444' : '1px solid #cbd5e1',
                                 fontSize: 'var(--text-base)',
                                 boxSizing: 'border-box',
                               }}

@@ -53,9 +53,14 @@ export type ConditionReportItem = {
   executedAt: string | null;
   executionNote: string | null;
   createdAt: string;
+  isExpired?: boolean;
   discountBarcode?: string | null;
   discountedPrice?: number | null;
 };
+
+function getTodayWibIso(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
+}
 
 interface FEFOActionSectionProps {
   onBadgeUpdate?: () => void;
@@ -196,19 +201,32 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
       return;
     }
 
+    const expiredNow = Boolean(
+      laporModalItem.isExpired ||
+        (laporModalItem.expiryDate && laporModalItem.expiryDate < getTodayWibIso()),
+    );
+    if (expiredNow && (gudangSuggestion === 'DISCOUNT' || gudangSuggestion === 'RELOCATE')) {
+      showToast(
+        'Barang sudah kedaluwarsa. Pilih Musnahkan atau Retur ke Supplier.',
+        'error',
+      );
+      return;
+    }
+
     setSubmittingLapor(true);
     try {
       const payload = {
         physicalCondition: physicalCondition.trim(),
         gudangSuggestion:
-          gudangSuggestion === 'DISCOUNT'
+          !expiredNow && gudangSuggestion === 'DISCOUNT'
             ? `Usul Diskon ${suggestedDiscountPct}% Cuci Gudang`
-            : gudangSuggestion === 'RELOCATE'
+            : !expiredNow && gudangSuggestion === 'RELOCATE'
             ? 'Usul Pindah ke Rak Display Depan'
             : gudangSuggestion === 'DISPOSE'
             ? 'Usul Pemusnahan / Write-off'
             : 'Usul Retur ke Supplier',
-        suggestedDiscountPct: gudangSuggestion === 'DISCOUNT' ? suggestedDiscountPct : null,
+        suggestedDiscountPct:
+          !expiredNow && gudangSuggestion === 'DISCOUNT' ? suggestedDiscountPct : null,
       };
 
       const res = await fetch(`/api/gudang/fefo-alerts/${laporModalItem.id}/lapor`, {
@@ -775,10 +793,13 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                     <button
                       type="button"
                       onClick={() => {
+                        const expiredNow = Boolean(item.isExpired || (item.expiryDate && item.expiryDate < getTodayWibIso()));
                         setLaporModalItem(item);
-                        setPhysicalCondition('');
-                        setGudangSuggestion('DISCOUNT');
-                        setSuggestedDiscountPct(30);
+                        setPhysicalCondition(
+                          expiredNow ? 'Batch sudah melewati tanggal kedaluwarsa, wajib ditarik dari rak.' : '',
+                        );
+                        setGudangSuggestion(expiredNow ? 'DISPOSE' : 'DISCOUNT');
+                        setSuggestedDiscountPct(expiredNow ? 0 : 30);
                       }}
                       className="btn btn-primary"
                       style={{
@@ -789,12 +810,14 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                         minHeight: 44,
                         padding: '8px 14px',
                         fontWeight: 700,
-                        backgroundColor: '#ea580c',
-                        borderColor: '#ea580c',
+                        backgroundColor: item.isExpired || (item.expiryDate && item.expiryDate < getTodayWibIso()) ? '#dc2626' : '#ea580c',
+                        borderColor: item.isExpired || (item.expiryDate && item.expiryDate < getTodayWibIso()) ? '#dc2626' : '#ea580c',
                       }}
                     >
                       <FileText size={14} />
-                      Input Pemeriksaan Fisik
+                      {item.isExpired || (item.expiryDate && item.expiryDate < getTodayWibIso())
+                        ? 'Ajukan Tarik / Musnahkan (Expired)'
+                        : 'Input Pemeriksaan Fisik'}
                     </button>
                   )}
 
@@ -981,6 +1004,25 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
               />
             </div>
 
+            {/* Peringatan Keras Jika Batch Sudah Kedaluwarsa */}
+            {(laporModalItem.isExpired || (laporModalItem.expiryDate && laporModalItem.expiryDate < getTodayWibIso())) && (
+              <div
+                role="alert"
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  background: '#fef2f2',
+                  border: '1.5px solid #ef4444',
+                  color: '#991b1b',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  lineHeight: 1.45,
+                }}
+              >
+                ⛔ BARANG SUDAH KEDALUWARSA (ED: {laporModalItem.expiryDate}). Dilarang didiskon atau dijual kembali! Pilih <strong>Musnahkan (Write-Off)</strong> atau <strong>Retur ke Supplier</strong> untuk menolkan stok batch ini setelah di-ACC Manager.
+              </div>
+            )}
+
             {/* Rekomendasi Tindakan */}
             <div>
               <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: 4 }}>
@@ -999,15 +1041,20 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                   fontWeight: 600,
                 }}
               >
-                <option value="DISCOUNT">🏷️ Usulkan Diskon Obral Darurat (Diskon Cepat)</option>
-                <option value="RELOCATE">➡️ Pindahkan ke Rak Display Depan (Dekat Kasir)</option>
-                <option value="DISPOSE">🗑️ Musnahkan / Buang (Rusak / Basi)</option>
-                <option value="RETURN">↩️ Retur ke Pihak Supplier</option>
+                {!(laporModalItem.isExpired || (laporModalItem.expiryDate && laporModalItem.expiryDate < getTodayWibIso())) && (
+                  <>
+                    <option value="DISCOUNT">🏷️ Usulkan Diskon Obral Darurat (Diskon Cepat)</option>
+                    <option value="RELOCATE">➡️ Pindahkan ke Rak Display Depan (Dekat Kasir)</option>
+                  </>
+                )}
+                <option value="DISPOSE">🗑️ Musnahkan / Tarik &amp; Nol-kan Stok (Rusak / Kedaluwarsa)</option>
+                <option value="RETURN">↩️ Retur ke Pihak Supplier (Tarik &amp; Nol-kan Stok)</option>
               </select>
             </div>
 
-            {/* Slider Diskon jika usul DISCOUNT */}
-            {gudangSuggestion === 'DISCOUNT' && (
+            {/* Slider Diskon jika usul DISCOUNT & BELUM expired */}
+            {gudangSuggestion === 'DISCOUNT' &&
+              !(laporModalItem.isExpired || (laporModalItem.expiryDate && laporModalItem.expiryDate < getTodayWibIso())) && (
               <div style={{ background: '#fef2f2', padding: 10, borderRadius: 8, border: '1px solid #fecaca' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                   <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#991b1b' }}>Usulan Besaran Diskon:</span>
