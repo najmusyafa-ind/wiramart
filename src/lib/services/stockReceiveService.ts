@@ -487,6 +487,16 @@ export async function updateStockReceiveDraft(
   }
 
   const todayStr = getTodayWib();
+  const editProdIds = Array.from(new Set(input.items.map((i) => i.productId)));
+  const validEditProds = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(and(inArray(products.id, editProdIds), isNull(products.deletedAt)));
+
+  if (validEditProds.length !== editProdIds.length) {
+    throw new AppError('BAD_REQUEST', 'Satu atau lebih produk pada draft tidak ditemukan atau telah dihapus.', 400);
+  }
+
   for (const item of input.items) {
     if (!item.expiryDate) {
       throw new AppError('BAD_REQUEST', `Tanggal kedaluwarsa "${item.productName || item.productId}" wajib diisi.`, 400);
@@ -570,14 +580,36 @@ export async function submitStockReceiveDraft(
     throw new AppError('BAD_REQUEST', `Draft tidak dapat disubmit karena berstatus ${existing.status}.`, 400);
   }
 
-  // Cek minimal 1 item
-  const [itemCountRow] = await db
-    .select({ total: count() })
+  // Cek minimal 1 item & re-validasi wajib tanggal kedaluwarsa tidak boleh kosong/lewat saat submit
+  const draftItems = await db
+    .select({
+      id: stockReceiveItems.id,
+      batchCode: stockReceiveItems.batchCode,
+      expiryDate: stockReceiveItems.expiryDate,
+    })
     .from(stockReceiveItems)
     .where(eq(stockReceiveItems.draftId, draftId));
 
-  if (!itemCountRow || Number(itemCountRow.total) === 0) {
+  if (draftItems.length === 0) {
     throw new AppError('BAD_REQUEST', 'Draft penerimaan barang masih kosong, belum ada produk.', 400);
+  }
+
+  const todayStr = getTodayWib();
+  for (const it of draftItems) {
+    if (!it.expiryDate) {
+      throw new AppError(
+        'BAD_REQUEST',
+        `Batch "${it.batchCode}" belum memiliki tanggal kedaluwarsa. Edit draft dan isi tanggal kedaluwarsa terlebih dahulu sebelum diajukan.`,
+        400,
+      );
+    }
+    if (it.expiryDate < todayStr) {
+      throw new AppError(
+        'BAD_REQUEST',
+        `Batch "${it.batchCode}" memiliki tanggal kedaluwarsa yang sudah terlewat (${it.expiryDate}). Perbarui draft terlebih dahulu.`,
+        400,
+      );
+    }
   }
 
   const [updated] = await db

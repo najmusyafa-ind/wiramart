@@ -10,14 +10,13 @@ import { db } from '@/lib/db/client';
 import {
   products,
   categories,
-  employees,
   admins,
   stockBatches,
   stockAdjustments,
 } from '@/lib/db/schema';
 import { eq, and, isNull, or, ilike, gt, lt, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
-import { getTodayWib, getStartOfTodayWib } from '@/lib/utils/helpers';
+import { getTodayWib, getStartOfTodayWib, getOffsetDateWib } from '@/lib/utils/helpers';
 import { getLowStockThreshold } from '@/lib/services/operationalSettingsService';
 
 let lastAdminLazySweepDateWib = '';
@@ -96,8 +95,10 @@ async function sweepYesterdayPerishableInAdmin(): Promise<void> {
 
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
-  // GET: admin ATAU kasir aktif boleh lihat daftar produk
-  if (!payload) return apiError('Unauthorized', 401);
+  // GET: hanya admin atau employee aktif (blokir buyer/unauthenticated)
+  if (!payload || (payload.role !== 'admin' && payload.role !== 'employee')) {
+    return apiError('Unauthorized', 401);
+  }
 
   const { searchParams } = new URL(req.url);
   const q = searchParams.get('q')?.trim() ?? '';
@@ -160,8 +161,13 @@ export async function GET(req: NextRequest) {
       .where(and(eq(products.isActive, true), isNull(products.deletedAt))),
   ]);
 
+  const safeProducts =
+    payload.role === 'admin'
+      ? rows
+      : rows.map((r) => ({ ...r, costPrice: '0' }));
+
   return apiOk({
-    products: rows,
+    products: safeProducts,
     categories: cats,
     lowStockThreshold,
     summary: {
@@ -187,46 +193,28 @@ const CreateProductSchema = z.object({
 
 export async function POST(req: NextRequest) {
   const payload = await verifyJwt(req);
-  // POST: admin ATAU kasir aktif boleh tambah produk baru
-  if (!payload) return apiError('Unauthorized', 401);
-
-  // ── Resolusi createdByAdminId (FK ke tabel admins) & nama pelaku ────────
-  let resolvedAdminId: string;
-  let actorLabel: string;
-  if (payload.role === 'admin') {
-    const [adm] = await db
-      .select({ id: admins.id, fullName: admins.fullName, nidn: admins.nidn, role: admins.role })
-      .from(admins)
-      .where(eq(admins.id, payload.sub))
-      .limit(1);
-    resolvedAdminId = adm?.id ?? payload.sub;
-    const displayName = adm?.fullName || adm?.nidn || payload.username;
-    actorLabel = `${displayName} (${adm?.role ?? payload.adminRole ?? 'ADMIN'})`;
-  } else {
-    // Kasir (employee): ambil createdByAdminId & nama kasir dari data employee
-    const [emp] = await db
-      .select({
-        fullName: employees.fullName,
-        createdByAdminId: employees.createdByAdminId,
-      })
-      .from(employees)
-      .where(eq(employees.id, payload.sub))
-      .limit(1);
-
-    actorLabel = emp?.fullName ? `${emp.fullName} (Kasir)` : 'Kasir';
-
-    if (emp?.createdByAdminId) {
-      resolvedAdminId = emp.createdByAdminId;
-    } else {
-      // Fallback: pakai admin pertama yang terdaftar di sistem
-      const [firstAdmin] = await db
-        .select({ id: admins.id })
-        .from(admins)
-        .limit(1);
-      if (!firstAdmin) return apiError('Tidak ada admin terdaftar di sistem', 500);
-      resolvedAdminId = firstAdmin.id;
-    }
+  // CISO Privilege Escalation Guard: Tambah produk aktif langsung HANYA untuk Admin/Manager.
+  // Petugas Gudang/Kasir WAJIB mengajukan lewat POST /api/gudang/produk-baru (Approval Manager).
+  if (!payload || payload.role !== 'admin') {
+    return apiError(
+      'Forbidden: Hanya Admin/Manager yang dapat menambahkan produk aktif secara langsung. Gunakan fitur Ajukan Produk Baru di portal Gudang.',
+      403,
+    );
   }
+
+  // ── Resolusi & Verifikasi Aktif Admin (Zero-Trust DB Check) ─────────────
+  const [adm] = await db
+    .select({ id: admins.id, fullName: admins.fullName, nidn: admins.nidn, role: admins.role })
+    .from(admins)
+    .where(and(eq(admins.id, payload.sub), eq(admins.isActive, true), isNull(admins.deletedAt)))
+    .limit(1);
+
+  if (!adm) {
+    return apiError('Sesi admin tidak aktif atau sudah dinonaktifkan', 403);
+  }
+  const resolvedAdminId = adm.id;
+  const displayName = adm.fullName || adm.nidn || payload.username;
+  const actorLabel = `${displayName} (${adm.role ?? payload.adminRole ?? 'ADMIN'})`;
 
   let body: unknown;
   try { body = await req.json(); } catch { return apiError('Invalid JSON', 400); }
@@ -309,7 +297,7 @@ export async function POST(req: NextRequest) {
             costPrice: costPrice.toString(),
             initialQty: stockQty,
             currentQty: stockQty,
-            expiryDate: isPerishable ? todayStr : undefined,
+            expiryDate: isPerishable ? todayStr : getOffsetDateWib(180, now),
             expiryClass: isPerishable ? 'HARIAN' : 'PANJANG',
             notes: `Stok awal produk baru oleh ${actorLabel}`,
           })

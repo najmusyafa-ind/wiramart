@@ -17,7 +17,7 @@ import {
 } from '@/lib/db/schema';
 import { eq, and, isNull, ne, gt, gte, asc, inArray, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
-import { getTodayWib } from '@/lib/utils/helpers';
+import { getTodayWib, getOffsetDateWib } from '@/lib/utils/helpers';
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -94,7 +94,28 @@ export async function PATCH(req: NextRequest, ctx: Context) {
     }
 
     const updateData: Partial<typeof products.$inferInsert> = { updatedAt: new Date() };
-    if (parsed.data.name !== undefined) updateData.name = parsed.data.name.trim();
+    if (parsed.data.name !== undefined) {
+      const cleanName = parsed.data.name.trim();
+      const [dupName] = await tx
+        .select({ id: products.id, name: products.name })
+        .from(products)
+        .where(
+          and(
+            ne(products.id, id),
+            isNull(products.deletedAt),
+            sql`LOWER(TRIM(${products.name})) = ${cleanName.toLowerCase()}`,
+          ),
+        )
+        .limit(1);
+      if (dupName) {
+        return {
+          ok: false as const,
+          status: 409,
+          message: `Nama produk "${dupName.name}" sudah digunakan produk lain (pencocokan tidak membedakan huruf besar/kecil).`,
+        };
+      }
+      updateData.name = cleanName;
+    }
     if (parsed.data.description !== undefined) updateData.description = parsed.data.description.trim();
     if (parsed.data.costPrice !== undefined) updateData.costPrice = parsed.data.costPrice.toString();
     if (parsed.data.sellingPrice !== undefined) updateData.sellingPrice = parsed.data.sellingPrice.toString();
@@ -169,7 +190,7 @@ export async function PATCH(req: NextRequest, ctx: Context) {
           costPrice: updated.costPrice,
           initialQty: deltaBatch,
           currentQty: deltaBatch,
-          expiryDate: updated.isPerishable ? todayStr : undefined,
+          expiryDate: updated.isPerishable ? todayStr : getOffsetDateWib(180, now),
           expiryClass: updated.isPerishable ? 'HARIAN' : 'PANJANG',
           notes: 'Penyesuaian stok manual katalog produk',
         });

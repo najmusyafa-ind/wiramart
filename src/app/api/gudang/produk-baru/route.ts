@@ -10,6 +10,7 @@ import {
   proposeNewProductByWarehouse,
   ProposeNewProductSchema,
 } from '@/lib/services/stockReceiveService';
+import { stockSubmitLimiter } from '@/lib/utils/rate-limit';
 import { AppError } from '@/lib/utils/helpers';
 import { ZodError } from 'zod';
 
@@ -26,6 +27,17 @@ export async function POST(req: NextRequest) {
       'Forbidden: Admin Shift hanya memiliki akses pantau gudang (read-only).',
       403,
     );
+  }
+
+  // Anti-spam rate limit untuk pengajuan produk baru oleh petugas gudang
+  if (payload.role === 'employee') {
+    const rateLimit = stockSubmitLimiter.check(`newprod:${payload.sub}`, true);
+    if (!rateLimit.allowed) {
+      return apiError(
+        `Batas pengajuan produk baru harian tercapai. Coba lagi dalam ${Math.ceil(rateLimit.retryAfterSeconds / 60)} menit.`,
+        429,
+      );
+    }
   }
 
   try {

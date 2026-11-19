@@ -698,6 +698,25 @@ export async function executeConditionReport(
       );
     }
 
+    // Zero-Trust Expiry Guard saat Eksekusi Lapangan:
+    // Jika keputusan Manager adalah DISCOUNT / DISPLAY_FRONT namun batch SUDAH EXPIRED saat hendak dieksekusi, blokir keras!
+    if (report.managerDecision === 'DISCOUNT' || report.managerDecision === 'DISPLAY_FRONT') {
+      const [checkBatch] = await tx
+        .select({ id: stockBatches.id, expiryDate: stockBatches.expiryDate })
+        .from(stockBatches)
+        .where(eq(stockBatches.id, report.batchId))
+        .limit(1);
+
+      const todayStrExec = getTodayWib();
+      if (checkBatch?.expiryDate && checkBatch.expiryDate < todayStrExec) {
+        throw new AppError(
+          'BAD_REQUEST',
+          `Batch ini telah melewati tanggal kedaluwarsa (${checkBatch.expiryDate}) sejak disetujui. Eksekusi diskon/pajang diblokir — klik Scan Radar FEFO lalu ajukan pemusnahan/retur.`,
+          400,
+        );
+      }
+    }
+
     // JIKA KEPUTUSAN ADALAH DESTROY (Pemusnahan) ATAU RETURN_SUPPLIER (Retur ke Supplier)
     if (report.managerDecision === 'DESTROY' || report.managerDecision === 'RETURN_SUPPLIER') {
       const [batchMeta] = await tx

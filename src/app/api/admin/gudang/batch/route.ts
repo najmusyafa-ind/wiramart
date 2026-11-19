@@ -192,8 +192,10 @@ const CreateBatchSchema = z.object({
   batchCode: z.string().trim().max(50).optional(),
   costPrice: z.number().nonnegative('HPP tidak boleh negatif'),
   initialQty: z.number().int().positive('Jumlah masuk harus lebih dari 0'),
-  expiryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD').nullable().optional(),
-  expiryClass: z.enum(['HARIAN', 'PENDEK', 'PANJANG']).default('PANJANG'),
+  expiryDate: z
+    .string({ message: 'Tanggal kedaluwarsa (expiry date) wajib diisi untuk semua barang masuk' })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD'),
+  expiryClass: z.enum(['HARIAN', 'PENDEK', 'PANJANG']).optional(),
   supplierId: z.string().uuid('Supplier ID tidak valid').nullable().optional(),
   supplierName: z.string().trim().max(100).optional(),
   invoiceNumber: z.string().trim().max(100).optional(),
@@ -230,13 +232,19 @@ export async function POST(req: NextRequest) {
     notes,
   } = parsed.data;
 
-  // Verifikasi aturan tanggal kedaluwarsa untuk kelas HARIAN & PENDEK (Bagian 4.6 & Bagian 26)
-  if ((expiryClass === 'HARIAN' || expiryClass === 'PENDEK') && !expiryDate) {
+  const todayStrNow = getTodayWib();
+  if (expiryDate < todayStrNow) {
     return apiError(
-      `Produk dengan kelas "${expiryClass}" wajib mencantumkan tanggal kedaluwarsa (expiry date).`,
+      `Tanggal kedaluwarsa (${expiryDate}) sudah terlewat. Tidak dapat menerima barang kedaluwarsa.`,
       422,
     );
   }
+  const diffDaysExp = Math.ceil(
+    (new Date(`${expiryDate}T00:00:00Z`).getTime() - new Date(`${todayStrNow}T00:00:00Z`).getTime()) /
+      (1000 * 60 * 60 * 24),
+  );
+  const resolvedExpiryClass: ExpiryClass =
+    expiryClass ?? (diffDaysExp <= 2 ? 'HARIAN' : diffDaysExp <= 14 ? 'PENDEK' : 'PANJANG');
 
   const now = new Date();
   const batchCode =
@@ -282,8 +290,8 @@ export async function POST(req: NextRequest) {
           costPrice: costPrice.toString(),
           initialQty,
           currentQty: initialQty,
-          expiryDate: expiryDate || null,
-          expiryClass,
+          expiryDate,
+          expiryClass: resolvedExpiryClass,
           notes: combinedNotes,
         })
         .returning();
