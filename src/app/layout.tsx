@@ -29,6 +29,7 @@ export const metadata: Metadata = {
     'Wiramart — Unit Kegiatan Mahasiswa Kewirausahaan & Sistem Kasir Digital POS Universitas Perwira M. Purbalingga (UNPERBA).',
   keywords: ['Wiramart', 'UKM Kewirausahaan', 'UNPERBA', 'kasir', 'POS', 'sistem kasir'],
   authors: [{ name: 'Wiramart UNPERBA' }],
+  manifest: '/manifest.webmanifest',
   robots: { index: false, follow: false },
   icons: {
     icon: [

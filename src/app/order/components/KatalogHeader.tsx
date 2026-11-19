@@ -8,13 +8,16 @@
 import React, { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ShoppingBag, Search, X, User, Footprints, ArrowRight, Sparkles } from 'lucide-react';
+import { ShoppingBag, Search, X, User, Footprints, ArrowRight, Sparkles, Download } from 'lucide-react';
 import { useCart } from '@/features/order/cart.context';
 
 interface KatalogHeaderProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onOpenWelcome?: () => void;
+  onInstallPwa?: () => void;
+  canShowInstallBtn?: boolean;
+  hasNativeInstallPrompt?: boolean;
 }
 
 const BANNER_KEY = 'wiramart_banner_dismissed_v1';
@@ -45,6 +48,9 @@ export default function KatalogHeader({
   searchQuery,
   onSearchChange,
   onOpenWelcome,
+  onInstallPwa,
+  canShowInstallBtn = false,
+  hasNativeInstallPrompt = false,
 }: KatalogHeaderProps) {
   const { buyer, isLoadingBuyer } = useCart();
   const [dismissedInSession, setDismissedInSession] = useState(false);
@@ -77,7 +83,19 @@ export default function KatalogHeader({
           </div>
         </Link>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {canShowInstallBtn && onInstallPwa && (
+            <button
+              type="button"
+              onClick={onInstallPwa}
+              className={`pwa-install-header-btn${hasNativeInstallPrompt ? ' pwa-install-header-btn--ready' : ''}`}
+              title="Download & Install Aplikasi Wiramart di HP"
+              aria-label="Install Aplikasi Wiramart"
+            >
+              <Download size={13} />
+              <span>Install</span>
+            </button>
+          )}
           {onOpenWelcome && (
             <button
               type="button"

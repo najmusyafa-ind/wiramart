@@ -20,18 +20,88 @@ import {
   ShieldCheck,
   Store,
   ArrowRight,
+  Download,
+  Smartphone,
+  CheckCircle2,
+  X,
+  Copy,
 } from 'lucide-react';
 
 interface KatalogClientProps {
   initialItems: KatalogItem[];
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: string[];
+  readonly userChoice: Promise<{
+    outcome: 'accepted' | 'dismissed';
+    platform: string;
+  }>;
+  prompt(): Promise<void>;
+}
+
 const WELCOME_SEEN_KEY = 'wiramart_pwa_intro_seen_v3';
 const INTRO_EVENT = 'wiramart-pwa-intro-seen-change';
+const PWA_INSTALL_EVENT = 'wiramart-pwa-install-state-change';
 const SPLASH_DURATION_MS = 2700;
 
 // In-memory guard agar navigasi client-side (/order <-> /order/login <-> /order/profile) tidak pernah memicu ulang splash
 let hasPlayedIntroInRuntime = false;
+let deferredPwaPrompt: BeforeInstallPromptEvent | null = null;
+let isPwaInstalledInRuntime = false;
+let swListenerInitialized = false;
+
+function initPwaInstallListeners(): void {
+  if (typeof window === 'undefined' || swListenerInitialized) return;
+  swListenerInitialized = true;
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/' })
+      .catch(() => {
+        // Service worker registration optional fallback
+      });
+  }
+
+  window.addEventListener('beforeinstallprompt', (e: Event) => {
+    e.preventDefault();
+    deferredPwaPrompt = e as BeforeInstallPromptEvent;
+    window.dispatchEvent(new Event(PWA_INSTALL_EVENT));
+  });
+
+  window.addEventListener('appinstalled', () => {
+    deferredPwaPrompt = null;
+    isPwaInstalledInRuntime = true;
+    window.dispatchEvent(new Event(PWA_INSTALL_EVENT));
+  });
+}
+
+if (typeof window !== 'undefined') {
+  initPwaInstallListeners();
+}
+
+function subscribePwaInstallState(callback: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  initPwaInstallListeners();
+  window.addEventListener(PWA_INSTALL_EVENT, callback);
+  const mq = window.matchMedia('(display-mode: standalone)');
+  mq.addEventListener?.('change', callback);
+  return () => {
+    window.removeEventListener(PWA_INSTALL_EVENT, callback);
+    mq.removeEventListener?.('change', callback);
+  };
+}
+
+function getIsStandaloneSnapshot(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (isPwaInstalledInRuntime) return true;
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  return window.matchMedia('(display-mode: standalone)').matches || nav.standalone === true;
+}
+
+function getHasNativePromptSnapshot(): boolean {
+  return deferredPwaPrompt !== null;
+}
 
 function subscribeIntroSeen(callback: () => void): () => void {
   if (typeof window === 'undefined') return () => {};
@@ -78,11 +148,45 @@ export default function KatalogClient({ initialItems }: KatalogClientProps) {
 
   // Mengecek apakah intro sudah pernah tampil di sesi tab ini (SSR default: true/closed agar tidak berkedip saat balik dari /order/login atau /order/profile)
   const hasSeenIntro = useSyncExternalStore(subscribeIntroSeen, getIntroSeenSnapshot, () => true);
+  const isStandalonePwa = useSyncExternalStore(subscribePwaInstallState, getIsStandaloneSnapshot, () => false);
+  const hasNativeInstallPrompt = useSyncExternalStore(subscribePwaInstallState, getHasNativePromptSnapshot, () => false);
 
   // manualPhase dipakai hanya saat pertama kali auto-run atau saat tombol "Sambutan" diklik manual
   const [manualPhase, setManualPhase] = useState<IntroPhase | null>(null);
   const [isTransitioningSplash, setIsTransitioningSplash] = useState(false);
   const [isClosingWelcome, setIsClosingWelcome] = useState(false);
+  const [showInstallGuideModal, setShowInstallGuideModal] = useState(false);
+  const [installBannerDismissed, setInstallBannerDismissed] = useState(false);
+  const [copiedLinkToast, setCopiedLinkToast] = useState(false);
+
+  const handleTriggerInstallPwa = async () => {
+    if (deferredPwaPrompt) {
+      try {
+        await deferredPwaPrompt.prompt();
+        const choice = await deferredPwaPrompt.userChoice;
+        if (choice.outcome === 'accepted') {
+          deferredPwaPrompt = null;
+          isPwaInstalledInRuntime = true;
+          window.dispatchEvent(new Event(PWA_INSTALL_EVENT));
+        }
+        return;
+      } catch {
+        // fallback ke panduan visual bila prompt gagal dipanggil
+      }
+    }
+    setShowInstallGuideModal(true);
+  };
+
+  const handleCopyOrderUrl = async () => {
+    try {
+      const targetUrl = typeof window !== 'undefined' ? `${window.location.origin}/order` : '';
+      await navigator.clipboard.writeText(targetUrl);
+      setCopiedLinkToast(true);
+      window.setTimeout(() => setCopiedLinkToast(false), 2400);
+    } catch {
+      // ignore
+    }
+  };
 
   const greeting = useSyncExternalStore(emptySubscribe, getTimeGreetingWib, () => 'Selamat Datang');
   const introPhase: IntroPhase = manualPhase ?? (hasSeenIntro ? 'closed' : 'splash');
@@ -361,6 +465,118 @@ export default function KatalogClient({ initialItems }: KatalogClientProps) {
                 <span>Mulai Belanja Sekarang</span>
                 <ArrowRight size={18} className="pwa-welcome-cta-arrow" />
               </button>
+
+              {!isStandalonePwa && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleCloseWelcome();
+                    void handleTriggerInstallPwa();
+                  }}
+                  className="pwa-welcome-install-btn"
+                >
+                  <Download size={16} />
+                  <span>
+                    {hasNativeInstallPrompt
+                      ? 'Download & Install Aplikasi Wiramart di HP'
+                      : 'Pasang Aplikasi Wiramart ke Layar Utama HP'}
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Panduan Install PWA (Muncul jika browser HP butuh klik menu Chrome / Safari atau dibuka dari WhatsApp) */}
+      {showInstallGuideModal && (
+        <div
+          className="pwa-welcome-overlay"
+          onClick={() => setShowInstallGuideModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pwa-install-guide-title"
+        >
+          <div className="pwa-install-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="pwa-install-modal-header">
+              <div className="pwa-install-modal-badge">
+                <Smartphone size={16} />
+                <span>INSTALASI APLIKASI WIRAMART</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInstallGuideModal(false)}
+                className="pwa-install-modal-close"
+                aria-label="Tutup panduan install"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <h3 id="pwa-install-guide-title" className="pwa-install-modal-title">
+              Pasang Aplikasi Wiramart di HP Anda
+            </h3>
+            <p className="pwa-install-modal-desc">
+              Nikmati pengalaman penuh layar dengan animasi logo sambutan seperti aplikasi native tanpa perlu mengetik alamat web lagi.
+            </p>
+
+            {hasNativeInstallPrompt && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInstallGuideModal(false);
+                  void handleTriggerInstallPwa();
+                }}
+                className="pwa-welcome-cta"
+                style={{ marginBottom: 14 }}
+              >
+                <Download size={17} />
+                <span>Instal Sekarang (1-Klik Otomatis)</span>
+              </button>
+            )}
+
+            <div className="pwa-install-steps-list">
+              <div className="pwa-install-step-box">
+                <div className="pwa-install-step-title">
+                  <CheckCircle2 size={16} />
+                  <span>HP Android (Google Chrome)</span>
+                </div>
+                <ol className="pwa-install-step-ol">
+                  <li>Pastikan halaman ini dibuka di aplikasi <strong>Google Chrome</strong> (bukan browser di dalam WhatsApp/Instagram).</li>
+                  <li>Ketuk ikon <strong>Titik Tiga (⋮)</strong> di pojok kanan atas Chrome.</li>
+                  <li>Pilih <strong>&ldquo;Instal aplikasi&rdquo; (Install app)</strong> atau <strong>&ldquo;Tambahkan ke Layar Utama&rdquo;</strong>, lalu ketuk <strong>Instal</strong>.</li>
+                </ol>
+              </div>
+
+              <div className="pwa-install-step-box">
+                <div className="pwa-install-step-title">
+                  <CheckCircle2 size={16} />
+                  <span>iPhone / iPad (Safari)</span>
+                </div>
+                <ol className="pwa-install-step-ol">
+                  <li>Buka halaman ini di browser <strong>Safari</strong>.</li>
+                  <li>Ketuk ikon <strong>Bagikan (Share)</strong> di bilah bawah layar.</li>
+                  <li>Geser ke bawah dan pilih <strong>&ldquo;Tambahkan ke Layar Utama&rdquo; (Add to Home Screen)</strong>.</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="pwa-install-modal-actions">
+              <button
+                type="button"
+                onClick={handleCopyOrderUrl}
+                className="pwa-install-copy-btn"
+              >
+                <Copy size={15} />
+                <span>{copiedLinkToast ? 'Link /order Tersalin!' : 'Salin Link untuk Dibuka di Chrome'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowInstallGuideModal(false)}
+                className="pwa-install-done-btn"
+              >
+                Mengerti
+              </button>
             </div>
           </div>
         </div>
@@ -371,7 +587,46 @@ export default function KatalogClient({ initialItems }: KatalogClientProps) {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onOpenWelcome={handleReplayFullIntro}
+        onInstallPwa={handleTriggerInstallPwa}
+        canShowInstallBtn={!isStandalonePwa}
+        hasNativeInstallPrompt={hasNativeInstallPrompt}
       />
+
+      {/* Smart Install App Strip (Hanya muncul bila belum di-install sebagai PWA standalone) */}
+      {!isStandalonePwa && !installBannerDismissed && (
+        <div className="pwa-install-smart-strip">
+          <button
+            type="button"
+            onClick={handleTriggerInstallPwa}
+            className="pwa-install-smart-strip__main"
+          >
+            <div className="pwa-install-smart-strip__icon">
+              <Download size={16} />
+            </div>
+            <div className="pwa-install-smart-strip__text">
+              <strong>
+                {hasNativeInstallPrompt
+                  ? 'Aplikasi Wiramart Siap Di-download!'
+                  : 'Pasang Aplikasi Wiramart di HP'}
+              </strong>
+              <span>
+                {hasNativeInstallPrompt
+                  ? 'Ketuk di sini untuk instal aplikasi langsung ke layar utama HP'
+                  : 'Ketuk untuk instal ke layar utama HP (akses 1-klik & layar penuh)'}
+              </span>
+            </div>
+            <span className="pwa-install-smart-strip__cta">Instal</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setInstallBannerDismissed(true)}
+            className="pwa-install-smart-strip__close"
+            aria-label="Sembunyikan banner instal aplikasi"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Categories Horizontal Scroll */}
       <CategoryBar

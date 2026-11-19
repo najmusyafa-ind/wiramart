@@ -2,15 +2,17 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: '/order',
     name: 'Wiramart UNPERBA — Campus Delivery',
     short_name: 'Wiramart',
     description: 'Pesan snack, minuman & kebutuhan kampus UNPERBA diantar langsung ke ruang kelas',
     start_url: '/order',
-    scope: '/order',
+    scope: '/',
     display: 'standalone',
     background_color: '#1b7a42',
     theme_color: '#1b7a42',
     orientation: 'portrait',
+    categories: ['food', 'shopping'],
     icons: [
       {
         src: '/icon.png',
