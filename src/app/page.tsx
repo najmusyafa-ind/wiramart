@@ -24,7 +24,6 @@ import {
   LogIn,
   ChevronDown,
   MapPin,
-  Phone,
   Star,
   Download,
   Smartphone,
@@ -312,7 +311,7 @@ export default function LandingPage() {
               aria-label="Download dan Install Aplikasi Wiramart di HP"
             >
               <Download size={14} aria-hidden="true" />
-              <span>Download App</span>
+              <span>Install App</span>
             </button>
             <Link href="/order" className="lp-mobile-order-btn">
               <ShoppingBag size={14} aria-hidden="true" />
@@ -405,16 +404,16 @@ export default function LandingPage() {
                 onClick={handleInstallPwa}
                 className="btn btn-lg lp-hero__cta-pwa"
               >
-                <Download size={20} aria-hidden="true" />
+                <Download size={19} aria-hidden="true" />
                 <span>
                   {hasInstallPrompt
-                    ? 'Download & Install Aplikasi Wiramart (PWA)'
-                    : 'Download Aplikasi Wiramart di HP (PWA)'}
+                    ? 'Install Aplikasi Wiramart'
+                    : 'Download Aplikasi Wiramart'}
                 </span>
               </button>
               <Link href="/order" className="btn btn-lg lp-hero__cta-order">
                 <ShoppingBag size={19} aria-hidden="true" />
-                <span>Buka Aplikasi Pesan Antar (Buyer)</span>
+                <span>Pesan Antar Kampus (Buyer)</span>
                 <ArrowRight size={18} aria-hidden="true" />
               </Link>
               <Link href="/kasir/login" prefetch={false} className="btn btn-primary btn-lg lp-hero__cta-primary" suppressHydrationWarning>

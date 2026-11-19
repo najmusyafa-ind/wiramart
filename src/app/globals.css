@@ -3786,7 +3786,17 @@ button:not(:disabled):not(.no-tactile):active,
   }
   .lp-hero__title { text-align: center; }
   .lp-hero__ctas { flex-direction: column; align-items: center; width: 100%; }
-  .lp-hero__ctas .btn { width: 100%; max-width: 340px; justify-content: center; }
+  .lp-hero__ctas .btn {
+    width: 100%;
+    max-width: 360px;
+    justify-content: center;
+    padding: 13px 16px;
+    font-size: 0.9375rem;
+    line-height: 1.3;
+    white-space: normal;
+    text-align: center;
+    box-sizing: border-box;
+  }
   .lp-hero__chips { gap: var(--space-2); }
 
   /* Stats: 2 columns */
@@ -3858,34 +3868,69 @@ button:not(:disabled):not(.no-tactile):active,
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+}
+
+.lp-mobile-install-btn,
+.lp-mobile-order-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lp-mobile-install-btn svg,
+.lp-mobile-order-btn svg {
+  flex-shrink: 0;
+  display: block;
 }
 
 .lp-mobile-install-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 7px 11px;
-  border-radius: 999px;
   background: linear-gradient(135deg, hsl(40, 96%, 52%), hsl(32, 95%, 44%));
   color: hsl(145, 75%, 10%);
   border: none;
-  font-size: 11.5px;
   font-weight: 800;
   cursor: pointer;
   box-shadow: 0 3px 10px rgba(234, 179, 8, 0.32);
 }
 
 .lp-mobile-order-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 7px 11px;
-  border-radius: 999px;
   background: var(--color-primary);
   color: #ffffff;
   text-decoration: none;
-  font-size: 11.5px;
   font-weight: 700;
+}
+
+@media (max-width: 390px) {
+  .lp-header__inner {
+    padding: var(--space-2) var(--space-3);
+    gap: 8px;
+  }
+  .lp-brand {
+    gap: 8px;
+  }
+  .lp-brand__logo {
+    width: 34px;
+    height: 34px;
+  }
+  .lp-brand__name {
+    font-size: 0.9rem;
+    letter-spacing: 0.02em;
+  }
+  .lp-mobile-install-btn,
+  .lp-mobile-order-btn {
+    height: 32px;
+    padding: 0 9px;
+    font-size: 11px;
+    gap: 4px;
+  }
 }
 
 .lp-hero__cta-pwa {
