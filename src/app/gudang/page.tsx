@@ -1378,7 +1378,7 @@ export default function GudangPortalPage() {
                 }}
               >
                 <Plus size={16} />
-                <span>Ajukan Produk Baru</span>
+                <span>Tambah Produk Baru</span>
               </button>
             )}
           </div>
@@ -2650,13 +2650,9 @@ export default function GudangPortalPage() {
                     justifyContent: 'space-between',
                   }}
                 >
-                  <span>
-                    {employee?.actorRole === 'MANAGER'
-                      ? 'Stok Sistem Setelah Restock:'
-                      : 'Estimasi Stok Setelah Di-ACC Manager:'}
-                  </span>
+                  <span>Stok Sistem Setelah Restock:</span>
                   <strong>
-                    {selectedProduct.stockQty + Number(restockQty)} {selectedProduct.unit}
+                    {selectedProduct.stockQty + Number(restockQty) + Math.max(0, Math.floor(Number(restockBonusQty || 0)))} {selectedProduct.unit}
                   </strong>
                 </div>
 
@@ -2708,11 +2704,7 @@ export default function GudangPortalPage() {
                     ) : (
                       <>
                         <CheckCircle2 size={16} />
-                        <span>
-                          {employee?.actorRole === 'MANAGER'
-                            ? 'Simpan Stok Masuk'
-                            : 'Ajukan Restock ke Manager'}
-                        </span>
+                        <span>Simpan Stok Masuk</span>
                       </>
                     )}
                   </button>
@@ -2773,10 +2765,10 @@ export default function GudangPortalPage() {
                 </div>
                 <div>
                   <h3 style={{ fontSize: '0.98rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                    Ajukan Produk Baru ke Manager
+                    Tambah Produk Baru (Langsung Aktif)
                   </h3>
                   <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
-                    Usulan SKU/varian baru (misal: Sendok, Aoka Vanila) — aktif di Kasir setelah di-ACC Manager.
+                    Input SKU/varian baru oleh Gudang atau Admin Shift — langsung tampil di Kasir &amp; tercatat di audit.
                   </div>
                 </div>
               </div>

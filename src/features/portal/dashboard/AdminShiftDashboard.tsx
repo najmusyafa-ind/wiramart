@@ -442,7 +442,7 @@ function GudangShiftActivityWidget() {
         )}
         <div style={{ marginTop: 'var(--space-2)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-2)' }}>
           <Link href="/gudang" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-primary)', textDecoration: 'none' }}>
-            <span>Pantau Portal Gudang (Read-Only)</span>
+            <span>Buka Portal Gudang (Backup Opsi B)</span>
             <ChevronRight size={13} aria-hidden="true" />
           </Link>
         </div>
@@ -687,7 +687,7 @@ export default function AdminShiftDashboard({
               </div>
             </div>
             <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.5 }}>
-              Kelola katalog produk, pantau stok menipis/habis, cek laporan gudang (read-only), dan pantau batch kedaluwarsa FEFO.
+              Kelola katalog produk, tambah/restok/edit barang bersama Gudang (saling backup), serta pantau batch kedaluwarsa FEFO (keputusan diskon &amp; keuangan tetap khusus Manager).
             </p>
             {summary.criticalBatches > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--color-error)', fontWeight: 600 }}>
