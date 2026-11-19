@@ -15,6 +15,7 @@ import {
   getWarehouseSummary,
   getWarehouseProducts,
   getActiveWarehouseCategories,
+  getWarehouseApprovalNotifications,
   restockProductByWarehouse,
   getWarehouseActivityLogs,
 } from '@/lib/services/warehouseService';
@@ -109,11 +110,12 @@ export async function GET(req: NextRequest) {
     : 'semua';
 
   try {
-    const [summary, productsResult, activities, categoriesList] = await Promise.all([
+    const [summary, productsResult, activities, categoriesList, approvalNotifications] = await Promise.all([
       getWarehouseSummary(),
       getWarehouseProducts({ search, filter, limit: 500 }),
       getWarehouseActivityLogs(50),
       getActiveWarehouseCategories(),
+      getWarehouseApprovalNotifications(payload.role === 'employee' ? payload.sub : undefined),
     ]);
 
     return apiOk({
@@ -123,6 +125,7 @@ export async function GET(req: NextRequest) {
       total: productsResult.total,
       activities,
       categories: categoriesList,
+      approvalNotifications,
     });
   } catch (error) {
     console.error('[API Gudang GET Error]:', error);

@@ -11,6 +11,8 @@ import {
   categories,
   stockBatches,
   stockAdjustments,
+  stockReceiveDrafts,
+  stockReceiveItems,
   productConditionReports,
   admins,
   employees,
@@ -208,6 +210,123 @@ export async function getWarehouseSummary(): Promise<WarehouseSummaryDto> {
     activeFefoAlertCount,
     todayRestockCount: todayAdjustmentStats?.count ?? 0,
     perishableSku,
+  };
+}
+
+export interface WarehouseApprovalNotificationItem {
+  id: string;
+  receiveNumber: string;
+  status: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'REVISED';
+  deliveryNote: string | null;
+  managerNote: string | null;
+  isNewProductProposal: boolean;
+  productSummary: string;
+  updatedAt: string;
+}
+
+export interface WarehouseApprovalNotificationsDto {
+  rejectedCount: number;
+  revisedCount: number;
+  pendingCount: number;
+  approvedTodayCount: number;
+  recentItems: WarehouseApprovalNotificationItem[];
+}
+
+export async function getWarehouseApprovalNotifications(
+  employeeId?: string,
+): Promise<WarehouseApprovalNotificationsDto> {
+  const nowWib = new Date();
+  const todayStr = getTodayWib(nowWib);
+  const sevenDaysAgo = new Date(nowWib.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  const baseConds: SQL[] = [isNull(stockReceiveDrafts.deletedAt)];
+  if (employeeId) {
+    baseConds.push(eq(stockReceiveDrafts.createdByEmployeeId, employeeId));
+  }
+
+  const recentDrafts = await db
+    .select({
+      id: stockReceiveDrafts.id,
+      receiveNumber: stockReceiveDrafts.receiveNumber,
+      status: stockReceiveDrafts.status,
+      deliveryNote: stockReceiveDrafts.deliveryNote,
+      managerNote: stockReceiveDrafts.managerNote,
+      updatedAt: stockReceiveDrafts.updatedAt,
+      approvedAt: stockReceiveDrafts.approvedAt,
+    })
+    .from(stockReceiveDrafts)
+    .where(
+      and(
+        ...baseConds,
+        inArray(stockReceiveDrafts.status, ['REJECTED', 'REVISED', 'APPROVED', 'SUBMITTED']),
+        sql`${stockReceiveDrafts.updatedAt} >= ${sevenDaysAgo}`,
+      ),
+    )
+    .orderBy(desc(stockReceiveDrafts.updatedAt))
+    .limit(20);
+
+  const draftIds = recentDrafts.map((d) => d.id);
+  const itemsByDraft = new Map<string, string[]>();
+  if (draftIds.length > 0) {
+    const itemRows = await db
+      .select({
+        draftId: stockReceiveItems.draftId,
+        productName: products.name,
+        qty: stockReceiveItems.qty,
+      })
+      .from(stockReceiveItems)
+      .innerJoin(products, eq(stockReceiveItems.productId, products.id))
+      .where(inArray(stockReceiveItems.draftId, draftIds));
+
+    for (const row of itemRows) {
+      const list = itemsByDraft.get(row.draftId) ?? [];
+      list.push(`${row.productName} (+${row.qty})`);
+      itemsByDraft.set(row.draftId, list);
+    }
+  }
+
+  let rejectedCount = 0;
+  let revisedCount = 0;
+  let pendingCount = 0;
+  let approvedTodayCount = 0;
+
+  const recentItems: WarehouseApprovalNotificationItem[] = recentDrafts.map((d) => {
+    if (d.status === 'REJECTED') rejectedCount++;
+    else if (d.status === 'REVISED') revisedCount++;
+    else if (d.status === 'SUBMITTED') pendingCount++;
+    else if (d.status === 'APPROVED') {
+      const approvedDay = d.approvedAt
+        ? new Date(d.approvedAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' })
+        : '';
+      if (approvedDay === todayStr) approvedTodayCount++;
+    }
+
+    const prods = itemsByDraft.get(d.id) ?? [];
+    const productSummary =
+      prods.length === 0
+        ? d.deliveryNote || d.receiveNumber
+        : prods.length <= 2
+          ? prods.join(', ')
+          : `${prods.slice(0, 2).join(', ')} +${prods.length - 2} lainnya`;
+
+    return {
+      id: d.id,
+      receiveNumber: d.receiveNumber,
+      status: d.status,
+      deliveryNote: d.deliveryNote,
+      managerNote: d.managerNote,
+      isNewProductProposal: Boolean(d.deliveryNote?.startsWith('[USULAN PRODUK BARU]')),
+      productSummary,
+      updatedAt: d.updatedAt.toISOString(),
+    };
+  });
+
+  return {
+    rejectedCount,
+    revisedCount,
+    pendingCount,
+    approvedTodayCount,
+    recentItems: recentItems.slice(0, 12),
   };
 }
 

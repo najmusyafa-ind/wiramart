@@ -31,6 +31,9 @@ import {
   Layers,
   AlertCircle,
   Sparkles,
+  Bell,
+  XCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import PenerimaanBarangSection from './components/PenerimaanBarangSection';
 import FEFOActionSection from './components/FEFOActionSection';
@@ -98,12 +101,34 @@ declare class BarcodeDetector {
   detect(source: HTMLVideoElement): Promise<{ rawValue: string }[]>;
 }
 
+type ApprovalNotifItem = {
+  id: string;
+  receiveNumber: string;
+  status: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'REVISED';
+  deliveryNote: string | null;
+  managerNote: string | null;
+  isNewProductProposal: boolean;
+  productSummary: string;
+  updatedAt: string;
+};
+
+type ApprovalNotificationsData = {
+  rejectedCount: number;
+  revisedCount: number;
+  pendingCount: number;
+  approvedTodayCount: number;
+  recentItems: ApprovalNotifItem[];
+};
+
+const GUDANG_NOTIF_READ_KEY = 'wiramart_gudang_notif_read_ts_v1';
+
 type WarehousePayloadData = {
   employee: WarehouseEmployee;
   summary: WarehouseSummary;
   items: WarehouseProduct[];
   activities: ActivityLog[];
   categories?: Array<{ id: string; name: string }>;
+  approvalNotifications?: ApprovalNotificationsData;
 };
 
 function getTodayWibStr(): string {
@@ -146,6 +171,22 @@ export default function GudangPortalPage() {
   const [categoriesList, setCategoriesList] = useState<Array<{ id: string; name: string }>>(
     () => initialCache?.categories ?? [],
   );
+  const [approvalNotifs, setApprovalNotifs] = useState<ApprovalNotificationsData | null>(
+    () => initialCache?.approvalNotifications ?? null,
+  );
+  const [showNotifModal, setShowNotifModal] = useState(false);
+  const [penerimaanTargetFilter, setPenerimaanTargetFilter] = useState<
+    'semua' | 'draft' | 'submitted' | 'revised' | 'approved' | 'rejected' | undefined
+  >(undefined);
+  const [penerimaanJumpSeq, setPenerimaanJumpSeq] = useState(0);
+  const [lastReadNotifTs, setLastReadNotifTs] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0;
+    try {
+      return Number(localStorage.getItem(GUDANG_NOTIF_READ_KEY) || '0') || 0;
+    } catch {
+      return 0;
+    }
+  });
   const [loading, setLoading] = useState<boolean>(() => !initialCache);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -179,6 +220,9 @@ export default function GudangPortalPage() {
       setSummary(cached.summary);
       setProducts(cached.items);
       setActivities(cached.activities);
+      if (cached.approvalNotifications) {
+        setApprovalNotifs(cached.approvalNotifications);
+      }
       setLoading(false);
     }
   }
@@ -252,6 +296,9 @@ export default function GudangPortalPage() {
       setActivities(data.activities);
       if (data.categories) {
         setCategoriesList(data.categories);
+      }
+      if (data.approvalNotifications) {
+        setApprovalNotifs(data.approvalNotifications);
       }
     },
     [],
@@ -346,6 +393,34 @@ export default function GudangPortalPage() {
     return () => {
       clearTimeout(timer);
       controller.abort();
+    };
+  }, [activeTab, search, fetchWarehouseData, applyWarehouseData]);
+
+  // Auto-refresh senyap saat petugas kembali membuka tab Gudang (mis. setelah Manager ACC/Tolak)
+  const lastVisibilitySyncRef = useRef<number>(0);
+  useEffect(() => {
+    const handleVisibilityRefresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - lastVisibilitySyncRef.current < 8000) return;
+      lastVisibilitySyncRef.current = now;
+      const cKey = makeWarehouseCacheKey(activeTab, search);
+      fetchWarehouseData(activeTab, search)
+        .then((result) => {
+          if (!result.redirected && result.ok) {
+            applyWarehouseData(result.data, cKey);
+          }
+        })
+        .catch(() => {
+          // silent background sync
+        });
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityRefresh);
+    window.addEventListener('focus', handleVisibilityRefresh);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityRefresh);
+      window.removeEventListener('focus', handleVisibilityRefresh);
     };
   }, [activeTab, search, fetchWarehouseData, applyWarehouseData]);
 
@@ -613,6 +688,35 @@ export default function GudangPortalPage() {
     }
   }
 
+  // Hitung notifikasi keputusan Manager yang belum dibaca oleh petugas
+  const unreadDecisionNotifs = (approvalNotifs?.recentItems ?? []).filter((n) => {
+    if (n.status !== 'REJECTED' && n.status !== 'REVISED' && n.status !== 'APPROVED') return false;
+    return new Date(n.updatedAt).getTime() > lastReadNotifTs;
+  });
+  const urgentUnreadNotifs = unreadDecisionNotifs.filter(
+    (n) => n.status === 'REJECTED' || n.status === 'REVISED',
+  );
+
+  function markAllNotifsAsRead() {
+    const nowTs = Date.now();
+    setLastReadNotifTs(nowTs);
+    try {
+      localStorage.setItem(GUDANG_NOTIF_READ_KEY, String(nowTs));
+    } catch {
+      // ignore
+    }
+  }
+
+  function jumpToPenerimaanStatus(
+    targetStatus: 'semua' | 'draft' | 'submitted' | 'revised' | 'approved' | 'rejected',
+  ) {
+    setPenerimaanTargetFilter(targetStatus);
+    setPenerimaanJumpSeq((s) => s + 1);
+    setActiveTab('penerimaan');
+    setShowNotifModal(false);
+    markAllNotifsAsRead();
+  }
+
   return (
     <div
       style={{
@@ -720,6 +824,68 @@ export default function GudangPortalPage() {
                 <span>Dashboard</span>
               </button>
             )}
+            {/* Tombol Lonceng Notifikasi Keputusan Manager */}
+            <button
+              type="button"
+              onClick={() => setShowNotifModal(true)}
+              className="btn btn-secondary"
+              style={{
+                position: 'relative',
+                minWidth: 44,
+                minHeight: 44,
+                padding: 0,
+                borderRadius: 8,
+                fontSize: '0.8rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border:
+                  urgentUnreadNotifs.length > 0
+                    ? '1.5px solid #ef4444'
+                    : unreadDecisionNotifs.length > 0
+                    ? '1.5px solid #22c55e'
+                    : '1px solid #cbd5e1',
+                background:
+                  urgentUnreadNotifs.length > 0
+                    ? '#fef2f2'
+                    : unreadDecisionNotifs.length > 0
+                    ? '#f0fdf4'
+                    : '#fff',
+                color:
+                  urgentUnreadNotifs.length > 0
+                    ? '#dc2626'
+                    : unreadDecisionNotifs.length > 0
+                    ? '#16a34a'
+                    : '#475569',
+              }}
+              aria-label="Notifikasi Keputusan Manager"
+              title="Notifikasi Keputusan Manager (ACC / Revisi / Ditolak)"
+            >
+              <Bell size={17} />
+              {unreadDecisionNotifs.length > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -5,
+                    right: -5,
+                    minWidth: 19,
+                    height: 19,
+                    padding: '0 5px',
+                    borderRadius: 999,
+                    backgroundColor: urgentUnreadNotifs.length > 0 ? '#dc2626' : '#16a34a',
+                    color: '#ffffff',
+                    fontSize: '0.68rem',
+                    fontWeight: 900,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+                  }}
+                >
+                  {unreadDecisionNotifs.length}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               onClick={() => loadData()}
@@ -770,6 +936,123 @@ export default function GudangPortalPage() {
 
       {/* ── KONTEN UTAMA ── */}
       <main style={{ maxWidth: 800, margin: '0 auto', padding: '16px 14px' }}>
+        {/* ── BANNER NOTIFIKASI KEPUTUSAN MANAGER (DITOLAK / PERLU REVISI) ── */}
+        {urgentUnreadNotifs.length > 0 && (
+          <div
+            role="alert"
+            style={{
+              marginBottom: 14,
+              padding: '12px 14px',
+              borderRadius: 12,
+              border:
+                urgentUnreadNotifs[0].status === 'REJECTED'
+                  ? '1.5px solid #ef4444'
+                  : '1.5px solid #f97316',
+              backgroundColor:
+                urgentUnreadNotifs[0].status === 'REJECTED' ? '#fef2f2' : '#fff7ed',
+              color:
+                urgentUnreadNotifs[0].status === 'REJECTED' ? '#991b1b' : '#9a3412',
+              boxShadow: '0 4px 12px rgba(220, 38, 38, 0.1)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                {urgentUnreadNotifs[0].status === 'REJECTED' ? (
+                  <XCircle size={20} style={{ color: '#dc2626', flexShrink: 0, marginTop: 1 }} />
+                ) : (
+                  <AlertTriangle size={20} style={{ color: '#ea580c', flexShrink: 0, marginTop: 1 }} />
+                )}
+                <div style={{ fontSize: '0.82rem', lineHeight: 1.45 }}>
+                  <div style={{ fontWeight: 800 }}>
+                    {urgentUnreadNotifs[0].status === 'REJECTED'
+                      ? `Usulan #${urgentUnreadNotifs[0].receiveNumber} DITOLAK oleh Manager`
+                      : `Usulan #${urgentUnreadNotifs[0].receiveNumber} PERLU REVISI dari Manager`}
+                    {urgentUnreadNotifs.length > 1 && ` (+${urgentUnreadNotifs.length - 1} lainnya)`}
+                  </div>
+                  <div style={{ fontSize: '0.76rem', marginTop: 2 }}>
+                    <strong>Item:</strong> {urgentUnreadNotifs[0].productSummary}
+                  </div>
+                  {urgentUnreadNotifs[0].managerNote && (
+                    <div
+                      style={{
+                        marginTop: 4,
+                        padding: '6px 9px',
+                        borderRadius: 6,
+                        backgroundColor: 'rgba(255,255,255,0.75)',
+                        border: '1px solid rgba(220, 38, 38, 0.2)',
+                        fontSize: '0.78rem',
+                      }}
+                    >
+                      <strong>Alasan / Catatan Manager:</strong> &ldquo;{urgentUnreadNotifs[0].managerNote}&rdquo;
+                    </div>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={markAllNotifsAsRead}
+                aria-label="Tandai notifikasi sudah dibaca"
+                title="Tandai sudah dibaca"
+                style={{
+                  background: 'rgba(255,255,255,0.7)',
+                  border: '1px solid rgba(0,0,0,0.1)',
+                  borderRadius: 6,
+                  color: 'inherit',
+                  padding: '4px 6px',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingLeft: 30 }}>
+              <button
+                type="button"
+                onClick={() =>
+                  jumpToPenerimaanStatus(
+                    urgentUnreadNotifs[0].status === 'REJECTED' ? 'rejected' : 'revised',
+                  )
+                }
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: 8,
+                  border: 'none',
+                  backgroundColor:
+                    urgentUnreadNotifs[0].status === 'REJECTED' ? '#dc2626' : '#ea580c',
+                  color: '#ffffff',
+                  fontSize: '0.76rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                {urgentUnreadNotifs[0].status === 'REJECTED'
+                  ? 'Lihat di Tab Ditolak →'
+                  : 'Perbaiki di Tab Perlu Revisi →'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowNotifModal(true)}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: 8,
+                  border: '1px solid currentColor',
+                  backgroundColor: '#ffffff',
+                  color: 'inherit',
+                  fontSize: '0.76rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Lihat Semua Notifikasi ({approvalNotifs?.recentItems.length ?? 0})
+              </button>
+            </div>
+          </div>
+        )}
         {isReadOnlyAdminShift && (
           <div
             role="status"
@@ -1035,7 +1318,15 @@ export default function GudangPortalPage() {
         >
           {[
             { id: 'semua', label: summary ? `Seluruh Produk (${summary.totalSku})` : 'Seluruh Produk' },
-            { id: 'penerimaan', label: 'Faktur Pemasok & Penerimaan' },
+            {
+              id: 'penerimaan',
+              label:
+                approvalNotifs && (approvalNotifs.rejectedCount > 0 || approvalNotifs.revisedCount > 0)
+                  ? `Faktur Pemasok & Penerimaan (${approvalNotifs.rejectedCount + approvalNotifs.revisedCount} Info)`
+                  : approvalNotifs && approvalNotifs.pendingCount > 0
+                  ? `Faktur Pemasok & Penerimaan (${approvalNotifs.pendingCount} Menunggu)`
+                  : 'Faktur Pemasok & Penerimaan',
+            },
             {
               id: 'fefo',
               label: summary
@@ -1247,6 +1538,7 @@ export default function GudangPortalPage() {
           </section>
         ) : activeTab === 'penerimaan' ? (
           <PenerimaanBarangSection
+            key={`${penerimaanTargetFilter ?? 'semua'}-${penerimaanJumpSeq}`}
             productsList={products.map((p) => ({
               id: p.id,
               name: p.name,
@@ -1256,6 +1548,7 @@ export default function GudangPortalPage() {
               unit: p.unit,
               isPerishable: p.isPerishable,
             }))}
+            initialStatusFilter={penerimaanTargetFilter}
             onDraftApproved={() => loadData(activeTab, search)}
           />
         ) : activeTab === 'fefo' && !isReadOnlyAdminShift ? (
@@ -2851,6 +3144,301 @@ export default function GudangPortalPage() {
                 {cameraError}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL PUSAT NOTIFIKASI KEPUTUSAN MANAGER (ACC / REVISI / DITOLAK) ── */}
+      {showNotifModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 80,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 14,
+          }}
+          onClick={() => setShowNotifModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 520,
+              backgroundColor: '#ffffff',
+              borderRadius: 16,
+              overflow: 'hidden',
+              boxShadow: '0 20px 30px -5px rgba(0, 0, 0, 0.25)',
+              maxHeight: '88dvh',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <div
+              style={{
+                padding: '16px 18px',
+                borderBottom: '1px solid #e2e8f0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                backgroundColor: '#f8fafc',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 10,
+                    backgroundColor: '#eff6ff',
+                    color: '#2563eb',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Bell size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 800, color: '#0f172a' }}>
+                    Notifikasi Keputusan Manager
+                  </h3>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                    Status pengajuan produk baru &amp; restock 7 hari terakhir
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNotifModal(false)}
+                aria-label="Tutup notifikasi"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#64748b',
+                  cursor: 'pointer',
+                  minWidth: 38,
+                  minHeight: 38,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ padding: '14px 16px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {!approvalNotifs || approvalNotifs.recentItems.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px 12px', color: '#64748b', fontSize: '0.84rem' }}>
+                  Belum ada notifikasi keputusan Manager dalam 7 hari terakhir.
+                </div>
+              ) : (
+                approvalNotifs.recentItems.map((n) => {
+                  const isRejected = n.status === 'REJECTED';
+                  const isRevised = n.status === 'REVISED';
+                  const isApproved = n.status === 'APPROVED';
+                  const isUnread =
+                    (isRejected || isRevised || isApproved) &&
+                    new Date(n.updatedAt).getTime() > lastReadNotifTs;
+
+                  const bg = isRejected
+                    ? '#fef2f2'
+                    : isRevised
+                    ? '#fff7ed'
+                    : isApproved
+                    ? '#f0fdf4'
+                    : '#f8fafc';
+                  const border = isRejected
+                    ? '#fca5a5'
+                    : isRevised
+                    ? '#fdba74'
+                    : isApproved
+                    ? '#86efac'
+                    : '#e2e8f0';
+                  const badgeBg = isRejected
+                    ? '#dc2626'
+                    : isRevised
+                    ? '#ea580c'
+                    : isApproved
+                    ? '#16a34a'
+                    : '#2563eb';
+                  const statusLabel = isRejected
+                    ? 'DITOLAK MANAGER'
+                    : isRevised
+                    ? 'PERLU REVISI'
+                    : isApproved
+                    ? 'DISETUJUI (ACC)'
+                    : 'MENUNGGU ACC';
+
+                  return (
+                    <div
+                      key={n.id}
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: 12,
+                        backgroundColor: bg,
+                        border: `${isUnread ? '1.5px' : '1px'} solid ${border}`,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              padding: '2px 8px',
+                              borderRadius: 999,
+                              backgroundColor: badgeBg,
+                              color: '#ffffff',
+                              fontSize: '0.68rem',
+                              fontWeight: 800,
+                            }}
+                          >
+                            {statusLabel}
+                          </span>
+                          {n.isNewProductProposal && (
+                            <span
+                              style={{
+                                padding: '2px 7px',
+                                borderRadius: 999,
+                                backgroundColor: '#ede9fe',
+                                color: '#6d28d9',
+                                fontSize: '0.66rem',
+                                fontWeight: 800,
+                              }}
+                            >
+                              ✨ PRODUK BARU
+                            </span>
+                          )}
+                          {isUnread && (
+                            <span style={{ fontSize: '0.66rem', fontWeight: 800, color: '#dc2626' }}>
+                              • BARU
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ fontSize: '0.7rem', color: '#64748b', fontFamily: 'monospace' }}>
+                          #{n.receiveNumber}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#0f172a' }}>
+                        {n.productSummary}
+                      </div>
+
+                      {n.managerNote && (
+                        <div
+                          style={{
+                            padding: '7px 10px',
+                            borderRadius: 8,
+                            backgroundColor: '#ffffff',
+                            border: '1px solid rgba(0,0,0,0.08)',
+                            fontSize: '0.78rem',
+                            color: isRejected ? '#991b1b' : isRevised ? '#9a3412' : '#1e293b',
+                          }}
+                        >
+                          <strong>Alasan / Catatan Manager:</strong> &ldquo;{n.managerNote}&rdquo;
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+                        <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                          {new Date(n.updatedAt).toLocaleString('id-ID', {
+                            day: '2-digit',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            timeZone: 'Asia/Jakarta',
+                          })}{' '}
+                          WIB
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            jumpToPenerimaanStatus(
+                              isRejected
+                                ? 'rejected'
+                                : isRevised
+                                ? 'revised'
+                                : isApproved
+                                ? 'approved'
+                                : 'submitted',
+                            )
+                          }
+                          style={{
+                            padding: '5px 10px',
+                            borderRadius: 6,
+                            border: 'none',
+                            backgroundColor: '#0f172a',
+                            color: '#ffffff',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Buka di Tab Penerimaan →
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div
+              style={{
+                padding: '12px 16px',
+                borderTop: '1px solid #e2e8f0',
+                backgroundColor: '#f8fafc',
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  markAllNotifsAsRead();
+                  setShowNotifModal(false);
+                }}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  backgroundColor: '#ffffff',
+                  color: '#334155',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Tandai Semua Sudah Dibaca
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowNotifModal(false)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: 'none',
+                  backgroundColor: '#2563eb',
+                  color: '#ffffff',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}

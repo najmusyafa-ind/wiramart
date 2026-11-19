@@ -98,6 +98,7 @@ export type ProductOption = {
 interface PenerimaanBarangSectionProps {
   productsList: ProductOption[];
   onDraftApproved?: () => void;
+  initialStatusFilter?: 'semua' | 'draft' | 'submitted' | 'revised' | 'approved' | 'rejected';
 }
 
 async function requestDrafts(filter: string, signal?: AbortSignal): Promise<DraftSummaryItem[]> {
@@ -215,6 +216,7 @@ const penerimaanMemCache = new Map<
 export default function PenerimaanBarangSection({
   productsList,
   onDraftApproved,
+  initialStatusFilter,
 }: PenerimaanBarangSectionProps) {
   const modalSearchId = useId();
   const photoUploadId = useId();
@@ -223,15 +225,16 @@ export default function PenerimaanBarangSection({
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   // State List Drafts & Tabel Buku Nota (inisialisasi instan dari memori cache)
-  const [statusFilter, setStatusFilter] = useState<string>('semua');
+  const initialKey = initialStatusFilter ?? 'semua';
+  const [statusFilter, setStatusFilter] = useState<string>(initialKey);
   const [drafts, setDrafts] = useState<DraftSummaryItem[]>(
-    () => penerimaanMemCache.get('semua')?.itemsData ?? [],
+    () => penerimaanMemCache.get(initialKey)?.itemsData ?? [],
   );
   const [tableRows, setTableRows] = useState<SupplierInvoiceTableRow[]>(
-    () => penerimaanMemCache.get('semua')?.tableData ?? [],
+    () => penerimaanMemCache.get(initialKey)?.tableData ?? [],
   );
   const [tableSearch, setTableSearch] = useState('');
-  const [loading, setLoading] = useState<boolean>(() => !penerimaanMemCache.has('semua'));
+  const [loading, setLoading] = useState<boolean>(() => !penerimaanMemCache.has(initialKey));
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // State Modal Preview Foto Nota
