@@ -31,6 +31,7 @@ import {
   asc,
   lte,
   gt,
+  gte,
   inArray,
   notInArray,
   exists,
@@ -259,7 +260,7 @@ export async function getWarehouseApprovalNotifications(
       and(
         ...baseConds,
         inArray(stockReceiveDrafts.status, ['REJECTED', 'REVISED', 'APPROVED', 'SUBMITTED']),
-        sql`${stockReceiveDrafts.updatedAt} >= ${sevenDaysAgo}`,
+        gte(stockReceiveDrafts.updatedAt, sevenDaysAgo),
       ),
     )
     .orderBy(desc(stockReceiveDrafts.updatedAt))
