@@ -41,8 +41,15 @@ const PatchSchema = z.object({
 
 export async function PATCH(req: NextRequest, ctx: Context) {
   const payload = await verifyJwt(req);
-  // PATCH: hanya admin yang boleh ubah HPP, harga jual, dan data produk
+  // PATCH: Admin Shift & Manager aktif boleh edit produk (berbarcode & non-barcode), harga, dan stok opname
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
+
+  const [activeAdmin] = await db
+    .select({ id: admins.id })
+    .from(admins)
+    .where(and(eq(admins.id, payload.sub), eq(admins.isActive, true), isNull(admins.deletedAt)))
+    .limit(1);
+  if (!activeAdmin) return apiError('Sesi admin tidak aktif atau sudah dinonaktifkan', 403);
 
   const { id } = await ctx.params;
   if (!z.string().uuid().safeParse(id).success) {
@@ -312,6 +319,13 @@ export async function PATCH(req: NextRequest, ctx: Context) {
 export async function DELETE(req: NextRequest, ctx: Context) {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
+
+  const [activeAdmin] = await db
+    .select({ id: admins.id })
+    .from(admins)
+    .where(and(eq(admins.id, payload.sub), eq(admins.isActive, true), isNull(admins.deletedAt)))
+    .limit(1);
+  if (!activeAdmin) return apiError('Sesi admin tidak aktif atau sudah dinonaktifkan', 403);
 
   const { id } = await ctx.params;
   if (!z.string().uuid().safeParse(id).success) {

@@ -634,7 +634,7 @@ function BarcodeScanner({ onDetected, onClose }: BarcodeScannerProps) {
 // prefillName + prefillBarcode untuk auto-fill dari barcode scanner
 // ─────────────────────────────────────────────────────────────
 function ProdukModal({
-  onClose, onSuccess, categories, editData, prefillName, prefillBarcode,
+  onClose, onSuccess, categories, editData, prefillName, prefillBarcode, openedFromScanMatch,
 }: {
   onClose: () => void;
   onSuccess: () => void;
@@ -642,19 +642,25 @@ function ProdukModal({
   editData?: Product | null;
   prefillName?: string;
   prefillBarcode?: string;
+  openedFromScanMatch?: boolean;
 }) {
   const uid = useId();
   const isEdit = !!editData;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const initialBarcode = (editData?.barcode ?? prefillBarcode ?? '').trim();
+  const [barcodeMode, setBarcodeMode] = useState<'barcode' | 'non_barcode'>(
+    initialBarcode ? 'barcode' : isEdit ? 'non_barcode' : prefillBarcode ? 'barcode' : 'barcode',
+  );
   const [form, setForm] = useState({
     categoryId:     editData?.categoryId ?? '',
     name:           editData?.name ?? prefillName ?? '',
     description:    editData?.description ?? '',
-    barcode:        editData?.barcode ?? prefillBarcode ?? '',
+    barcode:        initialBarcode,
     costPrice:      editData?.costPrice ?? '',
     sellingPrice:   editData?.sellingPrice ?? '',
     stockQty:       editData?.stockQty?.toString() ?? '0',
+    stockAdjustmentReason: '',
     unit:           editData?.unit ?? 'pcs',
     isPerishable:   Boolean(editData?.isPerishable),
     perishableType: (editData?.perishableType === 'BELI_LEPAS' ? 'BELI_LEPAS' : 'KONSINYASI') as 'KONSINYASI' | 'BELI_LEPAS',
@@ -695,13 +701,41 @@ function ProdukModal({
     setLoading(true);
     setError('');
     try {
+      const parsedCost = parseFloat(form.costPrice);
+      const parsedSell = parseFloat(form.sellingPrice);
+      const parsedStock = parseInt(form.stockQty, 10);
+      const safeStockQty = Number.isNaN(parsedStock) || parsedStock < 0 ? 0 : parsedStock;
+      const resolvedBarcode = barcodeMode === 'non_barcode' ? null : (form.barcode.trim() || null);
+
+      if (Number.isNaN(parsedCost) || parsedCost < 0) {
+        setError('Harga HPP wajib diisi angka >= 0.');
+        return;
+      }
+      if (Number.isNaN(parsedSell) || parsedSell <= 0) {
+        setError('Harga Jual wajib diisi angka > 0.');
+        return;
+      }
+
       const body = {
-        ...form,
-        costPrice:    parseFloat(form.costPrice),
-        sellingPrice: parseFloat(form.sellingPrice),
-        stockQty:     parseInt(form.stockQty),
+        categoryId:     form.categoryId,
+        name:           form.name,
+        description:    form.description,
+        barcode:        resolvedBarcode,
+        costPrice:      parsedCost,
+        sellingPrice:   parsedSell,
+        stockQty:       safeStockQty,
+        unit:           form.unit,
+        isPerishable:   form.isPerishable,
+        perishableType: form.perishableType,
         // Hanya relevan saat edit: server memakainya agar stok tak tertimpa angka basi
-        ...(isEdit ? { expectedStockQty: editData!.stockQty } : {}),
+        ...(isEdit
+          ? {
+              expectedStockQty: editData!.stockQty,
+              ...(form.stockAdjustmentReason.trim()
+                ? { stockAdjustmentReason: form.stockAdjustmentReason.trim() }
+                : {}),
+            }
+          : {}),
       };
       const res = await fetch(
         isEdit ? `/api/admin/produk/${editData!.id}` : '/api/admin/produk',
@@ -762,6 +796,22 @@ function ProdukModal({
           {error && (
             <div className="alert alert-error" role="alert" style={{ marginBottom: 'var(--space-4)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
               <AlertCircle size={14} aria-hidden="true" /> {error}
+            </div>
+          )}
+          {/* Indikator produk ditemukan lewat Scan Barcode */}
+          {openedFromScanMatch && isEdit && (
+            <div style={{
+              marginBottom: 'var(--space-4)',
+              padding: 'var(--space-2) var(--space-3)',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--color-success-light)',
+              color: 'var(--color-success)',
+              fontSize: 'var(--text-xs)',
+              display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+              fontWeight: 'var(--weight-medium)',
+            }}>
+              <CheckCircle size={14} aria-hidden="true" />
+              Produk ditemukan dari scan barcode. Anda bisa langsung edit data, harga, atau stok opname.
             </div>
           )}
           {/* Indikator prefill barcode */}
@@ -836,7 +886,9 @@ function ProdukModal({
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', gap: 'var(--space-3)' }}>
               <div className="form-group">
-                <label htmlFor={`${uid}-stock`} className="form-label">Stok Awal</label>
+                <label htmlFor={`${uid}-stock`} className="form-label">
+                  {isEdit ? 'Stok Saat Ini (Opname)' : 'Stok Awal'}
+                </label>
                 <input id={`${uid}-stock`} type="number" inputMode="numeric" min="0" className="form-input"
                   style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
                   value={form.stockQty} onChange={(e) => setForm((f) => ({ ...f, stockQty: e.target.value }))} disabled={loading} />
@@ -848,17 +900,78 @@ function ProdukModal({
                   value={form.unit} onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))} disabled={loading} />
               </div>
             </div>
-            {/* Barcode opsional */}
+            {isEdit && !Number.isNaN(parseInt(form.stockQty, 10)) && parseInt(form.stockQty, 10) !== editData!.stockQty && (
+              <div className="form-group">
+                <label htmlFor={`${uid}-adj-reason`} className="form-label">
+                  Alasan Perubahan Stok (Opname)
+                </label>
+                <input
+                  id={`${uid}-adj-reason`}
+                  type="text"
+                  className="form-input"
+                  placeholder="Contoh: Stok opname hari ini"
+                  maxLength={300}
+                  value={form.stockAdjustmentReason}
+                  onChange={(e) => setForm((f) => ({ ...f, stockAdjustmentReason: e.target.value }))}
+                  disabled={loading}
+                  style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
+                />
+              </div>
+            )}
+            {/* Jenis Produk: Berbarcode vs Non-Barcode */}
             <div className="form-group">
-              <label htmlFor={`${uid}-barcode`} className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-                <ScanLine size={13} aria-hidden="true" /> Barcode <span style={{ fontWeight: 'var(--weight-normal)', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>(opsional — EAN-13 / Code128)</span>
-              </label>
-              <input id={`${uid}-barcode`} type="text" className="form-input"
-                placeholder="Scan atau ketik kode barcode..."
-                value={form.barcode}
-                onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))}
-                disabled={loading}
-                style={{ fontFamily: 'var(--font-mono)', letterSpacing: 1, fontSize: 'var(--text-base)', minHeight: 44 }} />
+              <span className="form-label" style={{ display: 'block', marginBottom: 'var(--space-2)' }}>
+                Jenis Identifikasi Produk
+              </span>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                <button
+                  type="button"
+                  aria-pressed={barcodeMode === 'barcode'}
+                  onClick={() => setBarcodeMode('barcode')}
+                  disabled={loading}
+                  className={`btn btn-sm ${barcodeMode === 'barcode' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontWeight: 600 }}
+                >
+                  <ScanLine size={14} aria-hidden="true" /> Produk Berbarcode
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={barcodeMode === 'non_barcode'}
+                  onClick={() => {
+                    setBarcodeMode('non_barcode');
+                    setForm((f) => ({ ...f, barcode: '' }));
+                  }}
+                  disabled={loading}
+                  className={`btn btn-sm ${barcodeMode === 'non_barcode' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontWeight: 600 }}
+                >
+                  <Package size={14} aria-hidden="true" /> Produk Non-Barcode
+                </button>
+              </div>
+              {barcodeMode === 'barcode' ? (
+                <>
+                  <label htmlFor={`${uid}-barcode`} className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                    <ScanLine size={13} aria-hidden="true" /> Kode Barcode <span style={{ fontWeight: 'var(--weight-normal)', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>(EAN-13 / Code128 — kosongkan jika belum ada)</span>
+                  </label>
+                  <input id={`${uid}-barcode`} type="text" className="form-input"
+                    placeholder="Scan atau ketik kode barcode..."
+                    value={form.barcode}
+                    onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))}
+                    disabled={loading}
+                    style={{ fontFamily: 'var(--font-mono)', letterSpacing: 1, fontSize: 'var(--text-base)', minHeight: 44 }} />
+                </>
+              ) : (
+                <div style={{
+                  padding: '8px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'var(--color-surface-alt)',
+                  border: '1px solid var(--color-border)',
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--color-text-muted)',
+                }}>
+                  Produk akan disimpan sebagai <strong>Non-Barcode</strong> (tanpa kode barcode). Cocok untuk gorengan, makanan harian, atau jajanan curah.
+                </div>
+              )}
             </div>
             {/* Pengaturan Makanan Harian (Wajib Habis 1 Hari) */}
             <div
@@ -1010,8 +1123,10 @@ export default function ProdukPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
+  const [filterBarcodeType, setFilterBarcodeType] = useState<'all' | 'barcode' | 'non_barcode'>('all');
   const [showModal, setShowModal] = useState(false);
   const [editData, setEditData] = useState<Product | null>(null);
+  const [openedFromScanMatch, setOpenedFromScanMatch] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -1035,6 +1150,8 @@ export default function ProdukPage() {
     totalActiveProducts: number;
     lowStockCount: number;
     outOfStockCount: number;
+    withBarcodeCount?: number;
+    nonBarcodeCount?: number;
   } | null>(null);
 
   // ── Tab state: Katalog vs Usulan Kasir (K8) vs Batch Stok (F3) ─────────────
@@ -1100,10 +1217,18 @@ export default function ProdukPage() {
     };
   }, []);
 
-  const fetchProducts = useCallback(async (q = '', cat = '') => {
+  const fetchProducts = useCallback(async (
+    q = '',
+    cat = '',
+    barcodeType: 'all' | 'barcode' | 'non_barcode' = 'all',
+  ) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ q, ...(cat && { categoryId: cat }) });
+      const params = new URLSearchParams({
+        q,
+        ...(cat && { categoryId: cat }),
+        ...(barcodeType !== 'all' && { barcodeType }),
+      });
       const res = await fetch(`/api/admin/produk?${params}`);
       const json = await res.json() as {
         success?: boolean;
@@ -1115,6 +1240,8 @@ export default function ProdukPage() {
             totalActiveProducts: number;
             lowStockCount: number;
             outOfStockCount: number;
+            withBarcodeCount?: number;
+            nonBarcodeCount?: number;
           };
         };
       };
@@ -1137,9 +1264,9 @@ export default function ProdukPage() {
   // search='' + filterCat='' saat mount → initial load dengan debounce singkat.
   // Tidak ada lagi 2x fetch saat komponen pertama kali render.
   useEffect(() => {
-    const t = setTimeout(() => fetchProducts(search, filterCat), 350);
+    const t = setTimeout(() => fetchProducts(search, filterCat, filterBarcodeType), 350);
     return () => clearTimeout(t);
-  }, [search, filterCat, fetchProducts]);
+  }, [search, filterCat, filterBarcodeType, fetchProducts]);
 
   async function handleDelete(id: string, name: string) {
     // FIXED: gunakan state-based confirm dialog (menggantikan browser confirm())
@@ -1157,7 +1284,7 @@ export default function ProdukPage() {
         setDeleteError(json.error ?? 'Gagal menghapus produk. Coba lagi.');
         return;
       }
-      fetchProducts(search, filterCat);
+      fetchProducts(search, filterCat, filterBarcodeType);
     } catch {
       setDeleteError('Gagal menghapus produk. Periksa koneksi dan coba lagi.');
     } finally {
@@ -1166,13 +1293,41 @@ export default function ProdukPage() {
     }
   }
 
-  // ── Scanner callback ────────────────────────────────────
-  function handleBarcodeDetected(barcode: string, productName?: string) {
+  // ── Scanner callback (Smart Opname: jika barcode sudah ada -> buka Edit; jika baru -> buka Tambah)
+  async function handleBarcodeDetected(barcode: string, productName?: string) {
     setShowScanner(false);
+    const cleanCode = barcode.trim();
+    const normCode = cleanCode.toLowerCase();
+
+    // 1. Cek pada daftar produk yang sudah dimuat
+    let matched = products.find((p) => (p.barcode ?? '').trim().toLowerCase() === normCode) ?? null;
+
+    // 2. Fallback query server bila sedang terfilter
+    if (!matched && cleanCode) {
+      try {
+        const res = await fetch(`/api/admin/produk?q=${encodeURIComponent(cleanCode)}`);
+        const json = await res.json() as { success?: boolean; data?: { products?: Product[] } };
+        if (res.ok && json.success && Array.isArray(json.data?.products)) {
+          matched =
+            json.data.products.find((p) => (p.barcode ?? '').trim().toLowerCase() === normCode) ?? null;
+        }
+      } catch {
+        // Fallback ke tambah baru bila gagal cek
+      }
+    }
+
+    if (matched) {
+      setEditData(matched);
+      setOpenedFromScanMatch(true);
+      setScanPrefillBarcode(undefined);
+      setScanPrefillName(undefined);
+      setShowModal(true);
+      return;
+    }
+
     setEditData(null);
-    // Selalu pass barcode ke form agar bisa disimpan
-    setScanPrefillBarcode(barcode);
-    // Nama dari Open Food Facts jika ada, fallback ke kosong
+    setOpenedFromScanMatch(false);
+    setScanPrefillBarcode(cleanCode);
     setScanPrefillName(productName ?? '');
     setShowModal(true);
   }
@@ -1258,8 +1413,14 @@ export default function ProdukPage() {
           editData={editData}
           prefillName={scanPrefillName}
           prefillBarcode={scanPrefillBarcode}
-          onClose={() => { setShowModal(false); setScanPrefillName(undefined); setScanPrefillBarcode(undefined); }}
-          onSuccess={() => fetchProducts(search, filterCat)}
+          openedFromScanMatch={openedFromScanMatch}
+          onClose={() => {
+            setShowModal(false);
+            setOpenedFromScanMatch(false);
+            setScanPrefillName(undefined);
+            setScanPrefillBarcode(undefined);
+          }}
+          onSuccess={() => fetchProducts(search, filterCat, filterBarcodeType)}
         />
       )}
 
@@ -1268,7 +1429,7 @@ export default function ProdukPage() {
         <StokAdjModal
           product={adjProduct}
           onClose={() => setAdjProduct(null)}
-          onSuccess={() => fetchProducts(search, filterCat)}
+          onSuccess={() => fetchProducts(search, filterCat, filterBarcodeType)}
         />
       )}
 
@@ -1277,7 +1438,7 @@ export default function ProdukPage() {
         <FotoUploadModal
           product={fotoProduct}
           onClose={() => setFotoProduct(null)}
-          onSuccess={() => fetchProducts(search, filterCat)}
+          onSuccess={() => fetchProducts(search, filterCat, filterBarcodeType)}
         />
       )}
 
@@ -1302,7 +1463,13 @@ export default function ProdukPage() {
             <button
               type="button"
               id="btn-tambah-produk"
-              onClick={() => { setEditData(null); setScanPrefillName(undefined); setShowModal(true); }}
+              onClick={() => {
+                setEditData(null);
+                setOpenedFromScanMatch(false);
+                setScanPrefillName(undefined);
+                setScanPrefillBarcode(undefined);
+                setShowModal(true);
+              }}
               className="btn btn-primary"
               style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minHeight: '44px' }}
             >
@@ -1389,7 +1556,7 @@ export default function ProdukPage() {
         {activeTab === 'usulan' ? (
           <UsulanProdukTab
             onApproved={() => {
-              fetchProducts(search, filterCat);
+              fetchProducts(search, filterCat, filterBarcodeType);
               fetchPendingProposalsCount();
             }}
           />
@@ -1397,7 +1564,7 @@ export default function ProdukPage() {
           <BatchStokTab
             initialSearch={filterBatchProductName}
             onBatchUpdated={() => {
-              fetchProducts(search, filterCat);
+              fetchProducts(search, filterCat, filterBarcodeType);
               fetchCriticalBatchCount();
             }}
           />
@@ -1410,30 +1577,64 @@ export default function ProdukPage() {
           <>
             {/* Filter bar */}
         <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
-          <div className="card-body" style={{ padding: 'var(--space-3) var(--space-4)', display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'center' }}>
-            <div className="form-input-icon" style={{ flex: '1 1 200px', minWidth: 0 }}>
-              <Search size={16} className="form-input-icon__icon" aria-hidden="true" />
-              <input
-                type="search"
-                className="form-input form-input-icon__input"
-                placeholder="Cari nama atau barcode produk..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                aria-label="Cari produk"
-                style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
-              />
+          <div className="card-body" style={{ padding: 'var(--space-3) var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'center' }}>
+              <div className="form-input-icon" style={{ flex: '1 1 200px', minWidth: 0 }}>
+                <Search size={16} className="form-input-icon__icon" aria-hidden="true" />
+                <input
+                  type="search"
+                  className="form-input form-input-icon__input"
+                  placeholder="Cari nama atau barcode produk..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  aria-label="Cari produk"
+                  style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
+                />
+              </div>
+              <select
+                id={`${uid}-filter-cat`}
+                className="form-input form-select"
+                style={{ flex: '1 1 180px', maxWidth: '100%', minWidth: 160, fontSize: 'var(--text-base)', minHeight: 44 }}
+                value={filterCat}
+                onChange={(e) => setFilterCat(e.target.value)}
+                aria-label="Filter kategori"
+              >
+                <option value="">Semua Kategori</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
             </div>
-            <select
-              id={`${uid}-filter-cat`}
-              className="form-input form-select"
-              style={{ flex: '1 1 180px', maxWidth: '100%', minWidth: 160, fontSize: 'var(--text-base)', minHeight: 44 }}
-              value={filterCat}
-              onChange={(e) => setFilterCat(e.target.value)}
-              aria-label="Filter kategori"
-            >
-              <option value="">Semua Kategori</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            {/* Filter cepat Berbarcode vs Non-Barcode untuk Stok Opname */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                aria-pressed={filterBarcodeType === 'all'}
+                onClick={() => setFilterBarcodeType('all')}
+                className={`btn btn-sm ${filterBarcodeType === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ minHeight: 38, padding: '6px 12px', fontWeight: 600 }}
+              >
+                Semua ({stockSummary?.totalActiveProducts ?? products.length})
+              </button>
+              <button
+                type="button"
+                aria-pressed={filterBarcodeType === 'barcode'}
+                onClick={() => setFilterBarcodeType('barcode')}
+                className={`btn btn-sm ${filterBarcodeType === 'barcode' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ minHeight: 38, padding: '6px 12px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              >
+                <ScanLine size={13} aria-hidden="true" />
+                Berbarcode{typeof stockSummary?.withBarcodeCount === 'number' ? ` (${stockSummary.withBarcodeCount})` : ''}
+              </button>
+              <button
+                type="button"
+                aria-pressed={filterBarcodeType === 'non_barcode'}
+                onClick={() => setFilterBarcodeType('non_barcode')}
+                className={`btn btn-sm ${filterBarcodeType === 'non_barcode' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ minHeight: 38, padding: '6px 12px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+              >
+                <Package size={13} aria-hidden="true" />
+                Non-Barcode{typeof stockSummary?.nonBarcodeCount === 'number' ? ` (${stockSummary.nonBarcodeCount})` : ''}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1526,8 +1727,45 @@ export default function ProdukPage() {
                             </span>
                           )}
                         </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 3 }}>
+                          {p.barcode && p.barcode.trim() ? (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                fontSize: '0.7rem',
+                                fontFamily: 'var(--font-mono)',
+                                color: 'var(--color-text-muted)',
+                                backgroundColor: 'var(--color-surface-alt)',
+                                border: '1px solid var(--color-border)',
+                                borderRadius: 4,
+                                padding: '1px 6px',
+                              }}
+                            >
+                              <ScanLine size={10} aria-hidden="true" />
+                              {p.barcode}
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                fontSize: '0.68rem',
+                                fontWeight: 600,
+                                color: 'hsl(215 16% 42%)',
+                                backgroundColor: 'hsl(210 40% 96%)',
+                                border: '1px solid hsl(214 32% 88%)',
+                                borderRadius: 4,
+                                padding: '1px 6px',
+                              }}
+                            >
+                              Non-Barcode
+                            </span>
+                          )}
+                        </div>
                         {p.description && (
-                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
                             {p.description}
                           </div>
                         )}
@@ -1596,7 +1834,13 @@ export default function ProdukPage() {
                           <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', alignItems: 'center' }}>
                             <button
                               type="button"
-                              onClick={() => { setEditData(p); setScanPrefillName(undefined); setShowModal(true); }}
+                              onClick={() => {
+                                setEditData(p);
+                                setOpenedFromScanMatch(false);
+                                setScanPrefillName(undefined);
+                                setScanPrefillBarcode(undefined);
+                                setShowModal(true);
+                              }}
                               className="btn btn-ghost btn-sm"
                               title={`Edit produk ${p.name}`}
                               aria-label={`Edit produk ${p.name}`}

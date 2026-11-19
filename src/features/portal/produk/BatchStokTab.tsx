@@ -16,6 +16,7 @@ import {
   Search, RefreshCw, Loader2, X,
 } from 'lucide-react';
 import { formatRupiah } from '@/lib/utils/helpers';
+import { useAdmin } from '../PortalLayoutClient';
 
 export type BatchItem = {
   id: string;
@@ -92,6 +93,7 @@ export default function BatchStokTab({
   initialSearch?: string;
 }) {
   const uid = useId();
+  const { isManager } = useAdmin();
   const [batches, setBatches] = useState<BatchItem[]>([]);
   const [summary, setSummary] = useState<BatchSummary>({
     totalBatches: 0,
@@ -400,28 +402,47 @@ export default function BatchStokTab({
               <RefreshCw size={15} className={loading ? 'spin-icon' : ''} />
             </button>
 
-            <button
-              type="button"
-              id="btn-tambah-batch"
-              onClick={() => setShowAddModal(true)}
-              className="btn btn-primary btn-sm"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                fontWeight: 600,
-                minHeight: 44,
-                padding: '8px 14px',
-                backgroundColor: 'hsl(142 71% 35%)',
-                borderColor: 'hsl(142 71% 30%)',
-              }}
-            >
-              <Plus size={16} />
-              Terima Barang (Batch Masuk)
-            </button>
+            {isManager && (
+              <button
+                type="button"
+                id="btn-tambah-batch"
+                onClick={() => setShowAddModal(true)}
+                className="btn btn-primary btn-sm"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 600,
+                  minHeight: 44,
+                  padding: '8px 14px',
+                  backgroundColor: 'hsl(142 71% 35%)',
+                  borderColor: 'hsl(142 71% 30%)',
+                }}
+              >
+                <Plus size={16} />
+                Terima Barang (Batch Masuk)
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {!isManager && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 'var(--space-4)',
+            padding: '10px 14px',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--color-border)',
+            backgroundColor: 'var(--color-surface-alt)',
+            fontSize: 'var(--text-xs)',
+            color: 'var(--color-text-muted)',
+          }}
+        >
+          Mode Pantau Batch FEFO: Untuk <strong>Stok Opname (Tambah, Edit, Koreksi Stok, dan Hapus Produk Berbarcode maupun Non-Barcode)</strong>, gunakan tab <strong>Katalog Produk</strong>. Penambahan batch gudang langsung tetap memerlukan persetujuan Manager.
+        </div>
+      )}
 
       {/* 3. Table of Stock Batches */}
       <div className="card" style={{ overflow: 'hidden' }}>

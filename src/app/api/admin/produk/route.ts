@@ -103,10 +103,22 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get('q')?.trim() ?? '';
   const categoryId = searchParams.get('categoryId') ?? '';
+  const barcodeTypeRaw = searchParams.get('barcodeType') ?? 'all';
+  const barcodeType: 'all' | 'barcode' | 'non_barcode' =
+    barcodeTypeRaw === 'barcode' || barcodeTypeRaw === 'non_barcode'
+      ? barcodeTypeRaw
+      : 'all';
   const showAll = searchParams.get('showAll') === '1'; // include soft-deleted
 
   const lowStockThreshold = await getLowStockThreshold();
   await sweepYesterdayPerishableInAdmin();
+
+  const barcodeFilterCondition =
+    barcodeType === 'barcode'
+      ? sql`${products.barcode} IS NOT NULL AND TRIM(${products.barcode}) <> ''`
+      : barcodeType === 'non_barcode'
+        ? sql`(${products.barcode} IS NULL OR TRIM(${products.barcode}) = '')`
+        : undefined;
 
   const [rows, cats, [summaryRow]] = await Promise.all([
     db
@@ -141,21 +153,24 @@ export async function GET(req: NextRequest) {
               )
             : undefined,
           categoryId ? eq(products.categoryId, categoryId) : undefined,
+          barcodeFilterCondition,
         ),
       )
       .orderBy(products.name)
-      .limit(200),
+      .limit(1000),
     db
       .select({ id: categories.id, name: categories.name })
       .from(categories)
       .where(and(eq(categories.isActive, true), isNull(categories.deletedAt)))
       .orderBy(categories.name),
-    // Hitung metrik stok rendah & habis di server pada seluruh produk aktif
+    // Hitung metrik stok rendah, habis, berbarcode & non-barcode di server pada seluruh produk aktif
     db
       .select({
         totalActiveProducts: sql<number>`COUNT(*)::int`,
         outOfStockCount: sql<number>`COUNT(*) FILTER (WHERE ${products.stockQty} = 0)::int`,
         lowStockCount: sql<number>`COUNT(*) FILTER (WHERE ${products.stockQty} > 0 AND ${products.stockQty} <= ${lowStockThreshold})::int`,
+        withBarcodeCount: sql<number>`COUNT(*) FILTER (WHERE ${products.barcode} IS NOT NULL AND TRIM(${products.barcode}) <> '')::int`,
+        nonBarcodeCount: sql<number>`COUNT(*) FILTER (WHERE ${products.barcode} IS NULL OR TRIM(${products.barcode}) = '')::int`,
       })
       .from(products)
       .where(and(eq(products.isActive, true), isNull(products.deletedAt))),
@@ -174,6 +189,8 @@ export async function GET(req: NextRequest) {
       totalActiveProducts: summaryRow?.totalActiveProducts ?? 0,
       lowStockCount: summaryRow?.lowStockCount ?? 0,
       outOfStockCount: summaryRow?.outOfStockCount ?? 0,
+      withBarcodeCount: summaryRow?.withBarcodeCount ?? 0,
+      nonBarcodeCount: summaryRow?.nonBarcodeCount ?? 0,
     },
   });
 }

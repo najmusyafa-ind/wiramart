@@ -21,7 +21,7 @@ import {
   discountBarcodes,
 } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/utils/auth';
-import { apiOk, apiError, AppError, getTodayWib } from '@/lib/utils/helpers';
+import { apiOk, apiError, AppError, getTodayWib, getOffsetDateWib } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
 
@@ -165,6 +165,7 @@ export async function POST(req: NextRequest): Promise<Response> {
           name: products.name,
           costPrice: products.costPrice,
           stockQty: products.stockQty,
+          isPerishable: products.isPerishable,
           deletedAt: products.deletedAt,
         })
         .from(products)
@@ -197,14 +198,16 @@ export async function POST(req: NextRequest): Promise<Response> {
       // Step 2: Sinkronisasi stockBatches (Invarian: stock_qty = sum(stockBatches.currentQty))
       if (qtyDiff > 0) {
         // Opname menemukan kelebihan fisik: buat batch penyesuaian baru memakai tanggal WIB
-        const batchCode = `OPNAME-${getTodayWib(now).replace(/-/g, '')}-${randomInt(1000, 10000)}`;
+        const todayStr = getTodayWib(now);
+        const batchCode = `OPNAME-${todayStr.replace(/-/g, '')}-${randomInt(1000, 10000)}`;
         await tx.insert(stockBatches).values({
           productId,
           batchCode,
           costPrice: product.costPrice,
           initialQty: qtyDiff,
           currentQty: qtyDiff,
-          expiryClass: 'PANJANG',
+          expiryDate: product.isPerishable ? todayStr : getOffsetDateWib(180, now),
+          expiryClass: product.isPerishable ? 'HARIAN' : 'PANJANG',
           notes: `Penyesuaian stok opname (+${qtyDiff}): ${reason}`,
         });
       } else if (qtyDiff < 0) {
