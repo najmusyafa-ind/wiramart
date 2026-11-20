@@ -1,6 +1,6 @@
-# ALUR LENGKAP GUDANG - WIRAMART (PRD v3.0 - REVISI PRODUKSI)
+# ALUR LENGKAP GUDANG - WIRAMART (PRD v3.0 - REVISI PRODUKSI 20 NOV 2026)
 
-Dokumen ini menjelaskan seluruh alur operasional, validasi keamanan, dan alur data modul Gudang Wiramart secara end-to-end. Cakupan meliputi Penerimaan Barang (Restock, Faktur Pemasok, Usulan Produk Baru), Persetujuan Manager, Pusat Notifikasi Dua Arah, Manajemen Batch FEFO, Radar Kedaluwarsa, Keputusan Manager, dan Eksekusi Lapangan.
+Dokumen ini menjelaskan seluruh alur operasional, validasi keamanan, dan alur data modul Gudang Wiramart secara end-to-end sesuai kondisi produksi (`7444b01`). Cakupan meliputi Saling Backup Gudang & Admin Shift, Tambah Produk Baru, Restock + Bonus Supplier Gratis, Edit Produk & Tanggal Expired Multi-Batch, Arsip Faktur Pemasok, Radar FEFO, Keputusan Manager, dan Eksekusi Lapangan.
 
 ---
 
@@ -8,11 +8,11 @@ Dokumen ini menjelaskan seluruh alur operasional, validasi keamanan, dan alur da
 
 | Aktor | Role di Sistem | URL Utama | Hak Akses Modul Gudang |
 |---|---|---|---|
-| Petugas Gudang | `employee` | `/gudang` | Cek stok fisik, ajukan `+ Restock / Barang Masuk`, ajukan `+ Ajukan Produk Baru`, buat/edit/submit draft Faktur Pemasok, terima notifikasi keputusan Manager, scan FEFO Radar, lapor kondisi fisik, eksekusi tindakan lapangan. Tidak dapat menambah stok langsung tanpa ACC Manager dan tidak dapat melihat HPP master katalog. |
-| Admin Shift | `admin` (`ADMIN_SHIFT`) | `/admin/produk`, `/gudang` (pantau) | Akses mode pantau (read-only) stok dan batch FEFO di `/gudang`, serta unggah foto nota dan lihat Tabel Buku Nota Supplier. Tidak dapat memutasi stok langsung di gudang, tidak dapat menyetujui barang masuk, dan tidak dapat memutuskan tindakan FEFO. |
-| Manager (Dosen) | `admin` (`MANAGER`) | `/manager/gudang-approval`, `/gudang` | Hak eksklusif menyetujui, meminta revisi, atau menolak penerimaan barang dan usulan produk baru (termasuk penyesuaian Harga Jual/HPP saat ACC), melihat seluruh batch FEFO, serta menetapkan tindakan FEFO (`DISCOUNT`, `DISPLAY_FRONT`, `DESTROY`, `RETURN_SUPPLIER`, `HOLD`) dan penerbitan barcode diskon. |
+| Petugas Gudang | `employee` | `/gudang` | Cek stok fisik, tambah produk baru langsung aktif (ED wajib), input `Restock / Barang Masuk` langsung (ED wajib + bonus supplier gratis), edit produk/stok/tanggal expired per batch (multi-batch), hapus produk (soft-delete), arsip Faktur Pemasok, scan FEFO Radar, lapor kondisi fisik, dan eksekusi keputusan FEFO Manager di lapangan. Tidak dapat memutuskan diskon/pemusnahan FEFO dan tidak dapat mengakses laporan keuangan. |
+| Admin Shift | `admin` (`ADMIN_SHIFT`) | `/admin/produk`, `/gudang` | Saling backup penuh operasional barang & stok dengan Petugas Gudang di `/gudang` dan `/admin/produk` (tambah produk baru, restock + ED wajib + bonus supplier, edit produk & tanggal expired per batch, soft-delete, unggah foto & arsip Tabel Buku Nota Supplier). Tidak dapat memutuskan tindakan FEFO (`decide`) dan tidak dapat mengakses laporan keuangan/bagi hasil/pengaturan global. |
+| Manager (Dosen) | `admin` (`MANAGER`) | `/manager/gudang-approval`, `/gudang` | Hak eksklusif menetapkan tindakan FEFO (`DISCOUNT`, `DISPLAY_FRONT`, `DESTROY`, `RETURN_SUPPLIER`, `HOLD`) dan penerbitan barcode diskon `DISC-...`, review draft faktur formal, kelola Master Supplier, audit seluruh log `stock_adjustments`, serta kontrol penuh laporan keuangan & mutasi stok. |
 
-Catatan Pemisahan Tugas: Admin Shift bukan Manager. Seluruh persetujuan barang masuk, pengaktifan produk baru dari gudang, dan keputusan FEFO merupakan hak eksklusif Manager.
+Catatan Pemisahan Tugas: Gudang dan Admin Shift saling mem-backup pengelolaan stok/katalog agar toko tidak terhenti saat salah satu berhalangan. Seluruh keputusan FEFO (diskon/retur/musnahkan) dan keuangan tetap eksklusif milik Manager.
 
 ---
 
@@ -20,107 +20,77 @@ Catatan Pemisahan Tugas: Admin Shift bukan Manager. Seluruh persetujuan barang m
 
 ```mermaid
 flowchart TD
-    A([Barang Masuk / Varian Baru]) --> B1[Gudang: + Restock / Barang Masuk]
-    A --> B2[Gudang: Draft Faktur Pemasok]
-    A --> B3[Gudang: + Ajukan Produk Baru]
+    A["Barang Masuk / Produk Baru / Edit Expired"] --> B1["Gudang / Admin Shift: Restock + Bonus Supplier + ED Wajib"]
+    A --> B2["Gudang / Admin Shift: Tambah Produk Baru + ED Wajib"]
+    A --> B3["Gudang / Admin Shift: Edit Produk & Tanggal Expired per Batch"]
+    A --> B4["Gudang / Admin Shift: Arsip & Draft Faktur Pemasok"]
 
-    B1 --> D[Antrian Approval Manager - Status SUBMITTED]
-    B2 --> C[Gudang: Edit dan Lengkapi Item]
-    C --> D
-    B3 --> P0[Produk Tersimpan Nonaktif: is_active=false, stock=0]
-    P0 --> D
+    B1 --> F["Transaksi ACID: Tambah Stok + Buat Batch FEFO + HPP Efektif + Log stock_adjustments"]
+    B2 --> F
+    B3 --> F2["Transaksi ACID: Update Batch + Sinkron FEFO Reports & Discount Policies + Log stock_adjustments"]
+    B4 --> D["Arsip Tabel Buku Nota / Review Formal Manager di /manager/gudang-approval"]
 
-    D --> E{Manager: Review di /manager/gudang-approval}
-    E -- Approve / ACC --> F[Transaksi ACID: Aktifkan Produk + Buat Batch FEFO + Tambah Stok + Log stock_adjustments]
-    E -- Revisi --> R[Status REVISED + Catatan Manager -> Notifikasi ke /gudang]
-    R --> C
-    E -- Tolak --> G[Status REJECTED + Catatan Manager -> Soft-Delete Produk Baru Pending + Notifikasi Merah ke /gudang]
-
-    F --> H[FEFO Radar: Scan Batch Aktif current_qty > 0 dengan ED <= 7 Hari / Expired]
-    H --> I{Batch Mendekati ED / Sudah Expired?}
+    F --> H["FEFO Radar: Cron 06:00 WIB / Scan Manual / Real-Time saat Edit Expired"]
+    F2 --> H
+    H --> I{"Batch Aktif ED <= 7 Hari atau Sudah Expired?"}
     I -- Tidak --> H
-    I -- Ya --> J[Gudang: Periksa Fisik & Kirim Laporan Kondisi]
-    J --> K{Manager: Putuskan Tindakan FEFO}
-    K -- Belum Expired: DISCOUNT --> L[Auto-Generate Policy & Barcode Diskon DISC-...]
-    K -- Belum Expired: DISPLAY_FRONT --> M1[Geser ke Rak Depan Kasir]
-    K -- Expired / Rusak: DESTROY atau RETURN_SUPPLIER --> M2[Musnahkan atau Retur Pemasok]
-    K -- HOLD --> N[Tahan dan Pantau]
-    L --> O[Gudang: Tempel Barcode Diskon & Tandai Dieksekusi]
-    O --> P([Kasir: Scan Barcode DISC-... -> Harga Otomatis Diskon])
+    I -- Ya --> J["Gudang: Periksa Fisik & Kirim Laporan Kondisi"]
+    J --> K{"Manager: Putuskan Tindakan FEFO (Eksklusif Manager)"}
+    K -- "Belum Expired: DISCOUNT" --> L["Auto-Generate Policy & Barcode Diskon DISC-..."]
+    K -- "Belum Expired: DISPLAY_FRONT" --> M1["Geser ke Rak Depan Kasir"]
+    K -- "Expired / Rusak: DESTROY atau RETURN_SUPPLIER" --> M2["Musnahkan atau Retur Pemasok"]
+    K -- HOLD --> N["Tahan dan Pantau"]
+    L --> O["Gudang: Tempel Barcode Diskon & Tandai Dieksekusi"]
+    O --> P["Kasir POS: Scan Barcode DISC-... -> Harga Diskon + Badge Diskon FEFO"]
 ```
 
 ---
 
-## 3. FASE 1 - PENGAJUAN BARANG MASUK DAN PRODUK BARU
+## 3. FASE 1 - OPERASIONAL BARANG MASUK, PRODUK BARU, DAN EDIT EXPIRED
 
-Seluruh jalur masuk barang dari petugas gudang wajib melewati 2-layer approval Manager dan wajib menyertakan Tanggal Kedaluwarsa (`expiry_date >= hari ini WIB`).
-
-### 3.1 Jalur A: Restock Cepat (`+ Restock / Barang Masuk`)
-- Aktor: Petugas Gudang (`employee`) di `/gudang`.
-- Endpoint: `POST /api/kasir/gudang`.
-- Perilaku Sistem:
-  - Untuk `employee`, sistem tidak langsung menambah stok produk. Sistem membuat draft penerimaan berstatus `SUBMITTED` secara otomatis dengan 1 item (produk terpilih, qty, `expiryDate` wajib `>= hari ini WIB`, kode batch, dan catatan).
-  - Stok di Kasir dan Buyer tetap tidak berubah sampai Manager menekan Approve.
-  - Untuk `MANAGER` yang melakukan restock langsung, sistem tetap mewajibkan `expiryDate >= hari ini WIB` dan langsung mencatat batch + log `stock_adjustments`.
-
-### 3.2 Jalur B: Faktur Pemasok Multi-Item (Tab `Faktur Pemasok & Penerimaan`)
-- Aktor: Petugas Gudang (`employee`) atau Admin (untuk arsip nota) di `/gudang`.
-- Endpoint:
-  - Buat draft: `POST /api/gudang/penerimaan` (status awal `DRAFT`).
-  - Ubah draft (hanya saat `DRAFT` atau `REVISED`, IDOR-safe khusus pembuat draft): `PATCH /api/gudang/penerimaan/{id}`.
-  - Kirim ke antrian Manager: `POST /api/gudang/penerimaan/{id}/submit` (status berubah ke `SUBMITTED`).
+### 3.1 Jalur A: Restock / Barang Masuk Langsung (`POST /api/kasir/gudang`)
+- Aktor: Petugas Gudang (`employee`), Admin Shift (`ADMIN_SHIFT`), dan Manager (`MANAGER`) di `/gudang`.
 - Validasi Wajib:
-  - Produk harus aktif di sistem, minimal 1 item.
-  - `expiryDate` wajib diisi pada setiap item dan tidak boleh melewati hari ini (WIB), termasuk divalidasi ulang saat submit.
-  - Rate limiter: maksimal 10 kali submit per 24 jam per petugas.
+  - `qtyAdd >= 1` (jumlah beli), `bonusQty >= 0` (bonus / barang gratis supplier, misal beli 10 dus gratis 1 dus).
+  - `expiryDate` wajib diisi dan `>= hari ini WIB` (format `YYYY-MM-DD`).
+- Efek Transaksi ACID:
+  - Total fisik masuk `totalQty = qtyAdd + bonusQty` ditambahkan ke `products.stock_qty` dan dibuatkan batch baru di `stock_batches`.
+  - HPP efektif dihitung otomatis: `(qtyAdd x unitCost) / (qtyAdd + bonusQty)` saat ada bonus gratis.
+  - Log resmi tercatat di `stock_adjustments` dengan identitas petugas dan shift aktif.
 
-### 3.3 Jalur C: Usulan Produk Baru (`+ Ajukan Produk Baru`)
-- Aktor: Petugas Gudang (`employee`) di `/gudang`.
-- Endpoint: `POST /api/gudang/produk-baru` (dilindungi `stockSubmitLimiter`).
+### 3.2 Jalur B: Tambah Produk / Varian Baru Langsung Aktif (`POST /api/gudang/produk-baru`)
+- Aktor: Petugas Gudang, Admin Shift, dan Manager di `/gudang`.
 - Validasi & Pengamanan:
-  - Penolakan duplikasi nama produk (case-insensitive) dan duplikasi barcode terhadap produk aktif/pending.
-  - Harga jual usulan wajib `> Rp 0`, HPP wajib `>= 0` dan `<= Harga Jual`, stok awal `>= 1`, serta `expiryDate` wajib `>= hari ini WIB`.
-  - Petugas gudang diblokir (`403`) bila mengakses langsung `POST /api/admin/produk`.
-- Penyimpanan Transaksional:
-  - Produk baru dibuat dengan `is_active = false` dan `stock_qty = 0` sehingga belum tampil di Kasir maupun Buyer.
-  - Bersamaan dibuatkan draft `stock_receive_drafts` berstatus `SUBMITTED` dengan penanda `[USULAN PRODUK BARU]` dan 1 baris `stock_receive_items` berisi stok awal, batch, HPP usulan, dan `expiryDate`.
+  - Anti-duplikasi nama produk (case-insensitive) dan anti-duplikasi barcode aktif (`409 Conflict`).
+  - Harga jual > Rp 0, HPP >= 0, qty awal >= 1, dan `expiryDate` wajib `>= hari ini WIB`.
+- Efek Transaksi ACID:
+  - Produk langsung aktif (`is_active = true`) di Kasir & Gudang dengan batch awal FEFO dan jejak audit `stock_adjustments`.
+
+### 3.3 Jalur C: Edit Produk, Koreksi Stok, & Edit Tanggal Expired per Batch (`PATCH` / `DELETE /api/gudang/produk/[id]`)
+- Aktor: Petugas Gudang, Admin Shift, dan Manager di `/gudang`.
+- Akses UI di `/gudang`:
+  1. **Kartu Produk:** Produk berstok > 0 yang belum punya tanggal expired menampilkan indikator `Tanggal Expired belum diisi` + tombol cepat `Isi Exp`.
+  2. **Modal `Edit Produk & Tanggal Expired`:** Memuat seluruh batch aktif produk (1 batch maupun multi-batch secara terpisah), dilengkapi tombol cepat (`Hari Ini`, `+30h`, `+6bln`, `+1th`) dan peringatan jika tanggal lewat.
+  3. **Inline di Modal `Rincian Batch`:** Tombol `Isi Exp` / `Ubah Exp` langsung pada tiap kartu batch aktif.
+- Validasi & Sinkronisasi Relasi Atomik:
+  - Validasi kalender ketat (menolak tanggal tidak valid seperti `2026-02-31`, rentang tahun `2020-2040`).
+  - Proteksi anti-IDOR: setiap `batchId` pada `batchUpdates` diverifikasi milik `productId` yang diedit (`404` bila melintas produk lain).
+  - Koreksi stok pada produk multi-batch mempertahankan urutan FEFO dan menyinkronkan kuota `discount_policies` / `discount_barcodes`.
+  - Pembaruan tanggal expired langsung menyinkronkan `product_condition_reports` (membuat/membuka ulang `ALERT_ONLY` bila masuk <= 7 hari, menutup alert hantu `ALERT_ONLY -> CLOSED` bila diperbaiki > 7 hari) dan memblokir diskon aktif bila batch berubah expired.
+  - Mencatat audit `[EDIT EXPIRED GUDANG]` / `[EDIT PRODUK GUDANG]` di `stock_adjustments` dengan FK `batch_id` (untuk edit 1 batch) tanpa menggelembungkan metrik `Restock Hari Ini`.
+  - `DELETE` melakukan soft-delete (`deleted_at`), menolkan stok/batch, menonaktifkan diskon terkait, dan menutup seluruh alert FEFO terbuka.
+
+### 3.4 Jalur D: Faktur Pemasok Multi-Item & Buku Nota (`/api/gudang/penerimaan`)
+- Mendukung unggah foto fisik nota (`invoice_photo_url`, validasi magic bytes JPEG/PNG/WebP maks 4 MB), tanggal faktur, Auto-Match teks nota, dan arsip **Tabel Buku Nota**.
+- Jalur review formal Manager di `/manager/gudang-approval` (`approve`, `revisi`, `tolak`, wajib Check-In MOD) tetap aktif beserta notifikasi dua arah ke `/gudang`.
 
 ---
 
-## 4. FASE 2 - REVIEW MANAGER DAN PUSAT NOTIFIKASI DUA ARAH
+## 4. FASE 2 - RADAR FEFO, LAPORAN KONDISI, DAN LARANGAN BARANG EXPIRED
 
-### 4.1 Review di `/manager/gudang-approval`
-- Endpoint:
-  - Setujui: `POST /api/admin/gudang/penerimaan/{id}/approve`
-  - Minta Revisi: `POST /api/admin/gudang/penerimaan/{id}/revisi`
-  - Tolak: `POST /api/admin/gudang/penerimaan/{id}/tolak`
-- Prasyarat Wajib: Manager harus sudah melakukan Check-In sesi kerja harian (`manager_duty_log`). Jika belum, sistem menolak dengan error `403`.
-- Fitur Koreksi Harga saat ACC Usulan Produk Baru:
-  - Pada item `[USULAN PRODUK BARU]`, Manager dapat mengubah **Harga Jual (`overrideSellingPrice`)** dan **HPP (`overrideCostPrice`)** sebelum menyetujui.
-
-### 4.2 Efek Keputusan Manager (ACID Transaction)
-
-| Keputusan | Status Draft | Efek di Database |
-|---|---|---|
-| Approve (ACC) | `APPROVED` | Dalam 1 transaksi ACID: (1) jika produk baru nonaktif, aktifkan `is_active = true` dan terapkan harga jual/HPP final Manager; (2) buat baris baru di `stock_batches` dengan klasifikasi `HARIAN` (<= 2 hari), `PENDEK` (<= 14 hari), atau `PANJANG` (> 14 hari); (3) tambah `products.stock_qty`; (4) catat riwayat di `stock_adjustments`; (5) simpan ID Manager dan `audit_logs`. |
-| Revisi | `REVISED` | Draft dikembalikan ke petugas gudang beserta `manager_note`. Stok tidak berubah. Petugas dapat mengedit dan submit ulang. |
-| Tolak | `REJECTED` | Draft diarsipkan sebagai ditolak beserta `manager_note`. Stok tidak berubah. Jika pengajuan merupakan `[USULAN PRODUK BARU]`, produk pending (`is_active = false, stock_qty = 0`) otomatis di-soft-delete (`deleted_at`) agar tidak mengotori katalog. |
-
-### 4.3 Notifikasi Keputusan Manager di Portal `/gudang`
-- Endpoint sumber data: `GET /api/kasir/gudang` mengembalikan ringkasan `approvalNotifications` (7 hari terakhir, dibatasi per `employeeId` untuk karyawan dan seluruh toko untuk admin).
-- Tampilan di `/gudang`:
-  1. **Banner Peringatan Atas (Otomatis):** Muncul langsung di bagian atas halaman ketika terdapat usulan berstatus `REJECTED` atau `REVISED` yang belum dibaca, menampilkan nomor pengajuan, nama barang, alasan/catatan Manager, dan tombol pintasan ke tab `Ditolak` atau `Perlu Revisi`.
-  2. **Tombol Lonceng Notifikasi di Header:** Menampilkan angka notifikasi belum dibaca (indikator merah untuk `REJECTED`/`REVISED`, indikator hijau untuk `APPROVED`) dan membuka daftar riwayat respons Manager 7 hari terakhir lengkap dengan tombol `Buka di Tab Penerimaan` dan `Tandai Semua Sudah Dibaca`.
-  3. **Badge Tab & Auto-Sync:** Tab `Faktur Pemasok & Penerimaan` menampilkan lencana jumlah info/menunggu ACC, dan halaman `/gudang` otomatis menyinkronkan data secara senyap saat petugas kembali membuka tab browser (`visibilitychange` / `focus`).
-
----
-
-## 5. FASE 3 - RADAR FEFO, LAPORAN KONDISI, DAN LARANGAN BARANG EXPIRED
-
-### 5.1 Pemindaian FEFO Radar
-- Engine: `fefoAlertService.ts`.
-- Jadwal: berjalan otomatis setiap hari pukul 06:00 WIB (`/api/cron/scan-fefo`) dan dapat dipicu manual oleh petugas lewat tombol `Scan Radar FEFO`.
-- Cakupan: seluruh batch aktif dengan `current_qty > 0` dan `expiry_date <= 7 hari ke depan` (termasuk yang sudah melewati tanggal kedaluwarsa). Kartu KPI `FEFO Exp (<= 7 Hari / Exp)` di `/gudang` dihitung dari kriteria yang sama agar selalu sinkron dengan daftar Radar.
+### 4.1 Pemindaian FEFO Radar (`fefoAlertService.ts`)
+- Berjalan melalui 3 pemicu: Cron harian pukul **06:00 WIB** (`/api/cron/scan-fefo`), tombol manual `Scan Radar FEFO`, dan sinkronisasi real-time saat edit tanggal expired di `PATCH /api/gudang/produk/[id]`.
+- Cakupan: seluruh batch aktif (`current_qty > 0`) dengan `expiry_date <= 7 hari ke depan` atau sudah expired.
 
 | Alert Level | Kondisi Sisa Hari | Kategori |
 |---|---|---|
@@ -129,64 +99,26 @@ Seluruh jalur masuk barang dari petugas gudang wajib melewati 2-layer approval M
 | `H5` (`H5_WARNING`) | Sisa 4 sampai 5 hari | Waspada |
 | `H7` (`H7_WATCH`) | Sisa 6 sampai 7 hari | Pantau |
 
-### 5.2 Laporan Kondisi Fisik oleh Petugas Gudang
-- Endpoint: `POST /api/gudang/fefo-alerts/{id}/lapor`.
-- Petugas memeriksa kondisi fisik batch, mengisi catatan kondisi, melampirkan foto (opsional), dan memilih saran tindakan. Status laporan berubah dari `ALERT_ONLY` menjadi `SUBMITTED`.
-- **Hard-Block Barang Expired:** Jika tanggal kedaluwarsa batch sudah terlewat (`expiry_date < hari ini WIB`), UI dan API memblokir saran `DISCOUNT` dan `DISPLAY_FRONT`/`RELOCATE` (status 422). Petugas hanya dapat menyarankan `DESTROY` atau `RETURN_SUPPLIER`.
-
-### 5.3 Keputusan Tindakan oleh Manager
-- Endpoint: `POST /api/admin/gudang/fefo-alerts/{id}/decide`.
-- Pilihan keputusan (`manager_decision`):
-
-| Keputusan | Kode Enum | Syarat | Efek di Sistem |
-|---|---|---|---|
-| Diskon Darurat | `DISCOUNT` | Wajib belum expired | Auto-generate kebijakan di `discount_policies` dan kode barcode unik `DISC-{batch_code}-{timestamp}` di `discount_barcodes`. |
-| Majukan ke Rak Depan | `DISPLAY_FRONT` | Wajib belum expired | Instruksi pemindahan ke etalase depan kasir. |
-| Musnahkan | `DESTROY` | Semua kondisi (wajib/izinkan untuk expired) | Instruksi pemusnahan fisik dan pencatatan kerugian/mutasi. |
-| Retur ke Pemasok | `RETURN_SUPPLIER` | Semua kondisi (wajib/izinkan untuk expired) | Instruksi pengembalian ke pemasok/konsinyasi. |
-| Tahan dan Pantau | `HOLD` | Belum expired | Ditahan sementara untuk pemantauan lanjutan. |
-
-- **Hard-Block Berlapis:** Apabila batch sudah expired, endpoint `decide` maupun endpoint `execute` menolak `DISCOUNT` dan `DISPLAY_FRONT` di level server (status 422), sehingga barang kedaluwarsa tidak mungkin lolos ke penjualan kasir.
-
-### 5.4 Eksekusi Lapangan oleh Petugas Gudang
-- Endpoint: `POST /api/gudang/fefo-alerts/{id}/execute`.
-- Petugas menjalankan instruksi Manager di lapangan (menempelkan label `DISC-...` menutupi barcode asli, menggeser rak, memusnahkan, atau meretur barang), lalu menekan `Tandai Sudah Dieksekusi`.
-- Status laporan berubah menjadi `EXECUTED` / `CLOSED`.
-- Efek di Kasir: saat kasir memindai barcode `DISC-...`, harga otomatis terpotong sesuai kebijakan Manager dan kuota `remaining_qty` berkurang secara atomik.
+### 4.2 Laporan Kondisi, Keputusan Eksklusif Manager, & Eksekusi Lapangan
+- Laporan kondisi (`POST /api/gudang/fefo-alerts/{id}/lapor`): Gudang melaporkan kondisi fisik & saran (`ALERT_ONLY -> SUBMITTED`).
+- Keputusan Manager (`POST /api/admin/gudang/fefo-alerts/{id}/decide`): Eksklusif Manager (`DISCOUNT` + auto-barcode `DISC-...`, `DISPLAY_FRONT`, `DESTROY`, `RETURN_SUPPLIER`, `HOLD`).
+- Eksekusi lapangan (`POST /api/gudang/fefo-alerts/{id}/execute`): Gudang menempelkan stiker `DISC-...` atau mengeksekusi retur/pemusnahan (`EXECUTED -> CLOSED`).
+- **Hard-Block Barang Expired (4 Lapis):** Batch dengan `expiry_date < hari ini WIB` diblokir dari opsi `DISCOUNT` dan `DISPLAY_FRONT` pada tahap `lapor` (`422`), `decide` (`422`), `execute` (`422`), serta diblokir dari penjualan di Kasir POS (`400 EXPIRED_PRODUCT` + `ROLLBACK`).
 
 ---
 
-## 6. RINGKASAN ALUR STATUS
-
-Penerimaan Barang dan Usulan Produk Baru (`stock_receive_status`):
-
-```text
-DRAFT -> SUBMITTED -> APPROVED (Stok masuk & produk baru aktif)
-                   -> REVISED  -> (Gudang perbaiki) -> SUBMITTED
-                   -> REJECTED (Arsip, stok tidak masuk, produk baru pending soft-delete)
-```
-
-Laporan Kondisi dan FEFO (`condition_report_status`):
-
-```text
-ALERT_ONLY -> SUBMITTED -> MANAGER_REVIEW -> APPROVED -> EXECUTED -> CLOSED
-                                          -> REJECTED
-```
-
----
-
-## 7. MATRIKS PEMISAHAN TUGAS (SEPARATION OF DUTY)
+## 5. MATRIKS PEMISAHAN TUGAS (SEPARATION OF DUTY)
 
 | Aksi | Petugas Gudang (`employee`) | Admin Shift (`ADMIN_SHIFT`) | Manager (`MANAGER`) |
 |---|---|---|---|
-| Pantau stok & baca Buku Nota Supplier di `/gudang` | Ya | Ya (mode pantau) | Ya |
-| Buat / edit / submit draft Faktur Pemasok | Ya (milik sendiri) | Ya (unggah arsip nota) | Ya |
-| Ajukan `+ Restock / Barang Masuk` (butuh ACC) | Ya (masuk `SUBMITTED`) | Tidak | Ya (langsung tercatat) |
-| Ajukan `+ Ajukan Produk Baru` (butuh ACC) | Ya (masuk `SUBMITTED`) | Tidak | Tidak (input lewat `/manager/produk`) |
-| Input langsung produk ke `/api/admin/produk` | Tidak (diblokir 403) | Ya | Ya |
-| Lihat HPP master di katalog `/api/admin/produk` | Tidak (disamarkan) | Ya | Ya |
-| Approve / Revisi / Tolak penerimaan & produk baru | Tidak | Tidak | Ya (wajib Check-In) |
-| Scan FEFO Radar & lapor kondisi fisik | Ya | Tidak | Ya (pantau) |
-| Putuskan tindakan FEFO & terbitkan barcode diskon | Tidak | Tidak | Ya (eksklusif) |
+| Pantau stok, batch FEFO, & Buku Nota di `/gudang` | Ya | Ya | Ya |
+| Tambah produk baru langsung aktif (ED wajib) | Ya | Ya | Ya |
+| Restock langsung + Bonus Supplier + ED wajib | Ya | Ya | Ya |
+| Edit produk, koreksi stok, & edit tanggal expired per batch | Ya | Ya | Ya |
+| Hapus produk (soft-delete) | Ya | Ya | Ya |
+| Unggah foto & arsip Faktur Pemasok | Ya | Ya | Ya |
+| Scan FEFO Radar & lapor kondisi fisik | Ya | Pantau | Ya (pantau) |
+| **Putuskan tindakan FEFO & terbitkan barcode diskon `DISC-...`** | **Tidak** | **Tidak** | **Ya (eksklusif)** |
 | Eksekusi tindakan FEFO di lapangan | Ya | Tidak | Tidak |
-| Diskon / Geser Depan pada batch sudah expired | Diblokir (422) | Diblokir | Diblokir (422) |
+| Diskon / Penjualan pada batch sudah expired | Diblokir | Diblokir | Diblokir |
+| Laporan keuangan, bagi hasil 50%, VOID, & pengaturan global | Tidak | Tidak | **Ya (eksklusif)** |

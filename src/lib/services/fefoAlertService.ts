@@ -1,7 +1,7 @@
 // =============================================================
 // src/lib/services/fefoAlertService.ts
-// Domain Logic: FEFO Early Warning System & To-Do List Gudang (Fase 2 & 3 Wiramart v3.0)
-// STANDAR: NASA-Grade Decoupling, ACID Transaction, Zero any, Mathematical Precision
+// Domain Logic: FEFO Early Warning System & To-Do List Gudang
+// Transaksi ACID & Validasi FEFO
 // =============================================================
 
 import { z } from 'zod';
@@ -470,7 +470,7 @@ export async function submitConditionReport(
     );
   }
 
-  // Zero-Trust Expiry Guard: Ambil data batch & blokir keras usulan DISKON / DISPLAY untuk barang SUDAH EXPIRED
+  // Guard Expired: Blokir usulan DISKON / DISPLAY untuk batch yang sudah kedaluwarsa
   const [batch] = await db
     .select({ id: stockBatches.id, currentQty: stockBatches.currentQty, expiryDate: stockBatches.expiryDate })
     .from(stockBatches)
@@ -723,7 +723,7 @@ export async function executeConditionReport(
       );
     }
 
-    // Zero-Trust Expiry Guard saat Eksekusi Lapangan:
+    // Guard Expired saat Eksekusi Lapangan:
     // Jika keputusan Manager adalah DISCOUNT / DISPLAY_FRONT namun batch SUDAH EXPIRED saat hendak dieksekusi, blokir keras!
     if (report.managerDecision === 'DISCOUNT' || report.managerDecision === 'DISPLAY_FRONT') {
       const [checkBatch] = await tx

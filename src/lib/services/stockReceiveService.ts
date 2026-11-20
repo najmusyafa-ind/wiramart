@@ -1,7 +1,7 @@
 // =============================================================
 // src/lib/services/stockReceiveService.ts
-// Domain Logic: Penerimaan Barang Masuk & 2-Layer Approval (Fase 1 Wiramart v3.0)
-// STANDAR: NASA-Grade Decoupling, ACID Transaction, Zero-Trust IDOR Guard, Zero any
+// Domain Logic: Penerimaan Barang Masuk & Produk Baru Gudang
+// Transaksi ACID, Guard Anti-IDOR, & Validasi Skema
 // =============================================================
 
 import { z } from 'zod';
@@ -417,7 +417,7 @@ export async function proposeNewProductByWarehouse(
       supplierName: input.supplierName?.trim() || undefined,
     });
 
-    // Opsi B: Produk langsung aktif & tersedia di POS Kasir dengan batch FEFO & audit trail lengkap
+    // Produk langsung aktif di POS Kasir & Gudang dengan batch FEFO dan audit trail lengkap
     const [activeProduct] = await tx
       .insert(products)
       .values({
@@ -448,7 +448,7 @@ export async function proposeNewProductByWarehouse(
         submittedAt: now,
         approvedAt: now,
         approvedByAdminId: fallbackAdmin.id,
-        managerNote: 'Opsi B: Input produk baru langsung aktif oleh Gudang / Admin Shift',
+        managerNote: 'Input produk baru langsung aktif oleh Gudang / Admin Shift',
       })
       .returning();
 
@@ -694,7 +694,7 @@ export async function approveStockReceiveDraft(
     throw new AppError('FORBIDDEN', 'Hanya Manager (Dosen/Eksekutif) yang berwenang menyetujui penerimaan barang.', 403);
   }
 
-  // 0. MOD Check-in Guard (PRD Wiramart v3.0 — Fase 4.1)
+  // 0. Guard Check-In Manager on Duty (MOD)
   // Penerimaan barang wajib disetujui di bawah pengawasan Manager on Duty yang aktif hari ini
   const todayDuty = await ManagerDutyService.getTodayDutyStatus();
   if (!todayDuty.isCheckedIn || todayDuty.isCheckedOut) {

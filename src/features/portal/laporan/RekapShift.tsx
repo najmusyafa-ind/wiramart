@@ -2341,7 +2341,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                       lineHeight: 1.3,
                                     }}
                                   >
-                                    ℹ️ {g.transferNote}
+                                    {g.transferNote}
                                   </div>
                                 )}
                               </td>
@@ -2899,7 +2899,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                               lineHeight: 1.3,
                             }}
                           >
-                            ℹ️ {g.transferNote}
+                            {g.transferNote}
                           </div>
                         )}
 

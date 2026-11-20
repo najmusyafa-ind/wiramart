@@ -2,7 +2,7 @@
 // =============================================================
 // src/app/kasir/gudang/page.tsx
 // Portal Petugas Gudang & Manajemen Logistik Wiramart UNPERBA
-// STANDAR: Mobile-First Ergonomics, Zero-Trust HPP Protection, Live FEFO Radar
+// Standar: Mobile-First UI, Proteksi HPP, Radar FEFO
 // =============================================================
 
 import { useState, useEffect, useRef, useId, useCallback } from 'react';
@@ -243,7 +243,7 @@ export default function GudangPortalPage() {
   const [submittingRestock, setSubmittingRestock] = useState(false);
   const [restockSuccessMsg, setRestockSuccessMsg] = useState<string | null>(null);
 
-  // State Modal Edit Produk Langsung (Opsi B: Gudang + Admin Shift saling backup)
+  // State Modal Edit Produk & Tanggal Expired (Gudang + Admin Shift saling backup)
   const [editingProduct, setEditingProduct] = useState<WarehouseProduct | null>(null);
   const [editName, setEditName] = useState('');
   const [editBarcode, setEditBarcode] = useState('');
@@ -1263,7 +1263,7 @@ export default function GudangPortalPage() {
           >
             <AlertCircle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
             <div>
-              <strong>Portal Gudang & Nota Supplier (Admin Shift):</strong> Anda dapat mengunggah foto nota & melihat Tabel Buku Nota di tab <strong>🧾 Nota Supplier & Barang Masuk</strong>, serta memantau stok kritis dan batch FEFO.
+              <strong>Portal Gudang & Nota Supplier (Admin Shift):</strong> Anda dapat mengunggah foto nota & melihat Tabel Buku Nota di tab <strong>Faktur Pemasok &amp; Penerimaan</strong>, serta memantau stok kritis dan batch FEFO.
             </div>
           </div>
         )}
@@ -1701,16 +1701,16 @@ export default function GudangPortalPage() {
                       {/* Baris 3: Petugas & Batch Info */}
                       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, fontSize: '0.72rem', color: '#64748b' }}>
                         <div>
-                          👤 <strong>Petugas:</strong> {act.actorName ? `${act.actorName} (${act.actorNim || 'Gudang'})` : 'Petugas Toko'}
+                          <strong>Petugas:</strong> {act.actorName ? `${act.actorName} (${act.actorNim || 'Gudang'})` : 'Petugas Toko'}
                         </div>
                         {act.batchCode && (
                           <div>
-                            📦 <strong>Batch:</strong> <code style={{ backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: 4, color: '#0f172a' }}>{act.batchCode}</code>
+                            <strong>Batch:</strong> <code style={{ backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: 4, color: '#0f172a' }}>{act.batchCode}</code>
                           </div>
                         )}
                         {act.expiryDate && (
                           <div style={{ color: '#c2410c' }}>
-                            ⏰ <strong>Exp:</strong> {act.expiryDate}
+                            <strong>Exp:</strong> {act.expiryDate}
                           </div>
                         )}
                       </div>
@@ -1787,7 +1787,7 @@ export default function GudangPortalPage() {
                     onClick={() => setActiveTab('fefo')}
                   >
                     <div style={{ fontWeight: 800, color: '#c2410c', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span>🥫 Tipe 1: Produk Kemasan Ber-Barcode (FEFO)</span>
+                      <span>Tipe 1: Produk Kemasan Ber-Barcode (FEFO)</span>
                     </div>
                     <p style={{ margin: 0, lineHeight: 1.45 }}>
                       <strong>Sistem FEFO:</strong> Minuman botol (Ades, Sprite), susu, biskuit, snack pabrik. Tanggal expired dicatat per batch dus masuk dan dipantau 7 s/d 30 hari sebelum kedaluwarsa. Produk kedaluwarsa terdekat wajib ditempatkan paling depan rak.
@@ -1809,7 +1809,7 @@ export default function GudangPortalPage() {
                     onClick={() => setActiveTab('perishable')}
                   >
                     <div style={{ fontWeight: 800, color: '#15803d', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span>🥪 Tipe 2: Makanan Harian (Wajib Habis 1 Hari)</span>
+                      <span>Tipe 2: Makanan Harian (Wajib Habis 1 Hari)</span>
                     </div>
                     <p style={{ margin: 0, lineHeight: 1.45 }}>
                       <strong>Batas Konsumsi 1 Hari (Cut-off Pukul 15:00 WIB):</strong> Nasi bungkus, risol, donat, cilok, kue tradisional, dan makanan titipan harian. <em>Wajib habis di hari yang sama</em>. Pukul 15:00 WIB wajib dilakukan cut-off sisa (retur/obral) dan stok sisa otomatis di-reset menjadi 0 saat pergantian hari.
@@ -2008,11 +2008,11 @@ export default function GudangPortalPage() {
                           </div>
                           <span style={{ fontWeight: 800, fontSize: '0.68rem' }}>
                             {item.expiryUrgency === 'EXPIRED'
-                              ? '🚨 SUDAH EXPIRED'
+                              ? 'SUDAH EXPIRED'
                               : item.expiryUrgency === 'CRITICAL'
-                              ? '⚠️ < 7 HARI (FEFO)'
+                              ? '< 7 HARI (FEFO)'
                               : item.expiryUrgency === 'WARNING'
-                              ? '🟡 < 30 HARI'
+                              ? '< 30 HARI'
                               : 'AMAN'}
                           </span>
                         </div>
@@ -2311,7 +2311,7 @@ export default function GudangPortalPage() {
                                     padding: '1px 6px',
                                   }}
                                 >
-                                  ⚡ PRIORITAS 1 (KELUAR DULUAN)
+                                  PRIORITAS 1 (KELUAR DULUAN)
                                 </span>
                               ) : b.currentQty > 0 ? (
                                 <span
@@ -2325,7 +2325,7 @@ export default function GudangPortalPage() {
                                     padding: '1px 6px',
                                   }}
                                 >
-                                  📦 Batch Cadangan (Exp Lebih Panjang)
+                                  Batch Cadangan (Exp Lebih Panjang)
                                 </span>
                               ) : (
                                 <span
@@ -2705,7 +2705,7 @@ export default function GudangPortalPage() {
               </div>
             </div>
 
-            {/* Info Opsi B: Restok Langsung Aktif + Wajib Expired Date */}
+            {/* Info Restock Langsung & Tanggal Expired Wajib */}
             <div
               style={{
                 padding: '9px 12px',
@@ -3752,7 +3752,7 @@ export default function GudangPortalPage() {
                                 fontWeight: 800,
                               }}
                             >
-                              ✨ PRODUK BARU
+                              PRODUK BARU
                             </span>
                           )}
                           {isUnread && (
@@ -3879,7 +3879,7 @@ export default function GudangPortalPage() {
         </div>
       )}
 
-      {/* ── MODAL EDIT PRODUK LANGSUNG (OPSI B: GUDANG + ADMIN SHIFT SALING BACKUP) ── */}
+      {/* Modal Edit Produk & Tanggal Expired */}
       {canMutateStock && editingProduct && (
         <div
           style={{

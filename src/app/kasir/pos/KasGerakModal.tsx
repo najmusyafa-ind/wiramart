@@ -99,8 +99,8 @@ const CATEGORIES_OUT = [
 ];
 
 const CATEGORIES_IN = [
-  { value: 'TAMBAH_MODAL',   label: '🪙 Tukar Receh / Tambah Modal', desc: 'Penambahan uang pecahan di laci' },
-  { value: 'OPERASIONAL',    label: '➕ Kas Masuk Lain',             desc: 'Penerimaan tunai lain ke laci' },
+  { value: 'TAMBAH_MODAL',   label: 'Tukar Receh / Tambah Modal', desc: 'Penambahan uang pecahan di laci' },
+  { value: 'OPERASIONAL',    label: 'Kas Masuk Lain',             desc: 'Penerimaan tunai lain ke laci' },
 ];
 
 const QUICK_AMOUNTS = [2_000, 5_000, 10_000, 19_000, 20_000, 30_000, 50_000];

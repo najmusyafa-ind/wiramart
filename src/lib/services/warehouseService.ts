@@ -1,7 +1,7 @@
 // =============================================================
 // src/lib/services/warehouseService.ts
 // Domain Logic Modul Petugas Gudang (Warehouse Management System)
-// STANDAR: Zero-Trust Security (No HPP/costPrice leak), ACID Transaction
+// Proteksi HPP & Transaksi ACID
 // =============================================================
 
 import { randomInt } from 'crypto';
@@ -532,7 +532,7 @@ export async function restockProductByWarehouse(
     throw new Error('Jumlah restock harus berupa bilangan bulat positif.');
   }
 
-  // 1. Verifikasi Petugas (Opsi B: Petugas Gudang, Admin Shift, atau Manager aktif)
+  // 1. Verifikasi Petugas (Gudang, Admin Shift, atau Manager aktif)
   let actorName = '';
   let actorNim = '';
   let callerAdminId: string | null = null;

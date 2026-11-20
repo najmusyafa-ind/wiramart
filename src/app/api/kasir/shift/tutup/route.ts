@@ -61,7 +61,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
 
   const { notes, actualCash, breakdown, earlyCloseReason } = parsed.data;
 
-  // 3. Cari shift aktif (milik kasir ini ATAU shift aktif toko saat ini — Cacat 1 Opsi A)
+  // 3. Cari shift aktif (milik kasir ini atau shift aktif toko bersama)
   let activeShift = await db.query.shifts.findFirst({
     where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
     columns: { id: true, clockIn: true, modalAwal: true, auditFlags: true },
@@ -221,7 +221,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  // Zero-Trust: Blind Count sudah terkunci di DB (status CLOSED).
+  // Blind Count sudah terkunci di DB (status CLOSED).
   // Kirim ringkasan serah terima kas standar Bu Dyah (TANPA HPP / Laba / Expected selisih).
   return apiOk({
     message:  'Shift berhasil ditutup.',

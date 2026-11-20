@@ -89,14 +89,14 @@ function MiniStatCard({
     alertLevel === 'danger'
       ? 'var(--color-error)'
       : alertLevel === 'warn'
-      ? 'hsl(38 92% 50%)'
-      : 'var(--color-border)';
+        ? 'hsl(38 92% 50%)'
+        : 'var(--color-border)';
   const bgColor =
     alertLevel === 'danger'
       ? 'hsl(0 84% 60% / 0.06)'
       : alertLevel === 'warn'
-      ? 'hsl(38 92% 50% / 0.06)'
-      : 'var(--color-surface)';
+        ? 'hsl(38 92% 50% / 0.06)'
+        : 'var(--color-surface)';
 
   return (
     <div
@@ -442,7 +442,7 @@ function GudangShiftActivityWidget() {
         )}
         <div style={{ marginTop: 'var(--space-2)', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-2)' }}>
           <Link href="/gudang" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.78rem', fontWeight: 600, color: 'var(--color-primary)', textDecoration: 'none' }}>
-            <span>Buka Portal Gudang (Backup Opsi B)</span>
+            <span>Buka Portal Gudang</span>
             <ChevronRight size={13} aria-hidden="true" />
           </Link>
         </div>
@@ -515,7 +515,7 @@ export default function AdminShiftDashboard({
                 padding: '3px 10px',
               }}
             >
-              🛡️ Operasional Shift
+              Operasional Shift
             </span>
           </div>
           <p className="page-subtitle" style={{ marginTop: 'var(--space-1)' }}>

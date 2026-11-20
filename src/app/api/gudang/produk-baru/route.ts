@@ -1,7 +1,7 @@
 // =============================================================
 // src/app/api/gudang/produk-baru/route.ts
 // Route Handler: Pengajuan Produk Baru + Stok Awal oleh Petugas Gudang -> Approval Manager
-// STANDAR: NASA-Grade Decoupling, Zero-Trust Zod Validation, Separation of Duties
+// Validasi Zod, Transaksi ACID, & Pemisahan Wewenang
 // =============================================================
 
 import { NextRequest } from 'next/server';
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     return apiError('Unauthorized: Akses khusus Petugas Gudang, Admin Shift, atau Manager.', 401);
   }
 
-  // Opsi B: Petugas Gudang, Admin Shift, & Manager berwenang menambah produk baru langsung (saling backup).
+  // Petugas Gudang, Admin Shift, & Manager berwenang menambah produk baru langsung (saling backup).
   if (payload.role === 'employee') {
     const rateLimit = stockSubmitLimiter.check(`newprod:${payload.sub}`, true);
     if (!rateLimit.allowed) {

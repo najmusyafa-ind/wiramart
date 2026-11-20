@@ -1,7 +1,7 @@
 // =============================================================
 // src/app/api/kasir/gudang/route.ts
 // Route Handler: Portal Petugas Gudang (Ringkasan, List FEFO, & Restock)
-// NASA-Grade Decoupling: Zod DTO Validation & Delegasi ke warehouseService
+// Validasi DTO Zod & Delegasi ke warehouseService
 // Mendukung akses sesi Karyawan Gudang maupun Admin (Manager/Admin Shift)
 // =============================================================
 
@@ -132,7 +132,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ── POST: Inbound Restock Barang Masuk Langsung (Opsi B: Petugas Gudang, Admin Shift, & Manager) ──
+// POST: Restock Barang Masuk Langsung (Gudang, Admin Shift, & Manager)
 const restockSchema = z.object({
   productId: z.string().uuid('ID produk tidak valid'),
   qtyAdd: z.number().int().min(1, 'Jumlah restock minimal 1').max(100_000, 'Maksimal 100.000'),
@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
     return apiError('Unauthorized: Akses khusus Petugas Gudang / Admin Shift / Manager', 401);
   }
 
-  // Opsi B (Keputusan Rapat Tim): Petugas Gudang, Admin Shift, & Manager sama-sama berwenang restok langsung.
+  // Petugas Gudang, Admin Shift, & Manager berwenang melakukan restock langsung.
   // FEFO diskon & keuangan tetap eksklusif Manager.
   if (payload.role === 'admin') {
     const adminRow = await db.query.admins.findFirst({
@@ -200,7 +200,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Opsi B: Restock langsung masuk ke stok kasir & batch FEFO (tetap tercatat penuh di audit stock_adjustments)
+    // Restock langsung masuk ke stok kasir & batch FEFO beserta jejak audit stock_adjustments
     const result = await restockProductByWarehouse({
       productId: parsed.data.productId,
       qtyAdd: parsed.data.qtyAdd,

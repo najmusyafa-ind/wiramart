@@ -1,9 +1,9 @@
 // =============================================================
 // PATCH & DELETE /api/gudang/produk/[id]
-// Opsi B: Petugas Gudang, Admin Shift, & Manager berwenang edit & hapus
+// Petugas Gudang, Admin Shift, & Manager berwenang edit & hapus
 // produk serta memperbarui tanggal kedaluwarsa (expired) per batch secara
 // langsung (saling backup). FEFO diskon & keuangan tetap eksklusif Manager.
-// STANDAR: Zero-Trust Auth, Zod Validation, ACID Batch + FEFO Sync & Audit Trail
+// Auth JWT, Validasi Zod, ACID Batch + Sinkronisasi FEFO & Audit Trail
 // =============================================================
 
 import { randomInt } from 'node:crypto';

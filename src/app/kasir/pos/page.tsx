@@ -320,7 +320,7 @@ function BukaShiftOverlay({
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   margin: '0 auto var(--space-2)',
                   fontSize: 28,
-                }}>⚠️</div>
+                }}><AlertTriangle size={28} color="hsl(38 92% 40%)" /></div>
                 <h2 id="buka-shift-title" style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', margin: '0 0 var(--space-1)' }}>
                   Perhatian: Ada Shift Aktif
                 </h2>
@@ -345,7 +345,7 @@ function BukaShiftOverlay({
                       background: 'hsl(38 90% 85%)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 18, flexShrink: 0,
-                    }}>👤</div>
+                    }}><User size={18} color="hsl(38 92% 35%)" /></div>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 'var(--text-sm)', color: 'var(--color-text-primary)' }}>
                         {s.kasirName}
@@ -443,7 +443,7 @@ function BukaShiftOverlay({
                   border: '1px solid var(--color-success)',
                   fontSize: '0.75rem', color: 'var(--color-success)', fontWeight: 600,
                 }}>
-                  ✓ Serah terima dikonfirmasi. Masukkan modal awal yang diterima.
+                  Serah terima dikonfirmasi. Masukkan modal awal yang diterima.
                 </div>
               )}
 
@@ -454,7 +454,7 @@ function BukaShiftOverlay({
                 border: '1px solid var(--color-warning)',
                 fontSize: '0.72rem', color: 'var(--color-text)', lineHeight: 1.4,
               }}>
-                <strong>ℹ️ Modal Paten Owner:</strong> Default modal uang kembalian di laci kasir adalah <strong>Rp 100.000</strong>. Sesuaikan nominal jika menerima serah terima saldo berbeda.
+                <strong>Modal Paten:</strong> Default modal uang kembalian di laci kasir adalah <strong>Rp 100.000</strong>. Sesuaikan nominal jika menerima serah terima saldo berbeda.
               </div>
 
               {/* Mode Switcher */}
@@ -784,7 +784,7 @@ function PaymentModal({
                     fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)',
                     color: cashChange >= 0 ? 'var(--color-success)' : 'var(--color-error)',
                   }}>
-                    {cashChange >= 0 ? rp(cashChange) : '⚠ Kurang!'}
+                    {cashChange >= 0 ? rp(cashChange) : 'Kurang!'}
                   </div>
                 </div>
               )}
@@ -897,7 +897,7 @@ function PaymentModal({
                 )}
                 {splitQrisAmount >= total && (
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-error)', marginTop: 2 }}>
-                    ⚠ Porsi QRIS tidak boleh menyamai atau melebihi total tagihan. Gunakan tab QRIS jika ingin bayar penuh non-tunai.
+                    Porsi QRIS tidak boleh menyamai atau melebihi total tagihan. Gunakan tab QRIS jika ingin bayar penuh non-tunai.
                   </div>
                 )}
               </div>
@@ -977,7 +977,7 @@ function PaymentModal({
                 borderRadius: 'var(--radius-sm)',
                 lineHeight: 1.4,
               }}>
-                💡 <strong>Catatan Laci:</strong> Uang fisik masuk laci kasir bertambah <strong>{rp(splitCashNeeded)}</strong>. Nominal QRIS <strong>{rp(splitQrisAmount)}</strong> langsung masuk rekening bank toko.
+                <strong>Catatan Laci:</strong> Uang fisik masuk laci kasir bertambah <strong>{rp(splitCashNeeded)}</strong>. Nominal QRIS <strong>{rp(splitQrisAmount)}</strong> langsung masuk rekening bank toko.
               </div>
             </div>
           )}
@@ -1097,10 +1097,10 @@ function SuccessModal({
             </h2>
             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
               {isSplit
-                ? '🔀 Pembayaran Campuran (QRIS + Tunai)'
+                ? 'Pembayaran Campuran (QRIS + Tunai)'
                 : method === 'CASH'
-                ? '💵 Pembayaran Tunai'
-                : '📱 Pembayaran QRIS'}
+                ? 'Pembayaran Tunai'
+                : 'Pembayaran QRIS'}
             </p>
           </div>
 
@@ -1120,7 +1120,7 @@ function SuccessModal({
           >
             {/* Header struk — dinamis dari Pengaturan Toko */}
             <div style={{ textAlign: 'center', marginBottom: 8 }}>
-              <div style={{ fontWeight: 'bold', fontSize: 14 }}>🏪 {storeName}</div>
+              <div style={{ fontWeight: 'bold', fontSize: 14 }}>{storeName}</div>
               {storeAddress && <div style={{ fontSize: 11, color: '#444' }}>{storeAddress}</div>}
               {storePhone   && <div style={{ fontSize: 11, color: '#444' }}>Telp: {storePhone}</div>}
               <div style={{ borderTop: '1px dashed #000', marginTop: 6, paddingTop: 4, fontSize: 11, color: '#555' }}>
@@ -1211,7 +1211,7 @@ function SuccessModal({
 
             {/* Footer */}
             <div style={{ borderTop: '1px dashed #000', marginTop: 10, paddingTop: 6, textAlign: 'center', fontSize: 11, color: '#555' }}>
-              Terima kasih sudah berbelanja! 🙏
+              Terima kasih sudah berbelanja.
             </div>
           </div>
 
@@ -1222,7 +1222,7 @@ function SuccessModal({
               className="btn btn-secondary"
               style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-1)' }}
             >
-              🖨️ Cetak Struk
+              Cetak Struk
             </button>
             <button
               id={`${uid}-close`}
@@ -1947,14 +1947,14 @@ export default function PosPage() {
         // addToCart sudah menampilkan pesan sendiri jika stok habis / melebihi stok
         if (addToCart(json.data.product)) {
           playScanBeep();
-          const toastPrefix = json.data.isDiscounted ? '🏷️ Diskon Darurat: ' : 'Ditambahkan: ';
+          const toastPrefix = json.data.isDiscounted ? 'Diskon FEFO: ' : 'Ditambahkan: ';
           setScanToast(`${toastPrefix}${json.data.product.name}`);
           setTimeout(() => setScanToast(null), 2500);
         }
         return;
       }
       if (!json.success && json.error) {
-        setScanToast(`⚠️ ${json.error}`);
+        setScanToast(`${json.error}`);
         setTimeout(() => setScanToast(null), 3500);
         return;
       }
@@ -2351,7 +2351,7 @@ export default function PosPage() {
           <div className="card" style={{ width: '100%', maxWidth: 440, margin: 'auto', maxHeight: '90dvh', display: 'flex', flexDirection: 'column', boxShadow: 'var(--shadow-xl)' }}>
             <div className="card-body" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', overflowY: 'auto' }}>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 32, marginBottom: 4 }}>🔐</div>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 6 }}><Lock size={30} color="var(--color-primary)" /></div>
                 <h2 id="tutup-shift-title" style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', margin: '0 0 4px' }}>
                   Tutup Shift &amp; Rekap Laci
                 </h2>
@@ -2557,7 +2557,7 @@ export default function PosPage() {
           <div className="card" style={{ width: '100%', maxWidth: 400, margin: 'auto', boxShadow: 'var(--shadow-xl)' }}>
             <div className="card-body" style={{ padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 40, marginBottom: 'var(--space-2)' }}>✅</div>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--space-2)' }}><CheckCircle size={38} color="var(--color-success)" /></div>
                 <h2 id="ringkasan-shift-title" style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', margin: 0 }}>
                   Shift Ditutup!
                 </h2>
@@ -2800,7 +2800,7 @@ export default function PosPage() {
               color: 'var(--color-text-inverse)', fontWeight: 'var(--weight-bold)',
               fontSize: 'var(--text-sm)', letterSpacing: 'var(--tracking-wide)',
             }}>
-              🏪 WIRAMART
+              WIRAMART
             </span>
             <span style={{ color: 'var(--color-sidebar-muted)', fontSize: '10px' }}>
               UKM UNPERBA
@@ -2931,7 +2931,7 @@ export default function PosPage() {
             )}
           </button>
 
-          {/* Tombol [⚡ FITUR] — Menyimpan semua fitur operasional kasir */}
+          {/* Tombol menu fitur operasional kasir */}
           <button
             id="btn-kasir-fitur"
             onClick={() => setShowKasirMenu(true)}
@@ -3019,7 +3019,7 @@ export default function PosPage() {
             </div>
           </div>
         )}
-        {/* Banner Halus Edukasi Opsi B1: Pengingat Buat PIN Pribadi (Non-Blocking) */}
+        {/* Pengingat Buat PIN Pribadi (Non-Blocking) */}
         {session?.employee?.hasPin === false && !pinBannerDismissed && (
           <div
             role="status"
@@ -3109,7 +3109,7 @@ export default function PosPage() {
               border: '1px solid hsl(32, 90%, 75%)',
             }}
           >
-            ⚡ Makanan &amp; Non-Barcode
+            Makanan &amp; Non-Barcode
           </button>
           {categories.map((c) => (
             <button
@@ -3254,7 +3254,7 @@ export default function PosPage() {
                             border: '1px solid rgba(239, 68, 68, 0.3)',
                             flexShrink: 0,
                           }}>
-                            🏷️ OBRAL {item.discountPct}%
+                            OBRAL {item.discountPct}%
                           </span>
                         )}
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
@@ -3624,7 +3624,7 @@ export default function PosPage() {
                 <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
               </button>
 
-              {/* ── Pengaturan PIN Keamanan Login (Opsi B1) ── */}
+              {/* Pengaturan PIN Keamanan Login */}
               <button
                 type="button"
                 className="pos-drawer-link"
@@ -3736,7 +3736,7 @@ export default function PosPage() {
         }}
       />
 
-      {/* ── Modal Pengaturan / Ganti PIN Login Kasir (Opsi B1) ──── */}
+      {/* Modal Pengaturan / Ganti PIN Login Kasir */}
       {showPinModal && session?.employee && (
         <PinSecurityModal
           hasPin={Boolean(session.employee.hasPin)}
