@@ -156,6 +156,30 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
       );
   }
 
+  // 0C. Tutup otomatis (CLOSED) alert ALERT_ONLY yang tanggal expired-nya diperpanjang > 7 hari / dikosongkan
+  const outOfWindowReports = await db
+    .select({ id: productConditionReports.id })
+    .from(productConditionReports)
+    .innerJoin(stockBatches, eq(productConditionReports.batchId, stockBatches.id))
+    .where(
+      and(
+        eq(productConditionReports.status, 'ALERT_ONLY'),
+        or(isNull(stockBatches.expiryDate), gt(stockBatches.expiryDate, in7Days)),
+      ),
+    );
+
+  if (outOfWindowReports.length > 0) {
+    await db
+      .update(productConditionReports)
+      .set({ status: 'CLOSED', updatedAt: now })
+      .where(
+        inArray(
+          productConditionReports.id,
+          outOfWindowReports.map((r) => r.id),
+        ),
+      );
+  }
+
   // Cari seluruh batch aktif dengan sisa stok > 0 yang expired dalam <= 7 hari (atau sudah lewat)
   const expiringBatches = await db
     .select({
@@ -208,11 +232,12 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
         status: 'ALERT_ONLY',
       });
       newAlerts++;
-    } else if (existingReport.status === 'ALERT_ONLY') {
-      // Update level alert jika hari berkurang (misal dari H-5 turun ke H-3 atau H-1)
+    } else if (existingReport.status === 'ALERT_ONLY' || existingReport.status === 'CLOSED') {
+      // Update / buka kembali alert jika hari berkurang atau batch masuk jendela FEFO kembali
       await db
         .update(productConditionReports)
         .set({
+          status: 'ALERT_ONLY',
           alertLevel,
           qtyAtAlert: b.currentQty,
           daysRemainingAtAlert: daysRemaining,

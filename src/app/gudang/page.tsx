@@ -250,8 +250,19 @@ export default function GudangPortalPage() {
   const [editUnit, setEditUnit] = useState('pcs');
   const [editStockQty, setEditStockQty] = useState<number>(0);
   const [editReason, setEditReason] = useState('');
+  const [editBatches, setEditBatches] = useState<Array<{
+    id: string;
+    batchCode: string;
+    currentQty: number;
+    initialQty: number;
+    expiryDate: string;
+    originalExpiryDate: string | null;
+  }>>([]);
+  const [loadingEditBatches, setLoadingEditBatches] = useState(false);
+  const [editSingleExpiryDate, setEditSingleExpiryDate] = useState('');
   const [submittingEdit, setSubmittingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const editFetchSeqRef = useRef(0);
 
   // State Modal Rincian Multi-Batch FEFO
   const [viewingBatchProduct, setViewingBatchProduct] = useState<WarehouseProduct | null>(null);
@@ -268,11 +279,18 @@ export default function GudangPortalPage() {
     notes: string | null;
   }>>([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
+  const [inlineBatchEditId, setInlineBatchEditId] = useState<string | null>(null);
+  const [inlineBatchExpiry, setInlineBatchExpiry] = useState('');
+  const [savingInlineBatch, setSavingInlineBatch] = useState(false);
+  const [inlineBatchError, setInlineBatchError] = useState<string | null>(null);
 
   async function openBatchModal(prod: WarehouseProduct) {
     setViewingBatchProduct(prod);
     setLoadingBatches(true);
     setProductBatches([]);
+    setInlineBatchEditId(null);
+    setInlineBatchExpiry('');
+    setInlineBatchError(null);
     try {
       const res = await fetch(`/api/admin/gudang/batch?productId=${prod.id}`);
       const j = await res.json();
@@ -283,6 +301,41 @@ export default function GudangPortalPage() {
       // silent
     } finally {
       setLoadingBatches(false);
+    }
+  }
+
+  async function handleSaveInlineBatchExpiry(batchId: string) {
+    if (!viewingBatchProduct || !canMutateStock) return;
+    setSavingInlineBatch(true);
+    setInlineBatchError(null);
+    try {
+      const res = await fetch(`/api/gudang/produk/${viewingBatchProduct.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batchUpdates: [{ batchId, expiryDate: inlineBatchExpiry.trim() || null }],
+          reason: 'Pembaruan tanggal kedaluwarsa dari Rincian Batch',
+        }),
+      });
+      const json = (await res.json()) as { success: boolean; error?: string };
+      if (!res.ok || !json.success) {
+        setInlineBatchError(json.error ?? 'Gagal menyimpan tanggal kedaluwarsa.');
+        return;
+      }
+      setInlineBatchEditId(null);
+      setInlineBatchExpiry('');
+      const [batchRes] = await Promise.all([
+        fetch(`/api/admin/gudang/batch?productId=${viewingBatchProduct.id}`),
+        loadData(),
+      ]);
+      const batchJson = await batchRes.json();
+      if (batchJson.success && batchJson.data?.batches) {
+        setProductBatches(batchJson.data.batches);
+      }
+    } catch {
+      setInlineBatchError('Koneksi terputus saat menyimpan tanggal kedaluwarsa.');
+    } finally {
+      setSavingInlineBatch(false);
     }
   }
 
@@ -454,6 +507,49 @@ export default function GudangPortalPage() {
     setEditStockQty(prod.stockQty);
     setEditReason('');
     setEditError(null);
+    setEditBatches([]);
+    setEditSingleExpiryDate(prod.nearestExpiryDate ?? '');
+    setLoadingEditBatches(true);
+
+    const seq = ++editFetchSeqRef.current;
+    fetch(`/api/admin/gudang/batch?productId=${prod.id}&status=ACTIVE`)
+      .then((res) => res.json())
+      .then((j: {
+        success?: boolean;
+        data?: {
+          batches?: Array<{
+            id: string;
+            batchCode: string;
+            currentQty: number;
+            initialQty: number;
+            expiryDate: string | null;
+          }>;
+        };
+      }) => {
+        if (editFetchSeqRef.current !== seq) return;
+        const rows = (j.success && j.data?.batches ? j.data.batches : []).filter(
+          (b) => b.currentQty > 0,
+        );
+        setEditBatches(
+          rows.map((b) => ({
+            id: b.id,
+            batchCode: b.batchCode,
+            currentQty: b.currentQty,
+            initialQty: b.initialQty,
+            expiryDate: b.expiryDate ?? '',
+            originalExpiryDate: b.expiryDate ?? null,
+          })),
+        );
+      })
+      .catch(() => {
+        if (editFetchSeqRef.current !== seq) return;
+        setEditBatches([]);
+      })
+      .finally(() => {
+        if (editFetchSeqRef.current === seq) {
+          setLoadingEditBatches(false);
+        }
+      });
   }
 
   async function handleEditProductSubmit(e: React.FormEvent) {
@@ -464,18 +560,35 @@ export default function GudangPortalPage() {
       setEditError('Nama produk minimal 2 karakter.');
       return;
     }
+
+    const nextStockQty = Math.max(0, Math.floor(Number(editStockQty)));
+    const changedBatchUpdates = editBatches
+      .filter((b) => (b.expiryDate.trim() || null) !== b.originalExpiryDate)
+      .map((b) => ({
+        batchId: b.id,
+        expiryDate: b.expiryDate.trim() || null,
+      }));
+
+    const payloadBody: Record<string, unknown> = {
+      name: editName.trim(),
+      barcode: editBarcode.trim() || null,
+      unit: editUnit.trim() || 'pcs',
+      stockQty: nextStockQty,
+      reason: editReason.trim() || undefined,
+    };
+
+    if (changedBatchUpdates.length > 0) {
+      payloadBody.batchUpdates = changedBatchUpdates;
+    } else if (editBatches.length === 0 && nextStockQty > 0 && editSingleExpiryDate.trim()) {
+      payloadBody.expiryDate = editSingleExpiryDate.trim();
+    }
+
     setSubmittingEdit(true);
     try {
       const res = await fetch(`/api/gudang/produk/${editingProduct.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: editName.trim(),
-          barcode: editBarcode.trim() || null,
-          unit: editUnit.trim() || 'pcs',
-          stockQty: Math.max(0, Math.floor(Number(editStockQty))),
-          reason: editReason.trim() || undefined,
-        }),
+        body: JSON.stringify(payloadBody),
       });
       const json = (await res.json()) as { success: boolean; error?: string };
       if (!res.ok || !json.success) {
@@ -1854,7 +1967,7 @@ export default function GudangPortalPage() {
                       </div>
 
                       {/* Baris 2: Radar Kedaluwarsa FEFO */}
-                      {item.nearestExpiryDate && (
+                      {item.nearestExpiryDate ? (
                         <div
                           style={{
                             padding: '6px 10px',
@@ -1903,7 +2016,45 @@ export default function GudangPortalPage() {
                               : 'AMAN'}
                           </span>
                         </div>
-                      )}
+                      ) : item.stockQty > 0 ? (
+                        <div
+                          style={{
+                            padding: '6px 10px',
+                            borderRadius: 6,
+                            fontSize: '0.72rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            backgroundColor: '#fffbeb',
+                            color: '#92400e',
+                            border: '1px dashed #fcd34d',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
+                            <Clock size={13} />
+                            <span>Tanggal Expired belum diisi</span>
+                          </div>
+                          {canMutateStock && (
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(item)}
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: 5,
+                                border: '1px solid #f59e0b',
+                                backgroundColor: '#ffffff',
+                                color: '#b45309',
+                                fontSize: '0.7rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Isi Exp
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
 
                       {/* Baris 3: Tombol Aksi Restock & Rincian Batch FEFO */}
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
@@ -2207,13 +2358,15 @@ export default function GudangPortalPage() {
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: 8,
                             borderTop: '1px dashed #e2e8f0',
                             paddingTop: 6,
                             marginTop: 2,
                             fontSize: '0.75rem',
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                             <Clock size={12} style={{ color: '#64748b' }} />
                             <span>
                               Exp:{' '}
@@ -2224,9 +2377,31 @@ export default function GudangPortalPage() {
                                       month: 'short',
                                       year: 'numeric',
                                     })
-                                  : '—'}
+                                  : 'Belum diisi'}
                               </strong>
                             </span>
+                            {b.currentQty > 0 && canMutateStock && inlineBatchEditId !== b.id && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInlineBatchEditId(b.id);
+                                  setInlineBatchExpiry(b.expiryDate ?? '');
+                                  setInlineBatchError(null);
+                                }}
+                                style={{
+                                  padding: '2px 8px',
+                                  borderRadius: 5,
+                                  border: '1px solid #cbd5e1',
+                                  backgroundColor: '#ffffff',
+                                  color: '#2563eb',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {b.expiryDate ? 'Ubah Exp' : 'Isi Exp'}
+                              </button>
+                            )}
                           </div>
                           <div>
                             {isExpired ? (
@@ -2262,13 +2437,133 @@ export default function GudangPortalPage() {
                               <span style={{ color: '#d97706', fontWeight: 700 }}>
                                 Sisa {b.daysRemaining} hari (FEFO Kritis)
                               </span>
+                            ) : b.expiryStatus === 'WARNING_30' ? (
+                              <span style={{ color: '#b45309', fontWeight: 700 }}>
+                                Sisa {b.daysRemaining} hari (&lt; 30 hr)
+                              </span>
+                            ) : b.expiryStatus === 'NO_EXPIRY' || !b.expiryDate ? (
+                              <span style={{ color: '#b45309', fontWeight: 700 }}>
+                                Exp belum diisi
+                              </span>
                             ) : (
                               <span style={{ color: '#16a34a', fontWeight: 600 }}>
-                                Aman ({b.daysRemaining ?? '—'} hr)
+                                Aman ({b.daysRemaining} hr)
                               </span>
                             )}
                           </div>
                         </div>
+
+                        {inlineBatchEditId === b.id && canMutateStock && (
+                          <div
+                            style={{
+                              marginTop: 6,
+                              padding: '8px 10px',
+                              borderRadius: 8,
+                              backgroundColor: '#f8fafc',
+                              border: '1px solid #cbd5e1',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 6,
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+                              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#334155' }}>
+                                Atur Tanggal Expired Batch #{b.batchCode}
+                              </span>
+                              <div style={{ display: 'inline-flex', gap: 4 }}>
+                                {[
+                                  { d: 0, label: 'Hari Ini' },
+                                  { d: 30, label: '+30h' },
+                                  { d: 180, label: '+6bln' },
+                                  { d: 365, label: '+1th' },
+                                ].map(({ d, label }) => (
+                                  <button
+                                    key={d}
+                                    type="button"
+                                    onClick={() => setInlineBatchExpiry(addDaysWibStr(d))}
+                                    style={{
+                                      border: '1px solid #cbd5e1',
+                                      backgroundColor: '#ffffff',
+                                      color: '#334155',
+                                      fontSize: '0.66rem',
+                                      fontWeight: 700,
+                                      padding: '2px 6px',
+                                      borderRadius: 5,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                              <input
+                                type="date"
+                                value={inlineBatchExpiry}
+                                onChange={(e) => setInlineBatchExpiry(e.target.value)}
+                                style={{
+                                  flex: '1 1 160px',
+                                  minHeight: 38,
+                                  padding: '6px 10px',
+                                  borderRadius: 7,
+                                  border: '1px solid #94a3b8',
+                                  fontSize: '0.88rem',
+                                  backgroundColor: '#ffffff',
+                                }}
+                              />
+                              <button
+                                type="button"
+                                disabled={savingInlineBatch}
+                                onClick={() => handleSaveInlineBatchExpiry(b.id)}
+                                style={{
+                                  minHeight: 38,
+                                  padding: '6px 12px',
+                                  borderRadius: 7,
+                                  border: 'none',
+                                  backgroundColor: '#2563eb',
+                                  color: '#ffffff',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 700,
+                                  cursor: savingInlineBatch ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                {savingInlineBatch ? 'Menyimpan...' : 'Simpan Exp'}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={savingInlineBatch}
+                                onClick={() => {
+                                  setInlineBatchEditId(null);
+                                  setInlineBatchError(null);
+                                }}
+                                style={{
+                                  minHeight: 38,
+                                  padding: '6px 10px',
+                                  borderRadius: 7,
+                                  border: '1px solid #cbd5e1',
+                                  backgroundColor: '#ffffff',
+                                  color: '#475569',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Batal
+                              </button>
+                            </div>
+                            {inlineBatchExpiry && inlineBatchExpiry < getTodayWibStr() && (
+                              <div style={{ fontSize: '0.68rem', color: '#b91c1c', fontWeight: 600 }}>
+                                Perhatian: Tanggal ini sudah lewat — batch akan otomatis ditandai EXPIRED di Radar FEFO.
+                              </div>
+                            )}
+                            {inlineBatchError && (
+                              <div style={{ fontSize: '0.72rem', color: '#b91c1c', fontWeight: 700 }}>
+                                {inlineBatchError}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -3171,12 +3466,12 @@ export default function GudangPortalPage() {
                     {submittingNewProd ? (
                       <>
                         <RefreshCw size={16} className="spin-icon" />
-                        <span>Mengirim Usulan...</span>
+                        <span>Menyimpan Produk...</span>
                       </>
                     ) : (
                       <>
                         <CheckCircle2 size={16} />
-                        <span>Kirim Usulan ke Manager</span>
+                        <span>Simpan Produk Baru</span>
                       </>
                     )}
                   </button>
@@ -3613,7 +3908,7 @@ export default function GudangPortalPage() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 800, color: '#0f172a' }}>
-                Edit Produk (Opsi B)
+                Edit Produk &amp; Tanggal Expired
               </h3>
               <button
                 type="button"
@@ -3679,6 +3974,172 @@ export default function GudangPortalPage() {
                   style={{ width: '100%', minHeight: 42, padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.95rem', fontWeight: 700 }}
                 />
               </div>
+
+              {/* ── EDIT TANGGAL KEDALUWARSA / EXPIRED PER BATCH AKTIF ── */}
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                  <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Calendar size={14} style={{ color: '#2563eb' }} />
+                    <span>
+                      Tanggal Kedaluwarsa / Expired
+                      {editBatches.length > 1 ? ` (${editBatches.length} Batch Aktif)` : ''}
+                    </span>
+                  </span>
+                  {loadingEditBatches && (
+                    <span style={{ fontSize: '0.68rem', color: '#64748b' }}>Memuat batch...</span>
+                  )}
+                </div>
+
+                {loadingEditBatches ? (
+                  <div style={{ fontSize: '0.75rem', color: '#64748b', padding: '4px 0' }}>
+                    Memuat rincian batch produk...
+                  </div>
+                ) : editBatches.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {editBatches.map((batch) => {
+                      const isPast = Boolean(batch.expiryDate && batch.expiryDate < getTodayWibStr());
+                      return (
+                        <div
+                          key={batch.id}
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            backgroundColor: '#ffffff',
+                            border: !batch.expiryDate ? '1px solid #fcd34d' : isPast ? '1px solid #fca5a5' : '1px solid #e2e8f0',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 5,
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#334155', fontFamily: 'monospace' }}>
+                              #{batch.batchCode} &bull; Sisa {batch.currentQty} {editUnit || editingProduct.unit}
+                            </span>
+                            <div style={{ display: 'inline-flex', gap: 3 }}>
+                              {[
+                                { d: 0, label: 'Hari Ini' },
+                                { d: 30, label: '+30h' },
+                                { d: 180, label: '+6bln' },
+                                { d: 365, label: '+1th' },
+                              ].map(({ d, label }) => (
+                                <button
+                                  key={d}
+                                  type="button"
+                                  onClick={() =>
+                                    setEditBatches((prev) =>
+                                      prev.map((x) =>
+                                        x.id === batch.id ? { ...x, expiryDate: addDaysWibStr(d) } : x,
+                                      ),
+                                    )
+                                  }
+                                  style={{
+                                    border: '1px solid #cbd5e1',
+                                    backgroundColor: '#f8fafc',
+                                    color: '#334155',
+                                    fontSize: '0.64rem',
+                                    fontWeight: 700,
+                                    padding: '2px 5px',
+                                    borderRadius: 4,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <input
+                            type="date"
+                            value={batch.expiryDate}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setEditBatches((prev) =>
+                                prev.map((x) => (x.id === batch.id ? { ...x, expiryDate: val } : x)),
+                              );
+                            }}
+                            style={{
+                              width: '100%',
+                              minHeight: 40,
+                              padding: '6px 10px',
+                              borderRadius: 7,
+                              border: !batch.expiryDate ? '1px solid #f59e0b' : '1px solid #cbd5e1',
+                              fontSize: '0.9rem',
+                            }}
+                          />
+                          {isPast && (
+                            <div style={{ fontSize: '0.68rem', color: '#b91c1c', fontWeight: 600 }}>
+                              Tanggal sudah lewat — batch akan otomatis masuk Radar FEFO sebagai EXPIRED.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : editStockQty > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.72rem', color: '#475569' }}>
+                        Exp untuk batch baru ({editStockQty} {editUnit || editingProduct.unit})
+                      </span>
+                      <div style={{ display: 'inline-flex', gap: 3 }}>
+                        {[
+                          { d: 0, label: 'Hari Ini' },
+                          { d: 30, label: '+30h' },
+                          { d: 180, label: '+6bln' },
+                          { d: 365, label: '+1th' },
+                        ].map(({ d, label }) => (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => setEditSingleExpiryDate(addDaysWibStr(d))}
+                            style={{
+                              border: '1px solid #cbd5e1',
+                              backgroundColor: '#ffffff',
+                              color: '#334155',
+                              fontSize: '0.64rem',
+                              fontWeight: 700,
+                              padding: '2px 5px',
+                              borderRadius: 4,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <input
+                      type="date"
+                      value={editSingleExpiryDate}
+                      onChange={(e) => setEditSingleExpiryDate(e.target.value)}
+                      style={{
+                        width: '100%',
+                        minHeight: 40,
+                        padding: '6px 10px',
+                        borderRadius: 7,
+                        border: '1px solid #cbd5e1',
+                        fontSize: '0.9rem',
+                        backgroundColor: '#ffffff',
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                    Produk saat ini stok 0 (belum ada batch aktif). Isi stok di atas atau gunakan tombol Restock untuk mengisi tanggal expired.
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: 4 }}>
                   Alasan Perubahan (Opsional)
@@ -3687,7 +4148,7 @@ export default function GudangPortalPage() {
                   type="text"
                   value={editReason}
                   onChange={(e) => setEditReason(e.target.value)}
-                  placeholder="Contoh: Koreksi stok opname / perbaikan nama"
+                  placeholder="Contoh: Isi tanggal expired / koreksi stok opname"
                   style={{ width: '100%', minHeight: 42, padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
                 />
               </div>
@@ -3701,10 +4162,10 @@ export default function GudangPortalPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submittingEdit}
-                  style={{ minHeight: 42, padding: '8px 16px', borderRadius: 8, border: 'none', backgroundColor: '#2563eb', color: '#ffffff', fontWeight: 700, cursor: submittingEdit ? 'not-allowed' : 'pointer' }}
+                  disabled={submittingEdit || loadingEditBatches}
+                  style={{ minHeight: 42, padding: '8px 16px', borderRadius: 8, border: 'none', backgroundColor: '#2563eb', color: '#ffffff', fontWeight: 700, cursor: submittingEdit || loadingEditBatches ? 'not-allowed' : 'pointer', opacity: loadingEditBatches ? 0.65 : 1 }}
                 >
-                  {submittingEdit ? 'Menyimpan...' : 'Simpan Perubahan'}
+                  {submittingEdit ? 'Menyimpan...' : loadingEditBatches ? 'Memuat Batch...' : 'Simpan Perubahan'}
                 </button>
               </div>
             </form>
