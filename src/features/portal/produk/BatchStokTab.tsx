@@ -4,10 +4,10 @@
 // BatchStokTab.tsx — Tab Manajemen Batch Stok & FEFO Kedaluwarsa
 // Smartkasir Perwira (Wiramart UNPERBA)
 // Fitur:
-//   1. KPI Alert Kedaluwarsa (Expired, H-7 Kritis, H-30 Perhatian)
-//   2. Filter Kelas Umur Simpan (HARIAN, PENDEK, PANJANG)
-//   3. Modal Input Penerimaan Barang Masuk (Batch Baru)
-//   4. Tabel inventaris per-batch & pelacakan FEFO
+// 1. KPI Alert Kedaluwarsa (Expired, H-7 Kritis, H-30 Perhatian)
+// 2. Filter Kelas Umur Simpan (HARIAN, PENDEK, PANJANG)
+// 3. Modal Input Penerimaan Barang Masuk (Batch Baru)
+// 4. Tabel inventaris per-batch & pelacakan FEFO
 // =============================================================
 
 import { useState, useEffect, useCallback, useId, useMemo } from 'react';
@@ -216,7 +216,7 @@ export default function BatchStokTab({
         >
           <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-error)' }}>
-              🚨 Sudah Kedaluwarsa
+              Sudah Kedaluwarsa
             </span>
             <span className="badge badge-error" style={{ fontSize: '0.7rem' }}>
               Wajib Write-Off
@@ -249,7 +249,7 @@ export default function BatchStokTab({
         >
           <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'hsl(38 92% 32%)' }}>
-              ⚠️ Kritis (&le; 7 Hari)
+              Kritis (&le; 7 Hari)
             </span>
             <span className="badge badge-warning" style={{ fontSize: '0.7rem' }}>
               FEFO Prioritas
@@ -282,7 +282,7 @@ export default function BatchStokTab({
         >
           <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-info)' }}>
-              ⏳ Perhatian (&le; 30 Hari)
+              Perhatian (&le; 30 Hari)
             </span>
             <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
               Pantau Stok
@@ -317,7 +317,7 @@ export default function BatchStokTab({
         >
           <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text)' }}>
-              📦 Total Batch Terdata
+              Total Batch Terdata
             </span>
             <span className="badge badge-secondary" style={{ fontSize: '0.7rem' }}>
               FEFO Active
@@ -369,9 +369,9 @@ export default function BatchStokTab({
               onChange={(e) => startFilterTransition(() => setStatusFilter(e.target.value as BatchStatusFilter))}
             >
               <option value="ALL">Semua Status Kedaluwarsa</option>
-              <option value="EXPIRED">🚨 Sudah Kedaluwarsa</option>
-              <option value="EXPIRING_7">⚠️ Kritis (&le; 7 Hari)</option>
-              <option value="EXPIRING_30">⏳ Perhatian (&le; 30 Hari)</option>
+              <option value="EXPIRED">Sudah Kedaluwarsa</option>
+              <option value="EXPIRING_7">Kritis (&le; 7 Hari)</option>
+              <option value="EXPIRING_30">Perhatian (&le; 30 Hari)</option>
               <option value="ACTIVE">Hanya yang Ada Stok (&gt; 0)</option>
             </select>
 
@@ -535,7 +535,7 @@ export default function BatchStokTab({
                                   padding: '1px 5px',
                                 }}
                               >
-                                ⚡ PRIORITAS 1 (FEFO)
+                                PRIORITAS 1 (FEFO)
                               </span>
                             ) : (
                               <span
@@ -552,7 +552,7 @@ export default function BatchStokTab({
                                   padding: '1px 5px',
                                 }}
                               >
-                                📦 Batch Cadangan
+                                Batch Cadangan
                               </span>
                             )
                           ) : (

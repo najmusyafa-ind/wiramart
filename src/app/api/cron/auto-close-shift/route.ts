@@ -6,20 +6,20 @@
 // Auth: CRON_SECRET header (Vercel Cron standard)
 //
 // Business Rules:
-//   1. Tutup otomatis shift ACTIVE yang sudah melewati slotEnd jadwal
-//      kasir + 15 menit TOLERANSI — dihitung dari slotEnd hari kasir
-//      tersebut buka shift (bukan hari cron berjalan).
-//   2. Jika shift tidak punya slot jadwal (kasir tanpa jadwal hari ini),
-//      fallback: tutup shift yang > 10 jam (stale session).
-//   3. Semua auto-close dicatat dengan notes = 'AUTO_CLOSED_BY_CRON'
-//   4. Tidak blocking — error satu shift tidak menghentikan yang lain.
+// 1. Tutup otomatis shift ACTIVE yang sudah melewati slotEnd jadwal
+// kasir + 15 menit TOLERANSI — dihitung dari slotEnd hari kasir
+// tersebut buka shift (bukan hari cron berjalan).
+// 2. Jika shift tidak punya slot jadwal (kasir tanpa jadwal hari ini),
+// fallback: tutup shift yang > 10 jam (stale session).
+// 3. Semua auto-close dicatat dengan notes = 'AUTO_CLOSED_BY_CRON'
+// 4. Tidak blocking — error satu shift tidak menghentikan yang lain.
 //
-// ⚠️  FIX v2 — Bug yang diperbaiki:
-//      Versi lama membandingkan nowMinutes (0 saat cron 00:00 WIB)
-//      terhadap slotEndMinutes (~915 untuk 15:15 WIB). Selalu false.
-//      Kini menggunakan perbandingan epoch absolut:
-//        slotEndWib = date(clockIn WIB) + slotEnd "HH:MM" → ms
-//        shouldClose = nowEpoch >= slotEndWib + 15 menit buffer
+// FIX v2 — Bug yang diperbaiki:
+// Versi lama membandingkan nowMinutes (0 saat cron 00:00 WIB)
+// terhadap slotEndMinutes (~915 untuk 15:15 WIB). Selalu false.
+// Kini menggunakan perbandingan epoch absolut:
+// slotEndWib = date(clockIn WIB) + slotEnd "HH:MM" → ms
+// shouldClose = nowEpoch >= slotEndWib + 15 menit buffer
 //
 // FinOps: query ACTIVE shifts difilter isNull(clockOut) + limit 50
 // =============================================================
@@ -45,12 +45,12 @@ export const runtime = 'nodejs';
 // ── Mapping nama hari Indonesia ke format database ─────────────────────────
 const HARI_MAP: Record<string, string> = {
   Minggu: 'MINGGU',
-  Senin:  'SENIN',
+  Senin: 'SENIN',
   Selasa: 'SELASA',
-  Rabu:   'RABU',
-  Kamis:  'KAMIS',
-  Jumat:  'JUMAT',
-  Sabtu:  'SABTU',
+  Rabu: 'RABU',
+  Kamis: 'KAMIS',
+  Jumat: 'JUMAT',
+  Sabtu: 'SABTU',
 };
 
 // Pastikan hanya Vercel Cron yang bisa memanggil endpoint ini
@@ -66,8 +66,8 @@ function verifyCronSecret(req: NextRequest): boolean {
  * menjadi epoch milliseconds yang merepresentasikan waktu WIB absolut.
  *
  * Contoh: tanggal="2026-10-07" + slotEnd="15:00"
- *   → new Date("2026-10-07T15:00:00+07:00").getTime()
- *   → ms epoch untuk 15:00 WIB tgl 7 Oktober 2026
+ * → new Date("2026-10-07T15:00:00+07:00").getTime()
+ * → ms epoch untuk 15:00 WIB tgl 7 Oktober 2026
  */
 function slotEndToEpoch(tanggalWib: string, slotEnd: string): number {
   const [hh, mm] = slotEnd.split(':');
@@ -105,8 +105,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const nowEpoch = nowWib.getTime();
 
   // Toleransi menit setelah slotEnd sebelum shift ditutup paksa
-  const TOLERANSI_MS   = 15 * 60 * 1_000; // 15 menit
-  const TEN_HOURS_MS   = 10 * 60 * 60 * 1_000;
+  const TOLERANSI_MS = 15 * 60 * 1_000; // 15 menit
+  const TEN_HOURS_MS = 10 * 60 * 60 * 1_000;
 
   let closedCount = 0;
   let skippedCount = 0;
@@ -117,9 +117,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Ambil semua shift ACTIVE yang belum di-clockOut
     const activeShifts = await db
       .select({
-        shiftId:    shifts.id,
+        shiftId: shifts.id,
         employeeId: shifts.employeeId,
-        clockIn:    shifts.clockIn,
+        clockIn: shifts.clockIn,
       })
       .from(shifts)
       .where(
@@ -136,8 +136,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     for (const shift of activeShifts) {
       try {
         // Tentukan hari WIB saat kasir buka shift (bukan hari cron berjalan)
-        const clockInDate  = new Date(shift.clockIn);
-        const hariShift    = getDayOfWeekWib(clockInDate);
+        const clockInDate = new Date(shift.clockIn);
+        const hariShift = getDayOfWeekWib(clockInDate);
         const tanggalShift = getTanggalWib(clockInDate);
 
         // Cari jadwal kasir yang sesuai hari saat shift dibuka
@@ -180,9 +180,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         const result = await db
           .update(shifts)
           .set({
-            status:   'CLOSED',
+            status: 'CLOSED',
             clockOut: nowWib,
-            notes:    closeReason,
+            notes: closeReason,
           })
           .where(
             and(
@@ -220,7 +220,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const BUFFER_ABSEN_MS = 30 * 60 * 1_000; // 30 menit
 
       for (const refDate of waktuCek) {
-        const hariRef    = getDayOfWeekWib(refDate);
+        const hariRef = getDayOfWeekWib(refDate);
         const tanggalRef = getTanggalWib(refDate);
 
         // Ambil semua jadwal aktif hari referensi
@@ -228,7 +228,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           .select({
             scheduleId: shiftSchedules.id,
             employeeId: shiftSchedules.employeeId,
-            slotEnd:    shiftSchedules.slotEnd,
+            slotEnd: shiftSchedules.slotEnd,
           })
           .from(shiftSchedules)
           .where(and(
@@ -273,11 +273,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             await db
               .insert(attendances)
               .values({
-                employeeId:     empId,
-                scheduleId:     jadwal.scheduleId,
+                employeeId: empId,
+                scheduleId: jadwal.scheduleId,
                 attendanceDate: tanggalRef,
-                status:         'TIDAK_HADIR',
-                lateMinutes:    0,
+                status: 'TIDAK_HADIR',
+                lateMinutes: 0,
               })
               .onConflictDoNothing();
 

@@ -828,7 +828,7 @@ export default function ExportPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px 24px' }}>
           <div>
             <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>
-              📊 Laporan Penjualan &amp; Keuangan (7 Sheet)
+              Laporan Penjualan &amp; Keuangan (7 Sheet)
             </div>
             <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 3 }}>
               <li>Ringkasan hasil omzet, HPP, laba bersih &amp; bagi hasil 50-50</li>
@@ -838,7 +838,7 @@ export default function ExportPage() {
           </div>
           <div>
             <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>
-              📁 Backup Arsip Data (Hingga {EXPORT_MAX_ROWS_LABEL} baris/sheet)
+              Backup Arsip Data (Hingga {EXPORT_MAX_ROWS_LABEL} baris/sheet)
             </div>
             <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 3 }}>
               <li>Backup Lengkap, Transaksi, Produk, &amp; Karyawan dengan ringkasan cover</li>

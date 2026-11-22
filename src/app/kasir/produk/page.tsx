@@ -409,7 +409,7 @@ function ProdukModal({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 'var(--space-3)' }}>
           <div style={{ minWidth: 0 }}>
             <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', margin: 0 }}>
-              {isEdit ? 'Detail Informasi Produk' : '💡 Usulkan Produk Baru'}
+              {isEdit ? 'Detail Informasi Produk' : 'Usulkan Produk Baru'}
             </h2>
             <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: '4px 0 0 0' }}>
               {isEdit ? 'Informasi spesifikasi barang di sistem kasir' : 'Kirim usulan barang baru ke Gudang / Admin untuk penetapan HPP & harga jual'}
@@ -461,7 +461,7 @@ function ProdukModal({
             marginBottom: 12,
           }}>
             <strong style={{ color: 'var(--color-primary)', display: 'block', marginBottom: 2 }}>
-              🛡️ Kebijakan Wiramart UNPERBA (K8 & K2):
+              Kebijakan Wiramart UNPERBA (K8 & K2):
             </strong>
             Kasir hanya mengusulkan nama, barcode, foto, dan kategori. HPP dan Harga Jual akan diverifikasi & ditetapkan langsung oleh Kepala Gudang / Admin sesuai margin global toko.
           </div>
@@ -564,7 +564,7 @@ function ProdukModal({
 
           {!isEdit ? (
             <button type="submit" className="btn btn-primary" disabled={saving} style={{ marginTop: 8, minHeight: 44, padding: '12px 16px', fontSize: 14, fontWeight: 700 }}>
-              {saving ? <><Loader2 size={16} className="spin-icon" /> Mengirim Usulan...</> : '📨 Kirim Usulan Produk ke Gudang / Admin'}
+              {saving ? <><Loader2 size={16} className="spin-icon" /> Mengirim Usulan...</> : 'Kirim Usulan Produk ke Gudang / Admin'}
             </button>
           ) : (
             <button type="button" onClick={onClose} className="btn btn-secondary" style={{ marginTop: 8, minHeight: 44, padding: '12px 16px', fontSize: 14, fontWeight: 600 }}>
@@ -795,7 +795,7 @@ export default function KasirProdukPage() {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Plus size={18} />
-            <span>💡 Usul Produk Baru</span>
+            <span>Usul Produk Baru</span>
           </div>
           <span style={{ fontSize: 11, opacity: 0.9, fontWeight: 400 }}>Ajukan ke Gudang/Admin</span>
         </button>
@@ -824,7 +824,7 @@ export default function KasirProdukPage() {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <ScanLine size={18} />
-            <span>📷 Scan Barcode</span>
+            <span>Scan Barcode</span>
           </div>
           <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 400 }}>Via kamera HP</span>
         </button>
@@ -990,7 +990,7 @@ export default function KasirProdukPage() {
         aria-label="Usulkan produk baru"
       >
         <Plus size={18} />
-        <span>💡 Usul Produk</span>
+        <span>Usul Produk</span>
       </button>
 
       {/* Scanner Modal */}

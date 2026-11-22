@@ -37,12 +37,12 @@ type Employee = {
   hasPin: boolean;
   createdAt: string;
   // Dari left join shiftSchedules
-  shiftDay:    string | null;
-  shiftStart:  string | null;
-  shiftEnd:    string | null;
+  shiftDay: string | null;
+  shiftStart: string | null;
+  shiftEnd: string | null;
   shiftSlotId: string | null;
   // Dari left join shifts (sesi kasir aktif)
-  activeShiftId:      string | null;
+  activeShiftId: string | null;
   activeShiftClockIn: string | null;
   // Kumpulan seluruh shift yang diassign ke karyawan
   allShifts?: { day: string; start: string; end: string; slotId: string }[];
@@ -50,11 +50,11 @@ type Employee = {
 
 // Tipe slot dari publik jadwal endpoint
 type SlotOption = {
-  slotId:     string;
-  dayOfWeek:  string;
-  slotStart:  string;
-  slotEnd:    string;
-  isFilled:   boolean;
+  slotId: string;
+  dayOfWeek: string;
+  slotStart: string;
+  slotEnd: string;
+  isFilled: boolean;
   employeeId: string | null;
   employeeName: string | null;
 };
@@ -125,20 +125,20 @@ function KaryawanModal({
       .then((r) => r.json())
       .then((j) => {
         type RawEntry = { id: string; employeeId: string | null; employeeName: string | null; isFilled: boolean };
-        type RawSlot  = { slotStart: string; slotEnd: string; entries: RawEntry[] };
-        type RawDay   = { dayOfWeek: string; slots: RawSlot[] };
+        type RawSlot = { slotStart: string; slotEnd: string; entries: RawEntry[] };
+        type RawDay = { dayOfWeek: string; slots: RawSlot[] };
         const schedule: RawDay[] = j.data?.schedule ?? [];
         const flat: SlotOption[] = [];
         for (const day of schedule) {
           for (const slot of day.slots) {
             for (const entry of slot.entries) {
               flat.push({
-                slotId:      entry.id,
-                dayOfWeek:   day.dayOfWeek,
-                slotStart:   slot.slotStart,
-                slotEnd:     slot.slotEnd,
-                isFilled:    entry.isFilled,
-                employeeId:  entry.employeeId,
+                slotId: entry.id,
+                dayOfWeek: day.dayOfWeek,
+                slotStart: slot.slotStart,
+                slotEnd: slot.slotEnd,
+                isFilled: entry.isFilled,
+                employeeId: entry.employeeId,
                 employeeName: entry.employeeName,
               });
             }
@@ -167,8 +167,8 @@ function KaryawanModal({
           key,
           dayOfWeek: day,
           slotStart: st ?? '',
-          slotEnd:   en ?? '',
-          entries:   daySlotsRaw.filter((s) => `${s.slotStart}-${s.slotEnd}` === tk),
+          slotEnd: en ?? '',
+          entries: daySlotsRaw.filter((s) => `${s.slotStart}-${s.slotEnd}` === tk),
         });
       }
     }
@@ -359,7 +359,7 @@ function KaryawanModal({
                 fontSize: 'var(--text-sm)',
               }}
             >
-              ⚠️ {slotAssignError}
+              {slotAssignError}
             </div>
           )}
 
@@ -471,7 +471,7 @@ function KaryawanModal({
                 ))}
               </select>
               <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                ℹ️ {JABATAN_OPTIONS.find((j) => j.value === form.jabatan)?.desc}
+                {JABATAN_OPTIONS.find((j) => j.value === form.jabatan)?.desc}
               </p>
             </div>
 
@@ -566,7 +566,7 @@ function KaryawanModal({
                           fontWeight: 700,
                         }}
                       >
-                        🔑 PIN Terpasang
+                        PIN Terpasang
                       </span>
                     ) : (
                       <span
@@ -580,7 +580,7 @@ function KaryawanModal({
                           fontWeight: 700,
                         }}
                       >
-                        ⚠️ Belum Ada PIN
+                        Belum Ada PIN
                       </span>
                     )}
                   </div>
@@ -602,7 +602,7 @@ function KaryawanModal({
                   }}
                 >
                   <span style={{ fontSize: '0.78rem', color: 'hsl(0 70% 35%)', fontWeight: 600 }}>
-                    🗑️ PIN karyawan ini akan dicabut saat disimpan.
+                    PIN karyawan ini akan dicabut saat disimpan.
                   </span>
                   <button
                     type="button"
@@ -714,8 +714,8 @@ function KaryawanModal({
 
                   <p style={{ fontSize: '0.73rem', color: 'var(--color-text-muted)', margin: 0 }}>
                     {form.jabatan === 'Admin Shift'
-                      ? '⚠️ Admin Shift wajib memiliki PIN 6–8 digit angka untuk login ke Dashboard Manajemen.'
-                      : 'ℹ️ Digunakan untuk otorisasi shift kasir dan void. Biarkan kosong jika tidak ingin mengubah.'}
+                      ? 'Admin Shift wajib memiliki PIN 6–8 digit angka untuk login ke Dashboard Manajemen.'
+                      : 'Digunakan untuk otorisasi shift kasir dan void. Biarkan kosong jika tidak ingin mengubah.'}
                   </p>
                 </>
               )}
@@ -1120,7 +1120,7 @@ export default function KaryawanPage() {
               <AlertTriangle size={18} color="#b45309" style={{ flexShrink: 0, marginTop: 1 }} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#92400e', marginBottom: 4 }}>
-                  ⚠️ {noPinAdmins.length} Admin Shift Belum Punya PIN Login
+                  {noPinAdmins.length} Admin Shift Belum Punya PIN Login
                 </div>
                 <div style={{ fontSize: '0.75rem', color: '#78350f', lineHeight: 1.6 }}>
                   Mereka tidak bisa akses halaman Admin Dashboard sampai PIN diset oleh Manager.

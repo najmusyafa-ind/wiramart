@@ -1,11 +1,11 @@
 // =============================================================
 // /api/admin/jadwal/slot/[slotId]
 //
-// GET  → Info detail slot (siapa yang menempati, dll)
+// GET → Info detail slot (siapa yang menempati, dll)
 // PATCH → Admin kelola slot:
-//   action: 'free'     → bebaskan slot (set employee_id = NULL)
-//   action: 'reassign' → pindahkan ke karyawan lain
-//   action: 'swap'     → tukar slot antara dua karyawan
+// action: 'free' → bebaskan slot (set employee_id = NULL)
+// action: 'reassign' → pindahkan ke karyawan lain
+// action: 'swap' → tukar slot antara dua karyawan
 //
 // AUTH: Admin only (requireAdmin)
 // =============================================================
@@ -33,17 +33,17 @@ export async function GET(
 
   const slot = await db
     .select({
-      id:              shiftSchedules.id,
-      dayOfWeek:       shiftSchedules.dayOfWeek,
-      slotStart:       shiftSchedules.slotStart,
-      slotEnd:         shiftSchedules.slotEnd,
-      orderInSlot:     shiftSchedules.orderInSlot,
+      id: shiftSchedules.id,
+      dayOfWeek: shiftSchedules.dayOfWeek,
+      slotStart: shiftSchedules.slotStart,
+      slotEnd: shiftSchedules.slotEnd,
+      orderInSlot: shiftSchedules.orderInSlot,
       coordinatorName: shiftSchedules.coordinatorName,
-      isActive:        shiftSchedules.isActive,
-      employeeId:      shiftSchedules.employeeId,
-      employeeName:    employees.fullName,
-      employeeNim:     employees.nim,
-      employeeProdi:   employees.programStudi,
+      isActive: shiftSchedules.isActive,
+      employeeId: shiftSchedules.employeeId,
+      employeeName: employees.fullName,
+      employeeNim: employees.nim,
+      employeeProdi: employees.programStudi,
     })
     .from(shiftSchedules)
     .leftJoin(employees, eq(shiftSchedules.employeeId, employees.id))
@@ -72,7 +72,7 @@ const patchSchema = z.discriminatedUnion('action', [
     newEmployeeId: z.string().uuid(),
     forceMove: z.boolean().optional(),
   }),
-  // Tukar slot dua karyawan (swap slot A ↔ slot B)
+  // Tukar slot dua karyawan (swap slot A <-> slot B)
   z.object({ action: z.literal('swap'), targetSlotId: z.string().uuid() }),
 ]);
 
@@ -216,7 +216,7 @@ export async function PATCH(
 
         return (
           `Tukar posisi berhasil: ` +
-          `${slot.dayOfWeek} ${slot.slotStart}–${slot.slotEnd} ↔ ` +
+          `${slot.dayOfWeek} ${slot.slotStart}–${slot.slotEnd} <-> ` +
           `${targetSlot.dayOfWeek} ${targetSlot.slotStart}–${targetSlot.slotEnd}`
         );
       }

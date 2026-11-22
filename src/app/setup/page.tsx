@@ -71,7 +71,7 @@ export default function SetupPage() {
 
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: 'var(--space-6)' }}>
-          <div style={{ fontSize: 36, marginBottom: 'var(--space-3)' }}>🏪</div>
+          <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: '0.1em', color: 'var(--color-primary)', marginBottom: 'var(--space-2)' }}>WIRAMART UNPERBA</div>
           <h1 style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', marginBottom: 'var(--space-1)' }}>
             SmartKasir Perwira
           </h1>

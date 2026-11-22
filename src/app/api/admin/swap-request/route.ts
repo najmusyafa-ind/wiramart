@@ -21,6 +21,10 @@ import {
   employees,
 } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import {
+  finalizeExpiredEmptySlotSwaps,
+  SWAP_AUTO_APPROVE_GRACE_MS,
+} from '@/lib/services/swapAutoApprovalService';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +35,9 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (!session || session.role !== 'admin') {
     return apiError('Akses ditolak. Hanya Admin.', 403);
   }
+
+  // Finalisasi otomatis pengajuan pindah ke slot kosong setelah jeda 5 menit
+  await finalizeExpiredEmptySlotSwaps();
 
   const { searchParams } = new URL(req.url);
   const statusFilter = searchParams.get('status') ?? 'PENDING';
@@ -56,7 +63,15 @@ export async function GET(req: NextRequest): Promise<Response> {
     limit: 100,
   });
 
-  return apiOk(requests);
+  const enriched = requests.map((r) => ({
+    ...r,
+    autoApproveGraceUntil:
+      r.status === 'PENDING' && !r.peerEmployeeId
+        ? new Date(r.createdAt.getTime() + SWAP_AUTO_APPROVE_GRACE_MS).toISOString()
+        : null,
+  }));
+
+  return apiOk(enriched);
 }
 
 // ── POST: Admin input swap manual (konfirmasi WA) ─────────────

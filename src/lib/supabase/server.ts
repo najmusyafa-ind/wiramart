@@ -1,10 +1,10 @@
 // =============================================================
 // Supabase Server-Side Client — Smartkasir Perwira
 //
-// ⚠️  SECURITY: Klien ini menggunakan SERVICE_ROLE_KEY.
-//    → WAJIB hanya dipakai di server-side (route handlers, server actions).
-//    → JANGAN import file ini di komponen 'use client'.
-//    → Service role key bypass semua RLS — jangan expose ke browser.
+// SECURITY: Klien ini menggunakan SERVICE_ROLE_KEY.
+// → WAJIB hanya dipakai di server-side (route handlers, server actions).
+// → JANGAN import file ini di komponen 'use client'.
+// → Service role key bypass semua RLS — jangan expose ke browser.
 // =============================================================
 
 import { createClient } from '@supabase/supabase-js';

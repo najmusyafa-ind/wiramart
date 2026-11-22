@@ -47,6 +47,12 @@ export type DraftSummaryItem = {
   createdAt: string;
   creatorName: string;
   creatorNim: string;
+  autoChecklist?: {
+    passed: boolean;
+    warnings: string[];
+    graceUntil: string | null;
+    remainingSeconds: number;
+  } | null;
 };
 
 export type DraftItemDetail = {
@@ -751,7 +757,7 @@ export default function PenerimaanBarangSection({
 
   // ── Ajukan Draft Langsung dari List / Modal Detail ────────────
   async function handleDirectSubmit(draftId: string) {
-    if (!confirm('Yakin ingin mengajukan penerimaan barang ini ke Manager untuk disetujui?')) {
+    if (!confirm('Ajukan penerimaan barang ini? Jika lolos Auto-Checklist, stok akan otomatis masuk setelah jeda 5 menit.')) {
       return;
     }
     try {
@@ -761,8 +767,34 @@ export default function PenerimaanBarangSection({
         alert(json.error ?? 'Gagal mengajukan penerimaan barang.');
         return;
       }
-      alert('Penerimaan barang berhasil diajukan ke Manager!');
+      const checklist = json.data?.autoChecklist;
+      if (checklist?.passed) {
+        alert('Pengajuan diterima dan lolos Auto-Checklist. Stok otomatis masuk dalam 5 menit jika tidak ditarik atau ditolak.');
+      } else if (checklist?.warnings?.length) {
+        alert(`Pengajuan dikirim, tetapi perlu cek manual Admin Shift/Manager: ${checklist.warnings[0]}`);
+      } else {
+        alert('Penerimaan barang berhasil diajukan.');
+      }
       setViewingDraftId(null);
+      fetchDrafts(statusFilter);
+    } catch {
+      alert('Gagal menghubungi server.');
+    }
+  }
+
+  // ── Tarik Kembali Draft Saat Jeda 5 Menit ────────────────────
+  async function handlePullBackDraft(draftId: string) {
+    if (!confirm('Tarik kembali pengajuan ini ke status Draft untuk diperbaiki?')) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/gudang/penerimaan/${draftId}/tarik`, { method: 'POST' });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        alert(json.error ?? 'Gagal menarik draft.');
+        return;
+      }
+      alert(json.data?.message ?? 'Draft berhasil ditarik kembali.');
       fetchDrafts(statusFilter);
     } catch {
       alert('Gagal menghubungi server.');
@@ -1096,7 +1128,7 @@ export default function PenerimaanBarangSection({
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
             <div>
               <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>
-                📊 Buku Arsip Nota Supplier (Format Tabel Lengkap)
+                Buku Arsip Nota Supplier (Tabel Lengkap)
               </h3>
               <p style={{ margin: '2px 0 0 0', fontSize: '0.76rem', color: '#64748b' }}>
                 Menampilkan rincian Tanggal Faktur, No. Faktur, Foto Nota, Supplier, Nama Barang, Qty, Harga, Jumlah, & Expired.
@@ -1414,16 +1446,39 @@ export default function PenerimaanBarangSection({
                 </div>
               </div>
 
-              {/* Banner Catatan Manager jika ada (Revisi / Tolak) */}
+              {/* Status Auto-Checklist Jeda 5 Menit saat SUBMITTED */}
+              {d.status === 'SUBMITTED' && d.autoChecklist && (
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    background: d.autoChecklist.passed ? '#f0f9ff' : '#fffbeb',
+                    border: d.autoChecklist.passed ? '1px solid #bae6fd' : '1px solid #fcd34d',
+                    fontSize: '0.78rem',
+                    color: d.autoChecklist.passed ? '#0369a1' : '#b45309',
+                    fontWeight: 700,
+                  }}
+                >
+                  {d.autoChecklist.passed
+                    ? `Lolos Auto-Checklist · Stok otomatis masuk setelah jeda 5 menit${
+                        d.autoChecklist.graceUntil
+                          ? ` (pukul ${new Date(d.autoChecklist.graceUntil).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false })} WIB)`
+                          : ''
+                      }.`
+                    : `Perlu Cek Manual Admin Shift/Manager: ${d.autoChecklist.warnings.join(' | ')}`}
+                </div>
+              )}
+
+              {/* Banner Catatan jika ada */}
               {d.managerNote && (
                 <div
                   style={{
                     padding: '8px 12px',
                     borderRadius: 8,
-                    background: d.status === 'REVISED' ? '#fff7ed' : '#fef2f2',
-                    border: d.status === 'REVISED' ? '1px solid #fed7aa' : '1px solid #fecaca',
+                    background: d.status === 'APPROVED' ? '#f0fdf4' : d.status === 'REVISED' ? '#fff7ed' : '#fef2f2',
+                    border: d.status === 'APPROVED' ? '1px solid #bbf7d0' : d.status === 'REVISED' ? '1px solid #fed7aa' : '1px solid #fecaca',
                     fontSize: '0.8rem',
-                    color: d.status === 'REVISED' ? '#c2410c' : '#b91c1c',
+                    color: d.status === 'APPROVED' ? '#166534' : d.status === 'REVISED' ? '#c2410c' : '#b91c1c',
                     display: 'flex',
                     alignItems: 'flex-start',
                     gap: 8,
@@ -1431,7 +1486,7 @@ export default function PenerimaanBarangSection({
                 >
                   <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
                   <div>
-                    <strong>Catatan Manager: </strong>
+                    <strong>Catatan: </strong>
                     <span>{d.managerNote}</span>
                   </div>
                 </div>
@@ -1469,6 +1524,29 @@ export default function PenerimaanBarangSection({
                 >
                   <Eye size={14} /> Rincian Item
                 </button>
+
+                {d.status === 'SUBMITTED' && (
+                  <button
+                    type="button"
+                    onClick={() => handlePullBackDraft(d.id)}
+                    style={{
+                      minHeight: 44,
+                      padding: '8px 14px',
+                      borderRadius: 8,
+                      border: '1px solid #f59e0b',
+                      background: '#fffbeb',
+                      color: '#b45309',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <Edit3 size={14} /> Tarik ke Draft
+                  </button>
+                )}
 
                 {(d.status === 'DRAFT' || d.status === 'REVISED') && (
                   <>
@@ -1512,7 +1590,7 @@ export default function PenerimaanBarangSection({
                         boxShadow: '0 1px 3px rgba(2, 132, 199, 0.3)',
                       }}
                     >
-                      <Send size={14} /> Ajukan ke Manager
+                      <Send size={14} /> Ajukan (Auto-ACC 5m)
                     </button>
                   </>
                 )}
@@ -1554,7 +1632,7 @@ export default function PenerimaanBarangSection({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
               <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#0f172a' }}>
-                📷 Foto Fisik Nota: {previewPhotoTitle}
+                Foto Fisik Nota: {previewPhotoTitle}
               </h4>
               <button
                 type="button"
@@ -2030,7 +2108,7 @@ export default function PenerimaanBarangSection({
                     }}
                   />
                   <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>
-                    ✅ Foto nota siap disimpan. Anda bisa membaca angka di foto ini sambil mengecek tabel di bawah.
+                    Foto nota siap disimpan. Anda bisa membaca angka di foto ini sambil mengecek tabel di bawah.
                   </span>
                 </div>
               )}

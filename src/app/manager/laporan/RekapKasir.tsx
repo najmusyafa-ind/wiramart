@@ -1007,8 +1007,8 @@ export default function RekapKasir() {
                         <th style={{ textAlign: 'center' }}>Jam Kerja</th>
                         <th style={{ textAlign: 'right' }}>Shift</th>
                         <th style={{ textAlign: 'right' }}>Total Omzet</th>
-                        <th style={{ textAlign: 'right', color: '#16a34a' }}>💵 Cash</th>
-                        <th style={{ textAlign: 'right', color: '#7c3aed' }}>📱 QRIS</th>
+                        <th style={{ textAlign: 'right', color: '#16a34a' }}>Cash</th>
+                        <th style={{ textAlign: 'right', color: '#7c3aed' }}>QRIS</th>
                         <th style={{ textAlign: 'right' }}>Rata-rata/Shift</th>
                         <th style={{ textAlign: 'right' }}>Laba Kotor</th>
                         <th style={{ textAlign: 'right' }}>Trx</th>
@@ -1053,7 +1053,7 @@ export default function RekapKasir() {
                               </label>
                             </td>
                             <td style={{ textAlign: 'center', color: isTop ? '#f59e0b' : '#9ca3af', fontWeight: 700 }}>
-                              {isTop ? '🏆' : i + 1}
+                              {isTop ? '' : i + 1}
                             </td>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: isTop ? '#166534' : 'inherit' }}>
@@ -1098,7 +1098,7 @@ export default function RekapKasir() {
                                 )}
                                 {l.kuning > 0 && (
                                   <span title={`${l.kuning} shift selisih kecil`} style={{ ...TS.KUNING, padding: '2px 7px', borderRadius: 999, fontSize: '0.68rem', fontWeight: 700, border: `1px solid ${TS.KUNING.border}` }}>
-                                    ⚠ {l.kuning}
+                                    {l.kuning}
                                   </span>
                                 )}
                                 {l.merah > 0 && (
@@ -1268,7 +1268,7 @@ export default function RekapKasir() {
                               </label>
                             </td>
                             <td style={{ fontWeight: 700, color: isPeak ? '#166534' : 'inherit' }}>
-                              {h.label} {isPeak && '🔥'}
+                              {h.label} {isPeak && ''}
                             </td>
                             <td style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>{h.activeKasirCount}</td>
                             <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{h.txCount.toLocaleString('id-ID')}</td>
@@ -1382,7 +1382,7 @@ function ShiftModal({ kasir, shifts, onClose }: { kasir: KasirSummary; shifts: S
         <div style={{ background: 'linear-gradient(135deg,#1e3a5f,#1e40af)', padding: '16px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexShrink: 0 }}>
           <div>
             <h2 id={`${uid}-t`} style={{ color: '#fff', fontSize: '1.05rem', fontWeight: 700, margin: 0 }}>
-              📋 Detail Partisipasi Shift — {kasir.kasirName}
+              Detail Partisipasi Shift — {kasir.kasirName}
             </h2>
             <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: '0.78rem', margin: '4px 0 0' }}>
               NIM {kasir.kasirNim} · {kasir.jabatan} · {myS.length} shift
@@ -1502,7 +1502,7 @@ function ShiftModal({ kasir, shifts, onClose }: { kasir: KasirSummary; shifts: S
                             border: `1px solid ${ts.border}`,
                           }}
                         >
-                          {s.status === 'ACTIVE' ? '🟢 Aktif' : s.statusLaci}
+                          {s.status === 'ACTIVE' ? 'Aktif' : s.statusLaci}
                         </span>
                       </td>
                     </tr>

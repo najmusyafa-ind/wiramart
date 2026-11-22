@@ -20,10 +20,19 @@ import {
   type StockReceiveDraft,
   type ExpiryClass,
 } from '@/lib/db/schema';
-import { eq, and, desc, isNull, inArray, sql, count } from 'drizzle-orm';
+import { eq, and, desc, isNull, inArray, sql, count, lte } from 'drizzle-orm';
 import { AppError, getTodayWib } from '@/lib/utils/helpers';
-import { ManagerDutyService } from '@/lib/services/managerDutyService';
 import { resolveNormalizedSupplierId } from '@/lib/services/supplierResolver';
+
+export const GUDANG_AUTO_APPROVE_GRACE_MS = 5 * 60 * 1000;
+const MAX_AUTO_APPROVE_INVOICE_TOTAL = 20_000_000;
+
+export type StockReceiveAutoChecklist = {
+  passed: boolean;
+  warnings: string[];
+  graceUntil: string | null;
+  remainingSeconds: number;
+};
 
 
 // ── ZOD SCHEMAS (100% Runtime Validation) ──────────────────────
@@ -661,49 +670,231 @@ export async function submitStockReceiveDraft(
     }
   }
 
+  const now = new Date();
   const [updated] = await db
     .update(stockReceiveDrafts)
     .set({
       status: 'SUBMITTED',
-      submittedAt: new Date(),
-      updatedAt: new Date(),
+      submittedAt: now,
+      managerNote: null,
+      updatedAt: now,
     })
     .where(eq(stockReceiveDrafts.id, draftId))
     .returning();
 
-  return updated;
+  const checklist = await evaluateStockReceiveAutoChecklist(draftId, now);
+  return {
+    ...updated,
+    autoChecklist: checklist,
+  };
 }
 
 // =============================================================
-// 4. MANAGER ONLY: Approve Penerimaan Barang (ACID 2-Layer Approval)
+// 3b. GUDANG / ADMIN: Tarik Kembali Draft Saat Jeda 5 Menit (SUBMITTED -> DRAFT)
+// =============================================================
+
+export async function cancelSubmittedStockReceiveDraft(
+  draftId: string,
+  actorId: string,
+  actorRole: 'employee' | 'admin' = 'employee',
+) {
+  const { employeeId, isAdminActor } = await resolveCreatorEmployeeId(actorId, actorRole);
+
+  const [existing] = await db
+    .select()
+    .from(stockReceiveDrafts)
+    .where(and(eq(stockReceiveDrafts.id, draftId), isNull(stockReceiveDrafts.deletedAt)))
+    .limit(1);
+
+  if (!existing) {
+    throw new AppError('NOT_FOUND', 'Draft penerimaan barang tidak ditemukan.', 404);
+  }
+  if (!isAdminActor && existing.createdByEmployeeId !== employeeId) {
+    throw new AppError('FORBIDDEN', 'Hanya pembuat draft atau Admin Shift yang dapat menarik draft ini.', 403);
+  }
+  if (existing.status !== 'SUBMITTED') {
+    throw new AppError('BAD_REQUEST', `Draft tidak bisa ditarik karena sudah berstatus ${existing.status}.`, 400);
+  }
+
+  const now = new Date();
+  const [reverted] = await db
+    .update(stockReceiveDrafts)
+    .set({
+      status: 'DRAFT',
+      submittedAt: null,
+      managerNote: 'Ditarik kembali ke draft sebelum jeda 5 menit selesai',
+      updatedAt: now,
+    })
+    .where(and(eq(stockReceiveDrafts.id, draftId), eq(stockReceiveDrafts.status, 'SUBMITTED')))
+    .returning();
+
+  if (!reverted) {
+    throw new AppError('CONFLICT', 'Draft sudah diproses otomatis atau disetujui sebelumnya.', 409);
+  }
+  return reverted;
+}
+
+// =============================================================
+// 3c. AUTO-CHECKLIST & LAZY FINALIZER JEDA 5 MENIT (ZERO CRON)
+// =============================================================
+
+export async function evaluateStockReceiveAutoChecklist(
+  draftId: string,
+  submittedAtOverride?: Date | null,
+): Promise<StockReceiveAutoChecklist> {
+  const [draft] = await db
+    .select({
+      id: stockReceiveDrafts.id,
+      status: stockReceiveDrafts.status,
+      submittedAt: stockReceiveDrafts.submittedAt,
+    })
+    .from(stockReceiveDrafts)
+    .where(and(eq(stockReceiveDrafts.id, draftId), isNull(stockReceiveDrafts.deletedAt)))
+    .limit(1);
+
+  const subAt = submittedAtOverride ?? draft?.submittedAt ?? null;
+  const graceUntilDate = subAt ? new Date(subAt.getTime() + GUDANG_AUTO_APPROVE_GRACE_MS) : null;
+  const remainingSeconds = graceUntilDate
+    ? Math.max(0, Math.ceil((graceUntilDate.getTime() - Date.now()) / 1000))
+    : 0;
+
+  const rows = await db
+    .select({
+      qty: stockReceiveItems.qty,
+      costPrice: stockReceiveItems.costPrice,
+      expiryDate: stockReceiveItems.expiryDate,
+      batchCode: stockReceiveItems.batchCode,
+      productName: products.name,
+      sellingPrice: products.sellingPrice,
+      isActive: products.isActive,
+      deletedAt: products.deletedAt,
+    })
+    .from(stockReceiveItems)
+    .innerJoin(products, eq(stockReceiveItems.productId, products.id))
+    .where(eq(stockReceiveItems.draftId, draftId));
+
+  const warnings: string[] = [];
+  if (rows.length === 0) {
+    warnings.push('Daftar item penerimaan kosong.');
+  }
+
+  const todayStr = getTodayWib();
+  let totalNota = 0;
+
+  for (const row of rows) {
+    const cost = Number(row.costPrice ?? 0);
+    const sell = Number(row.sellingPrice ?? 0);
+    if (row.deletedAt) {
+      warnings.push(`Produk "${row.productName}" sudah dihapus.`);
+    }
+    if (row.qty <= 0) {
+      warnings.push(`Qty "${row.productName}" tidak valid (${row.qty}).`);
+    }
+    if (row.expiryDate && row.expiryDate < todayStr) {
+      warnings.push(`Batch ${row.batchCode} ("${row.productName}") sudah kedaluwarsa (${row.expiryDate}).`);
+    }
+    if (cost < 0 || Number.isNaN(cost)) {
+      warnings.push(`HPP "${row.productName}" tidak valid.`);
+    } else if (sell <= 0 || cost >= sell) {
+      warnings.push(
+        `Margin "${row.productName}" tidak sehat (HPP Rp ${Math.round(cost).toLocaleString('id-ID')} >= Jual Rp ${Math.round(sell).toLocaleString('id-ID')}).`,
+      );
+    }
+    totalNota += row.qty * Math.max(0, cost);
+  }
+
+  if (totalNota > MAX_AUTO_APPROVE_INVOICE_TOTAL) {
+    warnings.push(
+      `Total nilai nota Rp ${Math.round(totalNota).toLocaleString('id-ID')} melebihi batas auto-approve Rp 20.000.000.`,
+    );
+  }
+
+  return {
+    passed: warnings.length === 0,
+    warnings,
+    graceUntil: graceUntilDate ? graceUntilDate.toISOString() : null,
+    remainingSeconds,
+  };
+}
+
+export async function finalizeExpiredGudangDrafts(): Promise<number> {
+  const cutoff = new Date(Date.now() - GUDANG_AUTO_APPROVE_GRACE_MS);
+
+  const expiredDrafts = await db
+    .select({
+      id: stockReceiveDrafts.id,
+      receiveNumber: stockReceiveDrafts.receiveNumber,
+      submittedAt: stockReceiveDrafts.submittedAt,
+      managerNote: stockReceiveDrafts.managerNote,
+    })
+    .from(stockReceiveDrafts)
+    .where(
+      and(
+        eq(stockReceiveDrafts.status, 'SUBMITTED'),
+        isNull(stockReceiveDrafts.deletedAt),
+        lte(stockReceiveDrafts.submittedAt, cutoff),
+      ),
+    )
+    .limit(15);
+
+  if (expiredDrafts.length === 0) return 0;
+
+  const [systemAdmin] = await db
+    .select({ id: admins.id })
+    .from(admins)
+    .where(and(eq(admins.isActive, true), isNull(admins.deletedAt)))
+    .orderBy(desc(sql`CASE WHEN ${admins.role} = 'MANAGER' THEN 1 ELSE 0 END`), admins.createdAt)
+    .limit(1);
+
+  if (!systemAdmin) return 0;
+
+  let finalized = 0;
+  for (const d of expiredDrafts) {
+    try {
+      const check = await evaluateStockReceiveAutoChecklist(d.id, d.submittedAt);
+      if (check.passed) {
+        await approveStockReceiveDraft(d.id, systemAdmin.id, undefined, { autoApproved5m: true });
+        finalized += 1;
+      } else if (!d.managerNote?.startsWith('[PERLU CEK MANUAL]')) {
+        await db
+          .update(stockReceiveDrafts)
+          .set({
+            managerNote: `[PERLU CEK MANUAL] ${check.warnings.slice(0, 2).join(' ')}`,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(stockReceiveDrafts.id, d.id), eq(stockReceiveDrafts.status, 'SUBMITTED')));
+      }
+    } catch (err) {
+      console.error(`[finalizeExpiredGudangDrafts] skip ${d.receiveNumber}:`, err);
+    }
+  }
+  return finalized;
+}
+
+// =============================================================
+// 4. ADMIN SHIFT / MANAGER / AUTO-5M: Approve Penerimaan Barang (ACID)
 // =============================================================
 
 export async function approveStockReceiveDraft(
   draftId: string,
-  managerAdminId: string,
+  reviewerAdminId: string,
   priceOverrides?: ApprovePriceOverrideItem[],
+  options?: { autoApproved5m?: boolean },
 ) {
-  // Verifikasi Manager
-  const [manager] = await db
+  const isAuto = Boolean(options?.autoApproved5m);
+
+  // Verifikasi Admin (baik MANAGER maupun ADMIN_SHIFT berwenang menyetujui)
+  const [reviewer] = await db
     .select({ id: admins.id, role: admins.role, fullName: admins.fullName })
     .from(admins)
-    .where(and(eq(admins.id, managerAdminId), eq(admins.isActive, true), isNull(admins.deletedAt)))
+    .where(and(eq(admins.id, reviewerAdminId), eq(admins.isActive, true), isNull(admins.deletedAt)))
     .limit(1);
 
-  if (!manager || manager.role !== 'MANAGER') {
-    throw new AppError('FORBIDDEN', 'Hanya Manager (Dosen/Eksekutif) yang berwenang menyetujui penerimaan barang.', 403);
+  if (!reviewer || (reviewer.role !== 'MANAGER' && reviewer.role !== 'ADMIN_SHIFT')) {
+    throw new AppError('FORBIDDEN', 'Hanya Admin Shift atau Manager yang berwenang menyetujui penerimaan barang.', 403);
   }
 
-  // 0. Guard Check-In Manager on Duty (MOD)
-  // Penerimaan barang wajib disetujui di bawah pengawasan Manager on Duty yang aktif hari ini
-  const todayDuty = await ManagerDutyService.getTodayDutyStatus();
-  if (!todayDuty.isCheckedIn || todayDuty.isCheckedOut) {
-    throw new AppError(
-      'FORBIDDEN',
-      'ACC belum dapat dilakukan karena belum ada Manager yang memulai Sesi Kerja Hari Ini. Silakan mulai sesi kerja terlebih dahulu melalui tombol di header.',
-      403,
-    );
-  }
+  const approverLabel = isAuto ? 'Auto-Checklist 5 Menit' : reviewer.fullName;
 
   const overrideMap = new Map<string, ApprovePriceOverrideItem>();
   if (priceOverrides) {
@@ -798,7 +989,6 @@ export async function approveStockReceiveDraft(
       const qtyBefore = lockedProd.stockQty;
       const qtyAfter = qtyBefore + item.qty;
 
-      // Insert baris batch baru terhubung ke receive_item_id & supplier_id (3NF)
       const [insertedBatch] = await tx
         .insert(stockBatches)
         .values({
@@ -811,11 +1001,10 @@ export async function approveStockReceiveDraft(
           currentQty: item.qty,
           expiryDate: item.expiryDate || todayStr,
           expiryClass: expClass,
-          notes: `Penerimaan #${draft.receiveNumber} disetujui oleh ${manager.fullName}`,
+          notes: `Penerimaan #${draft.receiveNumber} disetujui oleh ${approverLabel}`,
         })
         .returning({ id: stockBatches.id });
 
-      // Update total stok produk di tabel master (+ aktifkan jika usulan produk baru & terapkan override harga)
       await tx
         .update(products)
         .set({
@@ -831,20 +1020,20 @@ export async function approveStockReceiveDraft(
         })
         .where(eq(products.id, item.productId));
 
-      // Catat ke stock_adjustments agar tampil di Riwayat Penambahan Stok Gudang & Laporan Mutasi Stok
       const creatorLabel = creatorEmp
         ? `${creatorEmp.fullName} (NIM ${creatorEmp.nim})`
         : 'Petugas Gudang';
       const expText = item.expiryDate ? ` Exp: ${item.expiryDate}` : '';
       const newProdTag = wasPendingNewProduct ? ' [PRODUK BARU DIAKTIFKAN]' : '';
+      const autoTag = isAuto ? ' [AUTO-ACC 5 MENIT]' : '';
       await tx.insert(stockAdjustments).values({
         productId: item.productId,
         batchId: insertedBatch?.id ?? null,
         qtyBefore,
         qtyAfter,
         qtyDiff: item.qty,
-        reason: `[RESTOCK GUDANG • PENERIMAAN ACC #${draft.receiveNumber}${newProdTag} • Petugas: ${creatorLabel} • Disetujui: ${manager.fullName}] Masuk +${item.qty} ${lockedProd.unit} (Batch: ${item.batchCode}${expText}).`,
-        adjustedByAdminId: manager.id,
+        reason: `[RESTOCK GUDANG • PENERIMAAN ACC #${draft.receiveNumber}${autoTag}${newProdTag} • Petugas: ${creatorLabel} • Disetujui: ${approverLabel}] Masuk +${item.qty} ${lockedProd.unit} (Batch: ${item.batchCode}${expText}).`,
+        adjustedByAdminId: reviewer.id,
         createdAt: now,
       });
     }
@@ -854,8 +1043,11 @@ export async function approveStockReceiveDraft(
       .update(stockReceiveDrafts)
       .set({
         status: 'APPROVED',
-        approvedByAdminId: manager.id,
+        approvedByAdminId: reviewer.id,
         approvedAt: now,
+        managerNote: isAuto
+          ? 'Disetujui otomatis (lolos Auto-Checklist + jeda 5 menit)'
+          : draft.managerNote,
         updatedAt: now,
       })
       .where(eq(stockReceiveDrafts.id, draftId))
@@ -869,13 +1061,15 @@ export async function approveStockReceiveDraft(
       oldValues: JSON.stringify({ status: 'SUBMITTED' }),
       newValues: JSON.stringify({
         status: 'APPROVED',
-        approvedByAdminId: manager.id,
+        tag: isAuto ? 'AUTO_APPROVED_5M' : 'MANUAL_APPROVED',
+        approvedByAdminId: reviewer.id,
+        approverRole: reviewer.role,
         receiveNumber: draft.receiveNumber,
         itemCount: items.length,
         activatedNewProductsCount,
       }),
-      actorType: 'ADMIN',
-      actorId: manager.id,
+      actorType: isAuto ? 'SYSTEM' : 'ADMIN',
+      actorId: reviewer.id,
     });
 
     return approvedDraft;
@@ -883,24 +1077,24 @@ export async function approveStockReceiveDraft(
 }
 
 // =============================================================
-// 5. MANAGER ONLY: Minta Revisi Draft
+// 5. ADMIN SHIFT / MANAGER: Minta Revisi Draft
 // =============================================================
 
 export async function reviseStockReceiveDraft(
   draftId: string,
-  managerAdminId: string,
+  reviewerAdminId: string,
   rawCatatan: z.infer<typeof ManagerRevisiSchema>,
 ) {
   const { catatan } = ManagerRevisiSchema.parse(rawCatatan);
 
-  const [manager] = await db
+  const [reviewer] = await db
     .select({ id: admins.id, role: admins.role })
     .from(admins)
-    .where(and(eq(admins.id, managerAdminId), eq(admins.isActive, true), isNull(admins.deletedAt)))
+    .where(and(eq(admins.id, reviewerAdminId), eq(admins.isActive, true), isNull(admins.deletedAt)))
     .limit(1);
 
-  if (!manager || manager.role !== 'MANAGER') {
-    throw new AppError('FORBIDDEN', 'Hanya Manager yang berwenang meminta revisi penerimaan barang.', 403);
+  if (!reviewer || (reviewer.role !== 'MANAGER' && reviewer.role !== 'ADMIN_SHIFT')) {
+    throw new AppError('FORBIDDEN', 'Hanya Admin Shift atau Manager yang berwenang meminta revisi penerimaan barang.', 403);
   }
 
   const [draft] = await db
@@ -922,7 +1116,7 @@ export async function reviseStockReceiveDraft(
     .set({
       status: 'REVISED',
       managerNote: catatan,
-      rejectedByAdminId: manager.id,
+      rejectedByAdminId: reviewer.id,
       updatedAt: new Date(),
     })
     .where(eq(stockReceiveDrafts.id, draftId))
@@ -932,24 +1126,24 @@ export async function reviseStockReceiveDraft(
 }
 
 // =============================================================
-// 6. MANAGER ONLY: Tolak Draft Penerimaan Barang
+// 6. ADMIN SHIFT / MANAGER: Tolak Draft Penerimaan Barang
 // =============================================================
 
 export async function rejectStockReceiveDraft(
   draftId: string,
-  managerAdminId: string,
+  reviewerAdminId: string,
   rawAlasan: z.infer<typeof ManagerTolakSchema>,
 ) {
   const { alasan } = ManagerTolakSchema.parse(rawAlasan);
 
-  const [manager] = await db
+  const [reviewer] = await db
     .select({ id: admins.id, role: admins.role })
     .from(admins)
-    .where(and(eq(admins.id, managerAdminId), eq(admins.isActive, true), isNull(admins.deletedAt)))
+    .where(and(eq(admins.id, reviewerAdminId), eq(admins.isActive, true), isNull(admins.deletedAt)))
     .limit(1);
 
-  if (!manager || manager.role !== 'MANAGER') {
-    throw new AppError('FORBIDDEN', 'Hanya Manager yang berwenang menolak penerimaan barang.', 403);
+  if (!reviewer || (reviewer.role !== 'MANAGER' && reviewer.role !== 'ADMIN_SHIFT')) {
+    throw new AppError('FORBIDDEN', 'Hanya Admin Shift atau Manager yang berwenang menolak penerimaan barang.', 403);
   }
 
   const [draft] = await db
@@ -973,7 +1167,7 @@ export async function rejectStockReceiveDraft(
       .set({
         status: 'REJECTED',
         managerNote: alasan,
-        rejectedByAdminId: manager.id,
+        rejectedByAdminId: reviewer.id,
         rejectedAt: now,
         updatedAt: now,
       })
@@ -1019,6 +1213,9 @@ export async function getStockReceiveDrafts(options: {
   page?: number;
   limit?: number;
 }) {
+  // Finalisasi otomatis draft yang sudah melewati jeda 5 menit & lolos Auto-Checklist
+  await finalizeExpiredGudangDrafts();
+
   const { employeeId, status, page = 1, limit = 20 } = options;
   const offset = (Math.max(1, page) - 1) * limit;
 
@@ -1064,8 +1261,18 @@ export async function getStockReceiveDrafts(options: {
     .limit(limit)
     .offset(offset);
 
+  const enriched = await Promise.all(
+    rows.map(async (r) => ({
+      ...r,
+      autoChecklist:
+        r.status === 'SUBMITTED'
+          ? await evaluateStockReceiveAutoChecklist(r.id, r.submittedAt)
+          : null,
+    })),
+  );
+
   return {
-    items: rows,
+    items: enriched,
     total: Number(totalRow?.count ?? 0),
     page,
     limit,
@@ -1081,6 +1288,7 @@ export async function getStockReceiveDraftDetail(
   draftId: string,
   requesterEmployeeId?: string,
 ) {
+  await finalizeExpiredGudangDrafts();
   const [draft] = await db
     .select({
       id: stockReceiveDrafts.id,
@@ -1142,8 +1350,14 @@ export async function getStockReceiveDraftDetail(
     .where(eq(stockReceiveItems.draftId, draftId))
     .orderBy(stockReceiveItems.createdAt);
 
+  const autoChecklist =
+    draft.status === 'SUBMITTED'
+      ? await evaluateStockReceiveAutoChecklist(draft.id, draft.submittedAt)
+      : null;
+
   return {
     ...draft,
+    autoChecklist,
     items,
   };
 }
@@ -1178,6 +1392,7 @@ export async function getSupplierInvoiceTableRows(options: {
   status?: string;
   limit?: number;
 }): Promise<SupplierInvoiceTableRowDTO[]> {
+  await finalizeExpiredGudangDrafts();
   const { employeeId, status, limit = 150 } = options;
   const conditions = [isNull(stockReceiveDrafts.deletedAt)];
 

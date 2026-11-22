@@ -132,8 +132,8 @@ export type PinVerifyInput = z.infer<typeof PinVerifySchema>;
  *
  * Kebijakan ongkir (= insentif runner):
  * - PICKUP / Lantai 1 : Rp 0
- * - Lantai 2          : Rp 1.000
- * - Lantai 3, 4, Aud  : Rp 2.000
+ * - Lantai 2 : Rp 1.000
+ * - Lantai 3, 4, Aud : Rp 2.000
  */
 const DELIVERY_FEE_MAP: Record<number, number> = {
   1: 0,
@@ -190,26 +190,26 @@ export function generateHandoverPin(): string {
 
 export const WA = {
   ORDER_CREATED: (name: string, no: string, total: number): string =>
-    `Halo ${name}! 🎉\n\nPesanan *#${no}* diterima!\n` +
+    `Halo ${name}!\n\nPesanan *#${no}* diterima!\n` +
     `Total: *Rp ${total.toLocaleString('id-ID')}*\n\n` +
     `Selesaikan pembayaran dalam 2 jam ya.\n\n_Wiramart UNPERBA_`,
 
   ORDER_CONFIRMED: (no: string, pin: string): string =>
-    `Pesanan *#${no}* dikonfirmasi! ✅\n\n` +
+    `Pesanan *#${no}* dikonfirmasi!\n\n` +
     `Sedang kami siapkan.\n\n` +
-    `🔐 *PIN Serah Terima: ${pin}*\n` +
+    `*PIN Serah Terima: ${pin}*\n` +
     `Tunjukkan PIN ini ke runner saat barang tiba.\n\n_Wiramart UNPERBA_`,
 
   PREPARING: (no: string): string =>
-    `Pesanan *#${no}* sedang disiapkan oleh tim kami. 📦\n\n_Wiramart UNPERBA_`,
+    `Pesanan *#${no}* sedang disiapkan oleh tim kami.\n\n_Wiramart UNPERBA_`,
 
   OUT_FOR_DELIVERY: (no: string, csName: string, floor: number | string, room: string): string =>
-    `Pesanan *#${no}* sedang diantar! 🏃\n\n` +
+    `Pesanan *#${no}* sedang diantar!\n\n` +
     `*${csName}* sedang naik ke *Lantai ${floor} — ${room}*.\n` +
     `Siapkan PIN kamu!\n\n_Wiramart UNPERBA_`,
 
   ORDER_COMPLETED: (no: string): string =>
-    `Pesanan *#${no}* selesai! 😊\n\n` +
+    `Pesanan *#${no}* selesai!\n\n` +
     `Terima kasih sudah pesan di Wiramart UNPERBA!\n\n_Wiramart UNPERBA_`,
 
   ORDER_CANCELLED: (no: string, reason: string): string =>
@@ -223,7 +223,7 @@ export const WA = {
     `Silakan pesan kembali dengan bukti pembayaran yang valid.\n\n_Wiramart UNPERBA_`,
 
   NO_SHOW_WARNING: (no: string, floor: number | string, room: string, count: number): string =>
-    `⚠️ Runner Wiramart menunggu di *Lantai ${floor} — ${room}*.\n\n` +
+    `Runner Wiramart menunggu di *Lantai ${floor} — ${room}*.\n\n` +
     `Order: *#${no}* (peringatan ${count}/2)\n` +
     `Segera ke lokasi dalam 5 menit ya!\n\n_Wiramart UNPERBA_`,
 
@@ -234,14 +234,14 @@ export const WA = {
 
   // Notif untuk admin shift
   NEW_ORDER_ADMIN: (no: string, buyer: string, total: number, method: string): string =>
-    `🛒 *[Pesanan Baru]* #${no}\n` +
+    `*[Pesanan Baru]* #${no}\n` +
     `Dari: ${buyer}\n` +
     `Total: Rp ${total.toLocaleString('id-ID')} | ${method}\n` +
     `Segera konfirmasi di dashboard.`,
 
   // Notif untuk CS yang di-assign
   CS_ASSIGNED: (no: string, buyer: string, floor: number | string, room: string, note?: string): string =>
-    `📦 *Pesanan baru untuk kamu antar!*\n\n` +
+    `*Pesanan baru untuk kamu antar!*\n\n` +
     `Order: *#${no}*\n` +
     `Ke: *Lantai ${floor} — ${room}*\n` +
     `Pembeli: ${buyer}` +
@@ -250,7 +250,7 @@ export const WA = {
 
   // Notif admin jika no-show 2x
     NO_SHOW_ADMIN_ALERT: (no: string, buyer: string, floor: number | string, room: string): string =>
-    `🚨 *[No-Show 2x]* Order #${no}\n` +
+    `*[No-Show 2x]* Order #${no}\n` +
     `Pembeli: ${buyer}\n` +
     `Lokasi: Lantai ${floor} — ${room}\n` +
     `Runner sudah 2x naik tapi buyer tidak ada. Perlu tindakan cancel.`,

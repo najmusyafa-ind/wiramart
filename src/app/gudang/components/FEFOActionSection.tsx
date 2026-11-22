@@ -579,11 +579,11 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
             }}
           >
             <option value="semua">Semua Status Progres</option>
-            <option value="ALERT_ONLY">⚠️ Belum Dicek Gudang</option>
-            <option value="SUBMITTED">⏳ Menunggu Manager</option>
-            <option value="APPROVED">✅ Disetujui Manager</option>
-            <option value="EXECUTED">🎉 Selesai Dieksekusi</option>
-            <option value="REJECTED">❌ Ditolak Manager</option>
+            <option value="ALERT_ONLY">Belum Dicek Gudang</option>
+            <option value="SUBMITTED">Menunggu Manager</option>
+            <option value="APPROVED">Disetujui Manager</option>
+            <option value="EXECUTED">Selesai Dieksekusi</option>
+            <option value="REJECTED">Ditolak Manager</option>
           </select>
         </div>
       </div>
@@ -703,11 +703,11 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                             : '#991b1b',
                       }}
                     >
-                      {item.status === 'ALERT_ONLY' && '⚠️ Belum Dicek'}
-                      {item.status === 'SUBMITTED' && '⏳ Menunggu ACC Manager'}
-                      {item.status === 'APPROVED' && `✅ Disetujui: ${item.managerDecision}`}
-                      {item.status === 'EXECUTED' && '🎉 Selesai Ditangani'}
-                      {item.status === 'REJECTED' && '❌ Ditolak Manager'}
+                      {item.status === 'ALERT_ONLY' && 'Belum Dicek'}
+                      {item.status === 'SUBMITTED' && 'Menunggu ACC Manager'}
+                      {item.status === 'APPROVED' && `Disetujui: ${item.managerDecision}`}
+                      {item.status === 'EXECUTED' && 'Selesai Ditangani'}
+                      {item.status === 'REJECTED' && 'Ditolak Manager'}
                     </span>
                   </div>
 
@@ -1019,7 +1019,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                   lineHeight: 1.45,
                 }}
               >
-                ⛔ BARANG SUDAH KEDALUWARSA (ED: {laporModalItem.expiryDate}). Dilarang didiskon atau dijual kembali! Pilih <strong>Musnahkan (Write-Off)</strong> atau <strong>Retur ke Supplier</strong> untuk menolkan stok batch ini setelah di-ACC Manager.
+                BARANG SUDAH KEDALUWARSA (ED: {laporModalItem.expiryDate}). Dilarang didiskon atau dijual kembali! Pilih <strong>Musnahkan (Write-Off)</strong> atau <strong>Retur ke Supplier</strong> untuk menolkan stok batch ini setelah di-ACC Manager.
               </div>
             )}
 
@@ -1043,12 +1043,12 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
               >
                 {!(laporModalItem.isExpired || (laporModalItem.expiryDate && laporModalItem.expiryDate < getTodayWibIso())) && (
                   <>
-                    <option value="DISCOUNT">🏷️ Usulkan Diskon Obral Darurat (Diskon Cepat)</option>
-                    <option value="RELOCATE">➡️ Pindahkan ke Rak Display Depan (Dekat Kasir)</option>
+                    <option value="DISCOUNT">Usulkan Diskon Obral Darurat (Diskon Cepat)</option>
+                    <option value="RELOCATE">Pindahkan ke Rak Display Depan (Dekat Kasir)</option>
                   </>
                 )}
-                <option value="DISPOSE">🗑️ Musnahkan / Tarik &amp; Nol-kan Stok (Rusak / Kedaluwarsa)</option>
-                <option value="RETURN">↩️ Retur ke Pihak Supplier (Tarik &amp; Nol-kan Stok)</option>
+                <option value="DISPOSE">Musnahkan / Tarik &amp; Nol-kan Stok (Rusak / Kedaluwarsa)</option>
+                <option value="RETURN">Retur ke Pihak Supplier (Tarik &amp; Nol-kan Stok)</option>
               </select>
             </div>
 
@@ -1205,7 +1205,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                   marginBottom: 6,
                 }}
               >
-                🏷️ OBRAL {printModalItem.approvedDiscountPct}% OFF
+                OBRAL {printModalItem.approvedDiscountPct}% OFF
               </div>
 
               <div className="price-box" style={{ margin: '6px 0' }}>

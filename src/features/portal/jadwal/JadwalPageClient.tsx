@@ -2,10 +2,10 @@
 // =============================================================
 // /admin/jadwal — Halaman Admin: Kelola Slot Jadwal Shift
 // Fitur:
-//   - Lihat semua slot per hari (terisi / kosong)
-//   - Bebaskan slot (free) — karyawan bisa daftar ulang
-//   - Pindah ke karyawan lain (reassign)
-//   - Tukar slot dua karyawan (swap)
+// - Lihat semua slot per hari (terisi / kosong)
+// - Bebaskan slot (free) — karyawan bisa daftar ulang
+// - Pindah ke karyawan lain (reassign)
+// - Tukar slot dua karyawan (swap)
 // =============================================================
 
 import { useState, useEffect, useCallback } from 'react';
@@ -180,9 +180,9 @@ function SlotModal({
     (modal.type === 'swap' && !!targetSlotId);
 
   const titles: Record<NonNullable<ModalState>['type'], string> = {
-    free:     '🔓 Bebaskan Slot',
-    reassign: modal.slot.isFilled ? '👤 Ganti / Pindah Karyawan' : '➕ Tugaskan Karyawan ke Slot Kosong',
-    swap:     '🔄 Tukar / Pindah Slot',
+    free: 'Bebaskan Slot',
+    reassign: modal.slot.isFilled ? 'Ganti / Pindah Karyawan' : 'Tugaskan Karyawan ke Slot Kosong',
+    swap: 'Tukar / Pindah Slot',
   };
 
   return (
@@ -321,7 +321,7 @@ function SlotModal({
                   borderRadius: 'var(--radius-sm)',
                   marginBottom: 'var(--space-2)',
                 }}>
-                  📅 {day.dayOfWeek}
+                  {day.dayOfWeek}
                 </div>
 
                 {day.slots.map(slotGroup => {
@@ -330,8 +330,8 @@ function SlotModal({
 
                   const isPagi = slotGroup.slotStart < '11:00';
                   const shiftLabel = isPagi
-                    ? `🌅 Shift Pagi (${slotGroup.slotStart}–${slotGroup.slotEnd})`
-                    : `☀️ Shift Siang (${slotGroup.slotStart}–${slotGroup.slotEnd})`;
+                    ? `Shift Pagi (${slotGroup.slotStart}–${slotGroup.slotEnd})`
+                    : `Shift Siang (${slotGroup.slotStart}–${slotGroup.slotEnd})`;
 
                   return (
                     <div key={`${day.dayOfWeek}-${slotGroup.slotStart}`} style={{ marginBottom: 'var(--space-2)', paddingLeft: 'var(--space-2)' }}>
@@ -446,10 +446,10 @@ function SlotModal({
           >
             {loading
               ? <><Loader2 size={14} className="spin-icon" /> Memproses...</>
-              : modal.type === 'free' ? '🔓 Bebaskan Slot'
-              : modal.type === 'reassign' ? (modal.slot.isFilled ? '✅ Pindahkan' : '➕ Tugaskan ke Slot')
-              : selectedTargetIsEmpty ? '➡️ Pindah ke Slot Kosong'
-              : '🔄 Tukar Posisi'}
+              : modal.type === 'free' ? 'Bebaskan Slot'
+              : modal.type === 'reassign' ? (modal.slot.isFilled ? 'Pindahkan' : 'Tugaskan ke Slot')
+              : selectedTargetIsEmpty ? 'Pindah ke Slot Kosong'
+              : 'Tukar Posisi'}
           </button>
         </div>
       </div>
@@ -687,7 +687,7 @@ export default function AdminJadwalPage() {
                       body: JSON.stringify({
                         dayOfWeek: day.dayOfWeek,
                         slotStart: slotGroup.slotStart,
-                        slotEnd:   slotGroup.slotEnd,
+                        slotEnd: slotGroup.slotEnd,
                       }),
                     });
                     const json = await res.json() as { data?: { message?: string }; error?: string };
@@ -715,10 +715,10 @@ export default function AdminJadwalPage() {
                           {/* Badge kapasitas */}
                           {(() => {
                             const filled = normalEntries.filter(e => e.isFilled).length;
-                            const total  = normalEntries.length;
+                            const total = normalEntries.length;
                             const isFull = filled === total;
                             const isAlmost = !isFull && filled / total >= 0.75;
-                            const bg    = isFull ? 'hsl(0,72%,95%)' : isAlmost ? 'hsl(38,92%,92%)' : 'hsl(145,55%,92%)';
+                            const bg = isFull ? 'hsl(0,72%,95%)' : isAlmost ? 'hsl(38,92%,92%)' : 'hsl(145,55%,92%)';
                             const color = isFull ? 'hsl(0,72%,40%)' : isAlmost ? 'hsl(38,92%,32%)' : 'hsl(145,55%,28%)';
                             return (
                               <div style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', background: bg, color, padding: '1px 8px', borderRadius: 'var(--radius-full)' }}>
@@ -748,7 +748,7 @@ export default function AdminJadwalPage() {
                       {/* Mini progress bar */}
                       {(() => {
                         const filled = normalEntries.filter(e => e.isFilled).length;
-                        const total  = normalEntries.length;
+                        const total = normalEntries.length;
                         return total > 0 ? (
                           <div style={{ height: 3, background: 'var(--color-border)', borderRadius: 999, marginBottom: 'var(--space-2)', overflow: 'hidden' }}>
                             <div style={{

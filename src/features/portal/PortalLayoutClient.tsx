@@ -99,10 +99,9 @@ function buildPortalNavItems(adminRole: 'MANAGER' | 'ADMIN_SHIFT'): NavItem[] {
     },
     {
       label: 'Persetujuan Barang Masuk',
-      href: `${MANAGER_BASE_PATH}/gudang-approval`,
+      href: `${basePath}/gudang-approval`,
       icon: <ShieldCheck size={18} aria-hidden="true" />,
       section: 'Produk & Gudang',
-      managerOnly: true,
     },
     {
       label: 'Restock Barcode',
@@ -372,7 +371,7 @@ function AdminSidebar({ adminName, adminRole = 'ADMIN_SHIFT', isMobileOpen, onCl
                 gap: 4,
               }}
             >
-              {adminRole === 'MANAGER' ? '👑 Manager (Dosen)' : '🛡️ Admin Shift'}
+              {adminRole === 'MANAGER' ? 'Manager (Dosen)' : 'Admin Shift'}
             </div>
           </div>
         </div>
@@ -608,7 +607,7 @@ export default function AdminLayoutClient({
                   border: adminRole === 'MANAGER' ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid rgba(37, 99, 235, 0.25)',
                 }}
               >
-                {adminRole === 'MANAGER' ? '👑 MANAGER' : '🛡️ SHIFT'}
+                {adminRole === 'MANAGER' ? 'MANAGER' : 'ADMIN SHIFT'}
               </span>
               <div
                 className="hide-xs-text"

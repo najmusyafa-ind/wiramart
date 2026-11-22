@@ -20,8 +20,8 @@ export async function POST(req: NextRequest, context: Context) {
     return apiError('Unauthorized: Akses ditolak', 401);
   }
 
-  if (payload.adminRole && payload.adminRole !== 'MANAGER') {
-    return apiError('Forbidden: Hanya akun Manager yang berwenang menolak penerimaan barang', 403);
+  if (payload.adminRole && payload.adminRole !== 'MANAGER' && payload.adminRole !== 'ADMIN_SHIFT') {
+    return apiError('Forbidden: Hanya Admin Shift atau Manager yang berwenang menolak penerimaan barang', 403);
   }
 
   const { id } = await context.params;

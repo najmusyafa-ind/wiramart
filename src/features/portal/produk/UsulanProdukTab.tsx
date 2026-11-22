@@ -533,7 +533,7 @@ export default function UsulanProdukTab({
                 className="btn btn-primary"
                 style={{ fontWeight: 700, minHeight: 44 }}
               >
-                {submitting ? <><Loader2 size={16} className="spin-icon" /> Menyimpan...</> : '✅ Setujui & Rilis ke Katalog'}
+                {submitting ? <><Loader2 size={16} className="spin-icon" /> Menyimpan...</> : 'Setujui & Rilis ke Katalog'}
               </button>
             </div>
           </div>

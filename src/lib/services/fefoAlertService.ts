@@ -540,8 +540,8 @@ export async function decideConditionReport(
     .where(and(eq(admins.id, managerAdminId), eq(admins.isActive, true), isNull(admins.deletedAt)))
     .limit(1);
 
-  if (!manager || manager.role !== 'MANAGER') {
-    throw new AppError('FORBIDDEN', 'Hanya Manager yang berwenang menetapkan keputusan FEFO.', 403);
+  if (!manager || (manager.role !== 'MANAGER' && manager.role !== 'ADMIN_SHIFT')) {
+    throw new AppError('FORBIDDEN', 'Hanya Admin Shift atau Manager yang berwenang menetapkan keputusan FEFO.', 403);
   }
 
   return await db.transaction(async (tx) => {

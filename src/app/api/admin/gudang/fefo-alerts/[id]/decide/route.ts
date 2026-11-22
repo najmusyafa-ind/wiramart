@@ -20,9 +20,8 @@ export async function POST(req: NextRequest, context: Context) {
     return apiError('Unauthorized: Akses ditolak', 401);
   }
 
-  // Separation of Duty Guard: Hanya Manager yang berwenang
-  if (payload.adminRole && payload.adminRole !== 'MANAGER') {
-    return apiError('Forbidden: Hanya akun Manager yang berwenang menetapkan keputusan FEFO.', 403);
+  if (payload.adminRole && payload.adminRole !== 'MANAGER' && payload.adminRole !== 'ADMIN_SHIFT') {
+    return apiError('Forbidden: Hanya Admin Shift atau Manager yang berwenang menetapkan keputusan FEFO.', 403);
   }
 
   const { id } = await context.params;

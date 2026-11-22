@@ -264,7 +264,7 @@ export default function TukarShiftPage() {
             Ajukan Tukar Shift
           </h1>
           <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-sidebar-muted)', margin: 0 }}>
-            Pengajuan akan dikonfirmasi oleh Admin
+            Tukar 2 arah otomatis setelah rekan setuju · Slot kosong otomatis 5 menit
           </p>
         </div>
         <button
@@ -340,10 +340,10 @@ export default function TukarShiftPage() {
                           gap: 4,
                         }}>
                           <div>
-                            👉 <strong>Jadwal Anda:</strong> {formatShiftLabel(req.toSchedule.dayOfWeek, req.toSchedule.slotStart, req.toSchedule.slotEnd)}
+                            <strong>Jadwal Anda:</strong> {formatShiftLabel(req.toSchedule.dayOfWeek, req.toSchedule.slotStart, req.toSchedule.slotEnd)}
                           </div>
                           <div>
-                            🔄 <strong>Ditukar dengan:</strong> {formatShiftLabel(req.fromSchedule.dayOfWeek, req.fromSchedule.slotStart, req.fromSchedule.slotEnd)}
+                            <strong>Ditukar dengan:</strong> {formatShiftLabel(req.fromSchedule.dayOfWeek, req.fromSchedule.slotStart, req.fromSchedule.slotEnd)}
                           </div>
                           {req.reason && (
                             <div style={{ fontStyle: 'italic', color: 'var(--color-text-secondary)', marginTop: 2 }}>

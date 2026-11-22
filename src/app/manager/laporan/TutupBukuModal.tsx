@@ -744,10 +744,10 @@ export default function TutupBukuModal({
                     color: 'white',
                   }}>
                     {preview.selisihSeverity === 'MERAH'
-                      ? '🔴 Tekor Berat (> 20k)'
+                      ? 'Tekor Berat (> 20k)'
                       : preview.selisihSeverity === 'KUNING'
-                      ? '🟡 Tekor Sedang'
-                      : '🟢 Wajar (≤ 2.000)'}
+                      ? 'Tekor Sedang'
+                      : 'Wajar (≤ 2.000)'}
                   </span>
                 </div>
               )}
@@ -935,13 +935,13 @@ export default function TutupBukuModal({
 
               {error && (
                 <div style={{ color: 'var(--color-error)', fontSize: 'var(--text-xs)', fontWeight: 600, background: 'var(--color-error-light)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                  ⚠️ {error}
+                  {error}
                 </div>
               )}
 
               {successMsg && (
                 <div style={{ color: 'var(--color-success)', fontSize: 'var(--text-xs)', fontWeight: 700, background: 'var(--color-success-light)', padding: '8px 12px', borderRadius: 'var(--radius-sm)' }}>
-                  ✔ {successMsg}
+                  {successMsg}
                 </div>
               )}
             </>

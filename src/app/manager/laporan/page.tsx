@@ -140,14 +140,14 @@ function formatDateTime(iso: string) {
 }
 
 const PERIODS: { key: PeriodKey; label: string }[] = [
-  { key: 'daily',       label: 'Hari Ini' },
-  { key: 'weekly',      label: 'Minggu Ini' },
-  { key: 'monthly',     label: 'Bulan Ini' },
-  { key: 'october',     label: 'Oktober' },
-  { key: 'november',    label: 'November' },
-  { key: 'oct_nov',     label: 'Oktober + November' },
+  { key: 'daily', label: 'Hari Ini' },
+  { key: 'weekly', label: 'Minggu Ini' },
+  { key: 'monthly', label: 'Bulan Ini' },
+  { key: 'october', label: 'Oktober' },
+  { key: 'november', label: 'November' },
+  { key: 'oct_nov', label: 'Oktober + November' },
   { key: 'semi_annual', label: '6 Bulan' },
-  { key: 'all',         label: 'Keseluruhan' },
+  { key: 'all', label: 'Keseluruhan' },
 ];
 
 // ─────────────────────────────────────────────────────────────
@@ -771,7 +771,7 @@ export default function LaporanPage() {
               >
                 {exportHarianLoading
                   ? <><Loader2 size={13} className="spin-icon" /> Mengunduh...</>
-                  : <><span>📊</span> 1-Sheet Harian (.xlsx)</>
+                  : <><span></span> 1-Sheet Harian (.xlsx)</>
                 }
               </button>
               <button
@@ -802,7 +802,7 @@ export default function LaporanPage() {
               >
                 {exportLoading
                   ? <><Loader2 size={13} className="spin-icon" /> Exporting...</>
-                  : <><span>📑</span> Multi-Sheet Lengkap</>
+                  : <><span></span> Multi-Sheet Lengkap</>
                 }
               </button>
             </div>
@@ -1265,7 +1265,7 @@ export default function LaporanPage() {
               </div>
 
               <div style={{ marginTop: 'var(--space-3)', padding: 'var(--space-3) var(--space-4)', background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', fontSize: 'var(--text-xs)', color: 'var(--color-text)', display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)' }}>
-                <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>🤝</span>
+                <span style={{ fontSize: '1.1rem', lineHeight: 1 }}></span>
                 <div style={{ lineHeight: 1.6 }}>
                   <strong>Sistem Bagi Hasil 50:50 Wiramart:</strong> Laba kotor penjualan dikurangi biaya operasional toko terlebih dahulu untuk mendapatkan <strong>Laba Bersih Operasional</strong>. Hasil bersih tersebut kemudian dibagi <strong>50%</strong> untuk hak mahasiswa (akumulasi per shift dan dibagi rata antar 4 role shift), dan <strong>50%</strong> menjadi laba bersih hak milik toko Wiramart. Pada periode bulanan, biaya paten Rp 50.000 (ATK Rp 20.000 + Bensin Rp 30.000) otomatis diikutsertakan.
                 </div>
@@ -1465,11 +1465,11 @@ export default function LaporanPage() {
                   >
                     {data.dailyChart.map((d) => {
                       const total = parseFloat(d.revenue) || 0;
-                      const cash  = parseFloat(d.amountCash) || 0;
-                      const qris  = parseFloat(d.amountQris) || 0;
+                      const cash = parseFloat(d.amountCash) || 0;
+                      const qris = parseFloat(d.amountQris) || 0;
                       const totalHeight = (total / maxRevenue) * 140;
-                      const cashPct  = total > 0 ? cash / total : 0;
-                      const qrisPct  = total > 0 ? qris / total : 0;
+                      const cashPct = total > 0 ? cash / total : 0;
+                      const qrisPct = total > 0 ? qris / total : 0;
 
                       return (
                         <div
@@ -1744,7 +1744,7 @@ export default function LaporanPage() {
                         {data.shifts.map((sh) => {
                           const isClosed = sh.status === 'CLOSED';
                           const isShortage = sh.statusLaci === 'SHORTAGE';
-                          const isOverage  = sh.statusLaci === 'OVERAGE';
+                          const isOverage = sh.statusLaci === 'OVERAGE';
                           const isBalanced = sh.statusLaci === 'BALANCED';
                           const isSelected = shiftSelection.isSelected(sh.shiftId);
 
@@ -1787,19 +1787,19 @@ export default function LaporanPage() {
                               <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
                                 <div>{formatDateTime(sh.clockIn)}</div>
                                 <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
-                                  {sh.clockOut ? `s/d ${formatDateTime(sh.clockOut)}` : '🟢 Sedang Berjalan'}
+                                  {sh.clockOut ? `s/d ${formatDateTime(sh.clockOut)}` : 'Sedang Berjalan'}
                                 </div>
                               </td>
                               <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
                                 <div>{sh.modalAwal !== null ? formatRp(sh.modalAwal) : '—'}</div>
                                 {sh.rawModalWarning && (
                                   <div style={{ fontSize: '0.68rem', color: 'var(--color-warning)', fontWeight: 600, marginTop: 2 }}>
-                                    ⚠️ Modal awal di luar kewajaran
+                                    Modal awal di luar kewajaran
                                   </div>
                                 )}
                                 {sh.serahTerimaDiff !== null && sh.serahTerimaDiff !== undefined && Math.abs(sh.serahTerimaDiff) > 0 && (
                                   <div style={{ fontSize: '0.68rem', color: 'var(--color-error)', fontWeight: 600, marginTop: 2 }}>
-                                    ⚠️ Beda serah terima: {sh.serahTerimaDiff > 0 ? `+${formatRp(sh.serahTerimaDiff)}` : formatRp(sh.serahTerimaDiff)}
+                                    Beda serah terima: {sh.serahTerimaDiff > 0 ? `+${formatRp(sh.serahTerimaDiff)}` : formatRp(sh.serahTerimaDiff)}
                                   </div>
                                 )}
                               </td>
@@ -1843,7 +1843,7 @@ export default function LaporanPage() {
                                     backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)',
                                     fontWeight: 600,
                                   }}>
-                                    ⏳ AKTIF
+                                    AKTIF
                                   </span>
                                 ) : sh.discrepancyTier === 'HIJAU' || isBalanced ? (
                                   <span style={{
@@ -1879,7 +1879,7 @@ export default function LaporanPage() {
                                     backgroundColor: 'var(--color-info-light)', color: 'var(--color-info)',
                                     fontWeight: 600,
                                   }}>
-                                    ⬆️ LEBIH
+                                    LEBIH
                                   </span>
                                 )}
 
@@ -1890,7 +1890,7 @@ export default function LaporanPage() {
                                       style={{ fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}
                                       title="Ada penjualan tunai tetapi kasir menutup shift dengan fisik uang persis modal awal"
                                     >
-                                      🚨 FRAUD LACI PERSIS MODAL
+                                      FRAUD LACI PERSIS MODAL
                                     </span>
                                   </div>
                                 )}
@@ -1901,7 +1901,7 @@ export default function LaporanPage() {
                                       style={{ fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}
                                       title="Modal awal buka shift berbeda dari fisik tutup shift sebelumnya"
                                     >
-                                      ⚠️ SELISIH SERAH TERIMA
+                                      SELISIH SERAH TERIMA
                                     </span>
                                   </div>
                                 )}

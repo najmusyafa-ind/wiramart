@@ -6,7 +6,7 @@ import {
   AlertTriangle, UserCheck, X, PlusCircle, MessageSquare,
 } from 'lucide-react';
 
-// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Types ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+// ─── Types ───────────────────────────────────────────────────
 type SwapStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 
 type SwapRequest = {
@@ -17,6 +17,7 @@ type SwapRequest = {
   createdAt: string;
   reviewedAt: string | null;
   peerApprovedAt?: string | null;
+  autoApproveGraceUntil?: string | null;
   requester: { fullName: string; nim: string; programStudi: string };
   peer?: { fullName: string; nim: string } | null;
   fromSchedule: { dayOfWeek: string; slotStart: string; slotEnd: string; coordinatorName: string | null };
@@ -33,7 +34,7 @@ type FlatSlot = {
   employeeName: string | null;
 };
 
-// ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼ Status Config ├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼├óΓÇ¥Γé¼
+// ─── Status Config ───────────────────────────────────────────├óΓÇ¥Γé¼
 const STATUS_CFG: Record<SwapStatus, { label: string; color: string; icon: React.ReactNode }> = {
   PENDING:   { label: 'Menunggu',  color: 'hsl(38 90% 55%)',   icon: <Clock size={13} /> },
   APPROVED:  { label: 'Disetujui', color: 'var(--color-success)', icon: <CheckCircle2 size={13} /> },
@@ -676,7 +677,7 @@ export default function SwapRequestPage() {
               </span>
             )}
           </div>
-          <p className="page-subtitle">Review pengajuan kasir dan catat permohonan tukar jadwal shift</p>
+          <p className="page-subtitle">Tukar 2 arah otomatis setelah rekan setuju · Pindah ke slot kosong otomatis setelah jeda 5 menit.</p>
         </div>
 
         {/* Tombol Tambah Manual */}
@@ -793,20 +794,31 @@ export default function SwapRequestPage() {
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
                     NIM: {r.requester.nim} • {r.requester.programStudi}
                   </div>
-                  {r.peer && (
+                  {r.peer ? (
                     <div style={{ fontSize: '0.72rem', color: 'var(--color-primary)', marginTop: 4, fontWeight: 500 }}>
                       Tukar dg: <strong>{r.peer.fullName}</strong>
                       {r.peerApprovedAt ? (
                         <span style={{ color: 'var(--color-success)', marginLeft: 6, fontWeight: 600 }}>
-                          ✔ Rekan Setuju
+                          Rekan Setuju
                         </span>
                       ) : (
                         <span style={{ color: 'hsl(38 92% 40%)', marginLeft: 6, fontWeight: 600 }}>
-                          ⏳ Menunggu Rekan
+                          Menunggu Rekan
                         </span>
                       )}
                     </div>
-                  )}
+                  ) : r.status === 'PENDING' && r.autoApproveGraceUntil ? (
+                    <div style={{ fontSize: '0.72rem', color: '#0369a1', marginTop: 4, fontWeight: 700 }}>
+                      Slot Kosong · Auto-ACC jeda 5 menit (s/d{' '}
+                      {new Date(r.autoApproveGraceUntil).toLocaleTimeString('id-ID', {
+                        timeZone: 'Asia/Jakarta',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                      })}{' '}
+                      WIB)
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* 2. Alur Swap */}

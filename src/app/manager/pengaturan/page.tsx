@@ -41,9 +41,9 @@ export default function PengaturanPage() {
   const [maintenanceStatus, setMaintenanceStatus] = useState<FeedbackStatus>('idle');
 
   // ── Info Toko state ────────────────────────────────────────
-  const [tokoNama, setTokoNama]     = useState('');
+  const [tokoNama, setTokoNama] = useState('');
   const [tokoAlamat, setTokoAlamat] = useState('');
-  const [tokoTelp, setTokoTelp]     = useState('');
+  const [tokoTelp, setTokoTelp] = useState('');
   const [tokoStatus, setTokoStatus] = useState<FeedbackStatus>('idle');
 
   // ── QRIS state ─────────────────────────────────────────────
@@ -58,9 +58,9 @@ export default function PengaturanPage() {
 
   // ── Pengaturan Operasional state ────────────────────────────
   const [attendanceTolerance, setAttendanceTolerance] = useState(15);
-  const [lowStockThreshold, setLowStockThreshold]     = useState(5);
+  const [lowStockThreshold, setLowStockThreshold] = useState(5);
   const [globalMarginPercentage, setGlobalMarginPercentage] = useState(20);
-  const [operasionalStatus, setOperasionalStatus]     = useState<FeedbackStatus>('idle');
+  const [operasionalStatus, setOperasionalStatus] = useState<FeedbackStatus>('idle');
 
   // ── Database Backup & Restore state ─────────────────────────
   const [backupLoading, setBackupLoading] = useState(false);
@@ -171,9 +171,9 @@ export default function PengaturanPage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          storeName:    tokoNama.trim()    || undefined,
-          storeAddress: tokoAlamat.trim()  || undefined,
-          storePhone:   tokoTelp.trim()    || undefined,
+          storeName: tokoNama.trim() || undefined,
+          storeAddress: tokoAlamat.trim() || undefined,
+          storePhone: tokoTelp.trim() || undefined,
         }),
       });
       setTokoStatus(res.ok ? 'success' : 'error');
@@ -491,7 +491,7 @@ export default function PengaturanPage() {
             >
               {tokoStatus === 'loading' && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
               {tokoStatus === 'success' && <CheckCircle size={14} aria-hidden="true" />}
-              {tokoStatus === 'error'   && <AlertCircle size={14} aria-hidden="true" />}
+              {tokoStatus === 'error' && <AlertCircle size={14} aria-hidden="true" />}
               {tokoStatus === 'loading' ? 'Menyimpan...' : tokoStatus === 'success' ? 'Tersimpan!' : tokoStatus === 'error' ? 'Gagal!' : 'Simpan Info Toko'}
             </button>
           </div>
@@ -580,7 +580,7 @@ export default function PengaturanPage() {
                   background: 'hsl(0 70% 55% / 0.1)', color: 'hsl(0 70% 60%)',
                   border: '1px solid hsl(0 70% 55% / 0.3)',
                 }}>
-                  ⚠ Stok ≤{lowStockThreshold} → Peringatan
+                  Stok ≤{lowStockThreshold} → Peringatan
                 </div>
               </div>
             </div>
@@ -632,10 +632,10 @@ export default function PengaturanPage() {
             >
               {operasionalStatus === 'loading' && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
               {operasionalStatus === 'success' && <CheckCircle size={14} aria-hidden="true" />}
-              {operasionalStatus === 'error'   && <AlertCircle size={14} aria-hidden="true" />}
+              {operasionalStatus === 'error' && <AlertCircle size={14} aria-hidden="true" />}
               {operasionalStatus === 'loading' ? 'Menyimpan...'
                 : operasionalStatus === 'success' ? 'Tersimpan!'
-                : operasionalStatus === 'error'   ? 'Gagal!'
+                : operasionalStatus === 'error' ? 'Gagal!'
                 : 'Simpan Pengaturan Operasional'}
             </button>
           </div>

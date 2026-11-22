@@ -54,6 +54,13 @@ import {
 
 type DraftStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'REVISED';
 
+type AutoChecklistInfo = {
+  passed: boolean;
+  warnings: string[];
+  graceUntil: string | null;
+  remainingSeconds: number;
+};
+
 type SubmissionItem = {
   id: string;
   receiveNumber: string;
@@ -68,6 +75,7 @@ type SubmissionItem = {
   creatorName: string;
   creatorNim: string;
   hasNewProductProposal?: boolean;
+  autoChecklist?: AutoChecklistInfo | null;
 };
 
 type ItemDetail = {
@@ -190,7 +198,6 @@ export default function GudangApprovalPage() {
 
   // ── State MOD (Manager on Duty) ──────────────────────────────
   const [modStatus, setModStatus] = useState<ModTodayStatus | null>(null);
-  const [checkingInMod, setCheckingInMod] = useState(false);
 
   // ── State Database Supplier (Fase 5.2 & 5.4) ─────────────────
   const [suppliers, setSuppliers] = useState<SupplierItem[]>([]);
@@ -457,39 +464,6 @@ export default function GudangApprovalPage() {
     }
   }
 
-  // ── Ambil Status MOD Hari Ini ────────────────────────────────
-  async function fetchModStatus() {
-    try {
-      const today = await requestModStatus();
-      if (today) setModStatus(today);
-    } catch {
-      // silent
-    }
-  }
-
-  // ── Check-In MOD Cepat ───────────────────────────────────────
-  async function handleQuickCheckInMOD() {
-    setCheckingInMod(true);
-    try {
-      const res = await fetch('/api/admin/duty', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'CHECK_IN' }),
-      });
-      const json = await res.json();
-      if (res.ok && json.success) {
-        setSuccessToast(`Berhasil memulai Sesi Kerja Hari Ini!`);
-        fetchModStatus();
-      } else {
-        alert(json.error ?? 'Gagal check-in MOD.');
-      }
-    } catch {
-      alert('Kesalahan jaringan saat check-in MOD.');
-    } finally {
-      setCheckingInMod(false);
-    }
-  }
-
   // ── Ambil Daftar Supplier ────────────────────────────────────
   async function fetchSuppliers(query = supplierSearch) {
     setLoadingSuppliers(true);
@@ -671,10 +645,10 @@ export default function GudangApprovalPage() {
 
       if (json.data?.discountBarcode) {
         setCreatedBarcodeToast(
-          `✅ Diskon ${approvedDiscountPct}% disetujui! Barcode override diterbitkan: ${json.data.discountBarcode}`,
+          `Diskon ${approvedDiscountPct}% disetujui! Barcode override diterbitkan: ${json.data.discountBarcode}`,
         );
       } else {
-        setSuccessToast(`✅ Keputusan ${fefoDecision} berhasil ditetapkan untuk produk ${selectedFefo.productName}.`);
+        setSuccessToast(`Keputusan ${fefoDecision} berhasil ditetapkan untuk produk ${selectedFefo.productName}.`);
       }
 
       setSelectedFefo(null);
@@ -801,10 +775,10 @@ export default function GudangApprovalPage() {
 
       setSuccessToast(
         actionType === 'APPROVE'
-          ? `✅ Penerimaan #${selectedSub.receiveNumber} disetujui! Produk & stok telah aktif di kasir.`
+          ? `Penerimaan #${selectedSub.receiveNumber} disetujui. Produk & stok telah aktif di kasir.`
           : actionType === 'REVISI'
-            ? `🔄 Draft #${selectedSub.receiveNumber} dikembalikan ke petugas gudang untuk direvisi.`
-            : `❌ Penerimaan #${selectedSub.receiveNumber} ditolak. Stok dibatalkan.`,
+            ? `Draft #${selectedSub.receiveNumber} dikembalikan ke petugas gudang untuk direvisi.`
+            : `Penerimaan #${selectedSub.receiveNumber} ditolak. Stok dibatalkan.`,
       );
 
       setActionType(null);
@@ -864,25 +838,25 @@ export default function GudangApprovalPage() {
       case 'H1':
         return (
           <span style={{ padding: '3px 8px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 800, background: '#fee2e2', color: '#b91c1c' }}>
-            🚨 H-1 Kritis (Besok ED)
+            H-1 Kritis (Besok ED)
           </span>
         );
       case 'H3':
         return (
           <span style={{ padding: '3px 8px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 800, background: '#ffedd5', color: '#c2410c' }}>
-            ⚠️ H-3 Urgent
+            H-3 Mendesak
           </span>
         );
       case 'H5':
         return (
           <span style={{ padding: '3px 8px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 800, background: '#fef3c7', color: '#b45309' }}>
-            ⚡ H-5 Warning
+            H-5 Peringatan
           </span>
         );
       case 'H7':
         return (
           <span style={{ padding: '3px 8px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 800, background: '#f1f5f9', color: '#475569' }}>
-            👀 H-7 Watch
+            H-7 Pantauan
           </span>
         );
     }
@@ -960,10 +934,10 @@ export default function GudangApprovalPage() {
           </div>
           <div>
             <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>
-              Portal Otoritas & Persetujuan Manager
+              Persetujuan Barang Masuk & FEFO
             </h1>
             <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: '#64748b' }}>
-              Wewenang eksklusif Manager untuk memvalidasi barang masuk dan menetapkan diskon darurat FEFO.
+              Auto-Checklist jeda 5 menit untuk barang masuk · Admin Shift & Manager dapat meninjau, merevisi, atau menetapkan diskon FEFO.
             </p>
           </div>
         </div>
@@ -992,101 +966,34 @@ export default function GudangApprovalPage() {
         </button>
       </div>
 
-      {/* ── MOD ACTIVE STATUS / WARNING BANNER (PRD 4.1) ── */}
-      {modStatus && (!modStatus.isCheckedIn || modStatus.isCheckedOut) ? (
-        <div
-          style={{
-            background: '#fffbeb',
-            border: '1.5px solid #f59e0b',
-            borderRadius: 12,
-            padding: '12px 18px',
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            boxShadow: '0 1px 3px rgba(245, 158, 11, 0.1)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 10,
-                background: '#fef3c7',
-                color: '#d97706',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <AlertTriangle size={20} />
-            </div>
-            <div>
-              <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#92400e' }}>
-                Perhatian: Belum Ada Sesi Kerja Hari Ini yang Aktif
-              </div>
-              <div style={{ fontSize: '0.76rem', color: '#b45309', marginTop: 2 }}>
-                Persetujuan barang masuk (ACC) memerlukan Manager yang sudah memulai sesi kerja hari ini. Klik tombol di samping untuk memulai.
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            disabled={checkingInMod}
-            onClick={handleQuickCheckInMOD}
-            style={{
-              padding: '9px 16px',
-              borderRadius: 8,
-              background: '#d97706',
-              color: '#ffffff',
-              border: 'none',
-              fontWeight: 800,
-              fontSize: '0.8rem',
-              cursor: checkingInMod ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              boxShadow: '0 2px 6px rgba(217, 119, 6, 0.3)',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {checkingInMod ? (
-              <>
-                <RefreshCw size={14} className="animate-spin" />
-                <span>Memproses...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles size={14} />
-                <span>Mulai Sesi Kerja Sekarang</span>
-              </>
-            )}
-          </button>
-        </div>
-      ) : modStatus?.isCheckedIn ? (
-        <div
-          style={{
-            background: '#f0fdf4',
-            border: '1px solid #86efac',
-            borderRadius: 10,
-            padding: '8px 14px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            fontSize: '0.78rem',
-            color: '#15803d',
-            fontWeight: 700,
-          }}
-        >
-          <ShieldCheck size={16} color="#16a34a" />
+      {/* ── AUTO-CHECKLIST JEDA 5 MENIT BANNER ── */}
+      <div
+        style={{
+          background: '#f0fdf4',
+          border: '1px solid #86efac',
+          borderRadius: 10,
+          padding: '10px 14px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 10,
+          fontSize: '0.79rem',
+          color: '#166534',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <ShieldCheck size={17} color="#16a34a" style={{ flexShrink: 0 }} />
           <span>
-            Sesi Kerja Aktif: <strong>{modStatus.managerName}</strong> — Seluruh wewenang ACC &amp; Diskon Darurat siap digunakan.
+            <strong>Auto-Checklist Jeda 5 Menit Aktif:</strong> Pengajuan barang masuk dengan margin &amp; tanggal kadaluwarsa valid otomatis masuk stok setelah 5 menit tanpa perlu menunggu Dosen login. Item bermasalah tetap ditahan untuk cek manual.
           </span>
         </div>
-      ) : null}
+        {modStatus?.isCheckedIn && (
+          <span style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
+            Sesi Aktif: {modStatus.managerName}
+          </span>
+        )}
+      </div>
 
       {/* ── TOP-LEVEL EXECUTIVE TAB SWITCHER ── */}
       <div style={{ display: 'flex', gap: 10, borderBottom: '2px solid #e2e8f0', paddingBottom: 2, overflowX: 'auto' }}>
@@ -1436,11 +1343,44 @@ export default function GudangApprovalPage() {
                             display: 'inline-block',
                           }}
                         >
-                          ✨ USULAN PRODUK BARU
+                          USULAN PRODUK BARU
                         </span>
                       )}
                     </div>
                   </div>
+
+                  {/* Status Auto-Checklist Jeda 5 Menit */}
+                  {sub.status === 'SUBMITTED' && sub.autoChecklist && (
+                    <div
+                      style={{
+                        padding: '9px 12px',
+                        borderRadius: 8,
+                        background: sub.autoChecklist.passed ? '#f0f9ff' : '#fffbeb',
+                        border: sub.autoChecklist.passed ? '1px solid #bae6fd' : '1px solid #fcd34d',
+                        color: sub.autoChecklist.passed ? '#0369a1' : '#b45309',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: 8,
+                      }}
+                    >
+                      {sub.autoChecklist.passed ? (
+                        <span>
+                          Lolos Auto-Checklist · Otomatis masuk stok setelah jeda 5 menit
+                          {sub.autoChecklist.graceUntil
+                            ? ` (pukul ${new Date(sub.autoChecklist.graceUntil).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false })} WIB)`
+                            : ''}.
+                        </span>
+                      ) : (
+                        <span>
+                          Perlu Cek Manual (Auto-ACC ditahan): {sub.autoChecklist.warnings.join(' | ')}
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Banner Catatan Manager jika ada */}
                   {sub.managerNote && (
@@ -1610,7 +1550,7 @@ export default function GudangApprovalPage() {
                                               fontWeight: 800,
                                             }}
                                           >
-                                            ✨ PRODUK BARU (Menunggu ACC)
+                                            PRODUK BARU (Menunggu ACC)
                                           </span>
                                           {it.productCategoryName && (
                                             <span style={{ fontSize: '0.68rem', color: '#475569' }}>
@@ -1865,7 +1805,7 @@ export default function GudangApprovalPage() {
                             </span>
                             {rep.approvedDiscountPct && (
                               <span style={{ background: '#dc2626', color: '#ffffff', padding: '2px 8px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 900 }}>
-                                🏷️ {rep.approvedDiscountPct}% OFF
+                                {rep.approvedDiscountPct}% OFF
                               </span>
                             )}
                           </div>
@@ -2362,7 +2302,7 @@ export default function GudangApprovalPage() {
                     }}
                   >
                     <div style={{ fontSize: '0.8rem', fontWeight: 800, color: '#5b21b6' }}>
-                      ✨ Konfirmasi Harga Usulan Produk Baru Sebelum Diaktifkan di Kasir:
+                      Konfirmasi Harga Usulan Produk Baru Sebelum Diaktifkan di Kasir:
                     </div>
                     {approvePreviewItems
                       .filter((it) => it.productIsActive === false)
@@ -2597,7 +2537,7 @@ export default function GudangApprovalPage() {
                   fontWeight: 700,
                 }}
               >
-                ⛔ BATCH SUDAH KEDALUWARSA (ED: {selectedFefo.expiryDate}). Opsi Diskon &amp; Rak Depan dikunci otomatis; pilih <strong>Pemusnahan (DESTROY)</strong> atau <strong>Retur Supplier (RETURN_SUPPLIER)</strong> agar stok dinolkan.
+                BATCH SUDAH KEDALUWARSA (ED: {selectedFefo.expiryDate}). Opsi Diskon &amp; Rak Depan dikunci otomatis; pilih <strong>Pemusnahan (DESTROY)</strong> atau <strong>Retur Supplier (RETURN_SUPPLIER)</strong> agar stok dinolkan.
               </div>
             )}
 
@@ -2620,13 +2560,13 @@ export default function GudangApprovalPage() {
               >
                 {!(selectedFefo.isExpired || (selectedFefo.expiryDate && selectedFefo.expiryDate < getTodayWibIsoManager())) && (
                   <>
-                    <option value="DISCOUNT">🏷️ ACC Diskon Obral Darurat (Auto-Generate Barcode Kasir)</option>
-                    <option value="DISPLAY_FRONT">➡️ Pindahkan ke Rak Depan Kasir (Jual Normal)</option>
+                    <option value="DISCOUNT">ACC Diskon Obral Darurat (Auto-Generate Barcode Kasir)</option>
+                    <option value="DISPLAY_FRONT">Pindahkan ke Rak Depan Kasir (Jual Normal)</option>
                   </>
                 )}
-                <option value="DESTROY">🗑️ ACC Pemusnahan / Write-Off (Tarik &amp; Nol-kan Stok)</option>
-                <option value="RETURN_SUPPLIER">↩️ ACC Retur ke Supplier (Tarik &amp; Nol-kan Stok)</option>
-                <option value="HOLD">⏸️ Tahan Sementara (Pantau Kondisi)</option>
+                <option value="DESTROY">ACC Pemusnahan / Write-Off (Tarik &amp; Nol-kan Stok)</option>
+                <option value="RETURN_SUPPLIER">ACC Retur ke Supplier (Tarik &amp; Nol-kan Stok)</option>
+                <option value="HOLD">Tahan Sementara (Pantau Kondisi)</option>
               </select>
             </div>
 

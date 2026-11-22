@@ -18,6 +18,10 @@ import { db } from '@/lib/db/client';
 import { shiftSwapRequests, shiftSchedules } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import { swapRequestLimiter } from '@/lib/utils/rate-limit';
+import {
+  finalizeExpiredEmptySlotSwaps,
+  SWAP_AUTO_APPROVE_GRACE_MS,
+} from '@/lib/services/swapAutoApprovalService';
 
 export const runtime = 'nodejs';
 
@@ -138,8 +142,11 @@ export async function POST(req: NextRequest): Promise<Response> {
     {
       id:      newRequest.id,
       message: peerEmployeeId
-        ? 'Pengajuan tukar shift berhasil dikirim ke rekan kerja untuk persetujuan 2-arah.'
-        : 'Pengajuan pindah shift berhasil dikirim ke Admin.',
+        ? 'Pengajuan tukar shift dikirim ke rekan kerja. Begitu rekan setuju, jadwal langsung bertukar otomatis.'
+        : 'Pengajuan pindah ke slot kosong diterima. Akan otomatis disetujui setelah lolos Auto-Checklist dan jeda 5 menit.',
+      autoApproveGraceUntil: peerEmployeeId
+        ? null
+        : new Date(Date.now() + SWAP_AUTO_APPROVE_GRACE_MS).toISOString(),
       from:    `${fromSchedule.dayOfWeek} ${fromSchedule.slotStart}–${fromSchedule.slotEnd}`,
       to:      `${toSchedule.dayOfWeek} ${toSchedule.slotStart}–${toSchedule.slotEnd}`,
     },
@@ -153,6 +160,8 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (!session || session.role !== 'employee') {
     return apiError('Akses ditolak.', 401);
   }
+
+  await finalizeExpiredEmptySlotSwaps();
 
   const [myRequests, incomingRequests] = await Promise.all([
     // Pengajuan yang diajukan oleh kasir ini
@@ -183,7 +192,13 @@ export async function GET(req: NextRequest): Promise<Response> {
   ]);
 
   return apiOk({
-    history: myRequests,
+    history: myRequests.map((r) => ({
+      ...r,
+      autoApproveGraceUntil:
+        r.status === 'PENDING' && !r.peerEmployeeId
+          ? new Date(r.createdAt.getTime() + SWAP_AUTO_APPROVE_GRACE_MS).toISOString()
+          : null,
+    })),
     incoming: incomingRequests,
   });
 }

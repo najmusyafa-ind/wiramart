@@ -23,9 +23,8 @@ export async function POST(req: NextRequest, context: Context) {
     return apiError('Unauthorized: Akses ditolak', 401);
   }
 
-  // Separation of Duty Guard: Tolak ADMIN_SHIFT secara cepat di level HTTP
-  if (payload.adminRole && payload.adminRole !== 'MANAGER') {
-    return apiError('Forbidden: Hanya akun Manager (Dosen) yang berwenang menyetujui penerimaan barang.', 403);
+  if (payload.adminRole && payload.adminRole !== 'MANAGER' && payload.adminRole !== 'ADMIN_SHIFT') {
+    return apiError('Forbidden: Hanya Admin Shift atau Manager yang berwenang menyetujui penerimaan barang.', 403);
   }
 
   const { id } = await context.params;

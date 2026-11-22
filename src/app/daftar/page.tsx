@@ -95,9 +95,9 @@ function ShiftGrid({ onSelect, selected }: {
           </div>
           {day.slots.map((slot) => {
             const normalEntries = slot.entries.filter(e => e.orderInSlot !== 99);
-            const emptyCount    = normalEntries.filter(e => !e.isFilled).length;
-            const totalNormal   = normalEntries.length;
-            const isFull        = emptyCount === 0;
+            const emptyCount = normalEntries.filter(e => !e.isFilled).length;
+            const totalNormal = normalEntries.length;
+            const isFull = emptyCount === 0;
             return (
               <div key={`${slot.slotStart}-${slot.slotEnd}`} style={{ marginBottom: 'var(--space-3)' }}>
                 {/* Slot header dengan badge kapasitas */}
@@ -113,7 +113,7 @@ function ShiftGrid({ onSelect, selected }: {
                     padding: '1px 8px',
                     borderRadius: 999,
                     background: isFull ? 'hsl(0,72%,95%)' : emptyCount <= 1 ? 'hsl(38,92%,92%)' : 'hsl(145,55%,92%)',
-                    color:      isFull ? 'hsl(0,72%,40%)' : emptyCount <= 1 ? 'hsl(38,92%,32%)' : 'hsl(145,55%,28%)',
+                    color: isFull ? 'hsl(0,72%,40%)' : emptyCount <= 1 ? 'hsl(38,92%,32%)' : 'hsl(145,55%,28%)',
                   }}>
                     {isFull ? 'Penuh' : `${emptyCount} tersisa`}
                   </div>
@@ -253,7 +253,7 @@ function PanelDosen({ onBack }: { onBack: () => void }) {
               marginBottom: -2,
             }}
           >
-            {t === 'aktivasi' ? '✨ Aktivasi Akun' : '🔑 Lupa Password'}
+            {t === 'aktivasi' ? 'Aktivasi Akun' : 'Lupa Password'}
           </button>
         ))}
       </div>
@@ -285,7 +285,7 @@ function PanelDosen({ onBack }: { onBack: () => void }) {
         )}
 
         <button type="button" onClick={handleSubmit} className="btn btn-primary" disabled={loading || !nidn || !namaLengkap || !password || !konfirmasi} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 44 }}>
-          {loading ? <><Loader2 size={16} className="spin-icon" /> Memproses...</> : (tab === 'aktivasi' ? '✅ Aktivasi Akun' : '🔑 Reset Password')}
+          {loading ? <><Loader2 size={16} className="spin-icon" /> Memproses...</> : (tab === 'aktivasi' ? 'Aktivasi Akun' : 'Reset Password')}
         </button>
       </div>
     </div>

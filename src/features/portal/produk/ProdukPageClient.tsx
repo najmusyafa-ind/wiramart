@@ -653,16 +653,16 @@ function ProdukModal({
     initialBarcode ? 'barcode' : isEdit ? 'non_barcode' : prefillBarcode ? 'barcode' : 'barcode',
   );
   const [form, setForm] = useState({
-    categoryId:     editData?.categoryId ?? '',
-    name:           editData?.name ?? prefillName ?? '',
-    description:    editData?.description ?? '',
-    barcode:        initialBarcode,
-    costPrice:      editData?.costPrice ?? '',
-    sellingPrice:   editData?.sellingPrice ?? '',
-    stockQty:       editData?.stockQty?.toString() ?? '0',
+    categoryId: editData?.categoryId ?? '',
+    name: editData?.name ?? prefillName ?? '',
+    description: editData?.description ?? '',
+    barcode: initialBarcode,
+    costPrice: editData?.costPrice ?? '',
+    sellingPrice: editData?.sellingPrice ?? '',
+    stockQty: editData?.stockQty?.toString() ?? '0',
     stockAdjustmentReason: '',
-    unit:           editData?.unit ?? 'pcs',
-    isPerishable:   Boolean(editData?.isPerishable),
+    unit: editData?.unit ?? 'pcs',
+    isPerishable: Boolean(editData?.isPerishable),
     perishableType: (editData?.perishableType === 'BELI_LEPAS' ? 'BELI_LEPAS' : 'KONSINYASI') as 'KONSINYASI' | 'BELI_LEPAS',
   });
 
@@ -717,15 +717,15 @@ function ProdukModal({
       }
 
       const body = {
-        categoryId:     form.categoryId,
-        name:           form.name,
-        description:    form.description,
-        barcode:        resolvedBarcode,
-        costPrice:      parsedCost,
-        sellingPrice:   parsedSell,
-        stockQty:       safeStockQty,
-        unit:           form.unit,
-        isPerishable:   form.isPerishable,
+        categoryId: form.categoryId,
+        name: form.name,
+        description: form.description,
+        barcode: resolvedBarcode,
+        costPrice: parsedCost,
+        sellingPrice: parsedSell,
+        stockQty: safeStockQty,
+        unit: form.unit,
+        isPerishable: form.isPerishable,
         perishableType: form.perishableType,
         // Hanya relevan saat edit: server memakainya agar stok tak tertimpa angka basi
         ...(isEdit
@@ -874,7 +874,7 @@ function ProdukModal({
                       }}
                       title={`Hitung otomatis: HPP + Margin ${globalMargin}%`}
                     >
-                      ⚡ Margin Global ({globalMargin}%)
+                      Margin Global ({globalMargin}%)
                     </button>
                   )}
                 </div>
@@ -1070,7 +1070,7 @@ function ProdukModal({
                 fontSize: 'var(--text-sm)',
                 color: margin >= 0 ? 'var(--color-success)' : 'var(--color-error)',
               }}>
-                {margin >= 0 ? '✅' : '⚠️'} Margin: Rp {margin.toLocaleString('id-ID')} ({marginPct}%)
+                {margin >= 0 ? 'Margin:' : 'Margin Minus:'} Rp {margin.toLocaleString('id-ID')} ({marginPct}%)
               </div>
             )}
             <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
@@ -1507,7 +1507,7 @@ export default function ProdukPage() {
             className={`btn btn-sm ${activeTab === 'usulan' ? 'btn-primary' : 'btn-secondary'}`}
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap', minHeight: 44, padding: '8px 14px' }}
           >
-            💡 Usulan dari Kasir
+            Usulan dari Kasir
             {pendingProposalCount > 0 && (
               <span style={{
                 background: 'var(--color-error)',
@@ -1537,7 +1537,7 @@ export default function ProdukPage() {
             className={`btn btn-sm ${activeTab === 'batch' ? 'btn-primary' : 'btn-secondary'}`}
             style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap', minHeight: 44, padding: '8px 14px' }}
           >
-            📦 Batch &amp; Kedaluwarsa (FEFO)
+            Batch &amp; Kedaluwarsa (FEFO)
             {criticalBatchCount > 0 && (
               <span style={{
                 background: 'var(--color-error)',

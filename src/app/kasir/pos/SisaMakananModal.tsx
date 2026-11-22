@@ -335,7 +335,7 @@ function SisaMakananModalBody({
                   margin: 0,
                 }}
               >
-                🍱 Opname Sisa Makanan Jam 15:00 WIB
+                Opname Sisa Makanan Jam 15:00 WIB
               </h2>
               <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
                 Catat sisa makanan cepat basi / non-barcode sebelum tutup shift sore

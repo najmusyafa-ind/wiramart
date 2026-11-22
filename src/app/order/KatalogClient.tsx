@@ -414,7 +414,7 @@ export default function KatalogClient({ initialItems }: KatalogClientProps) {
 
             {/* Body */}
             <div className="pwa-welcome-body">
-              <span className="pwa-welcome-greeting">{greeting}, Warga UNPERBA! 👋</span>
+              <span className="pwa-welcome-greeting">{greeting}, Warga UNPERBA!</span>
               <h2 id="pwa-welcome-title" className="pwa-welcome-title">
                 Belanja Jajanan &amp; Minuman,{' '}
                 <span className="pwa-welcome-highlight">Diantar Sampai Kelas</span>
