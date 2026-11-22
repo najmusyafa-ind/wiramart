@@ -35,6 +35,7 @@ type ShiftGroup = {
   slotStart: string;
   slotEnd: string;
   label: string;
+  defaultScheduleId?: string;
   isCurrent: boolean;
   coordinator: string | null;
   personnel: ShiftPersonnel[];
@@ -161,6 +162,14 @@ export default function KasirLoginPage() {
   const [selectedShiftGroup, setSelectedShiftGroup] = useState<ShiftGroup | null>(null);
   const [selectedRole, setSelectedRole] = useState<RoleOption>('Kasir');
   const [submittingPresensi, setSubmittingPresensi] = useState(false);
+
+  // Modal Absen Pengganti (Badal lintas hari / shift tambahan)
+  const [showBadalModal, setShowBadalModal] = useState(false);
+  const [badalEmployeeId, setBadalEmployeeId] = useState('');
+  const [badalScheduleId, setBadalScheduleId] = useState('');
+  const [badalRole, setBadalRole] = useState<RoleOption>('Kasir');
+  const [badalNote, setBadalNote] = useState('');
+  const [badalSearch, setBadalSearch] = useState('');
 
   // Deteksi kuota peran di shift yang sedang dipilih:
   // Admin Kasir & Kasir: Maksimal 1 orang per shift (laci/otorisasi tunggal).
@@ -318,12 +327,20 @@ export default function KasirLoginPage() {
       
       // Khusus Petugas Gudang: Langsung arahkan ke Portal Keamanan Gudang (NIM + PIN)
       if (selectedRole === 'Gudang') {
-        router.push('/gudang/login');
+        const nimParam = selectedPerson.nim ? `?nim=${encodeURIComponent(selectedPerson.nim)}` : '';
+        router.push(`/gudang/login${nimParam}`);
         return;
       }
 
-      // Auto-fill login POS jika orang ini bertugas sebagai Kasir atau Admin Shift
-      if (selectedRole === 'Kasir' || selectedRole === 'Admin Shift') {
+      // Khusus Admin Shift: Langsung arahkan ke Portal Pengelola Tab Admin Kasir (NIM + PIN)
+      if (selectedRole === 'Admin Shift') {
+        const nimParam = selectedPerson.nim ? `?nim=${encodeURIComponent(selectedPerson.nim)}` : '';
+        router.push(`/login${nimParam}`);
+        return;
+      }
+
+      // Auto-fill & pindah ke tab Login POS jika orang ini bertugas sebagai Kasir
+      if (selectedRole === 'Kasir') {
         setForm({
           fullName:     selectedPerson.fullName ?? '',
           nim:          selectedPerson.nim ?? '',
@@ -331,11 +348,62 @@ export default function KasirLoginPage() {
         });
         resetPinUiState();
         setError(null);
+        setActiveTab('pos');
       }
 
       setSelectedPerson(null);
       setSelectedShiftGroup(null);
       await loadPresensi(); // Refresh daftar agar badge langsung hijau
+    } catch {
+      setPresensiError('Gagal menghubungi server.');
+    } finally {
+      setSubmittingPresensi(false);
+    }
+  }
+
+  // Handle Absen Pengganti (Badal)
+  async function handleConfirmBadal(e: React.FormEvent) {
+    e.preventDefault();
+    if (!badalEmployeeId || !badalScheduleId) {
+      setPresensiError('Pilih nama mahasiswa dan sesi shift.');
+      return;
+    }
+
+    setSubmittingPresensi(true);
+    setPresensiError(null);
+    setPresensiSuccessMsg(null);
+    try {
+      const res = await fetch('/api/kasir/presensi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'CLOCK_IN',
+          employeeId: badalEmployeeId,
+          scheduleId: badalScheduleId,
+          roleTask: badalRole,
+          isSubstitute: true,
+          notes: badalNote.trim() || 'Pengganti shift',
+        }),
+      });
+      const json = (await res.json()) as { success: boolean; data?: { message?: string }; message?: string; error?: string };
+      if (!res.ok || !json.success) {
+        setPresensiError(json.error ?? 'Gagal mencatat absen pengganti.');
+        return;
+      }
+
+      const chosenEmp = presensiData?.allEmployees?.find((x) => x.id === badalEmployeeId);
+      setPresensiSuccessMsg(json.data?.message ?? json.message ?? 'Absen pengganti berhasil dicatat.');
+      setShowBadalModal(false);
+      setBadalEmployeeId('');
+      setBadalNote('');
+      setBadalSearch('');
+
+      if (badalRole === 'Kasir' && chosenEmp) {
+        setForm({ fullName: chosenEmp.fullName, nim: chosenEmp.nim, programStudi: chosenEmp.programStudi });
+        resetPinUiState();
+        setActiveTab('pos');
+      }
+      await loadPresensi();
     } catch {
       setPresensiError('Gagal menghubungi server.');
     } finally {
@@ -565,12 +633,12 @@ export default function KasirLoginPage() {
         {/* ─── TAB 1: KIOSK PRESENSI SHIFT (SEMUA ORANG) ─── */}
         {activeTab === 'presensi' && (
           <div>
-            <div style={{ marginBottom: 'var(--space-4)' }}>
-              <h1 className="auth-title" style={{ fontSize: 'var(--text-lg)', marginBottom: 4 }}>
-                Presensi Masuk Shift
+            <div style={{ marginBottom: 'var(--space-3)' }}>
+              <h1 className="auth-title" style={{ fontSize: 'var(--text-lg)', marginBottom: 2 }}>
+                Absen Shift
               </h1>
               <p className="auth-subtitle" style={{ fontSize: 'var(--text-xs)', margin: 0 }}>
-                Semua anggota shift (Kasir, Gudang, Admin Kasir) absen di sini sebelum bertugas.
+                Pilih nama Anda atau gunakan Absen Pengganti.
               </p>
             </div>
 
@@ -664,8 +732,7 @@ export default function KasirLoginPage() {
               let isWeekdayClosed = false;
 
               if (isWeekday) {
-                // Hari Kerja (Senin - Jumat):
-                // Sesuai instruksi: Halaman absensi shift HARUS KELIHATAN MULAI JAM 05:00 SUBUH (300 m) s/d 22:00 MALAM (1320 m)
+                // Hari kerja aktif 05:00 s/d 22:00 WIB
                 if (totalMenit < 5 * 60 || totalMenit > 22 * 60) {
                   isWeekdayClosed = true;
                 }
@@ -955,11 +1022,8 @@ export default function KasirLoginPage() {
                           fontSize: 11,
                           color: 'var(--color-primary)',
                           marginBottom: 10,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6
                         }}>
-                          <span>ℹ️ Shift fleksibel ({s.personnel.length} personel terdaftar). Anggota yang hadir dapat merangkap peran dan langsung bertugas di POS kasir.</span>
+                          Shift fleksibel ({s.personnel.length} orang).
                         </div>
                       )}
 
@@ -1011,7 +1075,7 @@ export default function KasirLoginPage() {
                                         borderRadius: 999,
                                       }}
                                     >
-                                      🏁 Selesai ({p.attendance.clockInTime} – {p.attendance.clockOutTime})
+                                      Selesai ({p.attendance.clockInTime} – {p.attendance.clockOutTime})
                                     </span>
                                   ) : (
                                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -1109,14 +1173,41 @@ export default function KasirLoginPage() {
             {/* Bottom Shortcut to POS (hanya tampil saat jadwal shift reguler aktif) */}
             {(() => {
               const hariUpper = (presensiData?.hari ?? '').toUpperCase();
-              const isWeekday = ['SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT'].includes(hariUpper);
+              const isWeekday = ['SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU', 'MINGGU'].includes(hariUpper);
               const [h, m] = (presensiData?.jamSekarang ?? '00:00').split(':').map(Number);
               const totalMenit = (h ?? 0) * 60 + (m ?? 0);
-              const isOpenWeekday = isWeekday && totalMenit >= 5 * 60 && totalMenit <= 22 * 60;
+              const isOpenWeekday = isWeekday && totalMenit >= 0 && totalMenit <= 24 * 60;
               if (loadingPresensi || !isOpenWeekday || !presensiData?.shifts.length) return null;
 
               return (
-                <div style={{ marginTop: 'var(--space-6)', textAlign: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-4)' }}>
+                <div style={{ marginTop: 'var(--space-5)', textAlign: 'center', borderTop: '1px solid var(--color-border)', paddingTop: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const activeGroup = presensiData.shifts.find((sh) => sh.isCurrent) ?? presensiData.shifts[0];
+                      setBadalScheduleId(activeGroup?.defaultScheduleId ?? activeGroup?.personnel[0]?.scheduleId ?? '');
+                      setBadalEmployeeId('');
+                      setBadalRole('Kasir');
+                      setBadalNote('');
+                      setBadalSearch('');
+                      setPresensiError(null);
+                      setShowBadalModal(true);
+                    }}
+                    className="btn btn-secondary"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      fontSize: 'var(--text-xs)',
+                      minHeight: 42,
+                      width: '100%',
+                      fontWeight: 700,
+                    }}
+                  >
+                    <UserCheck size={15} />
+                    <span>Absen Pengganti / Tambahan Shift</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => setActiveTab('pos')}
@@ -1127,48 +1218,153 @@ export default function KasirLoginPage() {
                       justifyContent: 'center',
                       gap: 8,
                       fontSize: 'var(--text-xs)',
-                      padding: '10px 14px',
+                      minHeight: 44,
                       width: '100%',
-                      maxWidth: '100%',
-                      whiteSpace: 'normal',
-                      textAlign: 'center',
-                      lineHeight: 1.3,
                     }}
                   >
-                    <span>Lanjut Login Kasir (POS)</span>
+                    <span>Masuk Kasir (POS)</span>
                     <ChevronRight size={16} style={{ flexShrink: 0 }} />
                   </button>
-                  <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--color-text-muted)' }}>
-                    Petugas yang sudah absen dapat langsung membuka kasir.
-                  </p>
-                  <div style={{ marginTop: 10 }}>
-                    <button
-                      type="button"
-                      onClick={() => router.push('/gudang/login')}
-                      className="btn btn-secondary"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 6,
-                        fontSize: '11px',
-                        padding: '8px 14px',
-                        borderRadius: 'var(--radius-full)',
-                        width: '100%',
-                        maxWidth: '100%',
-                        whiteSpace: 'normal',
-                        textAlign: 'center',
-                        lineHeight: 1.3,
-                      }}
-                    >
-                      <Package size={13} style={{ flexShrink: 0 }} />
-                      <span>Portal Gudang &amp; FEFO (PIN)</span>
-                      <ChevronRight size={13} style={{ flexShrink: 0 }} />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/gudang/login')}
+                    className="btn btn-secondary"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      fontSize: '11px',
+                      minHeight: 40,
+                      width: '100%',
+                    }}
+                  >
+                    <Package size={13} style={{ flexShrink: 0 }} />
+                    <span>Portal Gudang</span>
+                    <ChevronRight size={13} style={{ flexShrink: 0 }} />
+                  </button>
                 </div>
               );
             })()}
+          </div>
+        )}
+
+        {/* ─── MODAL ABSEN PENGGANTI / BADAL ─── */}
+        {showBadalModal && presensiData && (
+          <div
+            onClick={(e) => e.target === e.currentTarget && setShowBadalModal(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(15, 23, 42, 0.55)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: 16,
+              backdropFilter: 'blur(4px)',
+            }}
+          >
+            <form
+              onSubmit={handleConfirmBadal}
+              className="card"
+              style={{
+                maxWidth: 400,
+                width: '100%',
+                backgroundColor: 'white',
+                borderRadius: 16,
+                padding: 20,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              <h2 style={{ fontSize: '1rem', fontWeight: 800, margin: 0 }}>Absen Pengganti</h2>
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>Sesi Shift</label>
+                <select
+                  className="form-input"
+                  value={badalScheduleId}
+                  onChange={(e) => setBadalScheduleId(e.target.value)}
+                  required
+                  style={{ width: '100%', minHeight: 42 }}
+                >
+                  {presensiData.shifts.map((sh, i) => (
+                    <option key={i} value={sh.defaultScheduleId ?? sh.personnel[0]?.scheduleId ?? ''}>
+                      Shift {i === 0 ? 'Pagi' : 'Siang'} ({sh.label})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>Nama Mahasiswa</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Cari nama atau NIM..."
+                  value={badalSearch}
+                  onChange={(e) => setBadalSearch(e.target.value)}
+                  style={{ minHeight: 38, marginBottom: 6, fontSize: 13 }}
+                />
+                <select
+                  className="form-input"
+                  value={badalEmployeeId}
+                  onChange={(e) => setBadalEmployeeId(e.target.value)}
+                  required
+                  style={{ width: '100%', minHeight: 42 }}
+                >
+                  <option value="">-- Pilih Mahasiswa --</option>
+                  {(presensiData.allEmployees ?? [])
+                    .filter((emp) => {
+                      const q = badalSearch.trim().toLowerCase();
+                      return !q || emp.fullName.toLowerCase().includes(q) || emp.nim.includes(q);
+                    })
+                    .map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.fullName} ({emp.nim})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>Tugas</label>
+                <select
+                  className="form-input"
+                  value={badalRole}
+                  onChange={(e) => setBadalRole(e.target.value as RoleOption)}
+                  style={{ width: '100%', minHeight: 42 }}
+                >
+                  <option value="Kasir">Kasir</option>
+                  <option value="Admin Shift">Admin Shift</option>
+                  <option value="Gudang">Gudang</option>
+                  <option value="CS Pelayan">CS Pelayan</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 4 }}>Keterangan</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Contoh: Menggantikan tgl 15"
+                  value={badalNote}
+                  onChange={(e) => setBadalNote(e.target.value)}
+                  style={{ minHeight: 40, fontSize: 13 }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <button type="button" onClick={() => setShowBadalModal(false)} className="btn btn-secondary" style={{ flex: 1, minHeight: 42 }} disabled={submittingPresensi}>
+                  Batal
+                </button>
+                <button type="submit" className="btn btn-primary" style={{ flex: 2, minHeight: 42, fontWeight: 700 }} disabled={submittingPresensi}>
+                  {submittingPresensi ? 'Menyimpan...' : 'Catat Hadir'}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
@@ -1386,7 +1582,7 @@ export default function KasirLoginPage() {
               <div style={{ marginBottom: 'var(--space-4)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                   <span style={{ fontSize: 11, fontWeight: 'bold', color: 'var(--color-primary)' }}>
-                    🛠️ Mode Demonstrasi Aktif (?demo=1):
+                    Mode Demo (?demo=1):
                   </span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
@@ -1422,7 +1618,6 @@ export default function KasirLoginPage() {
                         transition: 'all 0.15s ease',
                       }}
                     >
-                      <span>{item.role === 'Gudang' ? '📦' : '🛒'}</span>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {item.label}
                       </span>

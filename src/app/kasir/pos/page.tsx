@@ -10,8 +10,9 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import KalkulatorPecahan, { type DenominasiMap } from './KalkulatorPecahan';
-import KasGerakModal from './KasGerakModal';
+import KasGerakModal, { type GraceRecalcResult } from './KasGerakModal';
 import SisaMakananModal from './SisaMakananModal';
+import TitipanHarianModal from './TitipanHarianModal';
 import {
   getBundlePriceDisplay,
   getHourWib,
@@ -1590,6 +1591,20 @@ export default function PosPage() {
   const [showTutupConfirm, setShowTutupConfirm] = useState(false);
   const [showKasGerak, setShowKasGerak] = useState(false);
   const [showSisaMakanan, setShowSisaMakanan] = useState(false);
+  const [showTitipanModal, setShowTitipanModal] = useState(false);
+  const [titipanBannerDismissed, setTitipanBannerDismissed] = useState(false);
+  const [titipanReminder, setTitipanReminder] = useState<{
+    shouldRemind: boolean;
+    minutesBeforeClose: number | null;
+    sessionLabel: string;
+    activeOpenCount: number;
+    carryoverCount: number;
+  } | null>(null);
+  const [graceCountdown, setGraceCountdown] = useState<string>('');
+  const [showRecountBox, setShowRecountBox] = useState(false);
+  const [recountInput, setRecountInput] = useState('');
+  const [recountLoading, setRecountLoading] = useState(false);
+  const [recountError, setRecountError] = useState<string | null>(null);
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinBannerDismissed, setPinBannerDismissed] = useState(false);
   const [tutupActualCash, setTutupActualCash] = useState<string>('');
@@ -1599,9 +1614,20 @@ export default function PosPage() {
   const [handoverCopied, setHandoverCopied]   = useState(false);
   const [tutupMode, setTutupMode]             = useState<'QUICK' | 'CALCULATOR'>('QUICK');
   const [tutupResult, setTutupResult] = useState<{
+    shiftId?: string;
     txCount: number;
     clockIn?: string;
     clockOut?: string;
+    autoChecklist?: {
+      status: string;
+      shortageAmount: number;
+      graceUntil: string | null;
+      recountRemaining: number;
+      unsettledConsignmentsToday: number;
+      carryoverConsignments: number;
+      typoSuspected: boolean;
+      toleranceRp: number;
+    };
     handoverSummary?: {
       kasirName: string;
       modalAwal: number;
@@ -2199,6 +2225,118 @@ export default function PosPage() {
     router.refresh();
   }
 
+  const fetchTitipanReminder = useCallback(async () => {
+    try {
+      const res = await fetch('/api/kasir/titipan?catalog=0', { cache: 'no-store' });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.success && json.data?.reminder) {
+        setTitipanReminder(json.data.reminder);
+      }
+    } catch {
+      // silent polling guard
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!session?.shift) return;
+    void fetchTitipanReminder();
+    const timer = setInterval(() => {
+      void fetchTitipanReminder();
+    }, 90_000);
+    return () => clearInterval(timer);
+  }, [session?.shift, fetchTitipanReminder]);
+
+  // Countdown real-time untuk Jeda 5 Menit setelah Tutup Shift
+  useEffect(() => {
+    const graceUntil = tutupResult?.autoChecklist?.graceUntil;
+    const status = tutupResult?.autoChecklist?.status;
+    if (status !== 'PENDING_GRACE' || !graceUntil) {
+      setGraceCountdown('');
+      return;
+    }
+
+    const tick = () => {
+      const diffMs = new Date(graceUntil).getTime() - Date.now();
+      if (diffMs <= 0) {
+        setGraceCountdown('00:00');
+        setTutupResult((prev) =>
+          prev?.autoChecklist
+            ? { ...prev, autoChecklist: { ...prev.autoChecklist, status: 'AUTO_LOCKED', graceUntil: null } }
+            : prev,
+        );
+        return;
+      }
+      const totalSec = Math.ceil(diffMs / 1000);
+      const mins = Math.floor(totalSec / 60);
+      const secs = totalSec % 60;
+      setGraceCountdown(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [tutupResult?.autoChecklist?.graceUntil, tutupResult?.autoChecklist?.status]);
+
+  function applyGraceUpdateToTutupResult(graceUpdate?: GraceRecalcResult | null) {
+    if (!graceUpdate) return;
+    setTutupResult((prev) => {
+      if (!prev?.autoChecklist) return prev;
+      return {
+        ...prev,
+        autoChecklist: {
+          ...prev.autoChecklist,
+          status: graceUpdate.status,
+          shortageAmount: graceUpdate.shortageAmount,
+          graceUntil: graceUpdate.graceUntil,
+        },
+        handoverSummary:
+          prev.handoverSummary && graceUpdate.actualCash !== null
+            ? { ...prev.handoverSummary, sisaCashKotakUang: graceUpdate.actualCash }
+            : prev.handoverSummary,
+      };
+    });
+  }
+
+  async function handleGraceRecountSubmit() {
+    if (recountLoading) return;
+    const val = parseFloat(recountInput.replace(/\D/g, ''));
+    if (isNaN(val) || val < 0) {
+      setRecountError('Masukkan nominal uang fisik yang valid.');
+      return;
+    }
+    setRecountLoading(true);
+    setRecountError(null);
+    try {
+      const res = await fetch('/api/kasir/shift/koreksi-fisik', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shiftId: tutupResult?.shiftId,
+          actualCash: val,
+          reason: 'Hitung ulang uang fisik dalam jeda 5 menit',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        setRecountError(json.error ?? 'Gagal memperbarui nominal fisik.');
+        return;
+      }
+      applyGraceUpdateToTutupResult(json.data?.recalc ?? null);
+      setTutupResult((prev) =>
+        prev?.autoChecklist
+          ? { ...prev, autoChecklist: { ...prev.autoChecklist, recountRemaining: 0 } }
+          : prev,
+      );
+      setShowRecountBox(false);
+      setRecountInput('');
+    } catch {
+      setRecountError('Gangguan koneksi.');
+    } finally {
+      setRecountLoading(false);
+    }
+  }
+
   async function handleTutupShift() {
     setTutupLoading(true);
     try {
@@ -2213,39 +2351,20 @@ export default function PosPage() {
           earlyCloseReason: tutupEarlyReason,
         }),
       });
-      const json = await res.json() as {
-        success: boolean;
-        data?: {
-          txCount: number;
-          clockIn?: string;
-          clockOut?: string;
-          handoverSummary?: {
-            kasirName: string;
-            modalAwal: number;
-            cashMasuk: number;
-            qrisMasuk: number;
-            totalPenjualan: number;
-            potonganSupplier: Array<{ category: string; notes: string; amount: number }>;
-            totalCashOut: number;
-            totalCashIn: number;
-            sisaCashKotakUang: number | null;
-            earlyCloseReason: 'NORMAL' | 'KULIAH' | 'IZIN_DOSEN';
-          };
-        };
-        error?: string;
-      };
+      const json = await res.json();
       if (!res.ok) {
         alert(json.error ?? 'Gagal menutup shift.');
         return;
       }
       setTutupResult(json.data ?? null);
       setHandoverCopied(false);
+      setShowRecountBox(false);
+      setRecountError(null);
       setShowTutupConfirm(false);
       setTutupActualCash('');
       setTutupBreakdown({});
       setTutupNotes('');
       setTutupEarlyReason('NORMAL');
-      // Update session: shift = null setelah tutup
       setSession((prev) => prev ? { ...prev, shift: null } : prev);
     } catch {
       alert('Kesalahan jaringan. Coba lagi.');
@@ -2474,6 +2593,39 @@ export default function PosPage() {
                 </select>
               </div>
 
+              {/* Trigger 3: Pengingat Titipan Harian sebelum Tutup Shift */}
+              {titipanReminder && (titipanReminder.activeOpenCount > 0 || titipanReminder.carryoverCount > 0) && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    padding: '8px 10px',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'hsl(38 92% 95%)',
+                    border: '1px solid hsl(38 85% 74%)',
+                    fontSize: '0.76rem',
+                  }}
+                >
+                  <span style={{ color: 'hsl(32 85% 24%)', fontWeight: 700 }}>
+                    {titipanReminder.activeOpenCount} titipan hari ini
+                    {titipanReminder.carryoverCount > 0 ? ` (+${titipanReminder.carryoverCount} susulan)` : ''} belum dihitung.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTutupConfirm(false);
+                      setShowTitipanModal(true);
+                    }}
+                    className="btn btn-secondary"
+                    style={{ minHeight: 38, padding: '4px 10px', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}
+                  >
+                    Buka Titipan
+                  </button>
+                </div>
+              )}
+
               {/* Reminder Sisa Makanan Sore (aktif hanya >= 15:00 WIB & stok sisa > 0) */}
               {shouldRemindTutupShift && (
                 <div
@@ -2570,6 +2722,114 @@ export default function PosPage() {
                 <span style={{ color: 'var(--color-text-muted)' }}>Total Transaksi</span>
                 <span style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>{tutupResult.txCount} txn</span>
               </div>
+
+              {/* Panel Auto-Checklist & Jeda Koreksi 5 Menit */}
+              {tutupResult.autoChecklist && tutupResult.autoChecklist.status !== 'NONE' && (
+                <div
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border:
+                      tutupResult.autoChecklist.status === 'AUTO_VERIFIED'
+                        ? '1px solid hsl(145 55% 75%)'
+                        : '1.5px solid hsl(0 72% 65%)',
+                    background:
+                      tutupResult.autoChecklist.status === 'AUTO_VERIFIED'
+                        ? 'hsl(145 60% 96%)'
+                        : 'hsl(0 84% 97%)',
+                    fontSize: '0.78rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  {tutupResult.autoChecklist.status === 'AUTO_VERIFIED' ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'hsl(145 65% 24%)', fontWeight: 800 }}>
+                      <CheckCircle size={16} />
+                      <span>Laci Klop (Otomatis Sah)</span>
+                    </div>
+                  ) : tutupResult.autoChecklist.status === 'PENDING_GRACE' ? (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                        <span style={{ color: 'hsl(0 72% 38%)', fontWeight: 800 }}>
+                          Laci kurang Rp {tutupResult.autoChecklist.shortageAmount.toLocaleString('id-ID')}
+                        </span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, padding: '2px 8px', borderRadius: 6, background: 'hsl(0 72% 45%)', color: '#fff', fontSize: '0.75rem' }}>
+                          {graceCountdown || '05:00'}
+                        </span>
+                      </div>
+                      <div style={{ color: 'hsl(0 55% 32%)', fontSize: '0.73rem' }}>
+                        {tutupResult.autoChecklist.typoSuspected
+                          ? 'Angka fisik terlihat terlalu kecil (kemungkinan salah ketik). Segera cek ulang.'
+                          : 'Lengkapi catatan Titipan / Diambil Bu Dyah / hitung ulang sebelum potongan dikunci.'}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowKasGerak(true)}
+                          className="btn btn-secondary"
+                          style={{ flex: '1 1 auto', minHeight: 38, fontSize: '0.74rem', fontWeight: 700, padding: '4px 8px' }}
+                        >
+                          Kas Laci
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowTitipanModal(true)}
+                          className="btn btn-secondary"
+                          style={{ flex: '1 1 auto', minHeight: 38, fontSize: '0.74rem', fontWeight: 700, padding: '4px 8px' }}
+                        >
+                          Titipan
+                        </button>
+                        {tutupResult.autoChecklist.recountRemaining > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setShowRecountBox((v) => !v)}
+                            className="btn btn-secondary"
+                            style={{ flex: '1 1 auto', minHeight: 38, fontSize: '0.74rem', fontWeight: 700, padding: '4px 8px' }}
+                          >
+                            Hitung Ulang (1x)
+                          </button>
+                        )}
+                      </div>
+
+                      {showRecountBox && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 6, borderTop: '1px dashed hsl(0 50% 80%)' }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              className="form-input"
+                              placeholder="Nominal fisik baru (Rp)"
+                              value={recountInput}
+                              onChange={(e) => {
+                                const v = e.target.value.replace(/\D/g, '');
+                                setRecountInput(v ? parseInt(v, 10).toLocaleString('id-ID') : '');
+                              }}
+                              style={{ flex: 1, minHeight: 40, fontWeight: 700 }}
+                            />
+                            <button
+                              type="button"
+                              onClick={handleGraceRecountSubmit}
+                              disabled={recountLoading}
+                              className="btn btn-primary"
+                              style={{ minHeight: 40, padding: '0 12px', fontSize: '0.76rem', fontWeight: 700 }}
+                            >
+                              {recountLoading ? '...' : 'Simpan'}
+                            </button>
+                          </div>
+                          {recountError && (
+                            <div style={{ color: 'hsl(0 72% 40%)', fontSize: '0.72rem', fontWeight: 600 }}>{recountError}</div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ color: 'hsl(0 72% 38%)', fontWeight: 700 }}>
+                      Masa jeda selesai — selisih kurang Rp {tutupResult.autoChecklist.shortageAmount.toLocaleString('id-ID')} terkunci di laporan shift.
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Blok Ringkasan Serah Terima Kas & Potongan Supplier (Standar Bu Dyah) */}
               {tutupResult.handoverSummary && (
@@ -2974,6 +3234,50 @@ export default function PosPage() {
             >
               Buka Shift
             </button>
+          </div>
+        )}
+        {/* Trigger 2: Pengingat Titipan Harian 30-45 menit sebelum tutup shift (10:45 & 14:00 WIB) */}
+        {session?.shift && titipanReminder?.shouldRemind && !titipanBannerDismissed && (
+          <div
+            role="status"
+            style={{
+              margin: 'var(--space-2) var(--space-3)',
+              padding: '10px 14px',
+              background: 'hsl(38 95% 95%)',
+              border: '1.5px solid hsl(38 90% 54%)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', color: 'hsl(32 90% 24%)', fontWeight: 700 }}>
+              <AlertTriangle size={16} style={{ color: 'hsl(35 90% 44%)', flexShrink: 0 }} />
+              <span>
+                Menjelang tutup shift — {titipanReminder.activeOpenCount} titipan aktif
+                {titipanReminder.carryoverCount > 0 ? `, ${titipanReminder.carryoverCount} susulan` : ''}.
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setTitipanBannerDismissed(true)}
+                className="btn btn-secondary"
+                style={{ padding: '6px 12px', minHeight: 40, fontSize: '0.78rem' }}
+              >
+                Nanti
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowTitipanModal(true)}
+                className="btn btn-primary"
+                style={{ padding: '6px 14px', minHeight: 40, fontSize: '0.8rem', fontWeight: 700 }}
+              >
+                Hitung Sisa
+              </button>
+            </div>
           </div>
         )}
         {/* Reminder Proaktif Cut-Off Makanan Sore (>= 15:00 WIB & stok makanan harian > 0) */}
@@ -3536,8 +3840,36 @@ export default function PosPage() {
                     <Receipt size={20} />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div className="pos-drawer-link-title">Kas Keluar / Masuk Laci</div>
-                    <div className="pos-drawer-link-sub">Petty Cash: Galon, Bensin, ATK, Receh</div>
+                    <div className="pos-drawer-link-title">Kas Laci</div>
+                    <div className="pos-drawer-link-sub">Uang keluar, diambil Bu Dyah, tip</div>
+                  </div>
+                  <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+                </button>
+              )}
+
+              {session?.shift && (
+                <button
+                  type="button"
+                  className="pos-drawer-link"
+                  onClick={() => {
+                    setShowKasirMenu(false);
+                    setShowTitipanModal(true);
+                  }}
+                  style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                >
+                  <div className="pos-drawer-icon-box" style={{ background: 'hsl(145 65% 92%)', color: 'hsl(145 70% 28%)' }}>
+                    <Utensils size={20} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="pos-drawer-link-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>Titipan Harian</span>
+                      {titipanReminder && titipanReminder.activeOpenCount + titipanReminder.carryoverCount > 0 && (
+                        <span style={{ fontSize: '0.68rem', fontWeight: 800, padding: '1px 6px', borderRadius: 99, background: 'hsl(38 92% 50%)', color: '#fff' }}>
+                          {titipanReminder.activeOpenCount + titipanReminder.carryoverCount}
+                        </span>
+                      )}
+                    </div>
+                    <div className="pos-drawer-link-sub">Catat titip, hitung sisa &amp; setor mitra</div>
                   </div>
                   <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
                 </button>
@@ -3557,8 +3889,8 @@ export default function PosPage() {
                     <Utensils size={20} />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div className="pos-drawer-link-title">Opname Makanan Jam 15:00</div>
-                    <div className="pos-drawer-link-sub">Catat sisa cilok, siomai, gorengan sebelum tutup</div>
+                    <div className="pos-drawer-link-title">Sisa Makanan</div>
+                    <div className="pos-drawer-link-sub">Opname sisa produk harian</div>
                   </div>
                   <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
                 </button>
@@ -3713,10 +4045,21 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* ── Modal Kas Keluar & Masuk Laci (Petty Cash) ─────────── */}
+      {/* ── Modal Kas Laci (Uang Keluar / Masuk) ────────────────── */}
       <KasGerakModal
         isOpen={showKasGerak}
         onClose={() => setShowKasGerak(false)}
+        onMovementAdded={(graceUpdate) => applyGraceUpdateToTutupResult(graceUpdate)}
+      />
+
+      {/* ── Modal Titipan Harian (Konsinyasi) ───────────────────── */}
+      <TitipanHarianModal
+        isOpen={showTitipanModal}
+        onClose={() => setShowTitipanModal(false)}
+        onChanged={(graceUpdate) => {
+          void fetchTitipanReminder();
+          applyGraceUpdateToTutupResult(graceUpdate);
+        }}
       />
 
       {/* ── Modal Cut-Off Sisa Makanan Jam 15:00 ────────────────── */}

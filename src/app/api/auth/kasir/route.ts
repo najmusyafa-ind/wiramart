@@ -146,17 +146,8 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  // 3b. Zero-Trust Enforcement: Akun Petugas Gudang WAJIB login via PIN di Portal Gudang (/kasir/gudang/login)
-  const isGudang = (employee.jabatan ?? '').toLowerCase().includes('gudang');
-  if (isGudang) {
-    return apiError(
-      'Akun Anda terdaftar sebagai Petugas Gudang & Logistik. Demi standar keamanan inventaris, silakan login melalui Portal Gudang menggunakan NIM & PIN.',
-      'GUDANG_PIN_AUTH_REQUIRED',
-      403,
-    );
-  }
-
-  // 3c. Opsi B1 Progressive Soft Migration: Verifikasi PIN jika sudah terdaftar, atau masa transisi jika belum
+  // 3b. Verifikasi PIN jika sudah terdaftar, atau masa transisi jika belum
+  // Catatan: Peran Gudang bersifat rotasi per shift, sehingga mahasiswa tetap dapat login POS saat bertugas sebagai Kasir.
   let hasPinAfterLogin = Boolean(employee.pinHash);
   const now = new Date();
 
@@ -373,13 +364,16 @@ export async function POST(request: Request): Promise<Response> {
       await db
         .insert(attendances)
         .values({
-          employeeId:     employee.id,
-          scheduleId:     jadwalHariIni.id,
-          attendanceDate: tanggalHari,
-          status:         isTelat ? 'TELAT' : 'HADIR',
-          shiftId:        shiftToUseId,
-          clockInActual:  nowWib,
+          employeeId:         employee.id,
+          scheduleId:         jadwalHariIni.id,
+          attendanceDate:     tanggalHari,
+          status:             isTelat ? 'TELAT' : 'HADIR',
+          shiftId:            shiftToUseId,
+          clockInActual:      nowWib,
           lateMinutes,
+          roleTask:           'Kasir',
+          verificationSource: 'LOGIN_AUTO',
+          isSubstitute:       false,
         })
         .onConflictDoNothing();
     }

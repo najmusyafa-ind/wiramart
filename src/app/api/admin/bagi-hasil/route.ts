@@ -20,7 +20,6 @@ import {
   KETUA_UMKM_DUPLICATE_ID,
   PERSEN_TUNJANGAN_KETUA,
   extractRoleFromNotes,
-  getSessionDurationWeight,
   computePersonnelWeight,
   type PeriodKey,
 } from '@/lib/finance/report';
@@ -42,8 +41,8 @@ export async function GET(req: NextRequest): Promise<Response> {
   if (!session || session.role !== 'admin') {
     return apiError('Akses ditolak. Khusus Admin/Manager.', 403);
   }
-  if (session.adminRole !== 'MANAGER') {
-    return apiError('Akses ditolak. Perhitungan bagi hasil hanya dapat diakses oleh Manager.', 403);
+  if (session.adminRole !== 'MANAGER' && session.adminRole !== 'ADMIN_SHIFT') {
+    return apiError('Akses ditolak. Khusus Admin Shift atau Manager.', 403);
   }
 
   const { searchParams } = new URL(req.url);
@@ -346,7 +345,10 @@ export async function GET(req: NextRequest): Promise<Response> {
             clockOutActual: s.clockOut,
             status: 'HADIR',
             lateMinutes: 0,
-            notes: 'Peran: Kasir | Auto-integrated shift cashier',
+            roleTask: 'Kasir',
+            verificationSource: 'LOGIN_AUTO',
+            isSubstitute: false,
+            notes: 'Peran: Kasir | Kasir Shift',
             recordedByAdminId: null,
             fromSwapRequestId: null,
             createdAt: s.clockIn,
@@ -359,7 +361,7 @@ export async function GET(req: NextRequest): Promise<Response> {
               jabatan: s.kasirJabatan || 'Kasir',
             },
             schedule: {
-              slotStart: sesi === 'Siang' ? '11:30' : '07:00',
+              slotStart: sesi === 'Siang' ? '11:30' : '07:30',
               slotEnd: sesi === 'Siang' ? '15:00' : '11:30',
               dayOfWeek: 'SENIN',
             },
@@ -375,11 +377,31 @@ export async function GET(req: NextRequest): Promise<Response> {
         const hasAnyAttendee = shiftsOnDate.some(
           (s) => (shiftPoolMap.get(s.id)?.attendees.length ?? 0) > 0,
         );
-        const shiftWeights = shiftsOnDate.map((s) => {
+        const shiftAttPoints = shiftsOnDate.map((s) => {
           const group = shiftPoolMap.get(s.id)!;
-          if (hasAnyAttendee && group.attendees.length === 0) return 0;
-          const lk = Math.max(0, profitByShiftId.get(s.id) ?? 0);
-          return lk * getSessionDurationWeight(group.sesi);
+          if (group.attendees.length === 0) return 0;
+          return group.attendees.reduce((sum, att) => {
+            const w = computePersonnelWeight({
+              role: extractRoleFromNotes(att.notes, att.employee.jabatan),
+              sesi: group.sesi,
+              attendanceDate: d.date,
+              lateMinutes: att.lateMinutes,
+            });
+            return sum + w.totalWeight;
+          }, 0);
+        });
+        const totalAttPts = shiftAttPoints.reduce((a, b) => a + b, 0);
+        const shiftLks = shiftsOnDate.map((s, idx) =>
+          hasAnyAttendee && (shiftAttPoints[idx] ?? 0) === 0 ? 0 : Math.max(0, profitByShiftId.get(s.id) ?? 0),
+        );
+        const totalLk = shiftLks.reduce((a, b) => a + b, 0);
+
+        // Rumus seragam 50% Kehadiran / 50% Laba Kotor (sama dengan /api/admin/laporan/per-shift)
+        const shiftWeights = shiftsOnDate.map((_, idx) => {
+          const attPts = shiftAttPoints[idx] ?? 0;
+          const lk = shiftLks[idx] ?? 0;
+          if (hasAnyAttendee && attPts === 0) return 0;
+          return 0.5 * attPts * (totalLk > 0 ? totalLk : 1) + 0.5 * lk * (totalAttPts > 0 ? totalAttPts : 1);
         });
         const shiftShares = allocateProportional(poolHariIni, shiftWeights);
 

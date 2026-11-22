@@ -30,6 +30,7 @@ export async function GET(): Promise<Response> {
       weekday: 'long',
     }).format(nowWib);
     const dayOfWeek = HARI_MAP[hariRaw] ?? (hariRaw.toUpperCase() as 'MINGGU' | 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU');
+    const queryDayOfWeek = dayOfWeek;
     const tanggalHari = nowWib.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
     const jamMenitSekarang = nowWib.toLocaleTimeString('en-GB', {
       timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
@@ -68,12 +69,12 @@ export async function GET(): Promise<Response> {
         ),
       )
       .where(and(
-        eq(shiftSchedules.dayOfWeek, dayOfWeek),
+        eq(shiftSchedules.dayOfWeek, queryDayOfWeek),
         eq(shiftSchedules.isActive, true),
       ))
       .orderBy(shiftSchedules.slotStart, shiftSchedules.orderInSlot);
 
-    // Ambil absensi yang sudah tercatat hari ini
+    // Ambil absensi yang sudah tercatat hari ini (beserta info karyawan & jadwal untuk dukungan Pengganti/Badal)
     const attendancesToday = await db
       .select({
         id:             attendances.id,
@@ -83,9 +84,20 @@ export async function GET(): Promise<Response> {
         clockInActual:  attendances.clockInActual,
         clockOutActual: attendances.clockOutActual,
         lateMinutes:    attendances.lateMinutes,
+        roleTask:       attendances.roleTask,
+        isSubstitute:   attendances.isSubstitute,
         notes:          attendances.notes,
+        empName:        employees.fullName,
+        empNim:         employees.nim,
+        empProdi:       employees.programStudi,
+        empJabatan:     employees.jabatan,
+        empHasPin:      sql<boolean>`CASE WHEN ${employees.pinHash} IS NOT NULL THEN true ELSE false END`,
+        schedSlotStart: shiftSchedules.slotStart,
+        schedSlotEnd:   shiftSchedules.slotEnd,
       })
       .from(attendances)
+      .innerJoin(employees, eq(attendances.employeeId, employees.id))
+      .leftJoin(shiftSchedules, eq(attendances.scheduleId, shiftSchedules.id))
       .where(eq(attendances.attendanceDate, tanggalHari));
 
     const attendanceMap = new Map<string, typeof attendancesToday[0]>();
@@ -93,11 +105,12 @@ export async function GET(): Promise<Response> {
       attendanceMap.set(`${att.employeeId}_${att.scheduleId}`, att);
     }
 
-    // Kelompokkan slot berdasarkan rentang waktu (mis. '08:00 - 11:30', '11:30 - 15:00')
+    // Kelompokkan slot berdasarkan rentang waktu (mis. '07:30 - 11:30', '11:30 - 15:00')
     const grouped = new Map<string, {
       slotStart: string;
       slotEnd: string;
       label: string;
+      defaultScheduleId: string;
       isCurrent: boolean;
       coordinator: string | null;
       personnel: Array<{
@@ -109,6 +122,7 @@ export async function GET(): Promise<Response> {
         programStudi: string | null;
         defaultJabatan: string | null;
         hasPin: boolean;
+        isSubstitute?: boolean;
         attendance: {
           isAttended: boolean;
           isClockedOut: boolean;
@@ -116,6 +130,7 @@ export async function GET(): Promise<Response> {
           clockInTime?: string | null;
           clockOutTime?: string | null;
           lateMinutes?: number;
+          roleTask?: string | null;
           notes?: string | null;
         };
       }>;
@@ -139,6 +154,7 @@ export async function GET(): Promise<Response> {
           slotStart: s.slotStart,
           slotEnd: s.slotEnd,
           label: `${s.slotStart} - ${s.slotEnd} WIB`,
+          defaultScheduleId: s.scheduleId,
           isCurrent,
           coordinator: s.coordinatorName,
           personnel: [],
@@ -167,6 +183,7 @@ export async function GET(): Promise<Response> {
           programStudi:    s.employeeProdi,
           defaultJabatan:  s.employeeJabatan,
           hasPin:          Boolean(s.hasPin),
+          isSubstitute:    Boolean(att?.isSubstitute),
           attendance: {
             isAttended:   Boolean(att),
             isClockedOut: Boolean(att?.clockOutActual),
@@ -174,10 +191,53 @@ export async function GET(): Promise<Response> {
             clockInTime:  clockInStr,
             clockOutTime: clockOutStr,
             lateMinutes:  att?.lateMinutes,
+            roleTask:     att?.roleTask ?? null,
             notes:        att?.notes,
           },
         });
       }
+    }
+
+    // Tambahkan personel Pengganti (Badal) yang hadir hari ini meski tidak ada di jadwal rutin hari ini
+    for (const att of attendancesToday) {
+      if (!att.schedSlotStart || !att.schedSlotEnd) continue;
+      const key = `${att.schedSlotStart} - ${att.schedSlotEnd}`;
+      const group = grouped.get(key);
+      if (!group) continue;
+      if (group.personnel.some((p) => p.employeeId === att.employeeId)) continue;
+
+      const clockInStr = att.clockInActual
+        ? new Date(att.clockInActual).toLocaleTimeString('en-GB', {
+            timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
+          })
+        : null;
+      const clockOutStr = att.clockOutActual
+        ? new Date(att.clockOutActual).toLocaleTimeString('en-GB', {
+            timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
+          })
+        : null;
+
+      group.personnel.push({
+        scheduleId:     att.scheduleId,
+        orderInSlot:    90,
+        employeeId:     att.employeeId,
+        fullName:       att.empName,
+        nim:            att.empNim,
+        programStudi:   att.empProdi,
+        defaultJabatan: att.empJabatan,
+        hasPin:         Boolean(att.empHasPin),
+        isSubstitute:   true,
+        attendance: {
+          isAttended:   true,
+          isClockedOut: Boolean(att.clockOutActual),
+          status:       att.status,
+          clockInTime:  clockInStr,
+          clockOutTime: clockOutStr,
+          lateMinutes:  att.lateMinutes,
+          roleTask:     att.roleTask ?? null,
+          notes:        att.notes,
+        },
+      });
     }
 
     // Ambil daftar seluruh mahasiswa aktif untuk kemudahan Kasir Pengganti (Badal) & Oper Kasir

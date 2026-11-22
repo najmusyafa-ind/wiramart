@@ -5,23 +5,25 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, ne, inArray, sql } from 'drizzle-orm';
+import { eq, and, ne, inArray, sql, gte, lt, isNotNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { shiftSchedules, employees, attendances, qrisSettings } from '@/lib/db/schema';
+import { shiftSchedules, employees, attendances, qrisSettings, shifts } from '@/lib/db/schema';
 import { apiOk, apiError } from '@/lib/utils/helpers';
+import { getWibMinutes } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 
 const presensiSchema = z.object({
-  action:     z.enum(['CLOCK_IN', 'CLOCK_OUT']).default('CLOCK_IN'),
-  employeeId: z.string().uuid('ID Karyawan tidak valid'),
-  scheduleId: z.string().uuid('ID Jadwal tidak valid'),
-  roleTask:   z.enum([
+  action:       z.enum(['CLOCK_IN', 'CLOCK_OUT']).default('CLOCK_IN'),
+  employeeId:   z.string().uuid('ID Karyawan tidak valid'),
+  scheduleId:   z.string().uuid('ID Jadwal tidak valid'),
+  roleTask:     z.enum([
     'Admin Shift', 'Kepala Gudang', 'Kasir', 'Customer Service',
     'Ketua Admin', 'Pelayan', 'Gudang', 'Admin Kasir', 'Kepala Kasir',
     'CS Pelayan', 'CS',
   ]).optional(),
-  notes:      z.string().max(255).optional(),
+  isSubstitute: z.boolean().optional().default(false),
+  notes:        z.string().max(255).optional(),
 });
 
 export async function POST(request: Request): Promise<Response> {
@@ -37,7 +39,7 @@ export async function POST(request: Request): Promise<Response> {
     return apiError('Data presensi tidak lengkap', 'VALIDATION_ERROR', 422, parsed.error.format());
   }
 
-  const { action, employeeId, scheduleId, notes } = parsed.data;
+  const { action, employeeId, scheduleId, isSubstitute, notes } = parsed.data;
   const roleTask = parsed.data.roleTask ?? 'Kasir';
 
   try {
@@ -147,7 +149,7 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    // Hitung keterlambatan berdasarkan toleransi
+    // Hitung keterlambatan berdasarkan toleransi + perlindungan serah terima shift pagi
     const settingsRow = await db.query.qrisSettings.findFirst({
       where: eq(qrisSettings.id, '00000000-0000-0000-0000-000000000002'),
       columns: { attendanceTolerance: true },
@@ -159,15 +161,41 @@ export async function POST(request: Request): Promise<Response> {
 
     const loginMenitTotal  = (jamAktual ?? 0) * 60 + (menitAktual ?? 0);
     const jadwalMenitTotal = (jamJadwal ?? 0) * 60 + (menitJadwal ?? 0);
-    const selisihMenit     = loginMenitTotal - jadwalMenitTotal; // positif = telat
 
-    const isTelat     = selisihMenit > toleransiMenit;
-    const lateMinutes = isTelat ? selisihMenit : 0;
-    const status      = isTelat ? 'TELAT' : 'HADIR';
+    // Jika Shift Siang (>= 11:00) dan Shift Pagi baru selesai melewati jam mulai siang,
+    // gunakan jam selesai Shift Pagi (maks +60 mnt) sebagai patokan agar tim siang tidak dihukum menunggu laci.
+    let patokanMenitTotal = jadwalMenitTotal;
+    if (!isSubstitute && jadwalMenitTotal >= 11 * 60) {
+      const startOfDayWib = new Date(`${tanggalHari}T00:00:00+07:00`);
+      const noonWib = new Date(`${tanggalHari}T11:15:00+07:00`);
+      const morningShifts = await db
+        .select({ clockOut: shifts.clockOut })
+        .from(shifts)
+        .where(
+          and(
+            gte(shifts.clockIn, startOfDayWib),
+            lt(shifts.clockIn, noonWib),
+            isNotNull(shifts.clockOut),
+          ),
+        );
+
+      for (const ms of morningShifts) {
+        if (!ms.clockOut) continue;
+        const outMin = getWibMinutes(new Date(ms.clockOut));
+        if (outMin > patokanMenitTotal) {
+          patokanMenitTotal = Math.min(jadwalMenitTotal + 60, outMin);
+        }
+      }
+    }
+
+    const selisihMenit = loginMenitTotal - patokanMenitTotal; // positif = telat
+    const isTelat      = isSubstitute ? false : selisihMenit > toleransiMenit;
+    const lateMinutes  = isSubstitute ? 0 : (isTelat ? selisihMenit : 0);
+    const status       = isSubstitute ? 'PENGGANTI' : (isTelat ? 'TELAT' : 'HADIR');
 
     // ── ATURAN KUOTA PERAN SHIFT ──
-    // Admin Kasir & Kasir: Maksimal 1 orang per shift (laci & otorisasi tunggal).
-    // Gudang & CS Pelayan: Fleksibel / Boleh > 1 orang (bantuan logistik & display toko).
+    // Admin Shift & Kasir: Maksimal 1 orang per shift (laci & otorisasi tunggal).
+    // Gudang & CS Pelayan: Fleksibel / Boleh > 1 orang.
     if (roleTask === 'Kasir' || roleTask === 'Admin Shift') {
       const siblingSchedules = await db.query.shiftSchedules.findMany({
         where: and(
@@ -193,7 +221,7 @@ export async function POST(request: Request): Promise<Response> {
               eq(attendances.attendanceDate, tanggalHari),
               inArray(attendances.scheduleId, siblingScheduleIds),
               ne(attendances.employeeId, employeeId),
-              sql`${attendances.notes} ILIKE ${`%Peran: ${roleTask}%`}`,
+              sql`(${attendances.roleTask} = ${roleTask} OR ${attendances.notes} ILIKE ${`%Peran: ${roleTask}%`})`,
             )
           )
           .limit(1);
@@ -201,7 +229,7 @@ export async function POST(request: Request): Promise<Response> {
         if (existingRoleAtt.length > 0) {
           const occName = existingRoleAtt[0]?.employeeName ?? 'rekan shift lain';
           return apiError(
-            `Peran ${roleTask} pada shift ini sudah diisi oleh ${occName}. Sesuai SOP, peran ${roleTask} dibatasi 1 orang per shift. Silakan pilih tugas Gudang atau CS Pelayan.`,
+            `Peran ${roleTask} pada shift ini sudah diisi oleh ${occName}. Silakan pilih tugas Gudang atau CS Pelayan.`,
             'ROLE_LIMIT_REACHED',
             422,
           );
@@ -209,29 +237,26 @@ export async function POST(request: Request): Promise<Response> {
       }
     }
 
-    const fullNotes = `Peran: ${roleTask}${notes ? ` | ${notes.trim()}` : ''}`;
+    const cleanNotes = notes?.trim();
+    const subTag = isSubstitute ? ' | Pengganti' : '';
+    const fullNotes = `Peran: ${roleTask}${subTag}${cleanNotes ? ` | ${cleanNotes}` : ''}`;
 
-    // Simpan record absensi masuk
+    // Simpan record absensi masuk (tanpa menimpa permanen employees.jabatan)
     const [saved] = await db
       .insert(attendances)
       .values({
         employeeId,
         scheduleId,
-        attendanceDate: tanggalHari,
+        attendanceDate:     tanggalHari,
         status,
-        clockInActual:  nowWib,
+        clockInActual:      nowWib,
         lateMinutes,
-        notes:          fullNotes,
+        roleTask,
+        verificationSource: isSubstitute ? 'BADAL_KIOSK' : 'KIOSK',
+        isSubstitute,
+        notes:              fullNotes,
       })
       .returning({ id: attendances.id });
-
-    // Update jabatan aktual di profil karyawan jika berubah
-    if (employee.jabatan !== roleTask) {
-      await db
-        .update(employees)
-        .set({ jabatan: roleTask, updatedAt: nowWib })
-        .where(eq(employees.id, employeeId));
-    }
 
     return apiOk({
       id: saved.id,
@@ -239,9 +264,12 @@ export async function POST(request: Request): Promise<Response> {
       nim: employee.nim,
       roleTask,
       status,
+      isSubstitute,
       jamPresensi: jamMenitSekarang,
       lateMinutes,
-      message: `Presensi berhasil! ${employee.fullName} tercatat ${status} sebagai ${roleTask}.`,
+      message: isSubstitute
+        ? `${employee.fullName} tercatat hadir sebagai Pengganti (${roleTask}).`
+        : `${employee.fullName} tercatat ${status} sebagai ${roleTask}.`,
     });
   } catch (err) {
     console.error('Error recording presensi:', err);

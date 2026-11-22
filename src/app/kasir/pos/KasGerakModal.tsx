@@ -12,6 +12,7 @@ import {
   History,
   TrendingDown,
   TrendingUp,
+  Clock,
 } from 'lucide-react';
 
 interface MovementItem {
@@ -20,15 +21,25 @@ interface MovementItem {
   category: string;
   amount: string;
   notes: string;
+  isGraceCorrection?: boolean;
   createdAt: string;
   employeeId?: string | null;
   employeeName?: string | null;
 }
 
+export interface GraceRecalcResult {
+  status: string;
+  shortageAmount: number;
+  expectedCash: number;
+  actualCash: number | null;
+  discrepancy: number | null;
+  graceUntil: string | null;
+}
+
 interface KasGerakModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onMovementAdded?: () => void;
+  onMovementAdded?: (graceUpdate?: GraceRecalcResult | null) => void;
 }
 
 interface KasGerakSummaryData {
@@ -36,35 +47,58 @@ interface KasGerakSummaryData {
   totalOut: number;
   totalIn: number;
   isPeerShared: boolean;
+  isGraceMode: boolean;
 }
 
 type FetchKasGerakResult =
   | { ok: true; data: KasGerakSummaryData }
   | { ok: false; aborted: boolean; error: string };
 
+const CATEGORY_LABELS: Record<string, string> = {
+  BAYAR_TITIPAN: 'Bayar Titipan',
+  TITIPAN_MAKANAN: 'Bayar Titipan',
+  SETORAN_PENGELOLA: 'Diambil Bu Dyah',
+  SETORAN_BU_DYAH: 'Diambil Bu Dyah',
+  BAYAR_SUPPLIER: 'Bayar Supplier',
+  OPERASIONAL: 'Operasional',
+  KONSUMSI_GALON: 'Operasional',
+  ATK_KRESEK: 'Operasional',
+  BENSIN: 'Operasional',
+  UANG_TIP: 'Uang Tip',
+  TAMBAH_MODAL: 'Tukar Receh',
+};
+
+const CATEGORIES_OUT = [
+  { value: 'BAYAR_TITIPAN', label: 'Bayar Titipan' },
+  { value: 'SETORAN_PENGELOLA', label: 'Diambil Bu Dyah' },
+  { value: 'BAYAR_SUPPLIER', label: 'Bayar Supplier' },
+  { value: 'OPERASIONAL', label: 'Operasional' },
+];
+
+const CATEGORIES_IN = [
+  { value: 'UANG_TIP', label: 'Uang Tip' },
+  { value: 'TAMBAH_MODAL', label: 'Tukar Receh' },
+  { value: 'OPERASIONAL', label: 'Masuk Lainnya' },
+];
+
+const QUICK_AMOUNTS = [5_000, 10_000, 20_000, 50_000, 100_000];
+
 async function requestKasGerakSummary(signal?: AbortSignal): Promise<FetchKasGerakResult> {
   try {
-    const res = await fetch('/api/kasir/shift/kas-gerak', {
-      cache: 'no-store',
-      signal,
-    });
+    const res = await fetch('/api/kasir/shift/kas-gerak', { cache: 'no-store', signal });
     const json = (await res.json()) as {
-      success?: boolean;
       error?: string;
       data?: {
         movements?: MovementItem[];
         totalCashOut?: number;
         totalCashIn?: number;
         isPeerShared?: boolean;
+        isGraceMode?: boolean;
       };
     };
 
     if (!res.ok) {
-      return {
-        ok: false,
-        aborted: false,
-        error: json.error ?? 'Gagal memuat data kas gerak shift.',
-      };
+      return { ok: false, aborted: false, error: json.error ?? 'Gagal memuat Kas Laci.' };
     }
 
     return {
@@ -74,55 +108,31 @@ async function requestKasGerakSummary(signal?: AbortSignal): Promise<FetchKasGer
         totalOut: json.data?.totalCashOut ?? 0,
         totalIn: json.data?.totalCashIn ?? 0,
         isPeerShared: Boolean(json.data?.isPeerShared),
+        isGraceMode: Boolean(json.data?.isGraceMode),
       },
     };
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       return { ok: false, aborted: true, error: '' };
     }
-    return {
-      ok: false,
-      aborted: false,
-      error: 'Gagal terhubung ke server saat memuat kas gerak.',
-    };
+    return { ok: false, aborted: false, error: 'Gagal terhubung ke server.' };
   }
 }
 
-const CATEGORIES_OUT = [
-  { value: 'BAYAR_SUPPLIER',  label: 'Bayar Supplier / Nota Barang', desc: 'Potongan cash bayar supplier (tulis nama supplier & nominal)' },
-  { value: 'TITIPAN_MAKANAN', label: 'Titipan Makanan / Beli Lepas', desc: 'Bayar titipan kue/snack mitra' },
-  { value: 'KONSUMSI_GALON',  label: 'Galon / Konsumsi',             desc: 'Beli air galon toko' },
-  { value: 'BENSIN',          label: 'Bensin & Transport',           desc: 'Bensin motor / kurir toko' },
-  { value: 'ATK_KRESEK',      label: 'Kresek & ATK',                 desc: 'Plastik kresek, lakban, kertas' },
-  { value: 'PARKIR_KEBERSIHAN', label: 'Parkir / Kebersihan',        desc: 'Uang kebersihan / parkir' },
-  { value: 'OPERASIONAL',     label: 'Operasional Lain',             desc: 'Biaya tak terduga toko' },
-];
-
-const CATEGORIES_IN = [
-  { value: 'TAMBAH_MODAL',   label: 'Tukar Receh / Tambah Modal', desc: 'Penambahan uang pecahan di laci' },
-  { value: 'OPERASIONAL',    label: 'Kas Masuk Lain',             desc: 'Penerimaan tunai lain ke laci' },
-];
-
-const QUICK_AMOUNTS = [2_000, 5_000, 10_000, 19_000, 20_000, 30_000, 50_000];
-
-export default function KasGerakModal({
-  isOpen,
-  onClose,
-  onMovementAdded,
-}: KasGerakModalProps) {
+export default function KasGerakModal({ isOpen, onClose, onMovementAdded }: KasGerakModalProps) {
   if (!isOpen) return null;
-  return <KasGerakModalBody onClose={onClose} onMovementAdded={onMovementAdded} />;
+  return <KasLaciBody onClose={onClose} onMovementAdded={onMovementAdded} />;
 }
 
-function KasGerakModalBody({
+function KasLaciBody({
   onClose,
   onMovementAdded,
 }: {
   onClose: () => void;
-  onMovementAdded?: () => void;
+  onMovementAdded?: (graceUpdate?: GraceRecalcResult | null) => void;
 }) {
   const [activeTab, setActiveTab] = useState<'CASH_OUT' | 'CASH_IN'>('CASH_OUT');
-  const [category, setCategory] = useState<string>('KONSUMSI_GALON');
+  const [category, setCategory] = useState<string>('BAYAR_TITIPAN');
   const [amountInput, setAmountInput] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
 
@@ -134,18 +144,7 @@ function KasGerakModalBody({
   const [movements, setMovements] = useState<MovementItem[]>([]);
   const [totalOut, setTotalOut] = useState(0);
   const [totalIn, setTotalIn] = useState(0);
-  const [isPeerShared, setIsPeerShared] = useState(false);
-
-  function applySummaryResult(res: FetchKasGerakResult) {
-    if (!res.ok) {
-      if (!res.aborted) setError(res.error);
-      return;
-    }
-    setMovements(res.data.movements);
-    setTotalOut(res.data.totalOut);
-    setTotalIn(res.data.totalIn);
-    setIsPeerShared(res.data.isPeerShared);
-  }
+  const [isGraceMode, setIsGraceMode] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,7 +159,7 @@ function KasGerakModalBody({
         setMovements(res.data.movements);
         setTotalOut(res.data.totalOut);
         setTotalIn(res.data.totalIn);
-        setIsPeerShared(res.data.isPeerShared);
+        setIsGraceMode(res.data.isGraceMode);
       }
       setFetchLoading(false);
     })();
@@ -171,15 +170,11 @@ function KasGerakModalBody({
     };
   }, []);
 
-  // Ganti default kategori saat ganti tab
   function handleTabChange(tab: 'CASH_OUT' | 'CASH_IN') {
     setActiveTab(tab);
-    if (tab === 'CASH_OUT') {
-      setCategory('KONSUMSI_GALON');
-    } else {
-      setCategory('TAMBAH_MODAL');
-    }
+    setCategory(tab === 'CASH_OUT' ? 'BAYAR_TITIPAN' : 'UANG_TIP');
     setError(null);
+    setSuccessMsg(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -188,11 +183,11 @@ function KasGerakModalBody({
 
     const nominal = parseFloat(amountInput.replace(/\D/g, ''));
     if (isNaN(nominal) || nominal < 100) {
-      setError('Masukkan nominal yang valid (minimal Rp 100).');
+      setError('Masukkan nominal minimal Rp 100.');
       return;
     }
-    if (!notes.trim() || notes.trim().length < 3) {
-      setError('Keterangan pengeluaran/pemasukan wajib diisi (minimal 3 huruf).');
+    if (notes.trim().length < 3) {
+      setError('Isi catatan minimal 3 huruf.');
       return;
     }
 
@@ -214,23 +209,27 @@ function KasGerakModalBody({
 
       const json = (await res.json()) as {
         error?: string;
-        data?: { message?: string };
+        data?: { message?: string; graceUpdate?: GraceRecalcResult | null };
       };
       if (!res.ok) {
-        setError(json.error ?? 'Gagal mencatat kas gerak.');
+        setError(json.error ?? 'Gagal menyimpan.');
         return;
       }
 
-      setSuccessMsg(json.data?.message ?? 'Berhasil dicatat ke laci.');
+      setSuccessMsg(json.data?.message ?? 'Tercatat.');
       setAmountInput('');
       setNotes('');
-      setFetchLoading(true);
+
       const summaryRes = await requestKasGerakSummary();
-      applySummaryResult(summaryRes);
-      setFetchLoading(false);
-      if (onMovementAdded) onMovementAdded();
+      if (summaryRes.ok) {
+        setMovements(summaryRes.data.movements);
+        setTotalOut(summaryRes.data.totalOut);
+        setTotalIn(summaryRes.data.totalIn);
+        setIsGraceMode(summaryRes.data.isGraceMode);
+      }
+      if (onMovementAdded) onMovementAdded(json.data?.graceUpdate ?? null);
     } catch {
-      setError('Terjadi gangguan koneksi internet. Coba lagi.');
+      setError('Gangguan koneksi. Coba lagi.');
     } finally {
       setLoading(false);
     }
@@ -242,7 +241,8 @@ function KasGerakModalBody({
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="kas-gerak-title"
+      aria-labelledby="kas-laci-title"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
       style={{
         position: 'fixed',
         inset: 0,
@@ -250,46 +250,39 @@ function KasGerakModalBody({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 'var(--space-3)',
-        background: 'rgba(0, 0, 0, 0.65)',
+        padding: 12,
+        background: 'rgba(15, 23, 42, 0.55)',
         backdropFilter: 'blur(3px)',
-        overflowY: 'auto',
       }}
     >
       <div
         className="card"
         style={{
           width: '100%',
-          maxWidth: 480,
-          maxHeight: '90dvh',
+          maxWidth: 460,
+          maxHeight: '92dvh',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: 'var(--shadow-xl)',
+          borderRadius: 16,
           overflow: 'hidden',
+          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.2)',
         }}
       >
-        {/* Header Modal */}
+        {/* Header */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: 'var(--space-3) var(--space-4)',
+            padding: '12px 16px',
             borderBottom: '1px solid var(--color-border)',
             background: 'var(--color-surface)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Receipt size={20} style={{ color: 'var(--color-primary)' }} />
-            <h2
-              id="kas-gerak-title"
-              style={{
-                fontSize: 'var(--text-base)',
-                fontWeight: 700,
-                margin: 0,
-              }}
-            >
-              Kas Keluar & Masuk Laci (Petty Cash)
+            <Receipt size={18} style={{ color: 'var(--color-primary)' }} />
+            <h2 id="kas-laci-title" style={{ fontSize: '1rem', fontWeight: 800, margin: 0 }}>
+              Kas Laci
             </h2>
           </div>
           <button
@@ -304,10 +297,9 @@ function KasGerakModalBody({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              borderRadius: 'var(--radius-md)',
-              flexShrink: 0,
               cursor: 'pointer',
               color: 'var(--color-text-muted)',
+              borderRadius: 10,
             }}
           >
             <X size={20} />
@@ -330,20 +322,19 @@ function KasGerakModalBody({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: 8,
-              minHeight: 44,
-              padding: '10px 8px',
+              gap: 6,
+              minHeight: 46,
+              border: 'none',
               fontWeight: 700,
               fontSize: '0.85rem',
-              border: 'none',
               background: activeTab === 'CASH_OUT' ? 'var(--color-surface)' : 'transparent',
-              color: activeTab === 'CASH_OUT' ? 'var(--color-error)' : 'var(--color-text-muted)',
-              borderBottom: activeTab === 'CASH_OUT' ? '2.5px solid var(--color-error)' : 'none',
+              color: activeTab === 'CASH_OUT' ? 'hsl(0 72% 45%)' : 'var(--color-text-muted)',
+              borderBottom: activeTab === 'CASH_OUT' ? '2.5px solid hsl(0 72% 45%)' : '2.5px solid transparent',
               cursor: 'pointer',
             }}
           >
-            <MinusCircle size={16} />
-            Kas Keluar (Biaya Laci)
+            <MinusCircle size={15} />
+            Uang Keluar
           </button>
           <button
             type="button"
@@ -352,88 +343,73 @@ function KasGerakModalBody({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: 8,
-              minHeight: 44,
-              padding: '10px 8px',
+              gap: 6,
+              minHeight: 46,
+              border: 'none',
               fontWeight: 700,
               fontSize: '0.85rem',
-              border: 'none',
               background: activeTab === 'CASH_IN' ? 'var(--color-surface)' : 'transparent',
-              color: activeTab === 'CASH_IN' ? 'var(--color-success)' : 'var(--color-text-muted)',
-              borderBottom: activeTab === 'CASH_IN' ? '2.5px solid var(--color-success)' : 'none',
+              color: activeTab === 'CASH_IN' ? 'hsl(145 65% 32%)' : 'var(--color-text-muted)',
+              borderBottom: activeTab === 'CASH_IN' ? '2.5px solid hsl(145 65% 32%)' : '2.5px solid transparent',
               cursor: 'pointer',
             }}
           >
-            <PlusCircle size={16} />
-            Kas Masuk (Tambah Modal)
+            <PlusCircle size={15} />
+            Uang Masuk
           </button>
         </div>
 
-        {/* Modal Body Scrollable */}
-        <div
-          style={{
-            padding: 'var(--space-4)',
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-3)',
-          }}
-        >
-          {/* Ringkasan Akumulasi Laci Shift Ini */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 8,
-              padding: '8px 12px',
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--color-surface-elevated)',
-              border: '1px solid var(--color-border)',
-            }}
-          >
-            <div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-                Total Kas Keluar Shift Ini:
-              </div>
-              <div
-                style={{
-                  fontSize: '0.9rem',
-                  fontWeight: 700,
-                  color: 'var(--color-error)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
+        {/* Body */}
+        <div style={{ padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Ringkasan Singkat */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div
+              style={{
+                padding: '8px 12px',
+                borderRadius: 10,
+                background: 'hsl(0 80% 97%)',
+                border: '1px solid hsl(0 70% 88%)',
+              }}
+            >
+              <div style={{ fontSize: '0.7rem', color: 'hsl(0 50% 40%)', fontWeight: 600 }}>Keluar</div>
+              <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'hsl(0 72% 42%)', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <TrendingDown size={14} />
                 Rp {totalOut.toLocaleString('id-ID')}
               </div>
             </div>
-            <div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-                Total Kas Masuk Shift Ini:
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div
+              style={{
+                padding: '8px 12px',
+                borderRadius: 10,
+                background: 'hsl(145 60% 96%)',
+                border: '1px solid hsl(145 55% 84%)',
+              }}
+            >
+              <div style={{ fontSize: '0.7rem', color: 'hsl(145 45% 32%)', fontWeight: 600 }}>Masuk</div>
+              <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'hsl(145 65% 28%)', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <TrendingUp size={14} />
-                <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--color-success)' }}>
-                  Rp {totalIn.toLocaleString('id-ID')}
-                </span>
+                Rp {totalIn.toLocaleString('id-ID')}
               </div>
             </div>
           </div>
 
-          {isPeerShared && (
+          {isGraceMode && (
             <div
               style={{
-                fontSize: '0.72rem',
-                padding: '6px 10px',
-                borderRadius: 'var(--radius-sm)',
-                background: 'hsl(210 90% 95%)',
-                border: '1px solid hsl(210 80% 82%)',
-                color: 'hsl(215 70% 30%)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: 'hsl(38 92% 95%)',
+                border: '1px solid hsl(38 80% 75%)',
+                color: 'hsl(32 85% 26%)',
+                fontSize: '0.75rem',
+                fontWeight: 700,
               }}
             >
-              Laci shift bersama aktif: pencatatan ini terhubung ke laci kas shift berjalan atas nama akun Anda.
+              <Clock size={14} />
+              <span>Mode Koreksi Jeda 5 Menit — otomatis memperbarui selisih laci.</span>
             </div>
           )}
 
@@ -442,16 +418,18 @@ function KasGerakModalBody({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
-                padding: '8px 12px',
-                borderRadius: 'var(--radius-md)',
-                background: 'var(--color-error-light)',
-                color: 'var(--color-error)',
-                fontSize: '0.8rem',
+                gap: 6,
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: 'hsl(0 84% 96%)',
+                border: '1px solid hsl(0 72% 84%)',
+                color: 'hsl(0 72% 38%)',
+                fontSize: '0.78rem',
+                fontWeight: 600,
               }}
             >
-              <AlertTriangle size={16} />
-              {error}
+              <AlertTriangle size={15} />
+              <span>{error}</span>
             </div>
           )}
 
@@ -460,97 +438,75 @@ function KasGerakModalBody({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
-                padding: '8px 12px',
-                borderRadius: 'var(--radius-md)',
-                background: 'var(--color-success-light)',
-                color: 'var(--color-success)',
-                fontSize: '0.8rem',
+                gap: 6,
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: 'hsl(145 65% 95%)',
+                border: '1px solid hsl(145 55% 80%)',
+                color: 'hsl(145 65% 26%)',
+                fontSize: '0.78rem',
+                fontWeight: 600,
               }}
             >
-              <CheckCircle2 size={16} />
-              {successMsg}
+              <CheckCircle2 size={15} />
+              <span>{successMsg}</span>
             </div>
           )}
 
-          {/* Form Pencatatan */}
+          {/* Form */}
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {/* Kategori */}
-            <div>
-              <label
-                style={{
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  color: 'var(--color-text-secondary)',
-                  display: 'block',
-                  marginBottom: 4,
-                }}
-              >
-                Kategori Pengeluaran / Pemasukan:
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 155px), 1fr))', gap: 6 }}>
-                {currentCategories.map((c) => (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+              {currentCategories.map((c) => {
+                const active = category === c.value;
+                return (
                   <button
                     key={c.value}
                     type="button"
                     onClick={() => setCategory(c.value)}
                     style={{
-                      minHeight: 48,
+                      minHeight: 44,
                       padding: '8px 10px',
-                      borderRadius: 'var(--radius-md)',
-                      textAlign: 'left',
-                      border:
-                        category === c.value
-                          ? `1.5px solid ${activeTab === 'CASH_OUT' ? 'var(--color-error)' : 'var(--color-success)'}`
-                          : '1px solid var(--color-border)',
-                      background:
-                        category === c.value
-                          ? activeTab === 'CASH_OUT'
-                            ? 'var(--color-error-light)'
-                            : 'var(--color-success-light)'
-                          : 'var(--color-surface)',
+                      borderRadius: 10,
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      border: active
+                        ? `1.5px solid ${activeTab === 'CASH_OUT' ? 'hsl(0 72% 45%)' : 'hsl(145 65% 32%)'}`
+                        : '1px solid var(--color-border)',
+                      background: active
+                        ? activeTab === 'CASH_OUT'
+                          ? 'hsl(0 80% 97%)'
+                          : 'hsl(145 65% 95%)'
+                        : 'var(--color-surface)',
+                      color: active
+                        ? activeTab === 'CASH_OUT'
+                          ? 'hsl(0 72% 38%)'
+                          : 'hsl(145 65% 24%)'
+                        : 'var(--color-text)',
                       cursor: 'pointer',
                     }}
                   >
-                    <div style={{ fontSize: '0.75rem', fontWeight: 700 }}>{c.label}</div>
-                    <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)' }}>
-                      {c.desc}
-                    </div>
+                    {c.label}
                   </button>
-                ))}
-              </div>
+                );
+              })}
             </div>
 
-            {/* Nominal */}
             <div>
-              <label
-                style={{
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  color: 'var(--color-text-secondary)',
-                  display: 'block',
-                  marginBottom: 4,
-                }}
-              >
-                Nominal (Rp):
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                Nominal (Rp)
               </label>
               <input
                 type="text"
                 inputMode="numeric"
                 className="form-input"
-                placeholder="Contoh: 19.000"
+                placeholder="0"
                 value={amountInput}
                 onChange={(e) => {
                   const val = e.target.value.replace(/\D/g, '');
                   setAmountInput(val ? parseInt(val, 10).toLocaleString('id-ID') : '');
                 }}
-                style={{
-                  fontSize: '1.1rem',
-                  fontWeight: 800,
-                  minHeight: 44,
-                }}
+                style={{ fontSize: '1.15rem', fontWeight: 800, minHeight: 46 }}
               />
-              {/* Quick Amount Suggestion */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                 {QUICK_AMOUNTS.map((amt) => (
                   <button
@@ -558,49 +514,34 @@ function KasGerakModalBody({
                     type="button"
                     onClick={() => setAmountInput(amt.toLocaleString('id-ID'))}
                     className="btn btn-secondary btn-sm"
-                    style={{ fontSize: '0.8rem', padding: '8px 12px', minHeight: 44, minWidth: 52 }}
+                    style={{ fontSize: '0.78rem', minHeight: 38, padding: '4px 10px' }}
                   >
-                    {amt >= 1000 ? `${amt / 1000}rb` : amt}
+                    {amt / 1000}rb
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Keterangan */}
             <div>
-              <label
-                style={{
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  color: 'var(--color-text-secondary)',
-                  display: 'block',
-                  marginBottom: 4,
-                }}
-              >
-                Keterangan / Rincian Belanja:
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, display: 'block', marginBottom: 4 }}>
+                Catatan
               </label>
               <input
                 type="text"
                 className="form-input"
-                placeholder="Misal: Beli 1 galon Le Minerale untuk toko"
+                placeholder="Nama mitra / keperluan"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 maxLength={200}
-                style={{ fontSize: 'var(--text-base)' }}
+                style={{ minHeight: 44, fontSize: '0.9rem' }}
               />
             </div>
 
-            {/* Tombol Simpan */}
             <button
               type="submit"
               disabled={loading}
               className={`btn ${activeTab === 'CASH_OUT' ? 'btn-danger' : 'btn-success'}`}
-              style={{
-                width: '100%',
-                minHeight: 46,
-                fontWeight: 700,
-                marginTop: 4,
-              }}
+              style={{ width: '100%', minHeight: 46, fontWeight: 700 }}
             >
               {loading ? (
                 <>
@@ -608,52 +549,29 @@ function KasGerakModalBody({
                   Menyimpan...
                 </>
               ) : activeTab === 'CASH_OUT' ? (
-                `Keluarkan Rp ${amountInput || '0'} dari Laci`
+                `Simpan Keluar Rp ${amountInput || '0'}`
               ) : (
-                `Masukkan Rp ${amountInput || '0'} ke Laci`
+                `Simpan Masuk Rp ${amountInput || '0'}`
               )}
             </button>
           </form>
 
-          {/* Riwayat Kas Gerak Shift Ini */}
-          <div style={{ marginTop: 8, borderTop: '1px solid var(--color-border)', paddingTop: 10 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 6,
-              }}
-            >
-              <span
-                style={{
-                  fontSize: '0.75rem',
-                  fontWeight: 700,
-                  color: 'var(--color-text-secondary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
+          {/* Riwayat */}
+          <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 5 }}>
                 <History size={14} />
-                Riwayat Kas Gerak Shift Ini ({movements.length})
+                Riwayat Shift ({movements.length})
               </span>
               {fetchLoading && <Loader2 size={12} className="spin" />}
             </div>
 
             {movements.length === 0 ? (
-              <div
-                style={{
-                  fontSize: '0.75rem',
-                  color: 'var(--color-text-muted)',
-                  textAlign: 'center',
-                  padding: '12px 0',
-                }}
-              >
-                Belum ada kas keluar/masuk tercatat di shift ini.
+              <div style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)', textAlign: 'center', padding: '10px 0' }}>
+                Belum ada catatan.
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 150, overflowY: 'auto' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflowY: 'auto' }}>
                 {movements.map((m) => {
                   const isOut = m.movementType === 'CASH_OUT';
                   return (
@@ -665,31 +583,25 @@ function KasGerakModalBody({
                         justifyContent: 'space-between',
                         gap: 8,
                         padding: '8px 10px',
-                        borderRadius: 'var(--radius-sm)',
+                        borderRadius: 8,
                         background: 'var(--color-surface-elevated)',
-                        fontSize: '0.75rem',
-                        borderLeft: `3px solid ${isOut ? 'var(--color-error)' : 'var(--color-success)'}`,
+                        fontSize: '0.76rem',
+                        borderLeft: `3px solid ${isOut ? 'hsl(0 72% 48%)' : 'hsl(145 65% 34%)'}`,
                       }}
                     >
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{m.notes}</div>
-                        <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)' }}>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
                           {new Date(m.createdAt).toLocaleTimeString('id-ID', {
                             hour: '2-digit',
                             minute: '2-digit',
                             timeZone: 'Asia/Jakarta',
                           })}{' '}
-                          WIB • {m.category}
-                          {m.employeeName ? ` • ${m.employeeName}` : ''}
+                          · {CATEGORY_LABELS[m.category] ?? m.category}
+                          {m.isGraceCorrection ? ' · Koreksi 5m' : ''}
                         </div>
                       </div>
-                      <div
-                        style={{
-                          fontWeight: 700,
-                          flexShrink: 0,
-                          color: isOut ? 'var(--color-error)' : 'var(--color-success)',
-                        }}
-                      >
+                      <div style={{ fontWeight: 800, flexShrink: 0, color: isOut ? 'hsl(0 72% 42%)' : 'hsl(145 65% 28%)' }}>
                         {isOut ? '-' : '+'}Rp {Number(m.amount).toLocaleString('id-ID')}
                       </div>
                     </div>

@@ -22,8 +22,9 @@ import {
   shiftSchedules,
   shiftCashMovements,
   transactionPayments,
+  consignmentEntries,
 } from '@/lib/db/schema';
-import { and, asc, eq, gte, lte, lt, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte, lt, inArray, isNull, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import {
   resolveReportRange,
@@ -34,9 +35,12 @@ import {
   KETUA_UMKM_NIM,
   KETUA_UMKM_CANONICAL_ID,
   KETUA_UMKM_DUPLICATE_ID,
+  PAYROLL_ATTENDANCE_RATIO,
+  PAYROLL_PERFORMANCE_RATIO,
   extractRoleFromNotes,
   computePersonnelWeight,
 } from '@/lib/finance/report';
+import { finalizeExpiredGraceShifts } from '@/lib/services/shiftShortageService';
 
 export const runtime = 'nodejs';
 
@@ -84,8 +88,9 @@ function wibDayOfWeek(wibDateStr: string): number {
 export async function GET(req: NextRequest): Promise<Response> {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
-  if (payload.adminRole !== 'MANAGER') {
-    return apiError('Akses ditolak. Laporan per-shift hanya untuk Manager (Dosen).', 403);
+  // Baik Manager maupun Admin Shift dapat mengakses audit shift & pembagian bagi hasil
+  if (payload.adminRole !== 'MANAGER' && payload.adminRole !== 'ADMIN_SHIFT') {
+    return apiError('Akses ditolak. Khusus Admin Shift atau Manager.', 403);
   }
 
   const sp = new URL(req.url).searchParams;
@@ -210,6 +215,9 @@ export async function GET(req: NextRequest): Promise<Response> {
     //    Filter testing hanya untuk tampilan laporan, bukan data shift.
     //    Kasir "testing" tetap punya laba dari shift → perlu diinclude.
     // ─────────────────────────────────────────────────────────────
+    // Finalisasi otomatis shift yang masa jeda 5 menitnya sudah lewat (tanpa butuh cron)
+    await finalizeExpiredGraceShifts();
+
     const rawShiftRows = await db
       .select({
         id: shifts.id,
@@ -220,6 +228,10 @@ export async function GET(req: NextRequest): Promise<Response> {
         actualCash: shifts.actualCash,
         serahTerimaDiff: shifts.serahTerimaDiff,
         auditFlags: shifts.auditFlags,
+        shortageStatus: shifts.shortageStatus,
+        shortageGraceUntil: shifts.shortageGraceUntil,
+        shortageAmount: shifts.shortageAmount,
+        shortageOverrideReason: shifts.shortageOverrideReason,
         notes: shifts.notes,
         employeeId: shifts.employeeId,
         kasirName: employees.fullName,
@@ -288,61 +300,145 @@ export async function GET(req: NextRequest): Promise<Response> {
     const shiftIdChunks = chunkArray(shiftIds);
 
     // ─────────────────────────────────────────────────────────────
-    // 2. Hitung laba kotor per shift dari SNAPSHOT item (audit-proof)
-    //    Formula: SUM(subtotal_sell - subtotal_cost) di mana cost > 0
-    //    Produk HPP=0 (dummy/selisih laci) TIDAK dihitung sebagai laba
+    // 2. Hitung laba kotor & total unit barang laku per shift dari SNAPSHOT item
+    //    + peta kasir aktual pelaku transaksi per shift (anti kontaminasi shift pagi->siang)
     // ─────────────────────────────────────────────────────────────
-    const finByShift = new Map<string, { omzet: number; labaKotor: number; txCount: number }>();
+    const finByShift = new Map<string, { omzet: number; labaKotor: number; txCount: number; unitsSold: number }>();
+    const txCashiersByShift = new Map<
+      string,
+      Array<{ employeeId: string; fullName: string; nim: string; programStudi: string; jabatan: string; txCount: number }>
+    >();
+
     for (const idChunk of shiftIdChunks) {
-      const shiftFinancials = await db
-        .select({
-          shiftId: transactions.shiftId,
-          omzet: sql<string>`ROUND(COALESCE(SUM(${transactionItems.subtotalSell}), 0))`,
-          labaKotor: sql<string>`ROUND(COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalSell} - ${transactionItems.subtotalCost} ELSE 0 END), 0))`,
-          txCount: sql<number>`COUNT(DISTINCT ${transactions.id})::int`,
-        })
-        .from(transactionItems)
-        .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
-        .where(
-          and(
-            eq(transactions.status, 'COMPLETED'),
-            eq(transactions.isTest, false),
-            inArray(transactions.shiftId, idChunk),
+      const [shiftFinancials, shiftTxCashiers] = await Promise.all([
+        db
+          .select({
+            shiftId: transactions.shiftId,
+            omzet: sql<string>`ROUND(COALESCE(SUM(${transactionItems.subtotalSell}), 0))`,
+            labaKotor: sql<string>`ROUND(COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalSell} - ${transactionItems.subtotalCost} ELSE 0 END), 0))`,
+            txCount: sql<number>`COUNT(DISTINCT ${transactions.id})::int`,
+            unitsSold: sql<number>`COALESCE(SUM(${transactionItems.qty}), 0)::int`,
+          })
+          .from(transactionItems)
+          .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
+          .where(
+            and(
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.isTest, false),
+              inArray(transactions.shiftId, idChunk),
+            ),
+          )
+          .groupBy(transactions.shiftId),
+        db
+          .select({
+            shiftId: transactions.shiftId,
+            employeeId: employees.id,
+            fullName: employees.fullName,
+            nim: employees.nim,
+            programStudi: employees.programStudi,
+            jabatan: employees.jabatan,
+            txCount: sql<number>`COUNT(*)::int`,
+          })
+          .from(transactions)
+          .innerJoin(employees, eq(transactions.employeeId, employees.id))
+          .where(
+            and(
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.isTest, false),
+              inArray(transactions.shiftId, idChunk),
+            ),
+          )
+          .groupBy(
+            transactions.shiftId,
+            employees.id,
+            employees.fullName,
+            employees.nim,
+            employees.programStudi,
+            employees.jabatan,
           ),
-        )
-        .groupBy(transactions.shiftId);
+      ]);
 
       for (const f of shiftFinancials) {
         if (!f.shiftId) continue;
-        const prev = finByShift.get(f.shiftId) ?? { omzet: 0, labaKotor: 0, txCount: 0 };
+        const prev = finByShift.get(f.shiftId) ?? { omzet: 0, labaKotor: 0, txCount: 0, unitsSold: 0 };
         finByShift.set(f.shiftId, {
           omzet: prev.omzet + parseFloat(f.omzet || '0'),
           labaKotor: prev.labaKotor + parseFloat(f.labaKotor || '0'),
           txCount: prev.txCount + f.txCount,
+          unitsSold: prev.unitsSold + Number(f.unitsSold ?? 0),
         });
+      }
+
+      for (const c of shiftTxCashiers) {
+        if (!c.shiftId) continue;
+        const list = txCashiersByShift.get(c.shiftId) ?? [];
+        const empId =
+          c.employeeId === KETUA_UMKM_DUPLICATE_ID || c.nim === KETUA_UMKM_NIM
+            ? KETUA_UMKM_CANONICAL_ID
+            : c.employeeId;
+        list.push({
+          employeeId: empId,
+          fullName: empId === KETUA_UMKM_CANONICAL_ID ? 'Gita Aprilianingrum' : c.fullName,
+          nim: empId === KETUA_UMKM_CANONICAL_ID ? KETUA_UMKM_NIM : c.nim,
+          programStudi: c.programStudi,
+          jabatan: c.jabatan,
+          txCount: c.txCount,
+        });
+        txCashiersByShift.set(c.shiftId, list);
       }
     }
 
-    // ── 2b. Audit Uang Kas & Laci per Shift (Petty Cash Movements & Cash Sales) ──
+    // ── 2b. Audit Uang Kas & Laci per Shift (Rincian Kas Laci + Cash Sales + Konsinyasi) ──
     const cashOutMap = new Map<string, number>();
     const cashInMap = new Map<string, number>();
     const cashSalesMap = new Map<string, number>();
+    type ShiftCashMovementDetail = {
+      id: string;
+      movementType: string;
+      category: string;
+      amount: number;
+      notes: string;
+      isGraceCorrection: boolean;
+      employeeName: string | null;
+      createdAt: string;
+    };
+    const cashMovementsByShift = new Map<string, ShiftCashMovementDetail[]>();
 
     for (const idChunk of shiftIdChunks) {
-      const cashMovements = await db
+      const cashMovementRows = await db
         .select({
+          id: shiftCashMovements.id,
           shiftId: shiftCashMovements.shiftId,
           movementType: shiftCashMovements.movementType,
-          total: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}), 0)`,
+          category: shiftCashMovements.category,
+          amount: shiftCashMovements.amount,
+          notes: shiftCashMovements.notes,
+          isGraceCorrection: shiftCashMovements.isGraceCorrection,
+          createdAt: shiftCashMovements.createdAt,
+          employeeName: employees.fullName,
         })
         .from(shiftCashMovements)
+        .leftJoin(employees, eq(shiftCashMovements.employeeId, employees.id))
         .where(inArray(shiftCashMovements.shiftId, idChunk))
-        .groupBy(shiftCashMovements.shiftId, shiftCashMovements.movementType);
+        .orderBy(desc(shiftCashMovements.createdAt));
 
-      for (const m of cashMovements) {
-        const val = parseFloat(m.total || '0');
+      for (const m of cashMovementRows) {
+        const val = parseFloat(m.amount || '0');
         if (m.movementType === 'CASH_OUT') cashOutMap.set(m.shiftId, (cashOutMap.get(m.shiftId) ?? 0) + val);
         else if (m.movementType === 'CASH_IN') cashInMap.set(m.shiftId, (cashInMap.get(m.shiftId) ?? 0) + val);
+
+        const list = cashMovementsByShift.get(m.shiftId) ?? [];
+        list.push({
+          id: m.id,
+          movementType: m.movementType,
+          category: m.category,
+          amount: Math.round(val),
+          notes: m.notes,
+          isGraceCorrection: Boolean(m.isGraceCorrection),
+          employeeName: m.employeeName ?? null,
+          createdAt: m.createdAt.toISOString(),
+        });
+        cashMovementsByShift.set(m.shiftId, list);
       }
 
       const splitCash = await db
@@ -467,6 +563,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       let aggOmzet = 0;
       let aggLaba = 0;
       let aggTx = 0;
+      let aggUnitsSold = 0;
       let aggCashSales = 0;
       let aggCashOut = 0;
       let aggCashIn = 0;
@@ -475,6 +572,15 @@ export async function GET(req: NextRequest): Promise<Response> {
       let latestActualCash = group[0]!.actualCash;
       let combinedFlags = primary.auditFlags;
       let combinedNotes = primary.notes;
+      let combinedShortageStatus = primary.shortageStatus;
+      let combinedShortageGraceUntil = primary.shortageGraceUntil;
+      let combinedShortageAmount = primary.shortageAmount;
+      let combinedShortageOverrideReason = primary.shortageOverrideReason;
+      const mergedCashMovements: ShiftCashMovementDetail[] = [];
+      const mergedTxCashiersMap = new Map<
+        string,
+        { employeeId: string; fullName: string; nim: string; programStudi: string; jabatan: string; txCount: number }
+      >();
 
       for (const item of group) {
         canonicalShiftIdOf.set(item.id, primary.id);
@@ -483,10 +589,17 @@ export async function GET(req: NextRequest): Promise<Response> {
           aggOmzet += f.omzet;
           aggLaba += f.labaKotor;
           aggTx += f.txCount;
+          aggUnitsSold += f.unitsSold;
         }
         aggCashSales += cashSalesMap.get(item.id) ?? 0;
         aggCashOut += cashOutMap.get(item.id) ?? 0;
         aggCashIn += cashInMap.get(item.id) ?? 0;
+        mergedCashMovements.push(...(cashMovementsByShift.get(item.id) ?? []));
+        for (const c of txCashiersByShift.get(item.id) ?? []) {
+          const prev = mergedTxCashiersMap.get(c.employeeId);
+          if (prev) prev.txCount += c.txCount;
+          else mergedTxCashiersMap.set(c.employeeId, { ...c });
+        }
         if (item.clockIn.getTime() < earliestIn.getTime()) earliestIn = item.clockIn;
         if (item.clockOut && (!latestOut || item.clockOut.getTime() > latestOut.getTime())) {
           latestOut = item.clockOut;
@@ -494,12 +607,23 @@ export async function GET(req: NextRequest): Promise<Response> {
         if (item.actualCash !== null) latestActualCash = item.actualCash;
         if (item.auditFlags && item.auditFlags !== 'NORMAL') combinedFlags = item.auditFlags;
         if (item.notes && !combinedNotes) combinedNotes = item.notes;
+        if (item.shortageStatus && item.shortageStatus !== 'NONE') {
+          combinedShortageStatus = item.shortageStatus;
+          combinedShortageGraceUntil = item.shortageGraceUntil;
+          combinedShortageAmount = item.shortageAmount;
+          combinedShortageOverrideReason = item.shortageOverrideReason;
+        }
       }
 
-      finByShift.set(primary.id, { omzet: aggOmzet, labaKotor: aggLaba, txCount: aggTx });
+      finByShift.set(primary.id, { omzet: aggOmzet, labaKotor: aggLaba, txCount: aggTx, unitsSold: aggUnitsSold });
       cashSalesMap.set(primary.id, aggCashSales);
       cashOutMap.set(primary.id, aggCashOut);
       cashInMap.set(primary.id, aggCashIn);
+      cashMovementsByShift.set(
+        primary.id,
+        mergedCashMovements.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
+      );
+      txCashiersByShift.set(primary.id, [...mergedTxCashiersMap.values()]);
 
       consolidatedShifts.push({
         ...primary,
@@ -507,6 +631,10 @@ export async function GET(req: NextRequest): Promise<Response> {
         clockOut: latestOut,
         actualCash: latestActualCash,
         auditFlags: combinedFlags,
+        shortageStatus: combinedShortageStatus,
+        shortageGraceUntil: combinedShortageGraceUntil,
+        shortageAmount: combinedShortageAmount,
+        shortageOverrideReason: combinedShortageOverrideReason,
         notes: combinedNotes,
       });
     }
@@ -644,9 +772,27 @@ export async function GET(req: NextRequest): Promise<Response> {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 4b. Integrasi Kasir Shift & Deduplikasi per Shift
+    // 4b. Integrasi Kasir Shift & Deduplikasi per Shift (ANTI KONTAMINASI LINTAS SESI)
+    //     Kasir pembuka shift hanya diikutkan jika benar-benar melayani transaksi di shift ini
+    //     dan TIDAK sedang tercatat hadir di sesi berlawanan pada tanggal yang sama.
+    //     Sebaliknya, kasir aktual pelaku transaksi POS diikutkan bila lupa absen.
     // ─────────────────────────────────────────────────────────────
+    const attendedSessionsByEmpDate = new Map<string, Set<'Pagi' | 'Siang'>>();
     for (const s of effectiveShifts) {
+      const sesi = sesiByShift.get(s.id) ?? 'Pagi';
+      const dt = wibDateOf(s.clockIn);
+      for (const att of attByShift.get(s.id) ?? []) {
+        const key = `${att.employee.id}__${dt}`;
+        const set = attendedSessionsByEmpDate.get(key) ?? new Set<'Pagi' | 'Siang'>();
+        set.add(sesi);
+        attendedSessionsByEmpDate.set(key, set);
+      }
+    }
+
+    for (const s of effectiveShifts) {
+      const sesi = sesiByShift.get(s.id) ?? 'Pagi';
+      const oppositeSesi: 'Pagi' | 'Siang' = sesi === 'Pagi' ? 'Siang' : 'Pagi';
+      const dt = wibDateOf(s.clockIn);
       const rawList = attByShift.get(s.id) ?? [];
       const deduped: typeof attRows = [];
       const seenEmp = new Set<string>();
@@ -657,18 +803,71 @@ export async function GET(req: NextRequest): Promise<Response> {
         }
       }
 
-      if (!isExcludedAccount(s.kasirName, s.kasirNim) && !seenEmp.has(s.employeeId)) {
+      const actualTxCashiers = txCashiersByShift.get(s.id) ?? [];
+      const ownerTxCount = actualTxCashiers.find((c) => c.employeeId === s.employeeId)?.txCount ?? 0;
+      const ownerAttendedOpposite = attendedSessionsByEmpDate.get(`${s.employeeId}__${dt}`)?.has(oppositeSesi) ?? false;
+
+      // 1. Jika ada pelaku transaksi aktual di POS shift ini yang belum masuk daftar hadir -> masukkan
+      for (const tc of actualTxCashiers) {
+        if (isExcludedAccount(tc.fullName, tc.nim) || seenEmp.has(tc.employeeId)) continue;
+        seenEmp.add(tc.employeeId);
+        deduped.push({
+          id: `shift-tx-kasir-${s.id}-${tc.employeeId}`,
+          employeeId: tc.employeeId,
+          scheduleId: '',
+          shiftId: s.id,
+          attendanceDate: dt,
+          clockInActual: s.clockIn,
+          clockOutActual: s.clockOut,
+          status: 'HADIR',
+          lateMinutes: 0,
+          roleTask: 'Kasir',
+          verificationSource: 'LOGIN_AUTO',
+          isSubstitute: false,
+          notes: 'Peran: Kasir | Tercatat dari transaksi POS',
+          recordedByAdminId: null,
+          fromSwapRequestId: null,
+          createdAt: s.clockIn,
+          updatedAt: s.clockIn,
+          employee: {
+            id: tc.employeeId,
+            fullName: tc.fullName,
+            nim: tc.nim,
+            programStudi: tc.programStudi,
+            jabatan: tc.jabatan || 'Kasir',
+          },
+          schedule: {
+            slotStart: sesi === 'Siang' ? '11:30' : '07:30',
+            slotEnd: sesi === 'Siang' ? '15:00' : '11:30',
+            dayOfWeek: 'SENIN',
+          },
+        });
+      }
+
+      // 2. Fallback untuk shift lama tanpa transaksi/tanpa absen (hanya jika owner tidak bentrok sesi lawan
+      //    dan tidak ada kasir lain yang menggantikan transaksi di shift ini)
+      const hasOtherActualCashier = actualTxCashiers.some((c) => c.employeeId !== s.employeeId);
+      const shouldIncludeOwner =
+        !isExcludedAccount(s.kasirName, s.kasirNim) &&
+        !seenEmp.has(s.employeeId) &&
+        !ownerAttendedOpposite &&
+        (ownerTxCount > 0 || !hasOtherActualCashier);
+
+      if (shouldIncludeOwner) {
         deduped.push({
           id: `shift-kasir-${s.id}`,
           employeeId: s.employeeId,
           scheduleId: '',
           shiftId: s.id,
-          attendanceDate: wibDateOf(s.clockIn),
+          attendanceDate: dt,
           clockInActual: s.clockIn,
           clockOutActual: s.clockOut,
           status: 'HADIR',
           lateMinutes: 0,
-          notes: 'Peran: Kasir | Auto-integrated shift cashier',
+          roleTask: 'Kasir',
+          verificationSource: 'LOGIN_AUTO',
+          isSubstitute: false,
+          notes: 'Peran: Kasir | Kasir Shift',
           recordedByAdminId: null,
           fromSwapRequestId: null,
           createdAt: s.clockIn,
@@ -681,8 +880,8 @@ export async function GET(req: NextRequest): Promise<Response> {
             jabatan: s.kasirJabatan || 'Kasir',
           },
           schedule: {
-            slotStart: sesiByShift.get(s.id) === 'Siang' ? '11:00' : '07:30',
-            slotEnd: sesiByShift.get(s.id) === 'Siang' ? '15:00' : '11:30',
+            slotStart: sesi === 'Siang' ? '11:30' : '07:30',
+            slotEnd: sesi === 'Siang' ? '15:00' : '11:30',
             dayOfWeek: 'SENIN',
           },
         });
@@ -691,11 +890,41 @@ export async function GET(req: NextRequest): Promise<Response> {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 4c. Alokasi Pool Shift — Rumus Hybrid 70/30 (Fair & Transparan)
+    // 4c. Alokasi Pool Shift — Rumus 50% Kehadiran / 50% Laba Kotor (Sama Rata Peran 1.0)
     // ─────────────────────────────────────────────────────────────
     const poolShiftMahasiswa = poolHakMahasiswa;
-    const ATTENDANCE_RATIO = 0.70;
-    const PERFORMANCE_RATIO = 0.30;
+    const ATTENDANCE_RATIO = PAYROLL_ATTENDANCE_RATIO;
+    const PERFORMANCE_RATIO = PAYROLL_PERFORMANCE_RATIO;
+
+    // Ambil ringkasan konsinyasi harian dalam rentang untuk panel audit shift
+    const consignmentRows = await db
+      .select({
+        entryDate: consignmentEntries.entryDate,
+        settledCount: sql<number>`COUNT(*) FILTER (WHERE ${consignmentEntries.status} = 'SETTLED')::int`,
+        openCount: sql<number>`COUNT(*) FILTER (WHERE ${consignmentEntries.status} IN ('OPEN', 'CARRYOVER'))::int`,
+        totalPayout: sql<string>`COALESCE(SUM(${consignmentEntries.totalPayout}) FILTER (WHERE ${consignmentEntries.status} = 'SETTLED'), 0)`,
+        totalDiscrepancyQty: sql<number>`COALESCE(SUM(ABS(${consignmentEntries.qtyDiscrepancy})) FILTER (WHERE ${consignmentEntries.status} = 'SETTLED'), 0)::int`,
+      })
+      .from(consignmentEntries)
+      .where(
+        and(
+          gte(consignmentEntries.entryDate, range.startDate),
+          lte(consignmentEntries.entryDate, range.endDate),
+        ),
+      )
+      .groupBy(consignmentEntries.entryDate);
+
+    const consignmentByDate = new Map(
+      consignmentRows.map((c) => [
+        c.entryDate,
+        {
+          settledCount: Number(c.settledCount ?? 0),
+          openCount: Number(c.openCount ?? 0),
+          totalPayout: Math.round(parseFloat(c.totalPayout || '0')),
+          totalDiscrepancyQty: Number(c.totalDiscrepancyQty ?? 0),
+        },
+      ]),
+    );
 
     // Hitung total poin disiplin seluruh shift (untuk normalisasi Pool A)
     const shiftAttPoints: number[] = effectiveShifts.map((s) => {
@@ -761,23 +990,37 @@ export async function GET(req: NextRequest): Promise<Response> {
       tanggal: string;       // 'YYYY-MM-DD' WIB
       hari: string;          // 'Senin', 'Selasa', …
       sesi: 'Pagi' | 'Siang';
-      slotLabel: string;     // '07:30-11:30' | '11:00-15:00'
+      slotLabel: string;     // '07:30-11:30' | '11:30-15:00'
       clockIn: string;
       clockOut: string | null;
       kasirName: string;
       kasirNim: string;
       txCount: number;
+      unitsSold: number;
       omzet: number;
       labaKotor: number;
       poolGaji: number;
       modalAwal: number;
+      cashSales: number;
+      cashOut: number;
+      cashIn: number;
       actualCash: number | null;
       expectedCash: number;
       discrepancy: number | null;
+      shortageStatus: string;
+      shortageGraceUntil: string | null;
+      shortageOverrideReason: string | null;
       shortageDeduction: number;
       gajiBersih: number;
       auditFlags: string | null;
       notes: string | null;
+      cashMovements: ShiftCashMovementDetail[];
+      consignmentSummary: {
+        settledCount: number;
+        openCount: number;
+        totalPayout: number;
+        totalDiscrepancyQty: number;
+      } | null;
       personnelCount: number;
       nominalPerOrang: number;
       personnel: AttendeeRow[];
@@ -801,27 +1044,35 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     const builtShifts: ShiftRow[] = [];
 
+    let totalShortageDeduction = 0;
+
     for (const s of effectiveShifts) {
       const wibDate = wibDateOf(s.clockIn);
       const sesi = sesiByShift.get(s.id) ?? 'Pagi';
-      const slotLabel = sesi === 'Siang' ? '11:00-15:00' : '07:30-11:30';
+      const slotLabel = sesi === 'Siang' ? '11:30-15:00' : '07:30-11:30';
 
-      const fin = finByShift.get(s.id) ?? { omzet: 0, labaKotor: 0, txCount: 0 };
+      const fin = finByShift.get(s.id) ?? { omzet: 0, labaKotor: 0, txCount: 0, unitsSold: 0 };
       const poolGaji = poolByShift.get(s.id) ?? 0;
 
-      // Hitung selisih laci kasir & potong tekor otomatis
+      // Audit Kas Laci + Auto-Checklist Potong Tekor (hanya aktif jika status AUTO_LOCKED setelah jeda 5 menit)
       const rawModal = s.modalAwal ? parseFloat(s.modalAwal) : 100_000;
       const modalAwal = rawModal > 150_000 ? 100_000 : (rawModal <= 0 ? 100_000 : rawModal);
       const actualCash = s.actualCash ? parseFloat(s.actualCash) : null;
-      const cashSales = cashSalesMap.get(s.id) ?? 0;
-      const cashOut = cashOutMap.get(s.id) ?? 0;
-      const cashIn = cashInMap.get(s.id) ?? 0;
-      const expectedCash = modalAwal + cashSales - cashOut + cashIn;
-      const discrepancy = actualCash !== null ? actualCash - expectedCash : null;
-      const shortageDeduction = (discrepancy !== null && discrepancy < -2000) ? Math.abs(discrepancy) : 0;
-      // Pilihan 1 (Closed-Loop 50:50): Hak mahasiswa 50% adalah paten dan tidak dipotong sepihak oleh tekor fisik laci kasir,
-      // sehingga Total Upah Shift (50%) = Kas Toko (50%) SAMA PERSIS 100%!
-      const gajiBersih = poolGaji;
+      const cashSales = Math.round(cashSalesMap.get(s.id) ?? 0);
+      const cashOut = Math.round(cashOutMap.get(s.id) ?? 0);
+      const cashIn = Math.round(cashInMap.get(s.id) ?? 0);
+      const expectedCash = Math.round(modalAwal + cashSales - cashOut + cashIn);
+      const discrepancy = actualCash !== null ? Math.round(actualCash - expectedCash) : null;
+      const rawShortage = discrepancy !== null && discrepancy < -2000 ? Math.abs(discrepancy) : 0;
+
+      const sStatus = s.shortageStatus || 'NONE';
+      const lockedShortage =
+        sStatus === 'AUTO_LOCKED'
+          ? Math.max(rawShortage, Math.round(parseFloat(s.shortageAmount || '0')))
+          : 0;
+      const shortageDeduction = sStatus === 'AUTO_LOCKED' ? Math.min(poolGaji, lockedShortage) : 0;
+      totalShortageDeduction += shortageDeduction;
+      const gajiBersih = Math.max(0, poolGaji - shortageDeduction);
 
       const attendeesRaw = attByShift.get(s.id) ?? [];
       const count = attendeesRaw.length;
@@ -920,17 +1171,26 @@ export async function GET(req: NextRequest): Promise<Response> {
         kasirName: s.kasirName,
         kasirNim: s.kasirNim,
         txCount: fin.txCount,
+        unitsSold: fin.unitsSold,
         omzet: fin.omzet,
         labaKotor: fin.labaKotor,
         poolGaji,
         modalAwal,
+        cashSales,
+        cashOut,
+        cashIn,
         actualCash,
         expectedCash,
         discrepancy,
+        shortageStatus: sStatus,
+        shortageGraceUntil: s.shortageGraceUntil ? s.shortageGraceUntil.toISOString() : null,
+        shortageOverrideReason: s.shortageOverrideReason ?? null,
         shortageDeduction,
         gajiBersih,
         auditFlags: s.auditFlags ?? null,
         notes: s.notes ?? null,
+        cashMovements: cashMovementsByShift.get(s.id) ?? [],
+        consignmentSummary: consignmentByDate.get(wibDate) ?? null,
         personnelCount: count,
         nominalPerOrang,
         personnel,
@@ -940,11 +1200,10 @@ export async function GET(req: NextRequest): Promise<Response> {
     const summaryPerEmployee = Array.from(empAgg.values())
       .sort((a, b) => b.totalNominal - a.totalNominal);
 
-    // Rumus Hybrid 70/30: Total pool 50% terdistribusi tuntas (closed-loop, zero leakage)
-    const totalDistributed = poolShiftMahasiswa;
+    // Rumus 50% Kehadiran / 50% Laba (Sama Rata Peran 1.0) + potongan tekor terkunci kembali ke Kas Toko
+    const totalDistributed = Math.max(0, poolShiftMahasiswa - totalShortageDeduction);
     const sisaPool = 0;
-    // Kas toko paten 50% dari Laba Bersih Operasional
-    const labaBersihToko = fs.labaBersih;
+    const labaBersihToko = fs.labaBersih + totalShortageDeduction;
 
     return apiOk({
       range: {
@@ -952,6 +1211,11 @@ export async function GET(req: NextRequest): Promise<Response> {
         endDate: range.endDate,
         label: range.label,
         period: period ?? 'custom',
+      },
+      formula: {
+        attendancePct: Math.round(PAYROLL_ATTENDANCE_RATIO * 100),
+        performancePct: Math.round(PAYROLL_PERFORMANCE_RATIO * 100),
+        equalRoleWeight: true,
       },
       grandTotal: {
         omzet: fs.omzet,
@@ -962,6 +1226,8 @@ export async function GET(req: NextRequest): Promise<Response> {
         tunjanganKetua: 0,
         poolShiftMahasiswa,
         txCount: fs.txCount,
+        totalUnitsSold: builtShifts.reduce((acc, sh) => acc + sh.unitsSold, 0),
+        totalShortageDeduction,
         totalDistributed,
         sisaPool,
         labaBersihToko,

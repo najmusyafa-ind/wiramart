@@ -12,6 +12,35 @@ import { shifts, employees } from '@/lib/db/schema';
 export const SHARED_SHIFT_MAX_AGE_MS = 4.5 * 60 * 60 * 1000; // 4 jam 30 menit
 export const STALE_SHIFT_AUTO_CLOSE_MS = 12 * 60 * 60 * 1000; // 12 jam
 
+/** Tanggal bisnis WIB 'YYYY-MM-DD' */
+export function getWibDateStr(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
+}
+
+/** Menit sejak 00:00 WIB */
+export function getWibMinutes(d: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Jakarta',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+  }).formatToParts(d);
+  const h = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10) % 24;
+  const m = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
+  return h * 60 + m;
+}
+
+/** Sesi WIB: Pagi (< 11:15) vs Siang (>= 11:15) — mencegah laci Pagi terbawa ke Shift Siang */
+export function getWibSessionLabel(d: Date): 'Pagi' | 'Siang' {
+  return getWibMinutes(d) >= 11 * 60 + 15 ? 'Siang' : 'Pagi';
+}
+
+/** True jika shift toko dibuka pada hari/sesi berbeda dari waktu sekarang */
+export function isCrossSessionStoreShift(shiftClockIn: Date, now: Date): boolean {
+  if (getWibDateStr(shiftClockIn) !== getWibDateStr(now)) return true;
+  return getWibSessionLabel(shiftClockIn) !== getWibSessionLabel(now);
+}
+
 export interface ResolvedActiveShift {
   id: string;
   employeeId: string;
@@ -162,7 +191,10 @@ export async function resolveActiveDrawerShift(
     };
   }
 
-  if (storeAgeMs <= SHARED_SHIFT_MAX_AGE_MS) {
+  const crossSession =
+    storeShift.employeeId !== employeeId && isCrossSessionStoreShift(new Date(storeShift.clockIn), now);
+
+  if (storeAgeMs <= SHARED_SHIFT_MAX_AGE_MS && !crossSession) {
     return {
       activeShift: {
         id: storeShift.id,

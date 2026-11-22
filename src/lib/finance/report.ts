@@ -367,13 +367,17 @@ const approx = (a: number, b: number): boolean => Math.abs(a - b) < 0.01;
 export const BIAYA_PATEN_ATK     = 20_000;
 export const BIAYA_PATEN_BENSIN  = 30_000;
 export const BIAYA_PATEN_BULANAN = BIAYA_PATEN_ATK + BIAYA_PATEN_BENSIN;
-export const PERSEN_BAGI_HASIL   = 50;
+export const PERSEN_BAGI_HASIL        = 50;
+// Komposisi pembagian pool 50% antar shift (disepakati 22 Nov 2026):
+// 50% Kehadiran & Ketepatan Waktu + 50% Performa Laba Kotor
+export const PAYROLL_ATTENDANCE_RATIO  = 0.50;
+export const PAYROLL_PERFORMANCE_RATIO = 0.50;
 
 // Konfigurasi Keadilan Bagi Hasil Mahasiswa (Bu Dyah & Manajemen Wiramart)
 export const KETUA_UMKM_NIM           = '02302017';
 export const KETUA_UMKM_CANONICAL_ID  = 'bcc2db7b-aee5-4e21-bc0f-312fff73f49e';
 export const KETUA_UMKM_DUPLICATE_ID  = '0ce4873b-0792-446e-b83d-f8b8d13dfff5';
-export const PERSEN_TUNJANGAN_KETUA   = 6; // 6% dari Pool Mahasiswa untuk Ketua UMKM
+export const PERSEN_TUNJANGAN_KETUA   = 0; // Sama rata sesuai keputusan operasional
 export const ERA2_PRESENSI_START_DATE = '2026-10-05'; // Awal absensi kiosk digital
 export const LATE_PENALTY_PER_5MIN    = 3; // Potongan 3% per 5 menit keterlambatan
 export const MAX_LATE_PENALTY_PERCENT = 50; // Maksimal potongan 50% agar hak hadir tidak Rp 0
@@ -391,14 +395,10 @@ export function extractRoleFromNotes(
 
 /**
  * Bobot tanggung jawab peran per shift:
- * - Admin Shift / Kasir: 1.20 (risiko laci kas, stok, HPP, & verifikasi pesanan)
- * - Kepala Gudang / Gudang: 1.10 (opname fisik, barang masuk, & FEFO)
- * - CS Pelayan / Customer Service: 1.00 (display rak & pengantaran yang sudah mendapat insentif ongkir)
+ * Diseragamkan sama rata (1.0) untuk seluruh peran (Kasir, Admin Shift, Gudang, CS Pelayan).
+ * Pembeda nominal dalam 1 shift murni berdasarkan kehadiran dan ketepatan waktu.
  */
-export function getRoleWeight(role: string): number {
-  const r = role.toLowerCase();
-  if (r.includes('admin') || r.includes('kasir') || r.includes('ketua')) return 1.2;
-  if (r.includes('gudang')) return 1.1;
+export function getRoleWeight(_role: string): number {
   return 1.0;
 }
 

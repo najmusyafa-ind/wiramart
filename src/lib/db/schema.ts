@@ -197,6 +197,15 @@ export const shifts = pgTable(
     serahTerimaDiff: decimal('serah_terima_diff', { precision: 15, scale: 2 }),
     // Flag audit sistem: SERAH_TERIMA_SELISIH, FRAUD_CASH_SUSPICIOUS, NORMAL
     auditFlags: varchar('audit_flags', { length: 100 }),
+    // Auto-Checklist & Jeda 5 Menit Selisih Laci:
+    // NONE | AUTO_VERIFIED | PENDING_GRACE | AUTO_LOCKED | OVERRIDDEN
+    shortageStatus: varchar('shortage_status', { length: 30 }).notNull().default('NONE'),
+    shortageGraceUntil: timestamp('shortage_grace_until', { withTimezone: true }),
+    shortageAmount: decimal('shortage_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    shortageRecountCount: integer('shortage_recount_count').notNull().default(0),
+    shortageOverrideReason: text('shortage_override_reason'),
+    shortageOverrideByAdminId: uuid('shortage_override_by_admin_id').references(() => admins.id),
+    shortageOverrideAt: timestamp('shortage_override_at', { withTimezone: true }),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -621,6 +630,9 @@ export const shiftCashMovements = pgTable(
     category: varchar('category', { length: 50 }).notNull(),
     amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
     notes: text('notes').notNull(),
+    // Penanda koreksi kas di masa jeda 5 menit setelah tutup shift
+    isGraceCorrection: boolean('is_grace_correction').notNull().default(false),
+    consignmentEntryId: uuid('consignment_entry_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -974,7 +986,13 @@ export const attendances = pgTable(
     clockOutActual: timestamp('clock_out_actual', { withTimezone: true }),
     // Keterlambatan dalam menit (0 jika tepat waktu / HADIR)
     lateMinutes: integer('late_minutes').notNull().default(0),
-    // Catatan dosen: alasan ijin, keterangan khusus
+    // Peran harian pada shift ini (tanpa menimpa jabatan permanen)
+    roleTask: varchar('role_task', { length: 50 }),
+    // Sumber pencatatan: KIOSK | MANUAL_CROSSCHECK | BADAL_KIOSK | SWAP | LOGIN_AUTO
+    verificationSource: varchar('verification_source', { length: 30 }).notNull().default('KIOSK'),
+    // Penanda pengganti / badal lintas hari
+    isSubstitute: boolean('is_substitute').notNull().default(false),
+    // Catatan dosen / admin: alasan ijin, keterangan khusus
     notes: text('notes'),
     // Dosen yang mencatat (nullable jika auto-generated saat login)
     recordedByAdminId: uuid('recorded_by_admin_id').references(() => admins.id),
@@ -1689,3 +1707,61 @@ export const notificationLogs = pgTable(
 
 export type NotificationLog = typeof notificationLogs.$inferSelect;
 export type NewNotificationLog = typeof notificationLogs.$inferInsert;
+
+// =============================================================
+// 32. CONSIGNMENT_ENTRIES (Buku Titipan Harian / Konsinyasi)
+// Alur: Pagi titip (qty_initial) -> Siang laku POS -> Sore hitung sisa & setor mitra
+// =============================================================
+
+export const CONSIGNMENT_STATUS = ['OPEN', 'CARRYOVER', 'SETTLED'] as const;
+export type ConsignmentStatus = (typeof CONSIGNMENT_STATUS)[number];
+
+export const CONSIGNMENT_PAYOUT_SOURCES = ['CASH_LACI', 'TRANSFER_PENGELOLA', 'NONE'] as const;
+export type ConsignmentPayoutSource = (typeof CONSIGNMENT_PAYOUT_SOURCES)[number];
+
+export const consignmentEntries = pgTable(
+  'consignment_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    entryDate: date('entry_date', { mode: 'string' }).notNull(),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id),
+    supplierId: uuid('supplier_id').references(() => suppliers.id, { onDelete: 'set null' }),
+    mitraName: varchar('mitra_name', { length: 200 }).notNull(),
+    qtyInitial: integer('qty_initial').notNull(),
+    hargaSetor: decimal('harga_setor', { precision: 15, scale: 2 }).notNull(),
+    sellingPrice: decimal('selling_price', { precision: 15, scale: 2 }).notNull(),
+    status: varchar('status', { length: 20 }).$type<ConsignmentStatus>().notNull().default('OPEN'),
+    qtySoldPos: integer('qty_sold_pos'),
+    qtyRemaining: integer('qty_remaining'),
+    qtySoldPhysical: integer('qty_sold_physical'),
+    qtyDiscrepancy: integer('qty_discrepancy').notNull().default(0),
+    totalPayout: decimal('total_payout', { precision: 15, scale: 2 }),
+    payoutSource: varchar('payout_source', { length: 30 }).$type<ConsignmentPayoutSource>(),
+    cashMovementId: uuid('cash_movement_id').references(() => shiftCashMovements.id, { onDelete: 'set null' }),
+    createdByEmployeeId: uuid('created_by_employee_id')
+      .notNull()
+      .references(() => employees.id),
+    settledByEmployeeId: uuid('settled_by_employee_id').references(() => employees.id),
+    settledAt: timestamp('settled_at', { withTimezone: true }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_consignment_date_status').on(table.entryDate, table.status),
+    index('idx_consignment_product_date').on(table.productId, table.entryDate),
+  ],
+);
+
+export type ConsignmentEntry = typeof consignmentEntries.$inferSelect;
+export type NewConsignmentEntry = typeof consignmentEntries.$inferInsert;
+
+export const consignmentEntriesRelations = relations(consignmentEntries, ({ one }) => ({
+  product: one(products, { fields: [consignmentEntries.productId], references: [products.id] }),
+  supplier: one(suppliers, { fields: [consignmentEntries.supplierId], references: [suppliers.id] }),
+  cashMovement: one(shiftCashMovements, { fields: [consignmentEntries.cashMovementId], references: [shiftCashMovements.id] }),
+  createdByEmployee: one(employees, { fields: [consignmentEntries.createdByEmployeeId], references: [employees.id] }),
+  settledByEmployee: one(employees, { fields: [consignmentEntries.settledByEmployeeId], references: [employees.id] }),
+}));

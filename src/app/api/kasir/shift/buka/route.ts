@@ -20,6 +20,7 @@ import { db } from '@/lib/db/client';
 import { shifts, employees } from '@/lib/db/schema';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
+import { isCrossSessionStoreShift } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -119,15 +120,22 @@ export async function PATCH(req: NextRequest): Promise<Response> {
 
     if (existingStoreShift) {
       const shiftAge = now.getTime() - new Date(existingStoreShift.clockIn).getTime();
+      const isCrossSession =
+        existingStoreShift.employeeId !== employeeId &&
+        isCrossSessionStoreShift(new Date(existingStoreShift.clockIn), now);
+
       if (shiftAge > TWELVE_HOURS) {
         // Auto-close shift lama yang sudah basi (>12 jam)
         await closeStaleShift(existingStoreShift.id, now);
-      } else if (existingStoreShift.employeeId !== employeeId && shiftAge > FOUR_AND_HALF_HOURS) {
-        // Shift aktif dari kasir shift roster sebelumnya yang belum ditutup (>4.5 jam dan beda kasir)
-        // Auto-close shift lama tersebut saat kasir shift baru membuka laci kasir baru
+      } else if (
+        existingStoreShift.employeeId !== employeeId &&
+        (shiftAge > FOUR_AND_HALF_HOURS || isCrossSession)
+      ) {
+        // Shift aktif milik kasir sesi sebelumnya (Pagi -> Siang atau > 4.5 jam):
+        // Tutup otomatis shift lama agar kasir sesi baru membuka baris shift miliknya sendiri.
         await closeStaleShift(existingStoreShift.id, now);
       } else if (existingStoreShift.modalAwal !== null) {
-        // Modal awal laci toko sudah dibuka (oleh kasir ini atau rekan dalam slot shift yang sama)
+        // Modal awal laci toko sudah dibuka (oleh kasir ini atau rekan dalam sesi shift yang sama)
         return buildActiveShiftResponse('Shift laci toko sudah aktif dengan modal awal.', existingStoreShift);
       } else {
         shiftToFill = { id: existingStoreShift.id };

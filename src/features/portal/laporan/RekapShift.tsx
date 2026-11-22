@@ -36,6 +36,10 @@ import {
   Copy,
   Check,
   Printer,
+  Package,
+  ShieldAlert,
+  X,
+  RotateCcw,
 } from 'lucide-react';
 import { formatRupiah } from './shared';
 import type { PeriodKey as ReportPeriodKey } from '@/lib/finance/report';
@@ -78,6 +82,24 @@ export type AttendeeRow = {
   nominalBagiHasil: number;
 };
 
+export type ShiftCashMovementDetail = {
+  id: string;
+  movementType: string;
+  category: string;
+  amount: number;
+  notes: string;
+  isGraceCorrection: boolean;
+  employeeName: string | null;
+  createdAt: string;
+};
+
+export type ConsignmentDaySummary = {
+  settledCount: number;
+  openCount: number;
+  totalPayout: number;
+  totalDiscrepancyQty: number;
+};
+
 export type ShiftRow = {
   shiftId: string;
   tanggal: string; // 'YYYY-MM-DD' WIB
@@ -89,17 +111,26 @@ export type ShiftRow = {
   kasirName: string;
   kasirNim: string;
   txCount: number;
+  unitsSold?: number;
   omzet: number;
   labaKotor: number;
   poolGaji: number;
   modalAwal?: number;
+  cashSales?: number;
+  cashOut?: number;
+  cashIn?: number;
   actualCash?: number | null;
   expectedCash?: number;
   discrepancy?: number | null;
+  shortageStatus?: string;
+  shortageGraceUntil?: string | null;
+  shortageOverrideReason?: string | null;
   shortageDeduction?: number;
   gajiBersih?: number;
   auditFlags?: string | null;
   notes?: string | null;
+  cashMovements?: ShiftCashMovementDetail[];
+  consignmentSummary?: ConsignmentDaySummary | null;
   personnelCount: number;
   nominalPerOrang: number;
   personnel: AttendeeRow[];
@@ -141,6 +172,8 @@ export type PerShiftData = {
     tunjanganKetua?: number;
     poolShiftMahasiswa?: number;
     txCount: number;
+    totalUnitsSold?: number;
+    totalShortageDeduction?: number;
     totalDistributed?: number;
     sisaPool?: number;
     labaBersihToko?: number;
@@ -159,6 +192,7 @@ export type RekapShiftProps = {
 
 type DailyShiftSession = {
   sessionKey: string;
+  shiftId: string;
   tanggal: string;
   hari: string;
   sesi: 'Pagi' | 'Siang';
@@ -167,16 +201,25 @@ type DailyShiftSession = {
   clockOut: string | null;
   kasirName: string;
   txCount: number;
+  unitsSold: number;
   omzet: number;
   labaKotor: number;
   modalAwal?: number;
+  cashSales: number;
+  cashOut: number;
+  cashIn: number;
   actualCash?: number | null;
   expectedCash?: number;
   discrepancy?: number | null;
-  shortageDeduction?: number;
+  shortageStatus: string;
+  shortageGraceUntil: string | null;
+  shortageOverrideReason: string | null;
+  shortageDeduction: number;
   upahBersih: number;
   auditFlags?: string | null;
   notes?: string | null;
+  cashMovements: ShiftCashMovementDetail[];
+  consignmentSummary: ConsignmentDaySummary | null;
   personnel: AttendeeRow[];
 };
 
@@ -185,18 +228,35 @@ type ShiftTeamGroup = {
   hari: string;
   dayOrder: number;
   sesi: 'Pagi' | 'Siang';
-  waktuLabel: string; // '07:00–11:30' | '11:30–15:00'
+  waktuLabel: string; // '07:30–11:30' | '11:30–15:00'
   shiftTglSummary: string;
   anggotaShift: { employeeId: string; fullName: string; nim: string; jabatan: string }[];
   totalPersonel: number;
   totalShiftCount: number;
   upahBersih: number;
   totalTx: number;
+  totalUnitsSold: number;
   totalOmzet: number;
   totalLabaKotor: number;
+  totalShortageDeduction: number;
   transferNote?: string;
   sessions: DailyShiftSession[];
 };
+
+const CASH_CATEGORY_LABELS: Record<string, string> = {
+  BAYAR_TITIPAN: 'Bayar Titipan',
+  SETOR_OWNER: 'Diambil Bu Dyah',
+  BELANJA_STOK: 'Bayar Supplier',
+  OPERASIONAL: 'Operasional',
+  UANG_TIP: 'Uang Tip',
+  TUKAR_RECEH: 'Tukar Receh',
+  TAMBAH_MODAL: 'Tambah Modal',
+  LAINNYA: 'Lainnya',
+};
+
+function formatCashCategory(cat: string): string {
+  return CASH_CATEGORY_LABELS[cat] ?? cat.replace(/_/g, ' ');
+}
 
 // ─── Helper Functions ────────────────────────────────────────────────────────
 
@@ -286,6 +346,54 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
   } | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const [copiedSlipKey, setCopiedSlipKey] = useState<string | null>(null);
+  const [expandedCashSessions, setExpandedCashSessions] = useState<Record<string, boolean>>({});
+  const [overrideTarget, setOverrideTarget] = useState<{
+    shiftId: string;
+    tanggal: string;
+    sesi: string;
+    mode: 'CANCEL_DEDUCTION' | 'RESTORE_DEDUCTION';
+    amount: number;
+  } | null>(null);
+  const [overrideReason, setOverrideReason] = useState('');
+  const [overrideSubmitting, setOverrideSubmitting] = useState(false);
+  const [overrideError, setOverrideError] = useState('');
+
+  function toggleCashSession(sessionKey: string) {
+    setExpandedCashSessions((prev) => ({ ...prev, [sessionKey]: !prev[sessionKey] }));
+  }
+
+  async function handleSubmitOverride(e: React.FormEvent) {
+    e.preventDefault();
+    if (!overrideTarget) return;
+    if (overrideReason.trim().length < 5) {
+      setOverrideError('Alasan wajib diisi minimal 5 karakter.');
+      return;
+    }
+    setOverrideSubmitting(true);
+    setOverrideError('');
+    try {
+      const res = await fetch(`/api/admin/shifts/${overrideTarget.shiftId}/shortage-override`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: overrideTarget.mode,
+          reason: overrideReason.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        setOverrideError(typeof json.error === 'string' ? json.error : 'Gagal menyimpan keputusan.');
+        return;
+      }
+      setOverrideTarget(null);
+      setOverrideReason('');
+      fetchData();
+    } catch {
+      setOverrideError('Kesalahan jaringan saat memproses override.');
+    } finally {
+      setOverrideSubmitting(false);
+    }
+  }
 
   function computeGroupMemberBreakdown(g: ShiftTeamGroup) {
     const map = new Map<
@@ -317,9 +425,13 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
     const lines = [
       `SLIP GAJI KELOMPOK SHIFT - WIRAMART UNPERBA`,
       `Periode: ${periodLabel}`,
+      `Rumus: 50% Kehadiran · 50% Laba · Peran Sama Rata (1,0)`,
       `Kelompok: ${g.hari} ${g.sesi} (${g.waktuLabel} WIB)`,
       `Tanggal Shift: ${g.shiftTglSummary || '-'} (${g.totalShiftCount}x pertemuan)`,
-      `Total Transaksi: ${g.totalTx} | Omzet: ${formatRupiah(g.totalOmzet)} | Laba Kotor: ${formatRupiah(g.totalLabaKotor)}`,
+      `Transaksi: ${g.totalTx} tx (${g.totalUnitsSold} pcs) | Omzet: ${formatRupiah(g.totalOmzet)} | Laba Kotor: ${formatRupiah(g.totalLabaKotor)}`,
+      ...(g.totalShortageDeduction > 0
+        ? [`Potongan Tekor Terkunci: -${formatRupiah(g.totalShortageDeduction)}`]
+        : []),
       `Total Upah Tim (50%): ${formatRupiah(g.upahBersih)}`,
       ``,
       `Rincian Per Anggota:`,
@@ -334,8 +446,9 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
   function buildAllShiftsWaText(): string {
     const periodLabel = data?.range.label ?? '-';
     const lines: string[] = [
-      `REKAP GAJI BULANAN PER SHIFT - WIRAMART UNPERBA`,
+      `REKAP GAJI PER SHIFT - WIRAMART UNPERBA`,
       `Periode: ${periodLabel}`,
+      `Rumus: 50% Kehadiran · 50% Laba · Peran Sama Rata (1,0)`,
       `Total Pool Gaji Mahasiswa (50%): ${formatRupiah(data?.grandTotal.poolGaji ?? 0)}`,
       `========================================`,
     ];
@@ -489,6 +602,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       if (!existing) {
         sessionMap.set(sKey, {
           sessionKey: sKey,
+          shiftId: s.shiftId,
           tanggal: s.tanggal,
           hari: s.hari,
           sesi: s.sesi,
@@ -497,25 +611,49 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           clockOut: s.clockOut,
           kasirName: s.kasirName,
           txCount: s.txCount,
+          unitsSold: s.unitsSold ?? 0,
           omzet: s.omzet,
           labaKotor: s.labaKotor,
           modalAwal: s.modalAwal,
+          cashSales: s.cashSales ?? 0,
+          cashOut: s.cashOut ?? 0,
+          cashIn: s.cashIn ?? 0,
           actualCash: s.actualCash,
           expectedCash: s.expectedCash,
           discrepancy: s.discrepancy,
+          shortageStatus: s.shortageStatus ?? 'NONE',
+          shortageGraceUntil: s.shortageGraceUntil ?? null,
+          shortageOverrideReason: s.shortageOverrideReason ?? null,
           shortageDeduction: s.shortageDeduction ?? 0,
           upahBersih: gaji,
           auditFlags: s.auditFlags ?? null,
           notes: s.notes ?? null,
+          cashMovements: [...(s.cashMovements ?? [])],
+          consignmentSummary: s.consignmentSummary ?? null,
           personnel: [...s.personnel],
         });
       } else {
         existing.txCount += s.txCount;
+        existing.unitsSold += s.unitsSold ?? 0;
         existing.omzet += s.omzet;
         existing.labaKotor += s.labaKotor;
+        existing.cashSales += s.cashSales ?? 0;
+        existing.cashOut += s.cashOut ?? 0;
+        existing.cashIn += s.cashIn ?? 0;
         existing.upahBersih += gaji;
         if (s.shortageDeduction) {
           existing.shortageDeduction = (existing.shortageDeduction ?? 0) + s.shortageDeduction;
+        }
+        if (s.shortageStatus && s.shortageStatus !== 'NONE') {
+          existing.shortageStatus = s.shortageStatus;
+          existing.shortageGraceUntil = s.shortageGraceUntil ?? null;
+          existing.shortageOverrideReason = s.shortageOverrideReason ?? null;
+        }
+        if (s.cashMovements?.length) {
+          existing.cashMovements.push(...s.cashMovements);
+        }
+        if (s.consignmentSummary && !existing.consignmentSummary) {
+          existing.consignmentSummary = s.consignmentSummary;
         }
         if (s.discrepancy !== undefined && s.discrepancy !== null) {
           existing.discrepancy = (existing.discrepancy ?? 0) + s.discrepancy;
@@ -617,15 +755,17 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         hari: g.hari,
         dayOrder: HARI_ORDER[g.hari] ?? 9,
         sesi: g.sesi,
-        waktuLabel: g.sesi === 'Pagi' ? '07:00–11:30' : '11:30–15:00',
+        waktuLabel: g.sesi === 'Pagi' ? '07:30–11:30' : '11:30–15:00',
         shiftTglSummary: formatGroupedDates(dates),
         anggotaShift,
         totalPersonel: anggotaShift.length,
         totalShiftCount: g.sessions.length,
         upahBersih: g.sessions.reduce((s, x) => s + x.upahBersih, 0),
         totalTx: g.sessions.reduce((s, x) => s + x.txCount, 0),
+        totalUnitsSold: g.sessions.reduce((s, x) => s + x.unitsSold, 0),
         totalOmzet: g.sessions.reduce((s, x) => s + x.omzet, 0),
         totalLabaKotor: g.sessions.reduce((s, x) => s + x.labaKotor, 0),
+        totalShortageDeduction: g.sessions.reduce((s, x) => s + x.shortageDeduction, 0),
         transferNote,
         sessions: g.sessions,
       });
@@ -782,8 +922,8 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       });
 
       styleBannerBlock(ws1, {
-        title: 'LAPORAN REKAPITULASI KEUANGAN & BAGI HASIL SHIFT — WIRAMART UNPERBA',
-        subtitle: `${subtitlePeriod} • Skema Pembagian Hybrid 70% Kehadiran / 30% Kinerja`,
+        title: 'LAPORAN KEUANGAN & BAGI HASIL SHIFT — WIRAMART UNPERBA',
+        subtitle: `${subtitlePeriod} • Rumus 50% Kehadiran / 50% Laba · Peran Sama Rata (1,0)`,
         endCol: cols1.length,
         titleRow: 1,
         subtitleRow: 2,
@@ -866,11 +1006,11 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       ws1.getRow(noteStartRow).height = 24;
 
       const notesList = [
-        { no: '1.', rule: 'Rasio Utama 50% : 50% (Paten)', detail: 'Laba Bersih Toko dibagi seimbang 50% untuk Kas Toko dan 50% untuk Plafon Upah Mahasiswa (Closed-Loop).' },
-        { no: '2.', rule: 'Komposisi Pool Hybrid 70% / 30%', detail: '70% Alokasi Kehadiran dibagikan berdasarkan poin kedisiplinan hadir dan ketepatan waktu. 30% Bonus Produktivitas dibagikan proporsional sesuai laba kotor shift.' },
-        { no: '3.', rule: 'Faktor Disiplin Waktu Kehadiran', detail: 'Hadir tepat waktu mendapat bobot 1,00 (100%). Keterlambatan dikenakan penalti poin proporsional sesuai durasi keterlambatan.' },
-        { no: '4.', rule: 'Pembagian Internal Shift', detail: 'Upah yang dialokasikan ke tiap shift dibagikan kepada seluruh personel yang hadir berdasarkan bobot peran dan kedisiplinan.' },
-        { no: '5.', rule: 'Distribusi Bulat Tanpa Residu (Hamilton)', detail: 'Seluruh alokasi rupiah dibulatkan menggunakan metode Largest Remainder (Hamilton) sehingga sisa saldo pool selalu Rp 0.' },
+        { no: '1.', rule: 'Rasio Utama 50% : 50% (Closed-Loop)', detail: 'Laba Operasional Bersih dibagi 50% untuk Kas Toko dan 50% untuk Pool Upah Mahasiswa.' },
+        { no: '2.', rule: 'Komposisi Antar-Shift 50% / 50%', detail: '50% dibagi berdasarkan kehadiran dan ketepatan waktu; 50% dibagi proporsional berdasarkan laba kotor shift.' },
+        { no: '3.', rule: 'Disiplin Waktu & Toleransi 15 Menit', detail: 'Shift Pagi 07:30, Siang 11:30. Toleransi 15 menit; keterlambatan di atas itu dipotong 3% per 5 menit (maks 50%).' },
+        { no: '4.', rule: 'Peran Sama Rata (1,0) & Potong Tekor Otomatis', detail: 'Seluruh peran dalam 1 shift berbobot sama rata (1,0). Tekor kas > Rp 2.000 masuk jeda 5 menit sebelum dikunci otomatis (dapat di-override Admin Shift/Manager dengan alasan).' },
+        { no: '5.', rule: 'Pembulatan Bulat (Hamilton)', detail: 'Distribusi rupiah dibulatkan dengan metode Largest Remainder (Hamilton) sehingga sisa pembulatan selalu Rp 0.' },
       ];
 
       const mergedDescWidth = cols1[1].width + cols1[2].width;
@@ -1518,6 +1658,8 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
     labaOperasionalBersih: 0,
     poolGaji: 0,
     txCount: 0,
+    totalUnitsSold: 0,
+    totalShortageDeduction: 0,
     totalDistributed: 0,
     sisaPool: 0,
     labaBersihToko: 0,
@@ -1627,7 +1769,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
               }}
             >
               <TrendingUp size={20} style={{ color: '#166534', flexShrink: 0 }} />
-              <span>Laporan Gaji Per Shift Wiramart — {data?.range.label ?? 'Memuat...'}</span>
+              <span>Bagi Hasil Per Shift — {data?.range.label ?? 'Memuat...'}</span>
             </h2>
             <p
               style={{
@@ -1636,7 +1778,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                 margin: '2px 0 0',
               }}
             >
-              Rekapitulasi Upah Bersih per Kelompok Shift · Klik baris untuk melihat jumlah transaksi & rincian tanggal
+              Rumus 50% Kehadiran · 50% Laba · Peran Sama Rata · Klik baris untuk rincian kas laci & anggota
             </p>
           </div>
 
@@ -1875,7 +2017,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
             label: 'Transaksi',
             value: `${grandTotal.txCount.toLocaleString('id-ID')} tx`,
             color: '#4f46e5',
-            sub: `${tableTotals.totalShiftCount}x shift berjalan`,
+            sub: `${grandTotal.totalUnitsSold ? `${grandTotal.totalUnitsSold.toLocaleString('id-ID')} pcs · ` : ''}${tableTotals.totalShiftCount}x shift`,
           },
           {
             icon: <DollarSign size={16} />,
@@ -1896,21 +2038,24 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
             label: 'Beban Toko',
             value: formatRupiah(grandTotal.biayaOperasional || 0),
             color: '#dc2626',
-            sub: 'Paten Rp 50rb/bln',
+            sub: 'Operasional periode',
           },
           {
             icon: <Award size={16} />,
             label: 'Total Upah Shift',
             value: formatRupiah(grandTotal.totalDistributed || 0),
             color: '#15803d',
-            sub: `${allGroups.length} kelompok shift`,
+            sub:
+              (grandTotal.totalShortageDeduction ?? 0) > 0
+                ? `Potong tekor -${formatRupiah(grandTotal.totalShortageDeduction ?? 0)}`
+                : `${allGroups.length} kelompok shift`,
           },
           {
             icon: <Wallet size={16} />,
             label: 'Kas Toko (50%)',
             value: formatRupiah(grandTotal.labaBersihToko || 0),
             color: '#4338ca',
-            sub: 'Laba bersih toko',
+            sub: 'Bagian kas toko',
           },
         ].map((c) => (
           <div
@@ -2053,7 +2198,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
             }}
           >
             {copiedSlipKey === '__ALL__' ? <Check size={14} /> : <Copy size={14} />}
-            <span>{copiedSlipKey === '__ALL__' ? 'Rekap WA Tersalin' : 'Salin Rekap WA (Grup Karyawan)'}</span>
+            <span>{copiedSlipKey === '__ALL__' ? 'Rekap Tersalin' : 'Salin Rekap WA'}</span>
           </button>
 
           <button
@@ -2190,10 +2335,10 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                         </th>
                         {[
                           { label: 'Waktu', align: 'left' },
-                          { label: 'Shift Tgl', align: 'left' },
+                          { label: 'Hari & Tanggal', align: 'left' },
                           { label: 'Anggota Shift', align: 'left' },
-                          { label: 'Total Personel', align: 'center' },
-                          { label: 'Berapa Kali Shift Total', align: 'center' },
+                          { label: 'Personel', align: 'center' },
+                          { label: 'Jumlah Shift', align: 'center' },
                           { label: 'Upah Bersih', align: 'right' },
                           { label: '', align: 'center' },
                         ].map((col, idx) => (
@@ -2450,15 +2595,15 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                   >
                                     <div>
                                       <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
-                                        Total Transaksi Shift Ini
+                                        Transaksi & Barang Laku
                                       </div>
                                       <div style={{ fontWeight: 800, fontSize: '1rem', color: '#4f46e5' }}>
-                                        {g.totalTx.toLocaleString('id-ID')} Transaksi
+                                        {g.totalTx.toLocaleString('id-ID')} tx · {g.totalUnitsSold.toLocaleString('id-ID')} pcs
                                       </div>
                                     </div>
                                     <div>
                                       <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
-                                        Total Omzet Shift Ini
+                                        Omzet Shift
                                       </div>
                                       <div style={{ fontWeight: 800, fontSize: '1rem', color: '#0284c7' }}>
                                         {formatRupiah(g.totalOmzet)}
@@ -2466,7 +2611,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                     </div>
                                     <div>
                                       <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
-                                        Total Laba Kotor Shift Ini
+                                        Laba Kotor
                                       </div>
                                       <div style={{ fontWeight: 800, fontSize: '1rem', color: '#0f172a' }}>
                                         {formatRupiah(g.totalLabaKotor)}
@@ -2474,15 +2619,14 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                     </div>
                                     <div>
                                       <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
-                                        Rata-rata Upah per Pertemuan
+                                        Rata-rata Upah / Shift
                                       </div>
                                       <div style={{ fontWeight: 800, fontSize: '1rem', color: '#15803d' }}>
                                         {formatRupiah(
                                           g.totalShiftCount > 0
                                             ? Math.round(g.upahBersih / g.totalShiftCount)
                                             : 0
-                                        )}{' '}
-                                        / shift
+                                        )}
                                       </div>
                                     </div>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
@@ -2529,6 +2673,45 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                     </div>
                                   </div>
 
+                                  {/* Rincian Upah Per Anggota Tim */}
+                                  <div
+                                    style={{
+                                      display: 'flex',
+                                      flexWrap: 'wrap',
+                                      gap: '8px',
+                                      marginBottom: '12px',
+                                      padding: '10px 12px',
+                                      backgroundColor: '#ffffff',
+                                      borderRadius: '8px',
+                                      border: '1px solid #e2e8f0',
+                                    }}
+                                  >
+                                    <div style={{ width: '100%', fontSize: '11px', fontWeight: 700, color: '#475569' }}>
+                                      Rincian Upah Per Anggota (Peran Sama Rata 1,0):
+                                    </div>
+                                    {computeGroupMemberBreakdown(g).map((m) => (
+                                      <div
+                                        key={m.nim || m.fullName}
+                                        style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '8px',
+                                          padding: '5px 10px',
+                                          borderRadius: '8px',
+                                          backgroundColor: '#f8fafc',
+                                          border: '1px solid #e2e8f0',
+                                          fontSize: '11.5px',
+                                        }}
+                                      >
+                                        <span style={{ fontWeight: 700, color: '#0f172a' }}>{m.fullName}</span>
+                                        <span style={{ color: '#64748b' }}>
+                                          {m.hadir}x{m.telatMenit > 0 ? ` · telat ${m.telatMenit}m` : ''}
+                                        </span>
+                                        <span style={{ fontWeight: 800, color: '#15803d' }}>{formatRupiah(m.nominal)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+
                                   {/* Sub-tabel Rincian Per Tanggal Shift */}
                                   <div
                                     style={{
@@ -2553,20 +2736,20 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                             borderBottom: '1px solid #e2e8f0',
                                           }}
                                         >
-                                          <th style={{ padding: '8px 12px', textAlign: 'center', width: '40px', color: '#475569' }}>
+                                          <th style={{ padding: '8px 12px', textAlign: 'center', width: '36px', color: '#475569' }}>
                                             #
                                           </th>
                                           <th style={{ padding: '8px 12px', textAlign: 'left', color: '#475569' }}>
-                                            Tanggal Shift
+                                            Tanggal
                                           </th>
                                           <th style={{ padding: '8px 12px', textAlign: 'left', color: '#475569' }}>
-                                            Jam Buka – Tutup
+                                            Jam Shift
                                           </th>
                                           <th style={{ padding: '8px 12px', textAlign: 'left', color: '#475569' }}>
-                                            Kasir & Catatan Kehadiran
+                                            Personel Hadir
                                           </th>
                                           <th style={{ padding: '8px 12px', textAlign: 'center', color: '#475569' }}>
-                                            Berapa Transaksi
+                                            Trx / Barang
                                           </th>
                                           <th style={{ padding: '8px 12px', textAlign: 'right', color: '#475569' }}>
                                             Omzet
@@ -2575,128 +2758,320 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                             Laba Kotor
                                           </th>
                                           <th style={{ padding: '8px 12px', textAlign: 'center', color: '#475569' }}>
-                                            Selisih Laci
+                                            Kas Laci & Tekor
                                           </th>
                                           <th style={{ padding: '8px 12px', textAlign: 'right', color: '#475569' }}>
-                                            Upah Bersih
+                                            Upah Shift
                                           </th>
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {g.sessions.map((sess, sIdx) => (
-                                          <tr
-                                            key={sess.sessionKey}
-                                            style={{
-                                              borderBottom:
-                                                sIdx < g.sessions.length - 1
-                                                  ? '1px solid #f1f5f9'
-                                                  : 'none',
-                                            }}
-                                          >
-                                            <td style={{ padding: '8px 12px', textAlign: 'center', color: '#64748b' }}>
-                                              {sIdx + 1}
-                                            </td>
-                                            <td style={{ padding: '8px 12px', fontWeight: 700, color: '#0f172a' }}>
-                                              {sess.hari}, {formatShortDate(sess.tanggal)}
-                                            </td>
-                                            <td style={{ padding: '8px 12px', color: '#475569' }}>
-                                              {formatTime(sess.clockIn)} –{' '}
-                                              {sess.clockOut ? formatTime(sess.clockOut) : 'Aktif'} WIB
-                                            </td>
-                                            <td style={{ padding: '8px 12px', color: '#334155' }}>
-                                              <span style={{ fontWeight: 600 }}>Kasir: {sess.kasirName}</span>
-                                              {sess.personnel.some((p) => p.lateMinutes > 0) && (
-                                                <span style={{ marginLeft: '6px', color: '#d97706', fontSize: '11px', fontWeight: 600 }}>
-                                                  (Telat:{' '}
-                                                  {sess.personnel
-                                                    .filter((p) => p.lateMinutes > 0)
-                                                    .map((p) => `${p.fullName} +${p.lateMinutes}m`)
-                                                    .join(', ')}
-                                                  )
-                                                </span>
-                                              )}
-                                            </td>
-                                            <td
-                                              style={{
-                                                padding: '8px 12px',
-                                                textAlign: 'center',
-                                                fontWeight: 700,
-                                                color: '#4f46e5',
-                                              }}
-                                            >
-                                              {sess.txCount} tx
-                                            </td>
-                                            <td style={{ padding: '8px 12px', textAlign: 'right', color: '#0f172a' }}>
-                                              {formatRupiah(sess.omzet)}
-                                            </td>
-                                            <td style={{ padding: '8px 12px', textAlign: 'right', color: '#0284c7', fontWeight: 600 }}>
-                                              {formatRupiah(sess.labaKotor)}
-                                            </td>
-                                            <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                                              {sess.shortageDeduction && sess.shortageDeduction > 0 ? (
-                                                <span
+                                        {g.sessions.map((sess, sIdx) => {
+                                          const cashOpen = !!expandedCashSessions[sess.sessionKey];
+                                          const hasGraceTag = sess.cashMovements.some((m) => m.isGraceCorrection);
+                                          const hasAuditDetails =
+                                            sess.cashMovements.length > 0 ||
+                                            (sess.actualCash !== null && sess.actualCash !== undefined) ||
+                                            sess.consignmentSummary !== null ||
+                                            sess.shortageStatus !== 'NONE';
+                                          return (
+                                            <Fragment key={sess.sessionKey}>
+                                              <tr
+                                                style={{
+                                                  borderBottom:
+                                                    cashOpen || sIdx < g.sessions.length - 1
+                                                      ? '1px solid #f1f5f9'
+                                                      : 'none',
+                                                }}
+                                              >
+                                                <td style={{ padding: '8px 12px', textAlign: 'center', color: '#64748b' }}>
+                                                  {sIdx + 1}
+                                                </td>
+                                                <td style={{ padding: '8px 12px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                                                  {sess.hari}, {formatShortDate(sess.tanggal)}
+                                                </td>
+                                                <td style={{ padding: '8px 12px', color: '#475569', whiteSpace: 'nowrap' }}>
+                                                  {formatTime(sess.clockIn)} – {sess.clockOut ? formatTime(sess.clockOut) : 'Aktif'} WIB
+                                                </td>
+                                                <td style={{ padding: '8px 12px', color: '#334155' }}>
+                                                  <div style={{ fontWeight: 600 }}>
+                                                    {sess.personnel.length > 0
+                                                      ? sess.personnel.map((p) => p.fullName).join(', ')
+                                                      : `Kasir: ${sess.kasirName}`}
+                                                  </div>
+                                                  {sess.personnel.some((p) => p.lateMinutes > 0) && (
+                                                    <div style={{ color: '#d97706', fontSize: '11px', fontWeight: 600, marginTop: '2px' }}>
+                                                      Telat:{' '}
+                                                      {sess.personnel
+                                                        .filter((p) => p.lateMinutes > 0)
+                                                        .map((p) => `${p.fullName} +${p.lateMinutes}m`)
+                                                        .join(', ')}
+                                                    </div>
+                                                  )}
+                                                </td>
+                                                <td style={{ padding: '8px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                                  <div style={{ fontWeight: 700, color: '#4f46e5' }}>{sess.txCount} tx</div>
+                                                  <div style={{ fontSize: '10.5px', color: '#64748b' }}>{sess.unitsSold} pcs</div>
+                                                </td>
+                                                <td style={{ padding: '8px 12px', textAlign: 'right', color: '#0f172a', whiteSpace: 'nowrap' }}>
+                                                  {formatRupiah(sess.omzet)}
+                                                </td>
+                                                <td style={{ padding: '8px 12px', textAlign: 'right', color: '#0284c7', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                                  {formatRupiah(sess.labaKotor)}
+                                                </td>
+                                                <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                                                  <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                                                    {sess.shortageStatus === 'PENDING_GRACE' ? (
+                                                      <span
+                                                        style={{
+                                                          padding: '2px 8px',
+                                                          borderRadius: '6px',
+                                                          backgroundColor: '#fffbeb',
+                                                          border: '1px solid #fcd34d',
+                                                          color: '#b45309',
+                                                          fontSize: '11px',
+                                                          fontWeight: 700,
+                                                        }}
+                                                      >
+                                                        Jeda 5 Menit ({formatRupiah(sess.discrepancy ?? 0)})
+                                                      </span>
+                                                    ) : sess.shortageStatus === 'AUTO_LOCKED' || sess.shortageDeduction > 0 ? (
+                                                      <span
+                                                        style={{
+                                                          padding: '2px 8px',
+                                                          borderRadius: '6px',
+                                                          backgroundColor: '#fef2f2',
+                                                          border: '1px solid #fecaca',
+                                                          color: '#dc2626',
+                                                          fontSize: '11px',
+                                                          fontWeight: 700,
+                                                        }}
+                                                      >
+                                                        Potong -{formatRupiah(sess.shortageDeduction)}
+                                                      </span>
+                                                    ) : sess.shortageStatus === 'OVERRIDDEN' ? (
+                                                      <span
+                                                        style={{
+                                                          padding: '2px 8px',
+                                                          borderRadius: '6px',
+                                                          backgroundColor: '#eff6ff',
+                                                          border: '1px solid #bfdbfe',
+                                                          color: '#1d4ed8',
+                                                          fontSize: '11px',
+                                                          fontWeight: 700,
+                                                        }}
+                                                        title={sess.shortageOverrideReason ?? undefined}
+                                                      >
+                                                        Potongan Dibatalkan
+                                                      </span>
+                                                    ) : sess.discrepancy !== undefined && sess.discrepancy !== null ? (
+                                                      sess.discrepancy > 2000 ? (
+                                                        <span
+                                                          style={{
+                                                            padding: '2px 8px',
+                                                            borderRadius: '6px',
+                                                            backgroundColor: '#eff6ff',
+                                                            border: '1px solid #bfdbfe',
+                                                            color: '#2563eb',
+                                                            fontSize: '11px',
+                                                            fontWeight: 700,
+                                                          }}
+                                                        >
+                                                          +{formatRupiah(sess.discrepancy)}
+                                                        </span>
+                                                      ) : (
+                                                        <span
+                                                          style={{
+                                                            padding: '2px 8px',
+                                                            borderRadius: '6px',
+                                                            backgroundColor: '#f0fdf4',
+                                                            border: '1px solid #bbf7d0',
+                                                            color: '#16a34a',
+                                                            fontSize: '11px',
+                                                            fontWeight: 600,
+                                                          }}
+                                                        >
+                                                          Klop
+                                                        </span>
+                                                      )
+                                                    ) : (
+                                                      <span style={{ color: '#94a3b8', fontSize: '11px' }}>—</span>
+                                                    )}
+                                                    {hasAuditDetails && (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => toggleCashSession(sess.sessionKey)}
+                                                        style={{
+                                                          padding: '2px 7px',
+                                                          borderRadius: '5px',
+                                                          border: hasGraceTag ? '1px solid #f59e0b' : '1px solid #cbd5e1',
+                                                          backgroundColor: hasGraceTag ? '#fffbeb' : '#ffffff',
+                                                          color: hasGraceTag ? '#b45309' : '#334155',
+                                                          fontSize: '10.5px',
+                                                          fontWeight: 700,
+                                                          cursor: 'pointer',
+                                                        }}
+                                                      >
+                                                        {cashOpen
+                                                          ? 'Tutup Audit'
+                                                          : hasGraceTag
+                                                            ? 'Audit Kas [Jeda 5m]'
+                                                            : `Audit Kas${sess.cashMovements.length > 0 ? ` (${sess.cashMovements.length})` : ''}`}
+                                                      </button>
+                                                    )}
+                                                  </div>
+                                                </td>
+                                                <td
                                                   style={{
-                                                    display: 'inline-flex',
-                                                    flexDirection: 'column',
-                                                    alignItems: 'center',
-                                                    padding: '2px 8px',
-                                                    borderRadius: '6px',
-                                                    backgroundColor: '#fef2f2',
-                                                    border: '1px solid #fecaca',
-                                                    color: '#dc2626',
-                                                    fontSize: '11px',
-                                                    fontWeight: 700,
+                                                    padding: '8px 12px',
+                                                    textAlign: 'right',
+                                                    fontWeight: 800,
+                                                    color: '#15803d',
+                                                    whiteSpace: 'nowrap',
                                                   }}
                                                 >
-                                                  <span>-{formatRupiah(sess.shortageDeduction)}</span>
-                                                  <span style={{ fontSize: '9px', fontWeight: 600 }}>Potong Tekor</span>
-                                                </span>
-                                              ) : sess.discrepancy !== undefined && sess.discrepancy !== null ? (
-                                                sess.discrepancy > 2000 ? (
-                                                  <span
-                                                    style={{
-                                                      padding: '2px 8px',
-                                                      borderRadius: '6px',
-                                                      backgroundColor: '#eff6ff',
-                                                      border: '1px solid #bfdbfe',
-                                                      color: '#2563eb',
-                                                      fontSize: '11px',
-                                                      fontWeight: 700,
-                                                    }}
-                                                  >
-                                                    +{formatRupiah(sess.discrepancy)}
-                                                  </span>
-                                                ) : (
-                                                  <span
-                                                    style={{
-                                                      padding: '2px 8px',
-                                                      borderRadius: '6px',
-                                                      backgroundColor: '#f0fdf4',
-                                                      border: '1px solid #bbf7d0',
-                                                      color: '#16a34a',
-                                                      fontSize: '11px',
-                                                      fontWeight: 600,
-                                                    }}
-                                                  >
-                                                    Klop (Rp 0)
-                                                  </span>
-                                                )
-                                              ) : (
-                                                <span style={{ color: '#94a3b8', fontSize: '11px' }}>—</span>
+                                                  {formatRupiah(sess.upahBersih)}
+                                                </td>
+                                              </tr>
+                                              {cashOpen && (
+                                                <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                                                  <td colSpan={9} style={{ padding: '10px 14px' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', fontSize: '11.5px', color: '#334155' }}>
+                                                        <span>Modal: <strong>{formatRupiah(sess.modalAwal ?? 0)}</strong></span>
+                                                        <span>Cash POS: <strong>{formatRupiah(sess.cashSales)}</strong></span>
+                                                        <span>Kas Keluar: <strong style={{ color: '#dc2626' }}>-{formatRupiah(sess.cashOut)}</strong></span>
+                                                        <span>Kas Masuk: <strong style={{ color: '#16a34a' }}>+{formatRupiah(sess.cashIn)}</strong></span>
+                                                        <span>Seharusnya: <strong>{formatRupiah(sess.expectedCash ?? 0)}</strong></span>
+                                                        <span>Fisik Laci: <strong>{sess.actualCash !== null && sess.actualCash !== undefined ? formatRupiah(sess.actualCash) : 'Belum tutup'}</strong></span>
+                                                      </div>
+
+                                                      {sess.consignmentSummary && (
+                                                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '5px 10px', borderRadius: '6px', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', fontSize: '11.5px', color: '#0f172a', width: 'fit-content' }}>
+                                                          <Package size={13} color="#166534" />
+                                                          <span>
+                                                            Titipan Harian: <strong>{sess.consignmentSummary.settledCount} lunas</strong> ({formatRupiah(sess.consignmentSummary.totalPayout)})
+                                                            {sess.consignmentSummary.openCount > 0 ? ` · ${sess.consignmentSummary.openCount} belum dihitung` : ''}
+                                                            {sess.consignmentSummary.totalDiscrepancyQty > 0 ? ` · Selisih ${sess.consignmentSummary.totalDiscrepancyQty} pcs` : ''}
+                                                          </span>
+                                                        </div>
+                                                      )}
+
+                                                      {sess.cashMovements.length > 0 && (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                          <div style={{ fontSize: '11px', fontWeight: 700, color: '#475569' }}>Riwayat Kas Laci:</div>
+                                                          {sess.cashMovements.map((mv) => (
+                                                            <div
+                                                              key={mv.id}
+                                                              style={{
+                                                                display: 'flex',
+                                                                justifyContent: 'space-between',
+                                                                alignItems: 'center',
+                                                                gap: '8px',
+                                                                padding: '5px 9px',
+                                                                borderRadius: '6px',
+                                                                backgroundColor: mv.isGraceCorrection ? '#fffbeb' : '#ffffff',
+                                                                border: mv.isGraceCorrection ? '1px solid #fcd34d' : '1px solid #e2e8f0',
+                                                                fontSize: '11.5px',
+                                                              }}
+                                                            >
+                                                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                                                <span style={{ fontWeight: 700, color: '#0f172a' }}>{formatCashCategory(mv.category)}</span>
+                                                                {mv.isGraceCorrection && (
+                                                                  <span style={{ padding: '1px 6px', borderRadius: '4px', backgroundColor: '#fef3c7', color: '#b45309', fontSize: '10px', fontWeight: 800 }}>
+                                                                    [Koreksi Jeda 5m]
+                                                                  </span>
+                                                                )}
+                                                                <span style={{ color: '#475569' }}>{mv.notes}</span>
+                                                                {mv.employeeName && <span style={{ color: '#94a3b8', fontSize: '10.5px' }}>({mv.employeeName})</span>}
+                                                              </div>
+                                                              <span style={{ fontWeight: 800, color: mv.movementType === 'CASH_OUT' ? '#dc2626' : '#16a34a', whiteSpace: 'nowrap' }}>
+                                                                {mv.movementType === 'CASH_OUT' ? '-' : '+'}
+                                                                {formatRupiah(mv.amount)}
+                                                              </span>
+                                                            </div>
+                                                          ))}
+                                                        </div>
+                                                      )}
+
+                                                      {sess.shortageOverrideReason && (
+                                                        <div style={{ fontSize: '11.5px', color: '#1d4ed8', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', padding: '5px 9px', borderRadius: '6px' }}>
+                                                          <strong>Catatan Override:</strong> {sess.shortageOverrideReason}
+                                                        </div>
+                                                      )}
+
+                                                      {(sess.shortageStatus === 'AUTO_LOCKED' || sess.shortageStatus === 'PENDING_GRACE' || sess.shortageStatus === 'OVERRIDDEN') && (
+                                                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                                          {sess.shortageStatus === 'OVERRIDDEN' ? (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => {
+                                                                setOverrideError('');
+                                                                setOverrideReason('');
+                                                                setOverrideTarget({
+                                                                  shiftId: sess.shiftId,
+                                                                  tanggal: sess.tanggal,
+                                                                  sesi: sess.sesi,
+                                                                  mode: 'RESTORE_DEDUCTION',
+                                                                  amount: Math.abs(sess.discrepancy ?? 0),
+                                                                });
+                                                              }}
+                                                              style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '5px',
+                                                                padding: '5px 10px',
+                                                                borderRadius: '6px',
+                                                                border: '1px solid #dc2626',
+                                                                backgroundColor: '#fef2f2',
+                                                                color: '#dc2626',
+                                                                fontSize: '11.5px',
+                                                                fontWeight: 700,
+                                                                cursor: 'pointer',
+                                                              }}
+                                                            >
+                                                              <RotateCcw size={12} /> Aktifkan Potongan Kembali
+                                                            </button>
+                                                          ) : (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => {
+                                                                setOverrideError('');
+                                                                setOverrideReason('');
+                                                                setOverrideTarget({
+                                                                  shiftId: sess.shiftId,
+                                                                  tanggal: sess.tanggal,
+                                                                  sesi: sess.sesi,
+                                                                  mode: 'CANCEL_DEDUCTION',
+                                                                  amount: sess.shortageDeduction || Math.abs(sess.discrepancy ?? 0),
+                                                                });
+                                                              }}
+                                                              style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '5px',
+                                                                padding: '5px 10px',
+                                                                borderRadius: '6px',
+                                                                border: '1px solid #1d4ed8',
+                                                                backgroundColor: '#eff6ff',
+                                                                color: '#1d4ed8',
+                                                                fontSize: '11.5px',
+                                                                fontWeight: 700,
+                                                                cursor: 'pointer',
+                                                              }}
+                                                            >
+                                                              <ShieldAlert size={12} /> Batalkan Potongan (Override)
+                                                            </button>
+                                                          )}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  </td>
+                                                </tr>
                                               )}
-                                            </td>
-                                            <td
-                                              style={{
-                                                padding: '8px 12px',
-                                                textAlign: 'right',
-                                                fontWeight: 800,
-                                                color: '#15803d',
-                                              }}
-                                            >
-                                              {formatRupiah(sess.upahBersih)}
-                                            </td>
-                                          </tr>
-                                        ))}
+                                            </Fragment>
+                                          );
+                                        })}
                                       </tbody>
                                     </table>
                                   </div>
@@ -2980,11 +3355,11 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                             }}
                           >
                             <div>
-                              <div style={{ fontSize: '9.5px', color: '#64748b' }}>Transaksi</div>
-                              <div style={{ fontWeight: 800, color: '#4f46e5' }}>{g.totalTx} tx</div>
+                              <div style={{ fontSize: '9.5px', color: '#64748b' }}>Trx / Barang</div>
+                              <div style={{ fontWeight: 800, color: '#4f46e5' }}>{g.totalTx} tx · {g.totalUnitsSold} pcs</div>
                             </div>
                             <div>
-                              <div style={{ fontSize: '9.5px', color: '#64748b' }}>Total Omzet</div>
+                              <div style={{ fontSize: '9.5px', color: '#64748b' }}>Omzet</div>
                               <div style={{ fontWeight: 700, color: '#0284c7' }}>
                                 {formatRupiah(g.totalOmzet)}
                               </div>
@@ -2997,16 +3372,32 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                             </div>
                           </div>
 
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
+                            {computeGroupMemberBreakdown(g).map((m) => (
+                              <span
+                                key={m.nim || m.fullName}
+                                style={{
+                                  padding: '3px 7px',
+                                  borderRadius: '6px',
+                                  backgroundColor: '#ffffff',
+                                  border: '1px solid #e2e8f0',
+                                  fontSize: '10.5px',
+                                }}
+                              >
+                                <strong>{m.fullName}</strong> ({m.hadir}x):{' '}
+                                <strong style={{ color: '#15803d' }}>{formatRupiah(m.nominal)}</strong>
+                              </span>
+                            ))}
+                          </div>
+
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                             {g.sessions.map((sess, idx) => (
                               <div
                                 key={sess.sessionKey}
                                 style={{
                                   display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  gap: '8px',
-                                  flexWrap: 'wrap',
+                                  flexDirection: 'column',
+                                  gap: '5px',
                                   padding: '8px 10px',
                                   borderRadius: '6px',
                                   backgroundColor: '#ffffff',
@@ -3014,22 +3405,66 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                   fontSize: '11px',
                                 }}
                               >
-                                <div>
-                                  <div style={{ fontWeight: 700, color: '#0f172a' }}>
-                                    #{idx + 1} · {formatShortDate(sess.tanggal)} ({sess.txCount} tx)
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                  <div>
+                                    <div style={{ fontWeight: 700, color: '#0f172a' }}>
+                                      #{idx + 1} · {formatShortDate(sess.tanggal)} ({sess.txCount} tx · {sess.unitsSold} pcs)
+                                    </div>
+                                    <div style={{ fontSize: '10px', color: '#64748b' }}>
+                                      Omzet {formatRupiah(sess.omzet)} · Keluar {formatRupiah(sess.cashOut)}
+                                      {sess.shortageStatus === 'AUTO_LOCKED' && sess.shortageDeduction > 0 ? (
+                                        <span style={{ color: '#dc2626', fontWeight: 700, marginLeft: '5px' }}>
+                                          · Potong -{formatRupiah(sess.shortageDeduction)}
+                                        </span>
+                                      ) : sess.shortageStatus === 'PENDING_GRACE' ? (
+                                        <span style={{ color: '#b45309', fontWeight: 700, marginLeft: '5px' }}>
+                                          · Jeda 5 Menit
+                                        </span>
+                                      ) : sess.shortageStatus === 'OVERRIDDEN' ? (
+                                        <span style={{ color: '#1d4ed8', fontWeight: 700, marginLeft: '5px' }}>
+                                          · Override
+                                        </span>
+                                      ) : null}
+                                    </div>
                                   </div>
-                                  <div style={{ fontSize: '10px', color: '#64748b' }}>
-                                    Kasir: {sess.kasirName} · Omzet {formatRupiah(sess.omzet)}
-                                    {sess.shortageDeduction && sess.shortageDeduction > 0 ? (
-                                      <span style={{ color: '#dc2626', fontWeight: 700, marginLeft: '6px' }}>
-                                        · Tekor -{formatRupiah(sess.shortageDeduction)} (Potong)
-                                      </span>
-                                    ) : null}
+                                  <div style={{ fontWeight: 800, color: '#15803d', fontSize: '11.5px', whiteSpace: 'nowrap' }}>
+                                    {formatRupiah(sess.upahBersih)}
                                   </div>
                                 </div>
-                                <div style={{ fontWeight: 800, color: '#15803d', fontSize: '11.5px' }}>
-                                  {formatRupiah(sess.upahBersih)}
-                                </div>
+                                {sess.cashMovements.some((m) => m.isGraceCorrection) && (
+                                  <div style={{ fontSize: '10px', fontWeight: 700, color: '#b45309', backgroundColor: '#fffbeb', padding: '3px 6px', borderRadius: '4px' }}>
+                                    Ada input Kas Laci saat Jeda 5 Menit ({sess.cashMovements.filter((m) => m.isGraceCorrection).length} item)
+                                  </div>
+                                )}
+                                {(sess.shortageStatus === 'AUTO_LOCKED' || sess.shortageStatus === 'PENDING_GRACE' || sess.shortageStatus === 'OVERRIDDEN') && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOverrideError('');
+                                      setOverrideReason('');
+                                      setOverrideTarget({
+                                        shiftId: sess.shiftId,
+                                        tanggal: sess.tanggal,
+                                        sesi: sess.sesi,
+                                        mode: sess.shortageStatus === 'OVERRIDDEN' ? 'RESTORE_DEDUCTION' : 'CANCEL_DEDUCTION',
+                                        amount: sess.shortageDeduction || Math.abs(sess.discrepancy ?? 0),
+                                      });
+                                    }}
+                                    style={{
+                                      alignSelf: 'flex-start',
+                                      padding: '4px 8px',
+                                      borderRadius: '5px',
+                                      border: '1px solid #1d4ed8',
+                                      backgroundColor: '#eff6ff',
+                                      color: '#1d4ed8',
+                                      fontSize: '10.5px',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {sess.shortageStatus === 'OVERRIDDEN' ? 'Aktifkan Potongan' : 'Batalkan Potongan (Override)'}
+                                  </button>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -3085,6 +3520,105 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
             </>
           )}
         </>
+      )}
+
+      {/* Modal Override Potongan Tekor (Tercatat di audit_logs) */}
+      {overrideTarget && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            backgroundColor: 'rgba(15, 23, 42, 0.55)',
+            backdropFilter: 'blur(3px)',
+          }}
+          onClick={(e) => e.target === e.currentTarget && setOverrideTarget(null)}
+        >
+          <div
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '14px',
+              border: '1px solid #e2e8f0',
+              padding: '20px',
+              width: '100%',
+              maxWidth: '440px',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.12)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+              <div>
+                <h3 style={{ fontSize: '1rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                  {overrideTarget.mode === 'CANCEL_DEDUCTION'
+                    ? 'Batalkan Potongan Tekor'
+                    : 'Aktifkan Kembali Potongan Tekor'}
+                </h3>
+                <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '3px 0 0' }}>
+                  Shift {overrideTarget.sesi} · {formatShortDate(overrideTarget.tanggal)} · Selisih {formatRupiah(overrideTarget.amount)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOverrideTarget(null)}
+                aria-label="Tutup"
+                style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                  backgroundColor: '#ffffff',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {overrideError && (
+              <div style={{ padding: '8px 10px', borderRadius: '8px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: '0.78rem', fontWeight: 600, marginBottom: '10px' }}>
+                {overrideError}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitOverride} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  Alasan Tertulis (Wajib, tercatat permanen di log audit)
+                </label>
+                <textarea
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  placeholder="Contoh: Uang titipan Roti Kopi Rp 30.000 belum sempat dicatat saat tutup laci, bukti nota sudah cocok."
+                  className="form-input"
+                  style={{ width: '100%', minHeight: '78px', fontSize: '0.82rem' }}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setOverrideTarget(null)}
+                  className="btn btn-secondary"
+                  disabled={overrideSubmitting}
+                >
+                  Batal
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={overrideSubmitting}>
+                  {overrideSubmitting ? <Loader2 size={14} className="spin-icon" /> : 'Simpan Keputusan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </section>
   );

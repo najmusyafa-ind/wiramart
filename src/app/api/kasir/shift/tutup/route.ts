@@ -21,6 +21,12 @@ import { db } from '@/lib/db/client';
 import { shifts, transactions, transactionPayments, shiftCashMovements, employees } from '@/lib/db/schema';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
+import {
+  SHORTAGE_TOLERANCE_RP,
+  SHORTAGE_GRACE_MS,
+  MAX_GRACE_RECOUNTS,
+  getUnsettledConsignmentsForToday,
+} from '@/lib/services/shiftShortageService';
 
 export const runtime = 'nodejs';
 
@@ -199,16 +205,44 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         : '';
   const finalNotes = [earlyPrefix, notes?.trim() ?? ''].filter(Boolean).join(' ') || null;
 
+  // 6b. Auto-Checklist 4 Titik & Jeda 5 Menit Selisih Laci (Hybrid Blind Count + Koreksi Mandiri)
+  const rawModal = activeShift.modalAwal !== null ? Number(activeShift.modalAwal) : 100_000;
+  const effectiveModalAwal = rawModal > 150_000 || rawModal <= 0 ? 100_000 : rawModal;
+  const expectedCash = Math.round(effectiveModalAwal + totalOmzetCash - totalCashOut + totalCashIn);
+  const discrepancy = actualCash !== undefined ? Math.round(actualCash) - expectedCash : null;
+  const shortageRp =
+    discrepancy !== null && discrepancy < -SHORTAGE_TOLERANCE_RP
+      ? Math.round(Math.abs(discrepancy))
+      : 0;
+  const typoSuspected =
+    actualCash !== undefined && actualCash > 0 && actualCash < 10_000 && expectedCash >= 50_000;
+  const consignmentCheck = await getUnsettledConsignmentsForToday();
+
+  const shortageStatus =
+    actualCash === undefined
+      ? 'NONE'
+      : shortageRp > 0
+        ? 'PENDING_GRACE'
+        : 'AUTO_VERIFIED';
+  const shortageGraceUntil =
+    shortageStatus === 'PENDING_GRACE'
+      ? new Date(nowWib.getTime() + SHORTAGE_GRACE_MS)
+      : null;
+
   // 7. Tutup shift — guard status ACTIVE
   const closed = await db
     .update(shifts)
     .set({
-      status:             'CLOSED',
-      clockOut:           nowWib,
-      actualCash:         actualCash !== undefined ? actualCash.toString() : null,
-      cashBreakdownClose: breakdown ?? null,
-      notes:              finalNotes,
-      auditFlags:         newAuditFlags,
+      status:               'CLOSED',
+      clockOut:             nowWib,
+      actualCash:           actualCash !== undefined ? actualCash.toString() : null,
+      cashBreakdownClose:   breakdown ?? null,
+      notes:                finalNotes,
+      auditFlags:           newAuditFlags,
+      shortageStatus,
+      shortageGraceUntil,
+      shortageAmount:       shortageRp.toString(),
+      shortageRecountCount: 0,
     })
     .where(and(eq(shifts.id, activeShift.id), eq(shifts.status, 'ACTIVE')))
     .returning({ id: shifts.id });
@@ -222,16 +256,29 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   }
 
   // Blind Count sudah terkunci di DB (status CLOSED).
-  // Kirim ringkasan serah terima kas standar Bu Dyah (TANPA HPP / Laba / Expected selisih).
+  // Kirim ringkasan serah terima kas + hasil Auto-Checklist Jeda 5 Menit (tanpa HPP / Laba).
   return apiOk({
-    message:  'Shift berhasil ditutup.',
+    message:
+      shortageStatus === 'PENDING_GRACE'
+        ? `Shift ditutup dengan selisih kurang Rp ${shortageRp.toLocaleString('id-ID')}. Tersedia jeda 5 menit untuk koreksi.`
+        : 'Shift berhasil ditutup.',
     shiftId:  activeShift.id,
     clockIn:  activeShift.clockIn,
     clockOut: nowWib.toISOString(),
     txCount,
+    autoChecklist: {
+      status: shortageStatus,
+      shortageAmount: shortageRp,
+      graceUntil: shortageGraceUntil ? shortageGraceUntil.toISOString() : null,
+      recountRemaining: shortageStatus === 'PENDING_GRACE' ? MAX_GRACE_RECOUNTS : 0,
+      unsettledConsignmentsToday: consignmentCheck.openToday,
+      carryoverConsignments: consignmentCheck.carryover,
+      typoSuspected,
+      toleranceRp: SHORTAGE_TOLERANCE_RP,
+    },
     handoverSummary: {
       kasirName: kasirRow?.fullName ?? 'Kasir',
-      modalAwal: activeShift.modalAwal !== null ? Number(activeShift.modalAwal) : 0,
+      modalAwal: effectiveModalAwal,
       cashMasuk: totalOmzetCash,
       qrisMasuk: totalOmzetQris,
       totalPenjualan,

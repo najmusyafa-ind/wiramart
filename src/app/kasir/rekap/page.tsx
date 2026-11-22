@@ -81,6 +81,30 @@ export default function CashierRecapPage() {
   );
   const [loading, setLoading] = useState<boolean>(() => !recapMemCache.has(initialCacheKey));
   const [error, setError] = useState<string | null>(null);
+  const [titipanRows, setTitipanRows] = useState<Array<{
+    id: string;
+    mitraName: string;
+    productName: string;
+    qtyInitial: number;
+    qtySoldPos: number;
+    qtySoldPhysical: number | null;
+    qtyRemaining: number | null;
+    qtyDiscrepancy: number;
+    totalPayout: number;
+    status: string;
+  }>>([]);
+
+  useEffect(() => {
+    let active = true;
+    fetch(`/api/kasir/titipan?date=${tanggal}&catalog=0`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!active || !j?.success) return;
+        setTitipanRows([...(j.data?.carryoverEntries ?? []), ...(j.data?.todayEntries ?? [])]);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [tanggal]);
 
   const applyRecapResult = useCallback(
     (result: Awaited<ReturnType<typeof requestRecap>>, cacheKey?: string) => {
@@ -508,10 +532,10 @@ export default function CashierRecapPage() {
                   </div>
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--color-text)' }}>
-                      Instruksi Serah Terima Shift (Standar Alfa / Indomaret)
+                      Serah Terima Kas Laci
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                      Pisahkan uang fisik laci kasir menjadi 2 pos sebelum diserahkan ke kasir shift berikutnya
+                      Pisahkan modal shift berikut dan setoran toko
                     </div>
                   </div>
                 </div>
@@ -911,10 +935,10 @@ export default function CashierRecapPage() {
                   >
                     <div>
                       <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--color-text)' }}>
-                        📦 Rekapitulasi Pergerakan Barang Penutupan Shift (Penerimaan, Penjualan &amp; Retur Pemasok)
+                        Rekap Barang
                       </h3>
                       <p style={{ margin: '4px 0 0 0', fontSize: 12, color: 'var(--color-text-muted)' }}>
-                        Ringkasan kuantitas barang yang diterima berdasarkan faktur pemasok, terjual melalui terminal POS, diretur kembali ke pemasok, serta saldo stok akhir.
+                        Barang masuk, terjual, retur, dan sisa stok
                       </p>
                     </div>
 
@@ -1038,6 +1062,63 @@ export default function CashierRecapPage() {
                 </div>
               );
             })()}
+
+            {/* ── RINGKASAN TITIPAN HARIAN ── */}
+            {titipanRows.length > 0 && (
+              <div
+                className="no-print"
+                style={{
+                  background: 'var(--color-surface)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 16,
+                  overflow: 'hidden',
+                  boxShadow: 'var(--shadow-sm)',
+                  marginTop: 20,
+                }}
+              >
+                <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)', fontWeight: 800, fontSize: 15 }}>
+                  Titipan Harian ({titipanRows.length})
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 520 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)', textAlign: 'left' }}>
+                        <th style={{ padding: '10px 16px' }}>Mitra &amp; Produk</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'right' }}>Titip</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'right' }}>Laku</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'right' }}>Sisa</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'right' }}>Setor Mitra</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'center' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {titipanRows.map((tr) => (
+                        <tr key={tr.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                          <td style={{ padding: '10px 16px' }}>
+                            <div style={{ fontWeight: 700 }}>{tr.productName}</div>
+                            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{tr.mitraName}</div>
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right' }}>{tr.qtyInitial}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>
+                            {tr.qtySoldPhysical ?? tr.qtySoldPos}
+                            {tr.qtyDiscrepancy !== 0 && (
+                              <span style={{ display: 'block', fontSize: 11, color: 'hsl(0 72% 42%)' }}>
+                                Selisih {tr.qtyDiscrepancy > 0 ? `+${tr.qtyDiscrepancy}` : tr.qtyDiscrepancy}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right' }}>{tr.qtyRemaining ?? '-'}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{rp(tr.totalPayout)}</td>
+                          <td style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 700, fontSize: 11 }}>
+                            {tr.status === 'SETTLED' ? 'Selesai' : tr.status === 'CARRYOVER' ? 'Susulan' : 'Aktif'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* ── DEDICATED THERMAL PRINT SLIP (HANYA MUNCUL SAAT CETAK / PRINT) ── */}
             <div className="print-only" style={{
