@@ -8,8 +8,6 @@ import {
   Clock,
   RefreshCw,
   ShieldAlert,
-  Database,
-  ArrowRight,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -157,12 +155,12 @@ export default function JejakTransaksiPanel() {
   if (forbidden) {
     return (
       <div className="card" style={{ padding: 'var(--space-6)', textAlign: 'center' }}>
-        <ShieldAlert size={36} style={{ color: '#dc2626', margin: '0 auto 12px' }} />
-        <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#1e293b', marginBottom: 6 }}>
-          Akses Khusus Manager (Dosen)
+        <ShieldAlert size={32} style={{ color: '#dc2626', margin: '0 auto 10px' }} />
+        <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
+          Khusus Manager
         </h3>
-        <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>
-          Jejak Audit Transaksi TCL (COMMIT / ROLLBACK) hanya dapat diakses oleh akun Manager.
+        <p style={{ fontSize: '0.82rem', color: '#64748b', margin: 0 }}>
+          Log transaksi sistem hanya dapat dilihat oleh akun Manager.
         </p>
       </div>
     );
@@ -172,215 +170,93 @@ export default function JejakTransaksiPanel() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-      {/* Banner Alur TCL sesuai materi kuliah */}
-      <div
-        className="card"
-        style={{
-          padding: '14px 18px',
-          background: 'linear-gradient(135deg, #f8fafc 0%, #f0fdf4 100%)',
-          border: '1px solid #bbf7d0',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-          <Database size={16} style={{ color: '#15803d' }} />
-          <span style={{ fontWeight: 700, fontSize: '0.86rem', color: '#14532d' }}>
-            Alur Pengamanan Transaksi Data (Praktek TCL PostgreSQL)
-          </span>
-          <span
-            style={{
-              fontSize: '0.72rem',
-              padding: '2px 8px',
-              borderRadius: 99,
-              background: '#dcfce7',
-              color: '#166534',
-              fontWeight: 600,
-            }}
-          >
-            Tabel: public.transaction_logs
-          </span>
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            flexWrap: 'wrap',
-            fontSize: '0.78rem',
-            color: '#334155',
-          }}
-        >
-          <span style={{ padding: '4px 10px', borderRadius: 6, background: '#e2e8f0', fontWeight: 600 }}>
-            1. START TRANSACTION (Log: STARTED)
-          </span>
-          <ArrowRight size={14} />
-          <span style={{ padding: '4px 10px', borderRadius: 6, background: '#dbeafe', color: '#1e40af', fontWeight: 600 }}>
-            2. DML: INSERT tx &amp; UPDATE stok
-          </span>
-          <ArrowRight size={14} />
-          <span style={{ padding: '4px 10px', borderRadius: 6, background: '#fef9c3', color: '#854d0e', fontWeight: 600 }}>
-            3. SELECT Verifikasi Guard (stock_qty &ge; qty)
-          </span>
-          <ArrowRight size={14} />
-          <span style={{ padding: '4px 10px', borderRadius: 6, background: '#dcfce7', color: '#166534', fontWeight: 700 }}>
-            4a. COMMIT (Permanen)
-          </span>
-          <span>/</span>
-          <span style={{ padding: '4px 10px', borderRadius: 6, background: '#fee2e2', color: '#991b1b', fontWeight: 700 }}>
-            4b. ROLLBACK (Batal Atomik)
-          </span>
-        </div>
-      </div>
-
-      {/* Ringkasan Kartu Status */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 'var(--space-3)',
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => { setOutcome(outcome === 'COMMITTED' ? '' : 'COMMITTED'); setPage(1); }}
-          className="card"
-          style={{
-            padding: '14px 16px',
-            textAlign: 'left',
-            cursor: 'pointer',
-            border: outcome === 'COMMITTED' ? '2px solid #16a34a' : '1px solid #bbf7d0',
-            background: '#f0fdf4',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#166534' }}>COMMITTED (BERHASIL)</span>
-            <CheckCircle2 size={18} style={{ color: '#16a34a' }} />
-          </div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#14532d', marginTop: 4 }}>
-            {summary.COMMITTED.toLocaleString('id-ID')}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: '#15803d' }}>Tersimpan permanen di DB</div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => { setOutcome(outcome === 'ROLLED_BACK' ? '' : 'ROLLED_BACK'); setPage(1); }}
-          className="card"
-          style={{
-            padding: '14px 16px',
-            textAlign: 'left',
-            cursor: 'pointer',
-            border: outcome === 'ROLLED_BACK' ? '2px solid #dc2626' : '1px solid #fecaca',
-            background: '#fef2f2',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#991b1b' }}>ROLLED_BACK (GAGAL DB)</span>
-            <XCircle size={18} style={{ color: '#dc2626' }} />
-          </div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#7f1d1d', marginTop: 4 }}>
-            {summary.ROLLED_BACK.toLocaleString('id-ID')}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: '#b91c1c' }}>Dibatalkan atomik oleh PostgreSQL</div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => { setOutcome(outcome === 'REJECTED' ? '' : 'REJECTED'); setPage(1); }}
-          className="card"
-          style={{
-            padding: '14px 16px',
-            textAlign: 'left',
-            cursor: 'pointer',
-            border: outcome === 'REJECTED' ? '2px solid #d97706' : '1px solid #fde68a',
-            background: '#fffbeb',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#92400e' }}>REJECTED (PRA-TX)</span>
-            <AlertTriangle size={18} style={{ color: '#d97706' }} />
-          </div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#78350f', marginTop: 4 }}>
-            {summary.REJECTED.toLocaleString('id-ID')}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: '#b45309' }}>Ditolak guard sebelum BEGIN</div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => { setOutcome(outcome === 'STARTED' ? '' : 'STARTED'); setPage(1); }}
-          className="card"
-          style={{
-            padding: '14px 16px',
-            textAlign: 'left',
-            cursor: 'pointer',
-            border: outcome === 'STARTED' ? '2px solid #475569' : '1px solid #e2e8f0',
-            background: '#f8fafc',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#334155' }}>STARTED (MULAI TX)</span>
-            <Clock size={18} style={{ color: '#64748b' }} />
-          </div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#1e293b', marginTop: 4 }}>
-            {summary.STARTED.toLocaleString('id-ID')}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Log awal sebelum BEGIN</div>
-        </button>
+      {/* Ringkasan Status Singkat (2x2 di HP) */}
+      <div className="rep-kpi-grid" style={{ marginBottom: 0 }}>
+        {[
+          { key: 'COMMITTED', label: 'Berhasil', count: summary.COMMITTED, color: '#15803d', icon: <CheckCircle2 size={15} /> },
+          { key: 'ROLLED_BACK', label: 'Gagal', count: summary.ROLLED_BACK, color: '#dc2626', icon: <XCircle size={15} /> },
+          { key: 'REJECTED', label: 'Ditolak', count: summary.REJECTED, color: '#d97706', icon: <AlertTriangle size={15} /> },
+          { key: 'STARTED', label: 'Diproses', count: summary.STARTED, color: '#475569', icon: <Clock size={15} /> },
+        ].map((item) => {
+          const active = outcome === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => { setOutcome(active ? '' : item.key); setPage(1); }}
+              className="rep-kpi"
+              style={{
+                textAlign: 'left',
+                cursor: 'pointer',
+                borderColor: active ? item.color : '#e2e8f0',
+                boxShadow: active ? `0 0 0 2px ${item.color}25` : undefined,
+              }}
+            >
+              <div className="rep-kpi__top">
+                <span className="rep-kpi__label">{item.label}</span>
+                <span style={{ color: item.color }}>{item.icon}</span>
+              </div>
+              <div className="rep-kpi__val" style={{ color: item.color }}>
+                {item.count.toLocaleString('id-ID')}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       {/* Filter Bar */}
-      <div className="card" style={{ padding: '12px 16px' }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div>
+      <div className="card" style={{ padding: '12px 14px' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div style={{ flex: '1 1 130px' }}>
             <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-              Dari Tanggal
+              Dari
             </label>
             <input
               type="date"
-              className="input"
+              className="form-input"
               value={dateFrom || data?.range.dateFrom || ''}
               onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-              style={{ fontSize: '0.82rem', padding: '6px 10px' }}
+              style={{ fontSize: '0.82rem', padding: '6px 10px', minHeight: 38 }}
             />
           </div>
-          <div>
+          <div style={{ flex: '1 1 130px' }}>
             <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-              Sampai Tanggal
+              Sampai
             </label>
             <input
               type="date"
-              className="input"
+              className="form-input"
               value={dateTo || data?.range.dateTo || ''}
               onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-              style={{ fontSize: '0.82rem', padding: '6px 10px' }}
+              style={{ fontSize: '0.82rem', padding: '6px 10px', minHeight: 38 }}
             />
           </div>
-          <div>
+          <div style={{ flex: '1 1 130px' }}>
             <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-              Status TCL
+              Status
             </label>
             <select
-              className="input"
+              className="form-input form-select"
               value={outcome}
               onChange={(e) => { setOutcome(e.target.value); setPage(1); }}
-              style={{ fontSize: '0.82rem', padding: '6px 10px' }}
+              style={{ fontSize: '0.82rem', padding: '6px 10px', minHeight: 38 }}
             >
               <option value="">Semua Status</option>
-              <option value="COMMITTED">COMMITTED</option>
-              <option value="ROLLED_BACK">ROLLED_BACK</option>
-              <option value="REJECTED">REJECTED</option>
-              <option value="STARTED">STARTED</option>
+              <option value="COMMITTED">Berhasil</option>
+              <option value="ROLLED_BACK">Gagal</option>
+              <option value="REJECTED">Ditolak</option>
+              <option value="STARTED">Diproses</option>
             </select>
           </div>
-          <div>
+          <div style={{ flex: '1 1 150px' }}>
             <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>
               Kasir
             </label>
             <select
-              className="input"
+              className="form-input form-select"
               value={employeeId}
               onChange={(e) => { setEmployeeId(e.target.value); setPage(1); }}
-              style={{ fontSize: '0.82rem', padding: '6px 10px', minWidth: 160 }}
+              style={{ fontSize: '0.82rem', padding: '6px 10px', minHeight: 38 }}
             >
               <option value="">Semua Kasir</option>
               {data?.cashiers.map((c) => (
@@ -393,10 +269,10 @@ export default function JejakTransaksiPanel() {
           <button
             type="button"
             onClick={() => fetchLogs()}
-            className="btn btn-secondary btn-sm"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 34 }}
+            className="rep-chip"
+            style={{ minHeight: 38 }}
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={13} />
             <span>Segarkan</span>
           </button>
         </div>
@@ -408,33 +284,32 @@ export default function JejakTransaksiPanel() {
         </div>
       )}
 
-      {/* Tabel Jejak Transaksi */}
+      {/* Tabel Log Transaksi */}
       <div className="card" style={{ overflow: 'hidden' }}>
-        <div style={{ overflowX: 'auto' }}>
+        <div className="rep-desktop-only" style={{ overflowX: 'auto' }}>
           <table className="table" style={{ width: '100%', fontSize: '0.8rem' }}>
             <thead>
               <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
-                <th style={{ padding: '10px 12px' }}>Mulai (START)</th>
-                <th style={{ padding: '10px 12px' }}>Selesai (END)</th>
+                <th style={{ padding: '10px 12px' }}>Waktu</th>
                 <th style={{ padding: '10px 12px' }}>Invoice</th>
                 <th style={{ padding: '10px 12px' }}>Kasir</th>
-                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Item / Total</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Total</th>
                 <th style={{ padding: '10px 12px' }}>Metode</th>
-                <th style={{ padding: '10px 12px' }}>Hasil TCL</th>
-                <th style={{ padding: '10px 12px' }}>Bukti DB / Alasan Gagal</th>
+                <th style={{ padding: '10px 12px' }}>Status</th>
+                <th style={{ padding: '10px 12px' }}>Keterangan</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>
-                    Memuat jejak transaksi...
+                  <td colSpan={7} style={{ padding: 28, textAlign: 'center', color: '#64748b' }}>
+                    Memuat log transaksi...
                   </td>
                 </tr>
               ) : !data || data.rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>
-                    Tidak ada log transaksi pada filter yang dipilih.
+                  <td colSpan={7} style={{ padding: 28, textAlign: 'center', color: '#64748b' }}>
+                    Tidak ada log pada periode ini.
                   </td>
                 </tr>
               ) : (
@@ -452,18 +327,12 @@ export default function JejakTransaksiPanel() {
                     <tr key={row.id} style={{ background: rowBg, borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                         <div style={{ fontWeight: 600, color: '#1e293b' }}>{formatWibTime(row.createdAt)}</div>
-                        <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Percobaan #{row.attemptNumber}</div>
-                      </td>
-                      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                        <div style={{ color: '#334155' }}>{formatWibTime(row.finishedAt)}</div>
                         <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                          {row.outcome === 'STARTED'
-                            ? 'Fase awal (pra-BEGIN)'
-                            : `Durasi: ${calcDurationMs(row.createdAt, row.finishedAt)}`}
+                          {row.outcome === 'STARTED' ? 'Menunggu' : calcDurationMs(row.createdAt, row.finishedAt)}
                         </div>
                       </td>
                       <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontWeight: 600 }}>
-                        {row.invoiceAttempt ?? <span style={{ color: '#94a3b8' }}>— (pra-tx)</span>}
+                        {row.invoiceAttempt ?? '—'}
                       </td>
                       <td style={{ padding: '10px 12px' }}>
                         <div style={{ fontWeight: 600, color: '#1e293b' }}>{row.employeeName ?? '—'}</div>
@@ -497,104 +366,34 @@ export default function JejakTransaksiPanel() {
                       </td>
                       <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                         {row.outcome === 'COMMITTED' && (
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              padding: '3px 9px',
-                              borderRadius: 99,
-                              background: '#dcfce7',
-                              color: '#166534',
-                              fontWeight: 700,
-                              fontSize: '0.72rem',
-                            }}
-                          >
-                            <CheckCircle2 size={12} /> COMMITTED
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 99, background: '#dcfce7', color: '#166534', fontWeight: 700, fontSize: '0.72rem' }}>
+                            <CheckCircle2 size={12} /> Berhasil
                           </span>
                         )}
                         {row.outcome === 'ROLLED_BACK' && (
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              padding: '3px 9px',
-                              borderRadius: 99,
-                              background: '#fee2e2',
-                              color: '#991b1b',
-                              fontWeight: 700,
-                              fontSize: '0.72rem',
-                            }}
-                          >
-                            <XCircle size={12} /> ROLLED_BACK
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 99, background: '#fee2e2', color: '#991b1b', fontWeight: 700, fontSize: '0.72rem' }}>
+                            <XCircle size={12} /> Gagal
                           </span>
                         )}
                         {row.outcome === 'REJECTED' && (
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              padding: '3px 9px',
-                              borderRadius: 99,
-                              background: '#fef3c7',
-                              color: '#92400e',
-                              fontWeight: 700,
-                              fontSize: '0.72rem',
-                            }}
-                          >
-                            <AlertTriangle size={12} /> REJECTED
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 99, background: '#fef3c7', color: '#92400e', fontWeight: 700, fontSize: '0.72rem' }}>
+                            <AlertTriangle size={12} /> Ditolak
                           </span>
                         )}
                         {row.outcome === 'STARTED' && (
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                              padding: '3px 9px',
-                              borderRadius: 99,
-                              background: '#e2e8f0',
-                              color: '#334155',
-                              fontWeight: 700,
-                              fontSize: '0.72rem',
-                            }}
-                          >
-                            <Clock size={12} /> STARTED
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 99, background: '#e2e8f0', color: '#334155', fontWeight: 700, fontSize: '0.72rem' }}>
+                            <Clock size={12} /> Diproses
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: '10px 12px', maxWidth: 300 }}>
+                      <td style={{ padding: '10px 12px', maxWidth: 280 }}>
                         {row.outcome === 'COMMITTED' ? (
-                          <div style={{ fontSize: '0.74rem', color: '#15803d', fontFamily: 'monospace' }}>
-                            tx_id: {row.transactionId ? `${row.transactionId.slice(0, 8)}...` : 'tersimpan'}
-                          </div>
+                          <span style={{ fontSize: '0.74rem', color: '#15803d' }}>Tersimpan</span>
                         ) : row.outcome === 'STARTED' ? (
-                          <div style={{ fontSize: '0.74rem', color: '#334155' }}>
-                            Memulai blok <span style={{ fontFamily: 'monospace' }}>db.transaction()</span> (BEGIN)
-                          </div>
+                          <span style={{ fontSize: '0.74rem', color: '#64748b' }}>Sedang diproses</span>
                         ) : (
-                          <div>
-                            {row.failedStep && (
-                              <span
-                                style={{
-                                  display: 'inline-block',
-                                  fontSize: '0.68rem',
-                                  fontWeight: 700,
-                                  padding: '1px 6px',
-                                  borderRadius: 4,
-                                  background: '#fee2e2',
-                                  color: '#991b1b',
-                                  marginBottom: 3,
-                                }}
-                              >
-                                Step: {row.failedStep}
-                              </span>
-                            )}
-                            <div style={{ fontSize: '0.74rem', color: '#991b1b', wordBreak: 'break-word' }}>
-                              {row.rollbackReason ?? '—'}
-                            </div>
+                          <div style={{ fontSize: '0.74rem', color: '#991b1b', wordBreak: 'break-word' }}>
+                            {row.rollbackReason ?? 'Transaksi dibatalkan'}
                           </div>
                         )}
                       </td>
@@ -604,6 +403,73 @@ export default function JejakTransaksiPanel() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Log Cards */}
+        <div className="rep-mobile-only" style={{ padding: '10px 12px' }}>
+          {loading ? (
+            <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: '0.82rem' }}>Memuat log...</div>
+          ) : !data || data.rows.length === 0 ? (
+            <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: '0.82rem' }}>Tidak ada log pada periode ini.</div>
+          ) : (
+            data.rows.map((row) => (
+              <div key={row.id} className="rep-mcard">
+                <div className="rep-mcard__top">
+                  <div>
+                    <div style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.8rem', color: '#0f172a' }}>
+                      {row.invoiceAttempt ?? '—'}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                      {formatWibTime(row.createdAt)} · {row.employeeName ?? '—'}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontWeight: 800, fontSize: '0.86rem', color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
+                      {row.grossAmount !== null ? formatRupiah(row.grossAmount) : '—'}
+                    </div>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        padding: '1px 7px',
+                        borderRadius: 99,
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        background:
+                          row.outcome === 'COMMITTED'
+                            ? '#dcfce7'
+                            : row.outcome === 'ROLLED_BACK'
+                              ? '#fee2e2'
+                              : row.outcome === 'REJECTED'
+                                ? '#fef3c7'
+                                : '#e2e8f0',
+                        color:
+                          row.outcome === 'COMMITTED'
+                            ? '#166534'
+                            : row.outcome === 'ROLLED_BACK'
+                              ? '#991b1b'
+                              : row.outcome === 'REJECTED'
+                                ? '#92400e'
+                                : '#334155',
+                      }}
+                    >
+                      {row.outcome === 'COMMITTED'
+                        ? 'Berhasil'
+                        : row.outcome === 'ROLLED_BACK'
+                          ? 'Gagal'
+                          : row.outcome === 'REJECTED'
+                            ? 'Ditolak'
+                            : 'Diproses'}
+                    </span>
+                  </div>
+                </div>
+                {row.rollbackReason && (
+                  <div style={{ fontSize: '0.72rem', color: '#991b1b', paddingTop: 6, borderTop: '1px solid #f1f5f9' }}>
+                    {row.rollbackReason}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
         </div>
 
         {/* Pagination */}

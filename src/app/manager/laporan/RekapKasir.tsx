@@ -127,8 +127,7 @@ const PRESET_BUTTONS: ReadonlyArray<{ key: PresetKey; label: string; highlight?:
   { key: 'monthly', label: 'Bulan Ini' },
   { key: 'october', label: 'Oktober', highlight: true },
   { key: 'november', label: 'November', highlight: true },
-  { key: 'oct_nov', label: 'Oktober + November', highlight: true },
-  { key: 'all', label: 'Keseluruhan', highlight: true },
+  { key: 'all', label: 'Semua', highlight: true },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -180,6 +179,7 @@ function prevW(): string {
 export default function RekapKasir() {
   const uid = useId();
   const [activePreset, setActivePreset] = useState<PresetKey | null>('weekly');
+  const [showCustomDates, setShowCustomDates] = useState(false);
   const [dateFrom, setDateFrom] = useState(prevW());
   const [dateTo, setDateTo] = useState(todayW());
   const [searchQ, setSearchQ] = useState('');
@@ -735,124 +735,117 @@ export default function RekapKasir() {
         />
       )}
 
-      {/* Filter Card */}
-      <div className="card" style={{ marginBottom: 20, borderRadius: 14 }}>
-        <div className="card-body" style={{ padding: '14px 18px' }}>
-          {/* Quick Presets */}
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-muted)', marginRight: 4 }}>
-              Periode Cepat:
-            </span>
+      {/* Filter Ringkas */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="rep-chip-bar" style={{ flex: '1 1 auto', maxWidth: '100%' }}>
             {PRESET_BUTTONS.map((p) => {
               const active = activePreset === p.key;
               return (
                 <button
                   key={p.key}
                   type="button"
-                  onClick={() => doSelectPreset(p.key)}
+                  onClick={() => {
+                    setShowCustomDates(false);
+                    doSelectPreset(p.key);
+                  }}
                   disabled={loading}
                   aria-pressed={active}
-                  className={active ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
-                  style={{
-                    minHeight: 44,
-                    fontSize: '0.78rem',
-                    padding: '8px 14px',
-                    borderRadius: 20,
-                    borderColor: active
-                      ? undefined
-                      : p.highlight
-                        ? 'hsl(262 60% 72%)'
-                        : undefined,
-                    color: active ? undefined : p.highlight ? 'hsl(262 55% 38%)' : undefined,
-                  }}
+                  className={`rep-chip${active ? ' active' : ''}`}
                 >
                   {p.label}
                 </button>
               );
             })}
+            <button
+              type="button"
+              onClick={() => setShowCustomDates((v) => !v)}
+              className={`rep-chip${showCustomDates || activePreset === null ? ' active' : ''}`}
+            >
+              <Calendar size={12} />
+              <span>Tanggal</span>
+            </button>
           </div>
 
-          {/* Date Range + Search + Export */}
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div className="form-group" style={{ margin: 0, flex: '1 1 150px', minWidth: 'min(100%, 150px)' }}>
-              <label htmlFor={`${uid}-f`} className="form-label" style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <Calendar size={11} /> Dari
-              </label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flex: '1 1 220px', maxWidth: 340 }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', pointerEvents: 'none' }} />
               <input
-                id={`${uid}-f`}
-                type="date"
+                id={`${uid}-s`}
+                type="search"
                 className="form-input"
-                style={{ fontSize: 'var(--text-base)', minHeight: 44, padding: '8px 10px', width: '100%' }}
-                value={dateFrom}
-                max={dateTo}
-                onChange={(e) => {
-                  setDateFrom(e.target.value);
-                  setActivePreset(null);
-                }}
+                placeholder="Cari kasir..."
+                style={{ paddingLeft: 32, fontSize: '0.84rem', minHeight: 38, width: '100%' }}
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                aria-label="Cari kasir"
               />
             </div>
-            <div className="form-group" style={{ margin: 0, flex: '1 1 150px', minWidth: 'min(100%, 150px)' }}>
-              <label htmlFor={`${uid}-t`} className="form-label" style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <Calendar size={11} /> Sampai
-              </label>
-              <input
-                id={`${uid}-t`}
-                type="date"
-                className="form-input"
-                style={{ fontSize: 'var(--text-base)', minHeight: 44, padding: '8px 10px', width: '100%' }}
-                value={dateTo}
-                min={dateFrom}
-                max={todayW()}
-                onChange={(e) => {
-                  setDateTo(e.target.value);
-                  setActivePreset(null);
-                }}
-              />
-            </div>
+
+            <button
+              type="button"
+              onClick={doExportAll}
+              disabled={!data || !data.summary.length}
+              className="rep-chip"
+              aria-label="Export Excel"
+            >
+              <Download size={13} /> Excel
+            </button>
+          </div>
+        </div>
+
+        {showCustomDates && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', padding: '10px 12px', borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+            <input
+              id={`${uid}-f`}
+              type="date"
+              className="form-input"
+              style={{ fontSize: '0.82rem', minHeight: 36, padding: '6px 10px', width: 150 }}
+              value={dateFrom}
+              max={dateTo}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                setActivePreset(null);
+              }}
+            />
+            <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>s/d</span>
+            <input
+              id={`${uid}-t`}
+              type="date"
+              className="form-input"
+              style={{ fontSize: '0.82rem', minHeight: 36, padding: '6px 10px', width: 150 }}
+              value={dateTo}
+              min={dateFrom}
+              max={todayW()}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setActivePreset(null);
+              }}
+            />
             <button
               type="button"
               id={`${uid}-ap`}
               onClick={doApply}
               disabled={loading}
               className="btn btn-primary btn-sm"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', minHeight: 44 }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minHeight: 36 }}
             >
-              {loading ? <Loader2 size={14} className="spin-icon" /> : <Search size={14} />} Tampilkan
+              {loading ? <Loader2 size={13} className="spin-icon" /> : <Search size={13} />} Terapkan
             </button>
             <button
               type="button"
-              onClick={doReset}
+              onClick={() => {
+                setShowCustomDates(false);
+                doReset();
+              }}
               disabled={loading}
-              className="btn btn-secondary btn-sm"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 44 }}
+              className="btn btn-ghost btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minHeight: 36 }}
             >
-              <RotateCcw size={13} /> Reset
-            </button>
-            <div style={{ position: 'relative', flex: '1 1 185px', minWidth: 'min(100%, 185px)' }}>
-              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', pointerEvents: 'none' }} />
-              <input
-                id={`${uid}-s`}
-                type="search"
-                className="form-input"
-                placeholder="Cari nama / NIM…"
-                style={{ paddingLeft: 32, fontSize: 'var(--text-base)', minHeight: 44, width: '100%' }}
-                value={searchQ}
-                onChange={(e) => setSearchQ(e.target.value)}
-                aria-label="Cari kasir"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={doExportAll}
-              disabled={!data || !data.summary.length}
-              className="btn btn-secondary btn-sm"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', minHeight: 44 }}
-              aria-label="Export Semua Excel"
-            >
-              <Download size={13} /> Export Semua Excel
+              <RotateCcw size={12} /> Reset
             </button>
           </div>
-        </div>
+        )}
       </div>
 
       {error && (
@@ -863,10 +856,10 @@ export default function RekapKasir() {
 
       {loading && (
         <div className="card" style={{ borderRadius: 14, marginBottom: 16 }}>
-          <div className="card-body" style={{ textAlign: 'center', padding: '48px 0' }}>
-            <Loader2 size={32} className="spin-icon" style={{ color: 'var(--color-primary)', margin: '0 auto 12px' }} />
-            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.88rem' }}>
-              Memuat rekap kasir &amp; data per jam…
+          <div className="card-body" style={{ textAlign: 'center', padding: '40px 0' }}>
+            <Loader2 size={28} className="spin-icon" style={{ color: 'var(--color-primary)', margin: '0 auto 10px' }} />
+            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.84rem', margin: 0 }}>
+              Memuat data kasir...
             </p>
           </div>
         </div>
@@ -874,66 +867,40 @@ export default function RekapKasir() {
 
       {!loading && data && (
         <>
-          {/* Stat Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', gap: 12, marginBottom: 20 }}>
+          {/* 4 Kartu Ringkas (2x2 di HP, 4 kolom di Desktop) */}
+          <div className="rep-kpi-grid">
             {[
-              { l: 'Total Omzet', v: rp(T.omzet), sub: `${visible.length} kasir`, icon: <TrendingUp size={20} />, g: 'linear-gradient(135deg,#166534,#15803d)' },
-              { l: 'Laba Kotor', v: rp(T.laba), sub: 'dari penjualan', icon: <Banknote size={20} />, g: 'linear-gradient(135deg,#0369a1,#0284c7)' },
-              { l: 'Total Partisipasi Shift', v: T.shift.toLocaleString('id-ID'), sub: `${visible.length} kasir`, icon: <Clock size={20} />, g: 'linear-gradient(135deg,#6d28d9,#7c3aed)' },
-              { l: 'Total Transaksi', v: T.trx.toLocaleString('id-ID'), sub: T.void > 0 ? `${T.void} void` : 'tanpa void', icon: <ShoppingBag size={20} />, g: 'linear-gradient(135deg,#b45309,#d97706)' },
+              { l: 'Omzet', v: rp(T.omzet), sub: `${visible.length} kasir`, icon: <TrendingUp size={15} />, c: '#15803d' },
+              { l: 'Laba Kotor', v: rp(T.laba), sub: `${T.shift} partisipasi`, icon: <Banknote size={15} />, c: '#0369a1' },
+              { l: 'Transaksi', v: T.trx.toLocaleString('id-ID'), sub: T.void > 0 ? `${T.void} void` : '0 void', icon: <ShoppingBag size={15} />, c: '#b45309' },
               {
-                l: peakHourRow ? `Jam Tersibuk` : 'Kasir Tercatat',
-                v: peakHourRow ? peakHourRow.label.replace(' WIB', '') : String(visible.length),
-                sub: peakHourRow ? `${rp(peakHourRow.omzet)} (${peakHourRow.txCount} trx)` : `${data.dateFrom} s/d ${data.dateTo}`,
-                icon: <Users size={20} />,
-                g: 'linear-gradient(135deg,#0f766e,#14b8a6)',
+                l: 'Jam Ramai',
+                v: peakHourRow ? peakHourRow.label.replace(' WIB', '') : '—',
+                sub: peakHourRow ? `${rp(peakHourRow.omzet)} (${peakHourRow.txCount} tx)` : `${data.dateFrom} s/d ${data.dateTo}`,
+                icon: <Users size={15} />,
+                c: '#4338ca',
               },
             ].map((item) => (
-              <div
-                key={item.l}
-                style={{
-                  background: item.g,
-                  borderRadius: 14,
-                  padding: '16px 18px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 14,
-                  boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-                }}
-              >
-                <div
-                  style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: 10,
-                    background: 'rgba(255,255,255,0.2)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                    color: '#fff',
-                  }}
-                >
-                  {item.icon}
+              <div key={item.l} className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">{item.l}</span>
+                  <span style={{ color: item.c }}>{item.icon}</span>
                 </div>
-                <div>
-                  <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>{item.l}</div>
-                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#fff', lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>{item.v}</div>
-                  {item.sub && <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.72)', marginTop: 2 }}>{item.sub}</div>}
-                </div>
+                <div className="rep-kpi__val">{item.v}</div>
+                <div className="rep-kpi__sub">{item.sub}</div>
               </div>
             ))}
           </div>
 
           {/* Sort bar */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-            <span style={{ fontWeight: 600 }}>Urutkan:</span>
+          <div className="rep-chip-bar" style={{ marginBottom: 12 }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: 600, color: '#64748b', flexShrink: 0 }}>Urutkan:</span>
             {(
               [
-                ['totalOmzet', 'Total Omzet'],
-                ['totalShift', 'Jumlah Shift'],
+                ['totalOmzet', 'Omzet'],
+                ['totalShift', 'Shift'],
                 ['totalTxCount', 'Transaksi'],
-                ['avgOmzetPerShift', 'Rata-rata/Shift'],
+                ['avgOmzetPerShift', 'Rata-rata'],
               ] as [typeof sortKey, string][]
             ).map(([k, lbl]) => {
               const act = sortKey === k;
@@ -943,22 +910,7 @@ export default function RekapKasir() {
                   type="button"
                   onClick={() => toggleSort(k)}
                   aria-pressed={act}
-                  style={{
-                    minHeight: 44,
-                    padding: '8px 14px',
-                    borderRadius: 999,
-                    border: `1.5px solid ${act ? '#166534' : 'var(--color-border)'}`,
-                    background: act ? '#166534' : 'transparent',
-                    color: act ? '#fff' : 'var(--color-text-muted)',
-                    cursor: 'pointer',
-                    fontSize: 'inherit',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    fontWeight: act ? 700 : 400,
-                    transition:
-                      'background-color 0.16s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.16s cubic-bezier(0.16, 1, 0.3, 1), color 0.16s cubic-bezier(0.16, 1, 0.3, 1)',
-                  }}
+                  className={`rep-chip${act ? ' active' : ''}`}
                 >
                   {lbl}
                   {act && (sortDir === 'desc' ? <ChevronDown size={11} /> : <ChevronUp size={11} />)}
@@ -977,19 +929,16 @@ export default function RekapKasir() {
           ) : (
             <div style={{ marginBottom: 26 }}>
               <div className="card" style={{ borderRadius: 14, overflow: 'hidden' }}>
-                <div style={{ background: 'linear-gradient(90deg,#f0fdf4,#fff)', borderBottom: '1px solid var(--color-border)', padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ background: '#f8fafc', borderBottom: '1px solid var(--color-border)', padding: '11px 16px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <Users size={15} style={{ color: '#166534' }} />
-                  <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#166534' }}>
-                    Kinerja Per-Anak / Kasir
+                  <span style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0f172a' }}>
+                    Kinerja Kasir
                   </span>
-                  <span style={{ marginLeft: 4, background: '#dcfce7', color: '#166534', borderRadius: 999, padding: '1px 10px', fontSize: '0.72rem', fontWeight: 700 }}>
+                  <span style={{ background: '#dcfce7', color: '#166534', borderRadius: 999, padding: '1px 9px', fontSize: '0.72rem', fontWeight: 700 }}>
                     {visible.length} kasir
                   </span>
-                  <span style={{ marginLeft: 'auto', fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
-                    Centang baris untuk hitung subtotal real-time &amp; ekspor terpilih
-                  </span>
                 </div>
-                <div className="table-wrapper" style={{ WebkitOverflowScrolling: 'touch' }}>
+                <div className="table-wrapper rep-desktop-only" style={{ WebkitOverflowScrolling: 'touch' }}>
                   <table className="table" style={{ fontSize: '0.78rem', whiteSpace: 'nowrap' }}>
                     <thead>
                       <tr>
@@ -1167,6 +1116,50 @@ export default function RekapKasir() {
                     </tfoot>
                   </table>
                 </div>
+
+                {/* Mobile Cashier Cards */}
+                <div className="rep-mobile-only" style={{ padding: '10px 12px' }}>
+                  {visible.map((k, i) => (
+                    <div key={k.kasirId} className="rep-mcard">
+                      <div className="rep-mcard__top">
+                        <div>
+                          <div style={{ fontWeight: 800, fontSize: '0.86rem', color: '#0f172a' }}>
+                            {i + 1}. {k.kasirName}
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                            {k.kasirNim} · {n(k.totalShift)} shift · {n(k.totalTxCount)} tx
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#15803d', fontVariantNumeric: 'tabular-nums' }}>
+                            {rp(n(k.totalOmzet))}
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                            Laba {rp(n(k.totalLabaKotor))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="rep-mcard__grid">
+                        <div>
+                          <div className="rep-mcard__k">Tunai / QRIS</div>
+                          <div className="rep-mcard__v" style={{ fontSize: '0.72rem' }}>
+                            {rp(n(k.totalPenjualanCash))} / {rp(n(k.totalPenjualanQris))}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            onClick={() => setDetailKasir(k)}
+                            className="rep-chip"
+                            style={{ minHeight: 32, padding: '4px 12px', fontSize: '0.74rem' }}
+                          >
+                            Detail Shift
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <SelectedRowsBar
@@ -1189,17 +1182,17 @@ export default function RekapKasir() {
           {/* Table 2: Rekapan Penjualan Per-Jam (WIB) */}
           <div style={{ marginTop: 8 }}>
             <div className="card" style={{ borderRadius: 14, overflow: 'hidden' }}>
-              <div style={{ background: 'linear-gradient(90deg,#eff6ff,#fff)', borderBottom: '1px solid var(--color-border)', padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ background: '#f8fafc', borderBottom: '1px solid var(--color-border)', padding: '11px 16px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <Clock size={15} style={{ color: '#1d4ed8' }} />
-                <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1e3a8a' }}>
-                  Rekapan Penjualan Per-Jam (WIB)
+                <span style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0f172a' }}>
+                  Penjualan Per Jam (WIB)
                 </span>
-                <span style={{ marginLeft: 4, background: '#dbeafe', color: '#1e40af', borderRadius: 999, padding: '1px 10px', fontSize: '0.72rem', fontWeight: 700 }}>
-                  {hourlyRows.length} jam aktif
+                <span style={{ background: '#dbeafe', color: '#1e40af', borderRadius: 999, padding: '1px 9px', fontSize: '0.72rem', fontWeight: 700 }}>
+                  {hourlyRows.length} jam
                 </span>
                 {peakHourRow && (
                   <span style={{ marginLeft: 'auto', fontSize: '0.74rem', fontWeight: 700, color: '#15803d', background: '#dcfce7', padding: '2px 10px', borderRadius: 999 }}>
-                    Jam Puncak: {peakHourRow.label} ({rp(peakHourRow.omzet)})
+                    Puncak: {peakHourRow.label} ({rp(peakHourRow.omzet)})
                   </span>
                 )}
               </div>
@@ -1209,7 +1202,8 @@ export default function RekapKasir() {
                   Belum ada transaksi tercatat pada rentang waktu ini.
                 </div>
               ) : (
-                <div className="table-wrapper" style={{ WebkitOverflowScrolling: 'touch' }}>
+                <>
+                <div className="table-wrapper rep-desktop-only" style={{ WebkitOverflowScrolling: 'touch' }}>
                   <table className="table" style={{ fontSize: '0.78rem', whiteSpace: 'nowrap' }}>
                     <thead>
                       <tr>
@@ -1306,6 +1300,34 @@ export default function RekapKasir() {
                     </tfoot>
                   </table>
                 </div>
+
+                {/* Mobile Hourly List */}
+                <div className="rep-mobile-only" style={{ padding: '10px 12px' }}>
+                  {hourlyRows.map((h) => {
+                    const isPeak = peakHourRow?.hour === h.hour;
+                    const pctWidth = maxHourOmzet > 0 ? Math.max(5, Math.round((n(h.omzet) / maxHourOmzet) * 100)) : 0;
+                    return (
+                      <div key={h.hour} className="rep-mcard" style={{ borderColor: isPeak ? '#86efac' : '#e2e8f0' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontWeight: 700, fontSize: '0.8rem', color: isPeak ? '#166534' : '#0f172a' }}>
+                            {h.label}
+                          </span>
+                          <span style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
+                            {rp(h.omzet)}
+                          </span>
+                        </div>
+                        <div style={{ height: 6, width: '100%', background: '#f1f5f9', borderRadius: 99, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${pctWidth}%`, background: isPeak ? '#16a34a' : '#2563eb', borderRadius: 99 }} />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#64748b' }}>
+                          <span>{h.txCount} tx · {h.activeKasirCount} kasir</span>
+                          <span>Cash {rp(h.cash)} · QRIS {rp(h.qris)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                </>
               )}
             </div>
 
@@ -1417,24 +1439,21 @@ function ShiftModal({ kasir, shifts, onClose }: { kasir: KasirSummary; shifts: S
           <table className="table" style={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
             <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
               <tr>
-                <th>Peran Shift</th>
-                <th>Clock-In</th>
-                <th>Clock-Out</th>
+                <th>Peran</th>
+                <th>Masuk</th>
+                <th>Keluar</th>
                 <th>Durasi</th>
-                <th style={{ textAlign: 'right' }}>Omzet Laci</th>
-                <th style={{ textAlign: 'right' }}>Laba Kotor Laci</th>
-                <th style={{ textAlign: 'right', color: '#16a34a' }}>Hak 50% (Bruto)</th>
+                <th style={{ textAlign: 'right' }}>Omzet Shift</th>
+                <th style={{ textAlign: 'right' }}>Laba Kotor</th>
                 <th style={{ textAlign: 'right' }}>Selisih Laci</th>
-                <th style={{ textAlign: 'right', color: '#dc2626' }}>Potong Tekor</th>
-                <th style={{ textAlign: 'right', color: '#15803d', fontWeight: 800 }}>Upah Shift Bersih</th>
-                <th style={{ textAlign: 'center' }}>Status</th>
+                <th style={{ textAlign: 'center' }}>Status Laci</th>
               </tr>
             </thead>
             <tbody>
               {myS.length === 0 ? (
                 <tr>
-                  <td colSpan={11} style={{ textAlign: 'center', padding: '32px 0', color: 'var(--color-text-muted)' }}>
-                    Tidak ada shift tercatat pada rentang tanggal ini.
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '28px 0', color: 'var(--color-text-muted)' }}>
+                    Tidak ada shift pada periode ini.
                   </td>
                 </tr>
               ) : (
@@ -1442,10 +1461,6 @@ function ShiftModal({ kasir, shifts, onClose }: { kasir: KasirSummary; shifts: S
                   const tier = s.status === 'ACTIVE' ? 'RUNNING' : s.discrepancyTier;
                   const ts = TS[tier] ?? TS.RUNNING;
                   const labaKotor = n(s.labaKotor);
-                  const hakBruto = Math.round(labaKotor * 0.5);
-                  const isTekor = s.discrepancy !== null && s.discrepancy < -2000;
-                  const potongTekor = isTekor ? Math.abs(n(s.discrepancy)) : 0;
-                  const upahBersih = Math.max(0, hakBruto - potongTekor);
                   const isPendamping = s.employeeId !== kasir.kasirId;
 
                   return (
@@ -1464,30 +1479,18 @@ function ShiftModal({ kasir, shifts, onClose }: { kasir: KasirSummary; shifts: S
                         >
                           {isPendamping ? `Pendamping (${s.kasirPembukaName ?? 'Rekan'})` : 'Pembuka Laci'}
                         </span>
-                        {s.rawModalWarning && (
-                          <div style={{ fontSize: '0.62rem', color: '#b45309', marginTop: 2 }}>
-                            Modal: {rp(n(s.modalAwal))}
-                          </div>
-                        )}
                       </td>
                       <td style={{ fontFamily: 'monospace', fontSize: '0.7rem' }}>{fdt(s.clockIn)}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: s.clockOut ? 'inherit' : '#9ca3af' }}>{fdt(s.clockOut)}</td>
                       <td>{dur(s.durasiMenit)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: '#166534', fontVariantNumeric: 'tabular-nums' }}>{rp(n(s.omzet))}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{rp(labaKotor)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: '#16a34a', fontVariantNumeric: 'tabular-nums' }}>{rp(hakBruto)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, color: ts.color, fontVariantNumeric: 'tabular-nums' }}>
                         {s.discrepancy !== null
                           ? (s.discrepancy >= 0 ? '+' : '') + rp(n(s.discrepancy))
                           : s.status === 'ACTIVE'
                             ? '(aktif)'
                             : '—'}
-                      </td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, color: potongTekor > 0 ? '#dc2626' : '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-                        {potongTekor > 0 ? `-${rp(potongTekor)}` : 'Rp 0'}
-                      </td>
-                      <td style={{ textAlign: 'right', fontWeight: 800, color: '#166534', backgroundColor: '#f0fdf4', fontVariantNumeric: 'tabular-nums' }}>
-                        {rp(upahBersih)}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <span

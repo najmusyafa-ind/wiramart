@@ -69,6 +69,7 @@ export default function BiayaOperasionalPanel({ period, dateFrom, dateTo, onChan
     [selectedRows],
   );
 
+  const [showForm, setShowForm] = useState(false);
   const [date, setDate] = useState(todayWib());
   const [category, setCategory] = useState<ExpenseCategoryKey>('LISTRIK');
   const [description, setDescription] = useState('');
@@ -219,13 +220,25 @@ export default function BiayaOperasionalPanel({ period, dateFrom, dateTo, onChan
             </span>
           )}
         </h2>
-        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          Total periode: <strong>{formatRupiah(total)}</strong>
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+            Total: <strong>{formatRupiah(total)}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            className={`btn btn-sm ${showForm ? 'btn-secondary' : 'btn-primary'}`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          >
+            <Plus size={13} aria-hidden="true" />
+            <span>{showForm ? 'Tutup Form' : 'Catat Biaya'}</span>
+          </button>
+        </div>
       </div>
 
       <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-        {/* ── Form tambah ── */}
+        {/* ── Form tambah (dibuka saat tombol diklik) ── */}
+        {showForm && (
         <form
           onSubmit={handleSubmit}
           style={{
@@ -311,7 +324,7 @@ export default function BiayaOperasionalPanel({ period, dateFrom, dateTo, onChan
                 id={`${uid}-desc`}
                 type="text"
                 className="form-input"
-                placeholder="Contoh: Token listrik toko, plastik kresek 1 pack, fee transfer QRIS bank..."
+                placeholder="Contoh: Token listrik, plastik kresek..."
                 value={description}
                 maxLength={200}
                 onChange={(e) => setDescription(e.target.value)}
@@ -335,10 +348,11 @@ export default function BiayaOperasionalPanel({ period, dateFrom, dateTo, onChan
             >
               {saving
                 ? <><Loader2 size={16} className="spin-icon" aria-hidden="true" /> Menyimpan...</>
-                : <><Plus size={16} aria-hidden="true" /> Catat Biaya</>}
+                : <><Plus size={16} aria-hidden="true" /> Simpan Biaya</>}
             </button>
           </div>
         </form>
+        )}
 
         {formError && <div style={noticeStyle('error')} role="alert">{formError}</div>}
         {formOk && <div style={noticeStyle('success')} role="status">{formOk}</div>}
@@ -497,12 +511,9 @@ export default function BiayaOperasionalPanel({ period, dateFrom, dateTo, onChan
 
         {truncated && (
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>
-            Daftar dipotong (hanya 1.000 biaya terbaru ditampilkan). Total di kartu laporan tetap lengkap.
+            Menampilkan 1.000 biaya terbaru.
           </p>
         )}
-        <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          Biaya yang dihapus tidak hilang dari audit: pelaku dan alasan tercatat. Fee QRIS dicatat manual lewat kategori “Fee QRIS / Bank”.
-        </p>
       </div>
     </section>
   );

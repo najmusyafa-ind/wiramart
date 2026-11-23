@@ -22,17 +22,12 @@ import {
   ChevronLeft,
   Users,
   TrendingUp,
-  DollarSign,
-  ShoppingBag,
   AlertCircle,
   Loader2,
   RefreshCw,
   Clock,
   Download,
   Search,
-  Wallet,
-  Award,
-  Receipt,
   Copy,
   Check,
   Printer,
@@ -190,6 +185,7 @@ export type RekapShiftProps = {
   period?: PeriodKey;
   dateFrom?: string;
   dateTo?: string;
+  externalViewMode?: 'groups' | 'daily_combined';
 };
 
 type DailyShiftSession = {
@@ -318,7 +314,7 @@ function getTodayWib(): string {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo }: RekapShiftProps) {
+export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo, externalViewMode }: RekapShiftProps) {
   const todayWib = useMemo(() => getTodayWib(), []);
   const currentMonthWib = useMemo(() => todayWib.slice(0, 7), [todayWib]);
   const selection = useTableSelection();
@@ -335,7 +331,8 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
   const [rangeEnd, setRangeEnd] = useState<string>(propDateTo || todayWib);
 
   // Filter tabel shift & mode tampilan
-  const [viewMode, setViewMode] = useState<'groups' | 'daily_combined'>('groups');
+  const [internalViewMode, setInternalViewMode] = useState<'groups' | 'daily_combined'>('groups');
+  const viewMode = externalViewMode ?? internalViewMode;
   const [filterSesi, setFilterSesi] = useState<'Semua' | 'Pagi' | 'Siang'>('Semua');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -1561,23 +1558,6 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
     }
   }
 
-  const grandTotal = data?.grandTotal ?? {
-    omzet: 0,
-    labaKotor: 0,
-    biayaOperasional: 0,
-    labaOperasionalBersih: 0,
-    poolGaji: 0,
-    txCount: 0,
-    totalUnitsSold: 0,
-    totalShortageDeduction: 0,
-    totalDistributed: 0,
-    sisaPool: 0,
-    labaBersihToko: 0,
-  };
-
-  const margin =
-    grandTotal.omzet > 0 ? Math.round((grandTotal.labaKotor / grandTotal.omzet) * 100) : 0;
-
   const availableMonths = useMemo(() => {
     const list =
       data?.availableMonths && data.availableMonths.length > 0
@@ -1669,7 +1649,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           <div>
             <h2
               style={{
-                fontSize: '1.12rem',
+                fontSize: '1.05rem',
                 fontWeight: 800,
                 color: 'var(--color-text, #111827)',
                 margin: 0,
@@ -1678,18 +1658,9 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                 gap: '8px',
               }}
             >
-              <TrendingUp size={20} style={{ color: '#166534', flexShrink: 0 }} />
-              <span>Bagi Hasil Per Shift — {data?.range.label ?? 'Memuat...'}</span>
+              <TrendingUp size={18} style={{ color: '#166534', flexShrink: 0 }} />
+              <span>Shift &amp; Slip Gaji — {data?.range.label ?? 'Memuat...'}</span>
             </h2>
-            <p
-              style={{
-                color: 'var(--color-text-muted, #6b7280)',
-                fontSize: '0.78rem',
-                margin: '2px 0 0',
-              }}
-            >
-              Pembagian gaji utuh per kelompok shift (50% Kehadiran Tim · 50% Laba Shift) · Klik baris untuk rincian tanggal &amp; audit kas
-            </p>
           </div>
 
           <button
@@ -1716,27 +1687,15 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
             borderTop: '1px solid var(--color-border-light, #f1f5f9)',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              gap: 6,
-              overflowX: 'auto',
-              flexWrap: 'nowrap',
-              scrollbarWidth: 'none',
-              WebkitOverflowScrolling: 'touch',
-              paddingBottom: 2,
-              maxWidth: '100%',
-            }}
-          >
+          <div className="rep-chip-bar" style={{ maxWidth: '100%' }}>
             {(
               [
-                { id: 'monthly', label: 'Per Bulan' },
-                { id: 'daily', label: 'Per Tanggal' },
-                { id: 'range', label: 'Rentang Bebas' },
+                { id: 'monthly', label: 'Bulanan' },
+                { id: 'daily', label: 'Harian' },
                 { id: 'october', label: 'Oktober' },
                 { id: 'november', label: 'November' },
-                { id: 'oct_nov', label: 'Oktober + November' },
-                { id: 'all', label: 'Keseluruhan' },
+                { id: 'all', label: 'Semua' },
+                { id: 'range', label: 'Tanggal' },
               ] as const
             ).map((m) => {
               const isActive = filterMode === m.id;
@@ -1745,21 +1704,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                   key={m.id}
                   type="button"
                   onClick={() => setFilterMode(m.id)}
-                  style={{
-                    minHeight: 44,
-                    padding: '8px 14px',
-                    borderRadius: 100,
-                    border: isActive
-                      ? '1.5px solid var(--color-primary, #166534)'
-                      : '1.5px solid #e2e8f0',
-                    background: isActive ? 'var(--color-primary, #166534)' : '#f8fafc',
-                    color: isActive ? '#ffffff' : 'var(--color-text-muted, #475569)',
-                    fontSize: '0.82rem',
-                    fontWeight: isActive ? 700 : 500,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0,
-                  }}
+                  className={`rep-chip${isActive ? ' active' : ''}`}
                 >
                   {m.label}
                 </button>
@@ -1918,227 +1863,87 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          2. RINGKASAN EKSEKUTIF (KPI CARDS)
-          ───────────────────────────────────────────────────────────── */}
-      <div className="rs-kpi-grid">
-        {[
-          {
-            icon: <ShoppingBag size={16} />,
-            label: 'Transaksi',
-            value: `${grandTotal.txCount.toLocaleString('id-ID')} tx`,
-            color: '#4f46e5',
-            sub: `${grandTotal.totalUnitsSold ? `${grandTotal.totalUnitsSold.toLocaleString('id-ID')} pcs · ` : ''}${tableTotals.totalShiftCount}x shift`,
-          },
-          {
-            icon: <DollarSign size={16} />,
-            label: 'Total Omzet',
-            value: formatRupiah(grandTotal.omzet),
-            color: '#0284c7',
-            sub: 'Penjualan produk',
-          },
-          {
-            icon: <TrendingUp size={16} />,
-            label: `Laba Kotor (${margin}%)`,
-            value: formatRupiah(grandTotal.labaKotor),
-            color: '#16a34a',
-            sub: 'Selisih jual & HPP',
-          },
-          {
-            icon: <Receipt size={16} />,
-            label: 'Beban Toko',
-            value: formatRupiah(grandTotal.biayaOperasional || 0),
-            color: '#dc2626',
-            sub: 'Operasional periode',
-          },
-          {
-            icon: <Award size={16} />,
-            label: 'Total Upah Shift',
-            value: formatRupiah(grandTotal.totalDistributed || 0),
-            color: '#15803d',
-            sub:
-              (grandTotal.totalShortageDeduction ?? 0) > 0
-                ? `Potong tekor -${formatRupiah(grandTotal.totalShortageDeduction ?? 0)}`
-                : `${allGroups.length} kelompok shift`,
-          },
-          {
-            icon: <Wallet size={16} />,
-            label: 'Kas Toko (50%)',
-            value: formatRupiah(grandTotal.labaBersihToko || 0),
-            color: '#4338ca',
-            sub: 'Bagian kas toko',
-          },
-        ].map((c) => (
-          <div
-            key={c.label}
-            className="card"
-            style={{
-              padding: '10px 12px',
-              border: '1px solid var(--color-border)',
-              borderRadius: '10px',
-              backgroundColor: '#ffffff',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                color: c.color,
-                marginBottom: '4px',
-              }}
-            >
-              <div
-                style={{
-                  padding: '4px',
-                  borderRadius: '6px',
-                  backgroundColor: `${c.color}15`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                {c.icon}
-              </div>
-              <span
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  color: 'var(--color-text-muted)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {c.label}
-              </span>
-            </div>
-            <div
-              style={{
-                fontWeight: 800,
-                fontSize: '1rem',
-                color: c.color,
-                lineHeight: 1.2,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {c.value}
-            </div>
-            <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '3px' }}>
-              {c.sub}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* ─────────────────────────────────────────────────────────────
-          2B. RINGKASAN SHIFT PAGI, SHIFT SIANG & GABUNGAN (OMZET, ABSEN, GAJI)
+          2. RINGKASAN SHIFT PAGI, SHIFT SIANG & TOTAL GABUNGAN
           ───────────────────────────────────────────────────────────── */}
       {!loading && !error && allGroups.length > 0 && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
-            gap: '10px',
-            marginBottom: '14px',
-          }}
-        >
+        <div className="rep-kpi-grid rep-kpi-grid--3">
           {[
             {
-              title: 'Shift Pagi (07:30–11:30 WIB)',
+              title: 'Shift Pagi',
+              jam: '07:30–11:30',
               icon: <Sun size={15} />,
-              accent: '#b45309',
-              bg: '#fffbeb',
-              border: '#fde68a',
+              accent: '#d97706',
               omzet: pagiSiangSummary.pagi.omzet,
               upah: pagiSiangSummary.pagi.upahBersih,
               hadir: pagiSiangSummary.pagi.totalHadir,
               telat: pagiSiangSummary.pagi.totalTelat,
               shiftCount: pagiSiangSummary.pagi.shiftCount,
               txCount: pagiSiangSummary.pagi.txCount,
-              unitsSold: pagiSiangSummary.pagi.unitsSold,
             },
             {
-              title: 'Shift Siang (11:30–15:00 WIB)',
+              title: 'Shift Siang',
+              jam: '11:30–15:00',
               icon: <Sunset size={15} />,
-              accent: '#4338ca',
-              bg: '#eef2ff',
-              border: '#c7d2fe',
+              accent: '#4f46e5',
               omzet: pagiSiangSummary.siang.omzet,
               upah: pagiSiangSummary.siang.upahBersih,
               hadir: pagiSiangSummary.siang.totalHadir,
               telat: pagiSiangSummary.siang.totalTelat,
               shiftCount: pagiSiangSummary.siang.shiftCount,
               txCount: pagiSiangSummary.siang.txCount,
-              unitsSold: pagiSiangSummary.siang.unitsSold,
             },
             {
-              title: 'Gabungan Shift (Pagi + Siang)',
+              title: 'Total (Pagi + Siang)',
+              jam: `${pagiSiangSummary.gabungan.shiftCount}x shift`,
               icon: <TrendingUp size={15} />,
-              accent: '#166534',
-              bg: '#f0fdf4',
-              border: '#86efac',
+              accent: '#15803d',
               omzet: pagiSiangSummary.gabungan.omzet,
               upah: pagiSiangSummary.gabungan.upahBersih,
               hadir: pagiSiangSummary.gabungan.totalHadir,
               telat: pagiSiangSummary.gabungan.totalTelat,
               shiftCount: pagiSiangSummary.gabungan.shiftCount,
               txCount: pagiSiangSummary.gabungan.txCount,
-              unitsSold: pagiSiangSummary.gabungan.unitsSold,
             },
           ].map((box) => (
             <div
               key={box.title}
-              className="card"
-              style={{
-                padding: '12px 14px',
-                borderRadius: '10px',
-                backgroundColor: box.bg,
-                border: `1px solid ${box.border}`,
-              }}
+              className="rep-kpi"
+              style={{ borderLeft: `3px solid ${box.accent}` }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 6 }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.76rem', fontWeight: 800, color: box.accent }}>
-                  {box.icon}
+              <div className="rep-kpi__top">
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.76rem', fontWeight: 700, color: '#0f172a' }}>
+                  <span style={{ color: box.accent }}>{box.icon}</span>
                   {box.title}
                 </span>
-                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#475569' }}>
-                  {box.shiftCount}x shift
-                </span>
+                <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{box.jam}</span>
               </div>
 
-              <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', lineHeight: 1.2 }}>
+              <div className="rep-kpi__val" style={{ marginTop: 2 }}>
                 {formatRupiah(box.omzet)}
               </div>
-              <div style={{ fontSize: '0.7rem', color: '#475569', marginBottom: 8 }}>
-                Omzet · {box.txCount.toLocaleString('id-ID')} tx ({box.unitsSold.toLocaleString('id-ID')} pcs)
+              <div className="rep-kpi__sub">
+                {box.txCount.toLocaleString('id-ID')} tx · {box.shiftCount}x shift
               </div>
 
               <div
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: '8px',
-                  paddingTop: '8px',
-                  borderTop: `1px solid ${box.border}`,
-                  fontSize: '0.72rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingTop: 7,
+                  marginTop: 4,
+                  borderTop: '1px solid #f1f5f9',
+                  fontSize: '0.74rem',
                 }}
               >
-                <div>
-                  <div style={{ color: '#64748b', fontSize: '0.67rem', fontWeight: 600 }}>Absensi Hadir</div>
-                  <div style={{ fontWeight: 800, color: '#0f172a' }}>
-                    {box.hadir} hadir
-                    {box.telat > 0 && (
-                      <span style={{ color: '#b45309', fontWeight: 700 }}> · {box.telat} telat</span>
-                    )}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ color: '#64748b', fontSize: '0.67rem', fontWeight: 600 }}>Total Gaji Shift</div>
-                  <div style={{ fontWeight: 800, color: '#15803d' }}>
-                    {formatRupiah(box.upah)}
-                  </div>
-                </div>
+                <span style={{ fontWeight: 600, color: '#334155' }}>
+                  Absen {box.hadir}
+                  {box.telat > 0 && <span style={{ color: '#b45309' }}> ({box.telat} telat)</span>}
+                </span>
+                <span style={{ fontWeight: 800, color: '#15803d', fontVariantNumeric: 'tabular-nums' }}>
+                  Gaji {formatRupiah(box.upah)}
+                </span>
               </div>
             </div>
           ))}
@@ -2146,70 +1951,34 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       )}
 
       {/* ─────────────────────────────────────────────────────────────
-          3. TOOLBAR TABEL: MODE TAMPILAN, FILTER SESI, PENCARIAN & AKSI
+          3. TOOLBAR TABEL: FILTER SESI, PENCARIAN & AKSI
           ───────────────────────────────────────────────────────────── */}
       <div className="rs-toolbar-actions">
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Mode Switcher: Kelompok & Slip Gaji vs Harian Pagi+Siang */}
-          <div
-            role="tablist"
-            aria-label="Mode tampilan rekap shift"
-            style={{
-              display: 'inline-flex',
-              padding: '3px',
-              borderRadius: '10px',
-              backgroundColor: '#f1f5f9',
-              border: '1px solid #cbd5e1',
-              gap: '3px',
-            }}
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'groups'}
-              onClick={() => setViewMode('groups')}
-              style={{
-                minHeight: 38,
-                padding: '6px 12px',
-                borderRadius: '7px',
-                border: 'none',
-                backgroundColor: viewMode === 'groups' ? '#166534' : 'transparent',
-                color: viewMode === 'groups' ? '#ffffff' : '#475569',
-                fontWeight: 700,
-                fontSize: '0.78rem',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-              }}
-            >
-              <FileText size={13} />
-              <span>Kelompok &amp; Slip Gaji</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'daily_combined'}
-              onClick={() => setViewMode('daily_combined')}
-              style={{
-                minHeight: 38,
-                padding: '6px 12px',
-                borderRadius: '7px',
-                border: 'none',
-                backgroundColor: viewMode === 'daily_combined' ? '#0f766e' : 'transparent',
-                color: viewMode === 'daily_combined' ? '#ffffff' : '#475569',
-                fontWeight: 700,
-                fontSize: '0.78rem',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-              }}
-            >
-              <Calendar size={13} />
-              <span>Harian (Pagi + Siang)</span>
-            </button>
-          </div>
+        <div className="rep-chip-bar" style={{ maxWidth: '100%' }}>
+          {!externalViewMode && (
+            <div role="tablist" aria-label="Mode tampilan rekap shift" className="rep-seg" style={{ marginRight: 4 }}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'groups'}
+                onClick={() => setInternalViewMode('groups')}
+                className={`rep-seg-btn${viewMode === 'groups' ? ' active' : ''}`}
+              >
+                <FileText size={13} />
+                <span>Slip Gaji Shift</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'daily_combined'}
+                onClick={() => setInternalViewMode('daily_combined')}
+                className={`rep-seg-btn${viewMode === 'daily_combined' ? ' active' : ''}`}
+              >
+                <Calendar size={13} />
+                <span>Harian Pagi+Siang</span>
+              </button>
+            </div>
+          )}
 
           {viewMode === 'groups' &&
             (
@@ -2225,23 +1994,10 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                   key={item.key}
                   type="button"
                   onClick={() => setFilterSesi(item.key)}
-                  style={{
-                    minHeight: 44,
-                    padding: '8px 13px',
-                    borderRadius: '99px',
-                    border: active ? '1.5px solid #166534' : '1px solid var(--color-border)',
-                    background: active ? '#f0fdf4' : '#ffffff',
-                    color: active ? '#166534' : 'var(--color-text-secondary)',
-                    cursor: 'pointer',
-                    fontSize: '0.8rem',
-                    fontWeight: active ? 700 : 500,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                  }}
+                  className={`rep-chip${active ? ' active' : ''}`}
                 >
-                  {item.key === 'Pagi' && <Sun size={13} style={{ color: '#d97706' }} />}
-                  {item.key === 'Siang' && <Sunset size={13} style={{ color: '#4f46e5' }} />}
+                  {item.key === 'Pagi' && <Sun size={13} style={{ color: active ? '#fde68a' : '#d97706' }} />}
+                  {item.key === 'Siang' && <Sunset size={13} style={{ color: active ? '#c7d2fe' : '#4f46e5' }} />}
                   <span>{item.label}</span>
                 </button>
               );
@@ -3131,7 +2887,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                     }}
                                   >
                                     <div style={{ width: '100%', fontSize: '11px', fontWeight: 700, color: '#475569' }}>
-                                      Anggota &amp; Kehadiran Tim Shift (Gaji Diserahkan Utuh Per Shift — Tanpa Pemecahan Per Nama):
+                                      Absensi Tim:
                                     </div>
                                     {computeGroupTeamAttendance(g).map((m) => (
                                       <div
@@ -4340,10 +4096,10 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                 >
                   <div>
                     <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#166534', textTransform: 'uppercase' }}>
-                      Total Upah Diterima Shift (Utuh Per Kelompok)
+                      Total Gaji Shift
                     </div>
                     <div style={{ fontSize: '0.72rem', color: '#15803d', marginTop: 2 }}>
-                      Skema 50% Kehadiran Tim · 50% Laba Shift · Tanpa pemecahan nominal per nama
+                      Diterima utuh per shift
                     </div>
                   </div>
                   <div style={{ fontSize: '1.45rem', fontWeight: 900, color: '#15803d' }}>

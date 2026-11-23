@@ -101,11 +101,6 @@ export default function RekapHarian({ rows, labaLengkap }: Props) {
             </span>
           )}
         </h2>
-        {rows.length > 0 && (
-          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-            Centang baris tanggal untuk hitung subtotal &amp; ekspor Excel
-          </span>
-        )}
       </div>
 
       {rows.length === 0 ? (
@@ -116,7 +111,8 @@ export default function RekapHarian({ rows, labaLengkap }: Props) {
         </div>
       ) : (
         <>
-          <div className="table-wrapper">
+          {/* Desktop Table */}
+          <div className="table-wrapper rep-desktop-only">
             <table className="table" style={{ fontSize: 'var(--text-xs)', whiteSpace: 'nowrap' }}>
               <caption style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
                 Rekap omzet, laba, bagi hasil karyawan, dan biaya per hari (zona waktu WIB)
@@ -218,6 +214,67 @@ export default function RekapHarian({ rows, labaLengkap }: Props) {
                 </tr>
               </tfoot>
             </table>
+          </div>
+
+          {/* Mobile Daily Cards */}
+          <div className="rep-mobile-only" style={{ padding: '10px 12px' }}>
+            {rows.map((r) => {
+              const bagiHasil = r.alokasiGajiKaryawan ?? Math.round(r.labaKotor * 0.5);
+              return (
+                <div key={r.date} className="rep-mcard">
+                  <div className="rep-mcard__top">
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a' }}>
+                        {formatTanggalWib(r.date)}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                        {r.txCount} tx{r.voidCount > 0 ? ` · ${r.voidCount} void` : ''}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
+                        {formatRupiah(r.omzet)}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: profitColor(r.labaBersih), fontVariantNumeric: 'tabular-nums' }}>
+                        Toko {formatRupiah(r.labaBersih)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rep-mcard__grid">
+                    <div>
+                      <div className="rep-mcard__k">Tunai / QRIS</div>
+                      <div className="rep-mcard__v" style={{ fontSize: '0.72rem' }}>
+                        {formatRupiah(r.omzetCash)} / {formatRupiah(r.omzetQris)}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="rep-mcard__k">Laba Kotor / Gaji 50%</div>
+                      <div className="rep-mcard__v" style={{ fontSize: '0.72rem', color: 'var(--color-primary)' }}>
+                        {formatRupiah(r.labaKotor)} / {formatRupiah(bagiHasil)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <div
+              className="rep-mcard"
+              style={{ background: '#f8fafc', borderColor: '#cbd5e1' }}
+            >
+              <div className="rep-mcard__top">
+                <div style={{ fontWeight: 800, fontSize: '0.82rem', color: '#0f172a' }}>
+                  TOTAL ({rows.length} hari · {totals.txCount} tx)
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f172a' }}>
+                    {formatRupiah(totals.omzet)}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 800, color: profitColor(totals.labaBersih) }}>
+                    Toko {formatRupiah(totals.labaBersih)}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <SelectedRowsBar

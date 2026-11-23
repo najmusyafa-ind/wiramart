@@ -194,68 +194,38 @@ export default function TransaksiQrisPanel({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
-      {/* 1. Strip Ringkasan Metode Pembayaran */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))',
-          gap: 'var(--space-3)',
-        }}
-      >
+      {/* 1. Ringkasan Singkat Pembayaran */}
+      <div className="rep-kpi-grid rep-kpi-grid--3" style={{ marginBottom: 0 }}>
         {[
           {
-            label: 'Total QRIS (Bu Dyah)',
+            label: 'QRIS (Bu Dyah)',
             value: formatRp(summary.amountQris),
-            sub: `${summary.countQris} transaksi QRIS`,
+            sub: `${summary.countQris} tx`,
             color: '#0369a1',
-            bg: '#f0f9ff',
-            border: '#bae6fd',
-            icon: <QrCode size={16} />,
+            icon: <QrCode size={15} />,
           },
           {
-            label: 'Total Tunai (Cash)',
+            label: 'Tunai',
             value: formatRp(summary.amountCash),
-            sub: `${summary.countCash} transaksi tunai`,
+            sub: `${summary.countCash} tx`,
             color: '#15803d',
-            bg: '#f0fdf4',
-            border: '#bbf7d0',
-            icon: <Banknote size={16} />,
+            icon: <Banknote size={15} />,
           },
           {
-            label: 'Transaksi Valid',
-            value: `${summary.totalCount.toLocaleString('id-ID')} struk`,
-            sub: `Periode ${periodLabel}`,
-            color: '#4338ca',
-            bg: '#eef2ff',
-            border: '#c7d2fe',
-            icon: <Receipt size={16} />,
-          },
-          {
-            label: 'Transaksi Void',
-            value: `${summary.countVoid} struk`,
-            sub: summary.voidAmount > 0 ? formatRp(summary.voidAmount) : 'Tidak ada pembatalan',
-            color: summary.countVoid > 0 ? '#dc2626' : '#64748b',
-            bg: summary.countVoid > 0 ? '#fef2f2' : '#f8fafc',
-            border: summary.countVoid > 0 ? '#fecaca' : '#e2e8f0',
-            icon: <AlertTriangle size={16} />,
+            label: 'Total Struk',
+            value: `${summary.totalCount.toLocaleString('id-ID')} valid`,
+            sub: summary.countVoid > 0 ? `${summary.countVoid} void (${formatRp(summary.voidAmount)})` : '0 void',
+            color: summary.countVoid > 0 ? '#dc2626' : '#0f172a',
+            icon: <Receipt size={15} />,
           },
         ].map((card) => (
-          <div
-            key={card.label}
-            className="card"
-            style={{
-              padding: '12px 14px',
-              background: card.bg,
-              border: `1px solid ${card.border}`,
-              borderRadius: 12,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: card.color, marginBottom: 4 }}>
-              {card.icon}
-              <span style={{ fontSize: '0.74rem', fontWeight: 700 }}>{card.label}</span>
+          <div key={card.label} className="rep-kpi">
+            <div className="rep-kpi__top">
+              <span className="rep-kpi__label">{card.label}</span>
+              <span style={{ color: card.color }}>{card.icon}</span>
             </div>
-            <div style={{ fontSize: '1.1rem', fontWeight: 800, color: card.color }}>{card.value}</div>
-            <div style={{ fontSize: '0.7rem', color: '#475569', marginTop: 2 }}>{card.sub}</div>
+            <div className="rep-kpi__val" style={{ color: card.color }}>{card.value}</div>
+            <div className="rep-kpi__sub">{card.sub}</div>
           </div>
         ))}
       </div>
@@ -272,27 +242,25 @@ export default function TransaksiQrisPanel({
             gap: 8,
           }}
         >
-          <div>
-            <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
-              <QrCode size={16} style={{ color: '#0369a1' }} aria-hidden="true" />
-              <span>Rekap QRIS Harian (Cek Cepat Mutasi Bu Dyah)</span>
-            </h2>
-            <p style={{ margin: '2px 0 0', fontSize: '0.73rem', color: 'var(--color-text-muted)' }}>
-              Klik tanggal untuk melihat rincian nominal QRIS per jam agar mudah dicocokkan dengan HP atau grup bukti QRIS.
-            </p>
-          </div>
-          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#0369a1' }}>
-            {qrisDailyRows.length} hari ada transaksi QRIS
+          <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+            <QrCode size={16} style={{ color: '#0369a1' }} aria-hidden="true" />
+            <span>QRIS Harian (Bu Dyah)</span>
+          </h2>
+          <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#0369a1' }}>
+            {qrisDailyRows.length} hari · klik baris untuk jam
           </span>
         </div>
 
-        <div className="card-body" style={{ padding: 0, overflowX: 'auto' }}>
+        <div className="card-body" style={{ padding: 0 }}>
           {qrisDailyRows.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 'var(--space-6)', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
               Belum ada transaksi QRIS pada periode ini.
             </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
+            <>
+              {/* Desktop QRIS Table */}
+              <div className="rep-desktop-only" style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-border)', background: '#f8fafc' }}>
                   <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '0.75rem', color: '#475569' }}>Tanggal</th>
@@ -394,9 +362,76 @@ export default function TransaksiQrisPanel({
                       )}
                     </Fragment>
                   );
+                  })}
+                </tbody>
+              </table>
+              </div>
+
+              {/* Mobile QRIS Cards */}
+              <div className="rep-mobile-only" style={{ padding: '10px 12px' }}>
+                {qrisDailyRows.map((d) => {
+                  const isOpen = expandedQrisDate === d.date;
+                  const hourly = hourlyCache[d.date];
+                  const isLoadingHourly = hourlyLoadingDate === d.date;
+                  return (
+                    <div
+                      key={d.date}
+                      className="rep-mcard"
+                      onClick={() => handleToggleQrisDate(d.date)}
+                      style={{ cursor: 'pointer', borderColor: isOpen ? '#0284c7' : '#e2e8f0' }}
+                    >
+                      <div className="rep-mcard__top">
+                        <div>
+                          <div style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a' }}>{formatTanggalWib(d.date)}</div>
+                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                            {d.txCount} tx · Tunai {formatRp(d.omzetCash)}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0369a1' }}>{formatRp(d.omzetQris)}</div>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: '0.7rem', fontWeight: 700, color: '#0369a1' }}>
+                            {isOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                            {isOpen ? 'Tutup' : 'Per Jam'}
+                          </span>
+                        </div>
+                      </div>
+                      {isOpen && (
+                        <div style={{ paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
+                          {isLoadingHourly ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: '#64748b' }}>
+                              <Loader2 size={13} className="spin-icon" /> Memuat per jam...
+                            </div>
+                          ) : !hourly || hourly.length === 0 ? (
+                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Tidak ada rincian jam.</div>
+                          ) : (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                              {hourly.map((h) => (
+                                <span
+                                  key={h.jam}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 5,
+                                    padding: '4px 8px',
+                                    borderRadius: 8,
+                                    background: '#f0f9ff',
+                                    border: '1px solid #bae6fd',
+                                    fontSize: '0.72rem',
+                                  }}
+                                >
+                                  <span style={{ color: '#475569', fontWeight: 600 }}>{h.jam}</span>
+                                  <strong style={{ color: '#0369a1' }}>{formatRp(h.totalQris)}</strong>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
                 })}
-              </tbody>
-            </table>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -423,7 +458,7 @@ export default function TransaksiQrisPanel({
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <div className="rep-chip-bar" style={{ flex: '1 1 auto' }}>
               {(
                 [
                   { id: 'ALL', label: 'Semua' },
@@ -436,16 +471,7 @@ export default function TransaksiQrisPanel({
                   key={m.id}
                   type="button"
                   onClick={() => setMethodFilter(m.id)}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: 99,
-                    border: methodFilter === m.id ? '1.5px solid #0369a1' : '1px solid var(--color-border)',
-                    background: methodFilter === m.id ? '#f0f9ff' : '#ffffff',
-                    color: methodFilter === m.id ? '#0369a1' : '#475569',
-                    fontSize: '0.76rem',
-                    fontWeight: methodFilter === m.id ? 700 : 500,
-                    cursor: 'pointer',
-                  }}
+                  className={`rep-chip${methodFilter === m.id ? ' active' : ''}`}
                 >
                   {m.label}
                 </button>
@@ -455,35 +481,36 @@ export default function TransaksiQrisPanel({
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'COMPLETED' | 'VOID')}
                 className="form-input"
-                style={{ width: 'auto', minHeight: 34, padding: '4px 10px', fontSize: '0.76rem' }}
+                style={{ width: 'auto', minHeight: 36, padding: '4px 10px', fontSize: '0.76rem', flexShrink: 0 }}
               >
                 <option value="ALL">Semua Status</option>
-                <option value="COMPLETED">Valid (OK)</option>
-                <option value="VOID">Void saja</option>
+                <option value="COMPLETED">Valid</option>
+                <option value="VOID">Void</option>
               </select>
             </div>
 
-            <div className="form-input-icon" style={{ minWidth: 220, flex: '1 1 220px', maxWidth: 320 }}>
+            <div className="form-input-icon" style={{ minWidth: 200, flex: '1 1 200px', maxWidth: 320 }}>
               <Search size={14} className="form-input-icon__icon" aria-hidden="true" />
               <input
                 type="search"
                 className="form-input form-input-icon__input"
-                placeholder="Cari nomor struk atau kasir..."
+                placeholder="Cari struk / kasir..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ minHeight: 36, fontSize: '0.82rem' }}
+                style={{ minHeight: 38, fontSize: '0.84rem' }}
               />
             </div>
           </div>
         </div>
 
-        <div className="card-body" style={{ padding: 0, overflowX: 'auto' }}>
+        <div className="card-body" style={{ padding: 0 }}>
           {filteredTransactions.length === 0 ? (
             <p style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
-              Tidak ada transaksi yang cocok dengan filter ini.
+              Tidak ada transaksi pada filter ini.
             </p>
           ) : (
             <>
+              <div className="rep-desktop-only" style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--color-border)', background: '#f8fafc' }}>
@@ -647,6 +674,74 @@ export default function TransaksiQrisPanel({
                   })}
                 </tbody>
               </table>
+              </div>
+
+              {/* Mobile Receipt List */}
+              <div className="rep-mobile-only" style={{ padding: '10px 12px' }}>
+                {filteredTransactions.map((t) => (
+                  <div
+                    key={t.id}
+                    className="rep-mcard"
+                    style={{ opacity: t.status === 'VOID' ? 0.6 : 1 }}
+                  >
+                    <div className="rep-mcard__top">
+                      <div>
+                        <div style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.8rem', color: '#0f172a' }}>
+                          {t.invoiceNumber}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                          {formatDateTimeWib(t.createdAt)} · {t.employeeName}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f172a', fontVariantNumeric: 'tabular-nums' }}>
+                          {formatRp(t.grossAmount)}
+                        </div>
+                        <span
+                          style={{
+                            display: 'inline-block',
+                            padding: '1px 7px',
+                            borderRadius: 99,
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            background: t.paymentMethod === 'CASH' ? '#dcfce7' : t.paymentMethod === 'QRIS' ? '#e0f2fe' : '#eef2ff',
+                            color: t.paymentMethod === 'CASH' ? '#15803d' : t.paymentMethod === 'QRIS' ? '#0369a1' : '#4338ca',
+                          }}
+                        >
+                          {t.paymentMethod}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid #f1f5f9' }}>
+                      {t.status === 'VOID' ? (
+                        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#dc2626' }}>
+                          VOID{t.voidReason ? ` · ${t.voidReason}` : ''}
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#15803d' }}>Valid</span>
+                      )}
+                      {t.status === 'COMPLETED' && (
+                        <button
+                          type="button"
+                          onClick={() => onVoidRequest(t)}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: 6,
+                            border: '1px solid #fecaca',
+                            background: '#fef2f2',
+                            color: '#dc2626',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Void
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
 
               <SelectedRowsBar
                 selectedCount={selectedTxs.length}

@@ -71,6 +71,7 @@ export default function LaporanMutasiStokSection() {
   const [startDate, setStartDate] = useState(initialRangeDate);
   const [endDate, setEndDate] = useState(initialRangeDate);
   const [preset, setPreset] = useState<'today' | '7days' | 'month' | 'custom'>('today');
+  const [showCustomDates, setShowCustomDates] = useState(false);
   const [search, setSearch] = useState('');
 
   const [loading, setLoading] = useState(true);
@@ -375,46 +376,40 @@ export default function LaporanMutasiStokSection() {
           gap: 14,
         }}
       >
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Boxes size={22} color="#0f172a" />
-              Laporan Mutasi Stok Terintegrasi (Gudang &amp; Kasir)
-            </h2>
-            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
-              Rekonsiliasi inventaris stok awal, kiriman supplier yang disetujui, penjualan kasir, obral promo, dan pemusnahan FEFO.
-            </p>
-          </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <h2 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Boxes size={18} color="#0f172a" />
+            <span>Mutasi Stok</span>
+          </h2>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               type="button"
               onClick={handleExportExcel}
               disabled={!reportData || reportData.items.length === 0 || exportingExcel}
               style={{
-                padding: '8px 16px',
+                padding: '7px 14px',
                 borderRadius: 8,
                 border: 'none',
                 background: '#0f172a',
                 color: '#ffffff',
-                fontSize: '0.8rem',
-                fontWeight: 800,
+                fontSize: '0.78rem',
+                fontWeight: 700,
                 cursor: exportingExcel || !reportData || reportData.items.length === 0 ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
-                boxShadow: '0 2px 6px rgba(15,23,42,0.25)',
+                gap: 6,
               }}
             >
               {exportingExcel ? (
                 <>
-                  <RefreshCw size={14} className="animate-spin" />
-                  <span>Membuat Excel...</span>
+                  <RefreshCw size={13} className="animate-spin" />
+                  <span>Membuat...</span>
                 </>
               ) : (
                 <>
-                  <FileSpreadsheet size={15} color="#38bdf8" />
-                  <span>Unduh Excel (.xlsx)</span>
+                  <FileSpreadsheet size={14} color="#38bdf8" />
+                  <span>Excel</span>
                 </>
               )}
             </button>
@@ -423,9 +418,8 @@ export default function LaporanMutasiStokSection() {
               type="button"
               onClick={handleExportCsv}
               disabled={!reportData || reportData.items.length === 0}
-              title="Unduh format teks CSV cadangan"
               style={{
-                padding: '8px 12px',
+                padding: '7px 11px',
                 borderRadius: 8,
                 border: '1px solid #cbd5e1',
                 background: '#ffffff',
@@ -445,187 +439,145 @@ export default function LaporanMutasiStokSection() {
               type="button"
               onClick={() => fetchReport(startDate, endDate)}
               style={{
-                padding: '8px 14px',
+                padding: '7px 12px',
                 borderRadius: 8,
                 border: '1px solid #cbd5e1',
                 background: '#f8fafc',
                 color: '#0f172a',
-                fontSize: '0.8rem',
+                fontSize: '0.78rem',
                 fontWeight: 700,
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
+                gap: 5,
               }}
             >
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Segarkan
+              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Segarkan
             </button>
           </div>
         </div>
 
         {/* Filter Controls */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingTop: 6, borderTop: '1px solid #f1f5f9' }}>
-          {/* Preset Buttons */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {[
-              { id: 'today', label: 'Hari Ini' },
-              { id: '7days', label: '7 Hari Terakhir' },
-              { id: 'month', label: 'Bulan Ini' },
-            ].map((p) => {
-              const active = preset === p.id;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => handlePresetChange(p.id as 'today' | '7days' | 'month')}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: 20,
-                    fontSize: '0.78rem',
-                    fontWeight: active ? 800 : 500,
-                    border: active ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                    background: active ? '#e0f2fe' : '#ffffff',
-                    color: active ? '#0369a1' : '#475569',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 6, borderTop: '1px solid #f1f5f9' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div className="rep-chip-bar" style={{ maxWidth: '100%' }}>
+              {[
+                { id: 'today', label: 'Hari Ini' },
+                { id: '7days', label: '7 Hari' },
+                { id: 'month', label: 'Bulan Ini' },
+              ].map((p) => {
+                const active = preset === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      setShowCustomDates(false);
+                      handlePresetChange(p.id as 'today' | '7days' | 'month');
+                    }}
+                    className={`rep-chip${active ? ' active' : ''}`}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setShowCustomDates((v) => !v)}
+                className={`rep-chip${showCustomDates || preset === 'custom' ? ' active' : ''}`}
+              >
+                <Calendar size={12} />
+                <span>Tanggal</span>
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '6px 10px', flex: '1 1 180px', maxWidth: 280 }}>
+              <Search size={14} color="#64748b" />
+              <input
+                type="text"
+                placeholder="Cari produk..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') fetchReport(startDate, endDate, search);
+                }}
+                style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: '0.82rem', width: '100%' }}
+              />
+            </div>
           </div>
 
-          {/* Date Picker Custom */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem' }}>
-            <Calendar size={15} color="#64748b" />
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => {
-                setStartDate(e.target.value);
-                setPreset('custom');
-              }}
-              style={{
-                padding: '5px 8px',
-                borderRadius: 6,
-                border: '1px solid #cbd5e1',
-                fontSize: '0.78rem',
-              }}
-            />
-            <span style={{ color: '#94a3b8' }}>s/d</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => {
-                setEndDate(e.target.value);
-                setPreset('custom');
-              }}
-              style={{
-                padding: '5px 8px',
-                borderRadius: 6,
-                border: '1px solid #cbd5e1',
-                fontSize: '0.78rem',
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => fetchReport(startDate, endDate)}
-              style={{
-                padding: '5px 10px',
-                borderRadius: 6,
-                border: '1px solid #cbd5e1',
-                background: '#f8fafc',
-                fontSize: '0.78rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              Terapkan
-            </button>
-          </div>
-
-          {/* Search Input */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8, padding: '5px 10px', minWidth: 200 }}>
-            <Search size={14} color="#64748b" />
-            <input
-              type="text"
-              placeholder="Cari produk..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') fetchReport(startDate, endDate, search);
-              }}
-              style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: '0.78rem', width: '100%' }}
-            />
-          </div>
+          {showCustomDates && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              <input
+                type="date"
+                className="form-input"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setPreset('custom');
+                }}
+                style={{ width: 145, minHeight: 34, padding: '4px 8px', fontSize: '0.78rem' }}
+              />
+              <span style={{ color: '#94a3b8', fontSize: '0.78rem' }}>s/d</span>
+              <input
+                type="date"
+                className="form-input"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setPreset('custom');
+                }}
+                style={{ width: 145, minHeight: 34, padding: '4px 8px', fontSize: '0.78rem' }}
+              />
+              <button
+                type="button"
+                onClick={() => fetchReport(startDate, endDate)}
+                className="btn btn-primary btn-sm"
+              >
+                Terapkan
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ── KPI METRICS SUMMARY CARDS ── */}
+      {/* ── 4 KARTU RINGKAS MUTASI STOK (2x2 MOBILE) ── */}
       {summary && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-          {/* Card 1: Barang Masuk */}
-          <div style={{ background: '#ffffff', borderRadius: 12, border: '1px solid #bbf7d0', padding: '14px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#166534', textTransform: 'uppercase' }}>
-                Barang Masuk (ACC)
-              </span>
-              <PackageCheck size={18} color="#15803d" />
+        <div className="rep-kpi-grid" style={{ marginBottom: 0 }}>
+          <div className="rep-kpi">
+            <div className="rep-kpi__top">
+              <span className="rep-kpi__label">Barang Masuk</span>
+              <PackageCheck size={15} color="#15803d" />
             </div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#15803d', marginTop: 4 }}>
-              +{summary.totalQtyIn} <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>pcs</span>
-            </div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>
-              Total Nilai HPP: <strong style={{ color: '#0f172a' }}>{formatRupiah(summary.totalHppIn)}</strong>
-            </div>
+            <div className="rep-kpi__val" style={{ color: '#15803d' }}>+{summary.totalQtyIn} pcs</div>
+            <div className="rep-kpi__sub">HPP {formatRupiah(summary.totalHppIn)}</div>
           </div>
 
-          {/* Card 2: Terjual di Kasir */}
-          <div style={{ background: '#ffffff', borderRadius: 12, border: '1px solid #bfdbfe', padding: '14px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#1e40af', textTransform: 'uppercase' }}>
-                Terjual di Kasir
-              </span>
-              <TrendingUp size={18} color="#2563eb" />
+          <div className="rep-kpi">
+            <div className="rep-kpi__top">
+              <span className="rep-kpi__label">Terjual</span>
+              <TrendingUp size={15} color="#2563eb" />
             </div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#1d4ed8', marginTop: 4 }}>
-              -{summary.totalQtyOut} <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>pcs</span>
-            </div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>
-              Omzet: <strong style={{ color: '#0f172a' }}>{formatRupiah(summary.totalGrossOut)}</strong> ({summary.totalDiscountedQtyOut} pcs obral)
-            </div>
+            <div className="rep-kpi__val" style={{ color: '#1d4ed8' }}>-{summary.totalQtyOut} pcs</div>
+            <div className="rep-kpi__sub">Omzet {formatRupiah(summary.totalGrossOut)}</div>
           </div>
 
-          {/* Card 3: Kerugian Write-Off (FEFO Basi/Musnah) */}
-          <div style={{ background: '#ffffff', borderRadius: 12, border: '1px solid #fecaca', padding: '14px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#991b1b', textTransform: 'uppercase' }}>
-                Kerugian Write-Off
-              </span>
-              <Trash2 size={18} color="#dc2626" />
+          <div className="rep-kpi">
+            <div className="rep-kpi__top">
+              <span className="rep-kpi__label">Musnah</span>
+              <Trash2 size={15} color="#dc2626" />
             </div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#b91c1c', marginTop: 4 }}>
-              -{summary.totalDestroyedQty} <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>pcs</span>
-            </div>
-            <div style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: 2, fontWeight: 700 }}>
-              Nilai Kerugian HPP: {formatRupiah(summary.totalLossAmount)}
-            </div>
+            <div className="rep-kpi__val" style={{ color: '#b91c1c' }}>-{summary.totalDestroyedQty} pcs</div>
+            <div className="rep-kpi__sub" style={{ color: '#dc2626' }}>Rugi {formatRupiah(summary.totalLossAmount)}</div>
           </div>
 
-          {/* Card 4: Retur Supplier */}
-          <div style={{ background: '#ffffff', borderRadius: 12, border: '1px solid #fed7aa', padding: '14px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#9a3412', textTransform: 'uppercase' }}>
-                Retur ke Supplier
-              </span>
-              <ArrowUpDown size={18} color="#ea580c" />
+          <div className="rep-kpi">
+            <div className="rep-kpi__top">
+              <span className="rep-kpi__label">Stok Akhir</span>
+              <ArrowUpDown size={15} color="#ea580c" />
             </div>
-            <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#c2410c', marginTop: 4 }}>
-              -{summary.totalReturnedQty} <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>pcs</span>
-            </div>
-            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>
-              Total Stok Akhir Toko: <strong style={{ color: '#0f172a' }}>{summary.totalFinalStock} pcs</strong>
-            </div>
+            <div className="rep-kpi__val">{summary.totalFinalStock} pcs</div>
+            <div className="rep-kpi__sub">Retur -{summary.totalReturnedQty} pcs</div>
           </div>
         </div>
       )}
@@ -648,12 +600,12 @@ export default function LaporanMutasiStokSection() {
           overflow: 'hidden',
         }}
       >
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.85rem', fontWeight: 800, color: '#1e293b' }}>
-            Rincian Mutasi Inventaris Per Produk ({reportData?.items.length ?? 0} Produk)
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#1e293b' }}>
+            Daftar Produk ({reportData?.items.length ?? 0})
           </span>
           <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-            Periode: <strong>{startDate}</strong> s/d <strong>{endDate}</strong>
+            {startDate} s/d {endDate}
           </span>
         </div>
 
@@ -670,21 +622,23 @@ export default function LaporanMutasiStokSection() {
             </p>
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <>
+          {/* Desktop Table (Light Modern Header) */}
+          <div className="rep-desktop-only" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
               <thead>
-                <tr style={{ background: '#18181b', color: '#ffffff', textAlign: 'left', borderBottom: '2px solid #000000' }}>
-                  <th style={{ padding: '11px 12px', width: 42, textAlign: 'center', color: '#ffffff', fontWeight: 800 }}>No</th>
-                  <th style={{ padding: '11px 12px', minWidth: 170, color: '#ffffff', fontWeight: 800 }}>Produk</th>
-                  <th style={{ padding: '11px 12px', color: '#ffffff', fontWeight: 800 }}>Kategori</th>
-                  <th style={{ padding: '11px 10px', textAlign: 'center', background: '#27272a', color: '#ffffff', fontWeight: 800 }}>Stok Awal</th>
-                  <th style={{ padding: '11px 10px', textAlign: 'center', color: '#86efac', fontWeight: 800 }}>Masuk (+)</th>
-                  <th style={{ padding: '11px 10px', textAlign: 'center', color: '#93c5fd', fontWeight: 800 }}>Keluar Kasir (-)</th>
-                  <th style={{ padding: '11px 10px', textAlign: 'center', color: '#fcd34d', fontWeight: 800 }}>Obral FEFO</th>
-                  <th style={{ padding: '11px 10px', textAlign: 'center', color: '#fca5a5', fontWeight: 800 }}>Musnah (-)</th>
-                  <th style={{ padding: '11px 10px', textAlign: 'center', color: '#fdba74', fontWeight: 800 }}>Retur (-)</th>
-                  <th style={{ padding: '11px 12px', textAlign: 'center', fontWeight: 900, background: '#27272a', color: '#4ade80' }}>
-                    Stok Akhir (=)
+                <tr style={{ background: '#f8fafc', color: '#475569', textAlign: 'left', borderBottom: '1.5px solid #e2e8f0' }}>
+                  <th style={{ padding: '10px 12px', width: 42, textAlign: 'center', fontWeight: 700, fontSize: '0.72rem' }}>No</th>
+                  <th style={{ padding: '10px 12px', minWidth: 170, fontWeight: 700, fontSize: '0.72rem' }}>Produk</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 700, fontSize: '0.72rem' }}>Kategori</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 700, fontSize: '0.72rem' }}>Awal</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center', color: '#15803d', fontWeight: 700, fontSize: '0.72rem' }}>Masuk</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center', color: '#1d4ed8', fontWeight: 700, fontSize: '0.72rem' }}>Terjual</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center', color: '#b45309', fontWeight: 700, fontSize: '0.72rem' }}>Obral</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center', color: '#dc2626', fontWeight: 700, fontSize: '0.72rem' }}>Musnah</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center', color: '#c2410c', fontWeight: 700, fontSize: '0.72rem' }}>Retur</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 800, color: '#166534', background: '#f0fdf4', fontSize: '0.72rem' }}>
+                    Stok Akhir
                   </th>
                 </tr>
               </thead>
@@ -744,29 +698,29 @@ export default function LaporanMutasiStokSection() {
               </tbody>
               {summary && (
                 <tfoot>
-                  <tr style={{ background: '#e4e4e7', borderTop: '2px solid #18181b', borderBottom: '3px double #18181b', fontWeight: 800 }}>
-                    <td colSpan={3} style={{ padding: '12px 14px', textAlign: 'left', color: '#09090b', fontSize: '0.82rem' }}>
-                      TOTAL SELURUH PRODUK ({summary.totalProducts} Item)
+                  <tr style={{ background: '#f8fafc', borderTop: '2px solid #e2e8f0', fontWeight: 800 }}>
+                    <td colSpan={3} style={{ padding: '11px 14px', textAlign: 'left', color: '#0f172a', fontSize: '0.8rem' }}>
+                      TOTAL ({summary.totalProducts} Produk)
                     </td>
-                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#09090b', fontSize: '0.82rem' }}>
+                    <td style={{ padding: '11px 10px', textAlign: 'center', color: '#0f172a' }}>
                       {summary.totalInitialStock}
                     </td>
-                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#15803d', fontSize: '0.82rem' }}>
+                    <td style={{ padding: '11px 10px', textAlign: 'center', color: '#15803d' }}>
                       +{summary.totalQtyIn}
                     </td>
-                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#1d4ed8', fontSize: '0.82rem' }}>
+                    <td style={{ padding: '11px 10px', textAlign: 'center', color: '#1d4ed8' }}>
                       -{summary.totalQtyOut}
                     </td>
-                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#b45309', fontSize: '0.82rem' }}>
-                      {summary.totalDiscountedQtyOut} pcs
+                    <td style={{ padding: '11px 10px', textAlign: 'center', color: '#b45309' }}>
+                      {summary.totalDiscountedQtyOut}
                     </td>
-                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#dc2626', fontSize: '0.82rem' }}>
+                    <td style={{ padding: '11px 10px', textAlign: 'center', color: '#dc2626' }}>
                       -{summary.totalDestroyedQty}
                     </td>
-                    <td style={{ padding: '12px 10px', textAlign: 'center', color: '#ea580c', fontSize: '0.82rem' }}>
+                    <td style={{ padding: '11px 10px', textAlign: 'center', color: '#c2410c' }}>
                       -{summary.totalReturnedQty}
                     </td>
-                    <td style={{ padding: '12px 12px', textAlign: 'center', background: '#dcfce7', color: '#14532d', fontSize: '0.85rem' }}>
+                    <td style={{ padding: '11px 12px', textAlign: 'center', background: '#f0fdf4', color: '#166534' }}>
                       {summary.totalFinalStock}
                     </td>
                   </tr>
@@ -774,6 +728,48 @@ export default function LaporanMutasiStokSection() {
               )}
             </table>
           </div>
+
+          {/* Mobile Stock Cards */}
+          <div className="rep-mobile-only" style={{ padding: '10px 12px' }}>
+            {reportData.items.map((row) => (
+              <div key={row.productId} className="rep-mcard">
+                <div className="rep-mcard__top">
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '0.84rem', color: '#0f172a' }}>{row.productName}</div>
+                    <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{row.categoryName}</div>
+                  </div>
+                  <span style={{ padding: '3px 9px', borderRadius: 99, background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#15803d', fontWeight: 800, fontSize: '0.76rem', whiteSpace: 'nowrap' }}>
+                    Akhir: {row.finalStock} {row.unit}
+                  </span>
+                </div>
+                <div className="rep-mcard__grid rep-mcard__grid--4">
+                  <div>
+                    <div className="rep-mcard__k">Awal</div>
+                    <div className="rep-mcard__v">{row.initialStock}</div>
+                  </div>
+                  <div>
+                    <div className="rep-mcard__k">Masuk</div>
+                    <div className="rep-mcard__v" style={{ color: row.qtyIn > 0 ? '#15803d' : '#94a3b8' }}>
+                      {row.qtyIn > 0 ? `+${row.qtyIn}` : '0'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="rep-mcard__k">Terjual</div>
+                    <div className="rep-mcard__v" style={{ color: row.qtyOut > 0 ? '#1d4ed8' : '#94a3b8' }}>
+                      {row.qtyOut > 0 ? `-${row.qtyOut}` : '0'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="rep-mcard__k">Musnah/Retur</div>
+                    <div className="rep-mcard__v" style={{ color: row.qtyDestroyed + row.qtyReturned > 0 ? '#dc2626' : '#94a3b8' }}>
+                      {row.qtyDestroyed + row.qtyReturned > 0 ? `-${row.qtyDestroyed + row.qtyReturned}` : '0'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          </>
         )}
       </div>
     </div>

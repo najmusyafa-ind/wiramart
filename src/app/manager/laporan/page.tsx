@@ -5,9 +5,6 @@ import {
   BarChart3,
   TrendingUp,
   DollarSign,
-  ShoppingBag,
-  CreditCard,
-  Banknote,
   Calendar,
   Download,
   AlertTriangle,
@@ -15,7 +12,6 @@ import {
   Loader2,
   FileText,
   QrCode,
-  Receipt,
   Wallet,
   Users,
   Users2,
@@ -135,9 +131,7 @@ const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: 'monthly', label: 'Bulan Ini' },
   { key: 'october', label: 'Oktober' },
   { key: 'november', label: 'November' },
-  { key: 'oct_nov', label: 'Oktober + November' },
-  { key: 'semi_annual', label: '6 Bulan' },
-  { key: 'all', label: 'Keseluruhan' },
+  { key: 'all', label: 'Semua' },
 ];
 
 // ─────────────────────────────────────────────────────────────
@@ -326,10 +320,11 @@ function VoidModal({ transaction, onClose, onSuccess }: VoidModalProps) {
 export default function LaporanPage() {
   const uid = useId();
   const [mainTab, setMainTab] = useState<'keuangan' | 'shift_gaji' | 'transaksi_qris' | 'stok_log'>('keuangan');
-  const [shiftSubTab, setShiftSubTab] = useState<'rekap_shift' | 'rekap_kasir'>('rekap_shift');
+  const [shiftSubTab, setShiftSubTab] = useState<'slip_shift' | 'harian_shift' | 'rekap_kasir'>('slip_shift');
   const [stokLogSubTab, setStokLogSubTab] = useState<'mutasi_stok' | 'log_sistem'>('mutasi_stok');
   const [period, setPeriod] = useState<PeriodKey>('daily');
   const [useCustomDates, setUseCustomDates] = useState(false);
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
   const [draftFrom, setDraftFrom] = useState(() => `${todayWibSlug().slice(0, 7)}-01`);
   const [draftTo, setDraftTo] = useState(() => todayWibSlug());
   const [appliedFrom, setAppliedFrom] = useState(() => `${todayWibSlug().slice(0, 7)}-01`);
@@ -363,7 +358,7 @@ export default function LaporanPage() {
             setMainTab('transaksi_qris');
           } else if (tabParam === 'shift_gaji' || tabParam === 'rekap_shift') {
             setMainTab('shift_gaji');
-            setShiftSubTab('rekap_shift');
+            setShiftSubTab('slip_shift');
           } else if (tabParam === 'rekap_kasir') {
             setMainTab('shift_gaji');
             setShiftSubTab('rekap_kasir');
@@ -565,144 +560,163 @@ export default function LaporanPage() {
       />
 
       <div>
-        {/* ── HEADER MOBILE-FIRST ── */}
+        {/* ── HEADER RINGKAS ── */}
         <div
           style={{
             display: 'flex',
-            alignItems: 'flex-start',
+            alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 12,
-            marginBottom: 12,
+            flexWrap: 'wrap',
+            gap: 10,
+            marginBottom: 14,
           }}
         >
-          {/* Judul + Tanggal */}
           <div>
             <h1
               className="page-title"
-              style={{ margin: 0, fontSize: 'clamp(1.15rem, 4vw, 1.55rem)', fontWeight: 800 }}
+              style={{ margin: 0, fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800 }}
             >
-              Laporan Keuangan
+              Laporan
             </h1>
             <p
               className="page-subtitle"
-              style={{ margin: '2px 0 0', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}
+              style={{ margin: '2px 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}
             >
               {data?.label ?? '—'}
               {data?.rangeStartDate && data?.rangeEndDate ? ` · ${data.rangeStartDate} s/d ${data.rangeEndDate}` : ''}
             </p>
           </div>
 
-          {/* Export Dropdown — tampil ikonis di HP, teks di desktop */}
-          <div style={{ position: 'relative', flexShrink: 0 }} id={`${uid}-export-wrapper`}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             <button
-              id={`${uid}-export-toggle`}
+              id={`${uid}-tutup-buku`}
               type="button"
-              onClick={() => {
-                const el = document.getElementById(`${uid}-export-menu`);
-                if (el) el.style.display = el.style.display === 'none' ? 'flex' : 'none';
-              }}
+              onClick={() => setShowTutupBuku(true)}
               style={{
-                display: 'flex',
+                display: 'inline-flex',
                 alignItems: 'center',
                 gap: 6,
-                padding: '8px 12px',
+                padding: '8px 13px',
                 borderRadius: 10,
-                border: '1.5px solid #16a34a',
-                background: '#f0fdf4',
-                color: '#15803d',
+                border: '1px solid hsl(217 91% 50%)',
+                background: 'hsl(217 91% 56%)',
+                color: '#ffffff',
                 fontSize: '0.8rem',
                 fontWeight: 700,
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
-                transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
               }}
-              aria-label="Pilih format ekspor Excel"
+              aria-label="Tutup Buku Hari Ini"
             >
-              <Download size={14} aria-hidden="true" />
-              <span>Export ▾</span>
+              <Lock size={14} aria-hidden="true" />
+              <span>Tutup Buku</span>
             </button>
 
-            {/* Dropdown panel — hidden by default */}
-            <div
-              id={`${uid}-export-menu`}
-              style={{
-                display: 'none',
-                flexDirection: 'column',
-                gap: 4,
-                position: 'absolute',
-                right: 0,
-                top: 'calc(100% + 6px)',
-                background: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: 12,
-                padding: 8,
-                minWidth: 210,
-                boxShadow: '0 8px 30px -4px rgba(0,0,0,0.12)',
-                zIndex: 100,
-              }}
-            >
+            <div style={{ position: 'relative' }} id={`${uid}-export-wrapper`}>
               <button
-                id={`${uid}-export-harian`}
+                id={`${uid}-export-toggle`}
                 type="button"
                 onClick={() => {
                   const el = document.getElementById(`${uid}-export-menu`);
-                  if (el) el.style.display = 'none';
-                  handleDownloadSkemaHarian();
+                  if (el) el.style.display = el.style.display === 'none' ? 'flex' : 'none';
                 }}
-                disabled={!data || exportHarianLoading}
                 style={{
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 8,
-                  padding: '10px 12px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: !data || exportHarianLoading ? '#f1f5f9' : '#f0fdf4',
-                  color: !data || exportHarianLoading ? '#94a3b8' : '#15803d',
-                  fontSize: '0.82rem',
+                  gap: 6,
+                  padding: '8px 12px',
+                  borderRadius: 10,
+                  border: '1px solid #16a34a',
+                  background: '#f0fdf4',
+                  color: '#15803d',
+                  fontSize: '0.8rem',
                   fontWeight: 700,
-                  cursor: !data || exportHarianLoading ? 'not-allowed' : 'pointer',
-                  textAlign: 'left',
-                  width: '100%',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
                 }}
-                aria-label="Unduh 1-Sheet Skema Harian Excel"
+                aria-label="Export Excel"
               >
-                {exportHarianLoading
-                  ? <><Loader2 size={13} className="spin-icon" /> Mengunduh...</>
-                  : <><span></span> 1-Sheet Harian (.xlsx)</>
-                }
+                <Download size={14} aria-hidden="true" />
+                <span>Export ▾</span>
               </button>
-              <button
-                id={`${uid}-export`}
-                type="button"
-                onClick={() => {
-                  const el = document.getElementById(`${uid}-export-menu`);
-                  if (el) el.style.display = 'none';
-                  handleExport();
-                }}
-                disabled={!data || exportLoading}
+
+              <div
+                id={`${uid}-export-menu`}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '10px 12px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: !data || exportLoading ? '#f1f5f9' : '#f8fafc',
-                  color: !data || exportLoading ? '#94a3b8' : '#334155',
-                  fontSize: '0.82rem',
-                  fontWeight: 700,
-                  cursor: !data || exportLoading ? 'not-allowed' : 'pointer',
-                  textAlign: 'left',
-                  width: '100%',
+                  display: 'none',
+                  flexDirection: 'column',
+                  gap: 4,
+                  position: 'absolute',
+                  right: 0,
+                  top: 'calc(100% + 6px)',
+                  background: '#ffffff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 12,
+                  padding: 8,
+                  minWidth: 195,
+                  boxShadow: '0 8px 30px -4px rgba(0,0,0,0.12)',
+                  zIndex: 100,
                 }}
-                aria-label="Export multi-sheet ke Excel"
               >
-                {exportLoading
-                  ? <><Loader2 size={13} className="spin-icon" /> Exporting...</>
-                  : <><span></span> Multi-Sheet Lengkap</>
-                }
-              </button>
+                <button
+                  id={`${uid}-export-harian`}
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById(`${uid}-export-menu`);
+                    if (el) el.style.display = 'none';
+                    handleDownloadSkemaHarian();
+                  }}
+                  disabled={!data || exportHarianLoading}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '9px 12px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: !data || exportHarianLoading ? '#f1f5f9' : '#f0fdf4',
+                    color: !data || exportHarianLoading ? '#94a3b8' : '#15803d',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    cursor: !data || exportHarianLoading ? 'not-allowed' : 'pointer',
+                    textAlign: 'left',
+                    width: '100%',
+                  }}
+                >
+                  {exportHarianLoading
+                    ? <><Loader2 size={13} className="spin-icon" /> Mengunduh...</>
+                    : 'Excel Harian (1 Sheet)'}
+                </button>
+                <button
+                  id={`${uid}-export`}
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById(`${uid}-export-menu`);
+                    if (el) el.style.display = 'none';
+                    handleExport();
+                  }}
+                  disabled={!data || exportLoading}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '9px 12px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: !data || exportLoading ? '#f1f5f9' : '#f8fafc',
+                    color: !data || exportLoading ? '#94a3b8' : '#334155',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    cursor: !data || exportLoading ? 'not-allowed' : 'pointer',
+                    textAlign: 'left',
+                    width: '100%',
+                  }}
+                >
+                  {exportLoading
+                    ? <><Loader2 size={13} className="spin-icon" /> Mengunduh...</>
+                    : 'Excel Lengkap (Multi-Sheet)'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -723,7 +737,7 @@ export default function LaporanPage() {
             <button
               type="button"
               onClick={() => setExportNotice('')}
-              aria-label="Tutup pemberitahuan ekspor"
+              aria-label="Tutup pemberitahuan"
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 4 }}
             >
               <X size={14} aria-hidden="true" />
@@ -731,85 +745,13 @@ export default function LaporanPage() {
           </div>
         )}
 
-        {/* ── TUTUP BUKU — Hero Action Card ── */}
-        <button
-          id={`${uid}-tutup-buku`}
-          type="button"
-          onClick={() => setShowTutupBuku(true)}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            padding: '13px 20px',
-            borderRadius: 12,
-            border: '1.5px solid hsl(217 91% 50%)',
-            background: 'linear-gradient(135deg, hsl(217 91% 60%), hsl(230 85% 58%))',
-            color: '#ffffff',
-            fontSize: '0.9rem',
-            fontWeight: 800,
-            cursor: 'pointer',
-            marginBottom: 14,
-            boxShadow: '0 4px 14px -2px hsl(217 91% 60% / 0.4)',
-            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-            letterSpacing: '0.01em',
-          }}
-          aria-label="Tutup Buku Finansial Harian (Locking Period)"
-        >
-          <Lock size={15} aria-hidden="true" />
-          <span>Tutup Buku Hari Ini</span>
-        </button>
-
-        {/* ─── MOBILE SCROLLABLE PILL TAB BAR ─── */}
-        <div
-          role="tablist"
-          aria-label="Pilih Jenis Laporan"
-          style={{
-            display: 'flex',
-            gap: 6,
-            marginBottom: 'var(--space-5)',
-            overflowX: 'auto',
-            flexWrap: 'nowrap',
-            scrollbarWidth: 'none',
-            paddingBottom: 4,
-            /* Fade hints at the trailing edge so user knows it's scrollable */
-            WebkitOverflowScrolling: 'touch',
-          }}
-        >
+        {/* ─── 4 TAB UTAMA (UNDERLINE MODERN) ─── */}
+        <div role="tablist" aria-label="Pilih Jenis Laporan" className="rep-tabs">
           {([
-            {
-              id: 'keuangan',
-              icon: <BarChart3 size={14} />,
-              label: 'Ringkasan Keuangan',
-              activeColor: '#166534',
-              activeBg: '#f0fdf4',
-              activeBorder: '#16a34a',
-            },
-            {
-              id: 'shift_gaji',
-              icon: <TrendingUp size={14} />,
-              label: 'Shift & Gaji',
-              activeColor: '#4338ca',
-              activeBg: '#eef2ff',
-              activeBorder: '#6366f1',
-            },
-            {
-              id: 'transaksi_qris',
-              icon: <QrCode size={14} />,
-              label: 'Transaksi & QRIS',
-              activeColor: '#0369a1',
-              activeBg: '#e0f2fe',
-              activeBorder: '#0284c7',
-            },
-            {
-              id: 'stok_log',
-              icon: <Boxes size={14} />,
-              label: 'Stok & Log',
-              activeColor: '#0f766e',
-              activeBg: '#f0fdfa',
-              activeBorder: '#0d9488',
-            },
+            { id: 'keuangan', icon: <BarChart3 size={15} />, label: 'Keuangan' },
+            { id: 'shift_gaji', icon: <TrendingUp size={15} />, label: 'Shift & Gaji' },
+            { id: 'transaksi_qris', icon: <QrCode size={15} />, label: 'Transaksi & QRIS' },
+            { id: 'stok_log', icon: <Boxes size={15} />, label: 'Stok & Log' },
           ] as const).map((tab) => {
             const isActive = mainTab === tab.id;
             return (
@@ -819,23 +761,7 @@ export default function LaporanPage() {
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => setMainTab(tab.id)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '9px 16px',
-                  borderRadius: 100,
-                  border: isActive ? `1.5px solid ${tab.activeBorder}` : '1.5px solid #e2e8f0',
-                  background: isActive ? tab.activeBg : '#f8fafc',
-                  color: isActive ? tab.activeColor : '#64748b',
-                  fontWeight: isActive ? 700 : 500,
-                  fontSize: '0.82rem',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                  transition: 'background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
-                  boxShadow: isActive ? `0 0 0 3px ${tab.activeBorder}22` : 'none',
-                }}
+                className={`rep-tab${isActive ? ' active' : ''}`}
               >
                 {tab.icon}
                 <span>{tab.label}</span>
@@ -846,101 +772,128 @@ export default function LaporanPage() {
 
         {mainTab === 'shift_gaji' ? (
           <div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => setShiftSubTab('rekap_shift')}
-                className={`btn btn-sm ${shiftSubTab === 'rekap_shift' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                <TrendingUp size={14} aria-hidden="true" />
-                <span>Rekap Shift &amp; Slip Gaji</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setShiftSubTab('rekap_kasir')}
-                className={`btn btn-sm ${shiftSubTab === 'rekap_kasir' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                <Users2 size={14} aria-hidden="true" />
-                <span>Performa Per Kasir</span>
-              </button>
+            <div style={{ marginBottom: 14 }}>
+              <div role="tablist" aria-label="Tampilan Shift dan Gaji" className="rep-seg">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={shiftSubTab === 'slip_shift'}
+                  onClick={() => setShiftSubTab('slip_shift')}
+                  className={`rep-seg-btn${shiftSubTab === 'slip_shift' ? ' active' : ''}`}
+                >
+                  <FileText size={14} aria-hidden="true" />
+                  <span>Slip Gaji Shift</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={shiftSubTab === 'harian_shift'}
+                  onClick={() => setShiftSubTab('harian_shift')}
+                  className={`rep-seg-btn${shiftSubTab === 'harian_shift' ? ' active' : ''}`}
+                >
+                  <Calendar size={14} aria-hidden="true" />
+                  <span>Harian Pagi + Siang</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={shiftSubTab === 'rekap_kasir'}
+                  onClick={() => setShiftSubTab('rekap_kasir')}
+                  className={`rep-seg-btn${shiftSubTab === 'rekap_kasir' ? ' active' : ''}`}
+                >
+                  <Users2 size={14} aria-hidden="true" />
+                  <span>Per Kasir</span>
+                </button>
+              </div>
             </div>
-            {shiftSubTab === 'rekap_shift' ? <RekapShift /> : <RekapKasir />}
+            {shiftSubTab === 'rekap_kasir' ? (
+              <RekapKasir />
+            ) : (
+              <RekapShift externalViewMode={shiftSubTab === 'harian_shift' ? 'daily_combined' : 'groups'} />
+            )}
           </div>
         ) : mainTab === 'stok_log' ? (
           <div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => setStokLogSubTab('mutasi_stok')}
-                className={`btn btn-sm ${stokLogSubTab === 'mutasi_stok' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                <Boxes size={14} aria-hidden="true" />
-                <span>Mutasi Stok Gudang</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setStokLogSubTab('log_sistem')}
-                className={`btn btn-sm ${stokLogSubTab === 'log_sistem' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                <FileText size={14} aria-hidden="true" />
-                <span>Log Transaksi Sistem</span>
-              </button>
+            <div style={{ marginBottom: 14 }}>
+              <div role="tablist" aria-label="Tampilan Stok dan Log" className="rep-seg">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={stokLogSubTab === 'mutasi_stok'}
+                  onClick={() => setStokLogSubTab('mutasi_stok')}
+                  className={`rep-seg-btn${stokLogSubTab === 'mutasi_stok' ? ' active' : ''}`}
+                >
+                  <Boxes size={14} aria-hidden="true" />
+                  <span>Mutasi Stok</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={stokLogSubTab === 'log_sistem'}
+                  onClick={() => setStokLogSubTab('log_sistem')}
+                  className={`rep-seg-btn${stokLogSubTab === 'log_sistem' ? ' active' : ''}`}
+                >
+                  <FileText size={14} aria-hidden="true" />
+                  <span>Log Sistem</span>
+                </button>
+              </div>
             </div>
             {stokLogSubTab === 'mutasi_stok' ? <LaporanMutasiStokSection /> : <JejakTransaksiPanel />}
           </div>
         ) : (
           <>
-            {/* Period selector + custom date range */}
-            <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
-              <div className="card-body" style={{ padding: 'var(--space-3) var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                <div
-                  role="group"
-                  aria-label="Pilih periode laporan"
-                  style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}
+            {/* Filter periode modern netral */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+              <div role="group" aria-label="Pilih periode laporan" className="rep-chip-bar">
+                {PERIODS.map((p) => {
+                  const isPresetActive = !useCustomDates && period === p.key;
+                  return (
+                    <button
+                      key={p.key}
+                      type="button"
+                      id={`${uid}-period-${p.key}`}
+                      onClick={() => {
+                        setShowCustomPicker(false);
+                        handleSelectPreset(p.key);
+                      }}
+                      className={`rep-chip${isPresetActive ? ' active' : ''}`}
+                      aria-pressed={isPresetActive}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setShowCustomPicker((v) => !v)}
+                  className={`rep-chip${useCustomDates || showCustomPicker ? ' active' : ''}`}
                 >
-                  {PERIODS.map((p) => {
-                    const isPresetActive = !useCustomDates && period === p.key;
-                    return (
-                      <button
-                        key={p.key}
-                        type="button"
-                        id={`${uid}-period-${p.key}`}
-                        onClick={() => handleSelectPreset(p.key)}
-                        className={`btn btn-sm ${isPresetActive ? 'btn-primary' : 'btn-secondary'}`}
-                        aria-pressed={isPresetActive}
-                      >
-                        {p.label}
-                      </button>
-                    );
-                  })}
-                </div>
+                  <Calendar size={13} aria-hidden="true" />
+                  <span>{useCustomDates ? `${appliedFrom} – ${appliedTo}` : 'Tanggal'}</span>
+                </button>
+              </div>
 
+              {showCustomPicker && (
                 <form
                   onSubmit={handleApplyCustomRange}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 'var(--space-2)',
+                    gap: 8,
                     flexWrap: 'wrap',
-                    paddingTop: 'var(--space-2)',
-                    borderTop: '1px solid var(--color-border)',
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    background: '#f8fafc',
+                    border: '1px solid var(--color-border)',
                   }}
                 >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', color: 'var(--color-text-secondary)' }}>
-                    <Calendar size={14} aria-hidden="true" />
-                    Rentang Custom (WIB):
-                  </span>
                   <input
                     type="date"
                     className="form-input"
                     value={draftFrom}
                     max={draftTo || todayWibSlug()}
                     onChange={(e) => { setDraftFrom(e.target.value); setDateFormError(''); }}
-                    aria-label="Tanggal mulai laporan"
+                    aria-label="Tanggal mulai"
                     style={{ width: 145, minHeight: 34, padding: '4px 8px', fontSize: 'var(--text-xs)' }}
                   />
                   <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>s/d</span>
@@ -951,22 +904,22 @@ export default function LaporanPage() {
                     min={draftFrom}
                     max={todayWibSlug()}
                     onChange={(e) => { setDraftTo(e.target.value); setDateFormError(''); }}
-                    aria-label="Tanggal akhir laporan"
+                    aria-label="Tanggal akhir"
                     style={{ width: 145, minHeight: 34, padding: '4px 8px', fontSize: 'var(--text-xs)' }}
                   />
-                  <button
-                    type="submit"
-                    className={`btn btn-sm ${useCustomDates ? 'btn-primary' : 'btn-secondary'}`}
-                  >
-                    Terapkan Rentang
+                  <button type="submit" className="btn btn-sm btn-primary">
+                    Terapkan
                   </button>
                   {useCustomDates && (
                     <button
                       type="button"
                       className="btn btn-sm btn-ghost"
-                      onClick={() => handleSelectPreset(period)}
+                      onClick={() => {
+                        setShowCustomPicker(false);
+                        handleSelectPreset(period);
+                      }}
                     >
-                      Reset ke Preset
+                      Reset
                     </button>
                   )}
                   {dateFormError && (
@@ -975,7 +928,7 @@ export default function LaporanPage() {
                     </span>
                   )}
                 </form>
-              </div>
+              )}
             </div>
 
         {error && (
@@ -1032,188 +985,76 @@ export default function LaporanPage() {
             />
           ) : (
           <>
-            {/* ─── Peringatan keakuratan ──────────────────────── */}
+            {/* ─── Peringatan singkat jika HPP belum lengkap / tidak cocok ── */}
             {!data.summary.labaLengkap && (
-              <div role="alert" style={{ ...noticeStyle('warning'), marginBottom: 'var(--space-4)' }}>
-                <strong>Laba belum lengkap.</strong> Ada penjualan {data.summary.unitTanpaHpp} unit produk
-                (omzet {formatRupiah(data.summary.omzetTanpaHpp)}) yang HPP-nya belum diisi. Penjualan tersebut
-                tetap masuk Omzet, tetapi <strong>tidak dihitung</strong> dalam Laba Kotor/Bersih. Lengkapi HPP
-                di menu Produk agar laba akurat.
+              <div role="alert" style={{ ...noticeStyle('warning'), marginBottom: 'var(--space-4)', fontSize: '0.78rem' }}>
+                Ada {data.summary.unitTanpaHpp} produk terjual ({formatRupiah(data.summary.omzetTanpaHpp)}) tanpa HPP. Lengkapi HPP di menu Produk.
               </div>
             )}
             {(!data.checks.methodSplitMatches || !data.checks.itemsMatchOmzet || !data.checks.dailyMatchesSummary) && (
-              <div role="alert" style={{ ...noticeStyle('error'), marginBottom: 'var(--space-4)' }}>
-                <strong>Pemeriksaan konsistensi gagal.</strong> Total per metode/rincian/harian tidak sama dengan
-                ringkasan. Jangan gunakan angka ini sebelum diperiksa.
+              <div role="alert" style={{ ...noticeStyle('error'), marginBottom: 'var(--space-4)', fontSize: '0.78rem' }}>
+                Data ringkasan tidak konsisten. Periksa transaksi sebelum digunakan.
               </div>
             )}
 
-            {/* ─── CLUSTER 1: Arus Pendapatan & Metode Pembayaran ── */}
-            <div style={{ marginBottom: 'var(--space-6)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
-                <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', margin: 0 }}>
-                  <TrendingUp size={16} style={{ color: 'var(--color-primary)' }} aria-hidden="true" />
-                  Arus Pendapatan &amp; Penjualan
-                </h2>
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Total {data.summary.totalCount} transaksi ({data.summary.countVoid > 0 ? `${data.summary.countVoid} void dibatalkan` : '0 void'})
-                </span>
-              </div>
-
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                  gap: 'var(--space-4)',
-                }}
-              >
-                {/* Total Omzet */}
-                <article id={`${uid}-card-total`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-primary)' }} />
-                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
-                    <TrendingUp size={20} aria-hidden="true" />
-                  </div>
-                  <div className="stat-card__label">Total Omzet Penjualan</div>
-                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
-                    {formatRp(data.summary.grossAmount)}
-                  </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                    100% total omzet kotor periode ini
-                  </div>
-                </article>
-
-                {/* Cash */}
-                <article id={`${uid}-card-cash`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-success)' }} />
-                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-success-light)', color: 'var(--color-success)' }}>
-                    <Banknote size={20} aria-hidden="true" />
-                  </div>
-                  <div className="stat-card__label">Penerimaan Tunai (Cash)</div>
-                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-success)' }}>
-                    {formatRp(data.summary.amountCash)}
-                  </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                    {data.summary.countCash} transaksi {data.summary.grossAmount > 0 ? `(${Math.round((data.summary.amountCash / data.summary.grossAmount) * 100)}% omzet)` : ''}
-                  </div>
-                </article>
-
-                {/* QRIS */}
-                <article id={`${uid}-card-qris`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-info)' }} />
-                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-info-light)', color: 'var(--color-info)' }}>
-                    <QrCode size={20} aria-hidden="true" />
-                  </div>
-                  <div className="stat-card__label">Penerimaan Non-Tunai (QRIS)</div>
-                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-info)' }}>
-                    {formatRp(data.summary.amountQris)}
-                  </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                    {data.summary.countQris} transaksi {data.summary.grossAmount > 0 ? `(${Math.round((data.summary.amountQris / data.summary.grossAmount) * 100)}% omzet)` : ''}
-                  </div>
-                </article>
-              </div>
-            </div>
-
-            {/* ─── CLUSTER 2: Profitabilitas & Kalkulasi Laba Bersih (Sistem Bagi Hasil 50:50) ── */}
-            <div style={{ marginBottom: 'var(--space-6)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-                <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', margin: 0 }}>
-                  <Wallet size={16} style={{ color: 'var(--color-success)' }} aria-hidden="true" />
-                  Profitabilitas &amp; Beban Toko
-                </h2>
-                <span style={{ fontSize: 'var(--text-xs)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-alt)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)', fontWeight: 'var(--weight-medium)' }}>
-                  Rumus: (Laba Kotor − Biaya Operasional) = Laba Bersih Operasional → 50% Mahasiswa : 50% Wiramart
-                </span>
-              </div>
-
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                  gap: 'var(--space-4)',
-                }}
-              >
-                {/* Laba Kotor */}
-                <article id={`${uid}-card-laba`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-warning)' }} />
-                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)' }}>
-                    <DollarSign size={20} aria-hidden="true" />
-                  </div>
-                  <div className="stat-card__label">Laba Kotor{!data.summary.labaLengkap && ' *'}</div>
-                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
-                    {formatRupiah(data.summary.grossProfit)}
-                  </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                    Omzet − Total HPP ({formatRupiah(data.summary.totalHpp)})
-                  </div>
-                  {!data.summary.labaLengkap && (
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)', marginTop: 'var(--space-1)' }}>
-                      * Sebagian produk belum memiliki data HPP
-                    </div>
-                  )}
-                </article>
-
-                {/* Bagi Hasil Karyawan (50% Paten) */}
-                <article id={`${uid}-card-gaji`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-primary)' }} />
-                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
-                    <Users size={20} aria-hidden="true" />
-                  </div>
-                  <div className="stat-card__label" style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-primary)' }}>
-                    Bagi Hasil Mahasiswa (50%)
-                  </div>
-                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: 'var(--color-primary)' }}>
-                    {formatRupiah(data.summary.alokasiGajiKaryawan ?? Math.round(data.summary.grossProfit * 0.5))}
-                  </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                    50% dari sisa laba bersih operasional
-                  </div>
-                </article>
-
-                {/* Biaya Operasional */}
-                <article id={`${uid}-card-biaya`} className="stat-card" style={{ position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--color-error)' }} />
-                  <div className="stat-card__icon" style={{ backgroundColor: 'var(--color-error-light)', color: 'var(--color-error)' }}>
-                    <Receipt size={20} aria-hidden="true" />
-                  </div>
-                  <div className="stat-card__label">Biaya Operasional Toko</div>
-                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: data.summary.biayaOperasional > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
-                    {formatRupiah(data.summary.biayaOperasional)}
-                  </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                    Paten bulanan 50rb (ATK 20rb + Bensin 30rb) + pengeluaran lain
-                  </div>
-                </article>
-
-                {/* Laba Bersih Toko */}
-                <article id={`${uid}-card-bersih`} className="stat-card" style={{ position: 'relative', overflow: 'hidden', border: '1px solid var(--color-success-light)' }}>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }} />
-                  <div className="stat-card__icon" style={{ backgroundColor: data.summary.labaBersih < 0 ? 'var(--color-error-light)' : 'var(--color-success-light)', color: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }}>
-                    <Wallet size={20} aria-hidden="true" />
-                  </div>
-                  <div className="stat-card__label" style={{ fontWeight: 'var(--weight-bold)', color: 'var(--color-text)' }}>
-                    Laba Bersih Wiramart (50%){!data.summary.labaLengkap && ' *'}
-                  </div>
-                  <div className="stat-card__value" style={{ fontSize: 'var(--text-2xl)', fontWeight: 'var(--weight-bold)', color: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }}>
-                    {formatRupiah(data.summary.labaBersih)}
-                  </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-                    Hak bersih toko setelah biaya &amp; bagi hasil
-                  </div>
-                </article>
-              </div>
-
-              <div style={{ marginTop: 'var(--space-3)', padding: 'var(--space-3) var(--space-4)', background: 'var(--color-surface-alt)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', fontSize: 'var(--text-xs)', color: 'var(--color-text)', display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)' }}>
-                <span style={{ fontSize: '1.1rem', lineHeight: 1 }}></span>
-                <div style={{ lineHeight: 1.6 }}>
-                  <strong>Sistem Bagi Hasil 50:50 Wiramart:</strong> Laba kotor penjualan dikurangi biaya operasional toko terlebih dahulu untuk mendapatkan <strong>Laba Bersih Operasional</strong>. Hasil bersih tersebut kemudian dibagi <strong>50%</strong> untuk hak mahasiswa (diserahkan utuh per kelompok shift, tanpa pemecahan nominal per nama), dan <strong>50%</strong> menjadi laba bersih hak milik toko Wiramart. Pada periode bulanan, biaya paten Rp 50.000 (ATK Rp 20.000 + Bensin Rp 30.000) otomatis diikutsertakan.
+            {/* ─── 4 KARTU INTI KEUANGAN (2x2 MOBILE, 4-KOLOM DESKTOP) ── */}
+            <div className="rep-kpi-grid">
+              <article id={`${uid}-card-total`} className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">Omzet ({data.summary.totalCount} tx)</span>
+                  <TrendingUp size={15} style={{ color: 'var(--color-primary)', flexShrink: 0 }} aria-hidden="true" />
                 </div>
-              </div>
+                <div className="rep-kpi__val" style={{ color: 'var(--color-primary)' }}>
+                  {formatRp(data.summary.grossAmount)}
+                </div>
+                <div className="rep-kpi__sub">
+                  Tunai {formatRp(data.summary.amountCash)} · QRIS {formatRp(data.summary.amountQris)}
+                </div>
+              </article>
+
+              <article id={`${uid}-card-laba`} className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">Laba Kotor{!data.summary.labaLengkap && ' *'}</span>
+                  <DollarSign size={15} style={{ color: '#d97706', flexShrink: 0 }} aria-hidden="true" />
+                </div>
+                <div className="rep-kpi__val">
+                  {formatRupiah(data.summary.grossProfit)}
+                </div>
+                <div className="rep-kpi__sub">
+                  HPP {formatRupiah(data.summary.totalHpp)}
+                </div>
+              </article>
+
+              <article id={`${uid}-card-gaji`} className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">Gaji Shift (50%)</span>
+                  <Users size={15} style={{ color: '#4f46e5', flexShrink: 0 }} aria-hidden="true" />
+                </div>
+                <div className="rep-kpi__val" style={{ color: '#4338ca' }}>
+                  {formatRupiah(data.summary.alokasiGajiKaryawan ?? Math.round(data.summary.grossProfit * 0.5))}
+                </div>
+                <div className="rep-kpi__sub">
+                  Utuh per shift
+                </div>
+              </article>
+
+              <article id={`${uid}-card-bersih`} className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">Laba Toko (50%){!data.summary.labaLengkap && ' *'}</span>
+                  <Wallet size={15} style={{ color: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)', flexShrink: 0 }} aria-hidden="true" />
+                </div>
+                <div className="rep-kpi__val" style={{ color: data.summary.labaBersih < 0 ? 'var(--color-error)' : 'var(--color-success)' }}>
+                  {formatRupiah(data.summary.labaBersih)}
+                </div>
+                <div className="rep-kpi__sub">
+                  Biaya {formatRupiah(data.summary.biayaOperasional)}
+                </div>
+              </article>
             </div>
 
             {/* ─── Ringkasan Per Bulan (jika rentang multi-bulan) ─ */}
             {data.monthly && data.monthly.length > 1 && (
-              <section className="card" style={{ marginBottom: 'var(--space-6)' }} aria-labelledby={`${uid}-monthly-title`}>
+              <section className="card" style={{ marginBottom: 'var(--space-5)' }} aria-labelledby={`${uid}-monthly-title`}>
                 <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
                   <h2
                     id={`${uid}-monthly-title`}
@@ -1222,9 +1063,6 @@ export default function LaporanPage() {
                   >
                     <Calendar size={16} aria-hidden="true" /> Rekap Bulanan ({data.monthly.length} Bulan)
                   </h2>
-                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                    Akumulasi konsisten dengan total harian
-                  </span>
                 </div>
                 <div className="table-wrapper">
                   <table className="table" style={{ fontSize: 'var(--text-xs)', whiteSpace: 'nowrap' }}>
@@ -1278,7 +1116,7 @@ export default function LaporanPage() {
               onChanged={reloadData}
             />
 
-            {/* ─── Row: Top Produk + Void info ──────────────────── */}
+            {/* ─── Produk Terlaris & Grafik Omzet berdampingan ── */}
             <div
               style={{
                 display: 'grid',
@@ -1291,7 +1129,7 @@ export default function LaporanPage() {
               <div className="card">
                 <div className="card-header">
                   <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                    <TrendingUp size={16} aria-hidden="true" /> Top {data.topProducts.length || 5} Produk Terlaris
+                    <TrendingUp size={16} aria-hidden="true" /> Produk Terlaris
                   </h2>
                 </div>
                 <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
@@ -1328,119 +1166,67 @@ export default function LaporanPage() {
                 </div>
               </div>
 
-              {/* Ringkasan Metode + Void Count */}
-              <div className="card">
-                <div className="card-header">
-                  <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                    <CreditCard size={16} aria-hidden="true" /> Ringkasan Pembayaran
-                  </h2>
-                </div>
-                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                  {[
-                    { label: 'Cash', amount: data.summary.amountCash, count: data.summary.countCash, color: 'var(--color-success)', icon: <Banknote size={16} aria-hidden="true" /> },
-                    { label: 'QRIS', amount: data.summary.amountQris, count: data.summary.countQris, color: 'var(--color-info)', icon: <QrCode size={16} aria-hidden="true" /> },
-                  ].map((m) => (
-                    <div key={m.label}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-1)' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: m.color, fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)' }}>
-                          {m.icon} {m.label}
-                        </span>
-                        <span style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)' }}>{formatRp(m.amount)}</span>
-                      </div>
-                      {/* Progress bar proporsional */}
-                      <div style={{ height: 6, borderRadius: 3, backgroundColor: 'var(--color-border)', overflow: 'hidden' }}>
-                        <div style={{
-                          height: '100%',
-                          borderRadius: 3,
-                          backgroundColor: m.color,
-                          width: data.summary.grossAmount > 0
-                            ? `${(m.amount / data.summary.grossAmount * 100).toFixed(1)}%`
-                            : '0%',
-                          transition: 'width 0.6s var(--ease-out-expo)',
-                        }} aria-hidden="true" />
-                      </div>
-                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
-                        {m.count} transaksi
-                        {data.summary.grossAmount > 0 && ` · ${(m.amount / data.summary.grossAmount * 100).toFixed(1)}%`}
-                      </div>
-                    </div>
-                  ))}
-                  {data.summary.countVoid > 0 && (
-                    <div style={{ paddingTop: 'var(--space-2)', borderTop: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', fontSize: 'var(--text-sm)' }}>
-                      <span style={{ color: 'var(--color-error)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                        <ShoppingBag size={14} aria-hidden="true" /> Void
+              {/* Grafik Omzet Harian */}
+              {data.dailyChart.length > 0 && (
+                <div className="card">
+                  <div className="card-header">
+                    <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                      <BarChart3 size={16} aria-hidden="true" /> Grafik Harian
+                    </h2>
+                    <div style={{ display: 'flex', gap: 'var(--space-3)', fontSize: 'var(--text-xs)' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ width: 9, height: 9, borderRadius: 2, background: 'var(--color-success)', display: 'inline-block' }} aria-hidden="true" />
+                        Tunai
                       </span>
-                      <strong style={{ color: 'var(--color-error)' }}>{data.summary.countVoid} transaksi</strong>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ width: 9, height: 9, borderRadius: 2, background: 'var(--color-info)', display: 'inline-block' }} aria-hidden="true" />
+                        QRIS
+                      </span>
                     </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* ─── Bar Chart Stacked: Cash vs QRIS per hari ─────── */}
-            {data.dailyChart.length > 0 && (
-              <div className="card" style={{ marginBottom: 'var(--space-6)' }}>
-                <div className="card-header">
-                  <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                    <BarChart3 size={16} aria-hidden="true" /> Grafik Omzet Harian
-                  </h2>
-                  {/* Legenda */}
-                  <div style={{ display: 'flex', gap: 'var(--space-4)', fontSize: 'var(--text-xs)' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--color-success)', display: 'inline-block' }} aria-hidden="true" />
-                      Cash
-                    </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--color-info)', display: 'inline-block' }} aria-hidden="true" />
-                      QRIS
-                    </span>
                   </div>
-                </div>
-                <div className="card-body">
-                  <div
-                    role="img"
-                    aria-label="Grafik bar omzet harian"
-                    style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-2)', height: 180, overflowX: 'auto', paddingBottom: 'var(--space-4)' }}
-                  >
-                    {data.dailyChart.map((d) => {
-                      const total = parseFloat(d.revenue) || 0;
-                      const cash = parseFloat(d.amountCash) || 0;
-                      const qris = parseFloat(d.amountQris) || 0;
-                      const totalHeight = (total / maxRevenue) * 140;
-                      const cashPct = total > 0 ? cash / total : 0;
-                      const qrisPct = total > 0 ? qris / total : 0;
+                  <div className="card-body">
+                    <div
+                      role="img"
+                      aria-label="Grafik omzet harian"
+                      style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-2)', height: 180, overflowX: 'auto', paddingBottom: 'var(--space-4)' }}
+                    >
+                      {data.dailyChart.map((d) => {
+                        const total = parseFloat(d.revenue) || 0;
+                        const cash = parseFloat(d.amountCash) || 0;
+                        const qris = parseFloat(d.amountQris) || 0;
+                        const totalHeight = (total / maxRevenue) * 140;
+                        const cashPct = total > 0 ? cash / total : 0;
+                        const qrisPct = total > 0 ? qris / total : 0;
 
-                      return (
-                        <div
-                          key={d.day}
-                          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 36, flex: 1 }}
-                        >
-                          {/* Bar stacked */}
+                        return (
                           <div
-                            title={`${d.day}\nTotal: ${formatRp(total)}\nCash: ${formatRp(cash)}\nQRIS: ${formatRp(qris)}\n${d.txCount} transaksi`}
-                            style={{
-                              width: '100%', maxWidth: 28,
-                              height: `${Math.max(totalHeight, 4)}px`,
-                              display: 'flex', flexDirection: 'column-reverse',
-                              borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
-                              overflow: 'hidden',
-                              transition: 'height 0.4s var(--ease-out-expo)',
-                            }}
+                            key={d.day}
+                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 32, flex: 1 }}
                           >
-                            <div style={{ flex: cashPct, backgroundColor: 'var(--color-success)', minHeight: cash > 0 ? 2 : 0 }} />
-                            <div style={{ flex: qrisPct, backgroundColor: 'var(--color-info)', minHeight: qris > 0 ? 2 : 0 }} />
+                            <div
+                              title={`${d.day}\nTotal: ${formatRp(total)}\nTunai: ${formatRp(cash)}\nQRIS: ${formatRp(qris)}\n${d.txCount} tx`}
+                              style={{
+                                width: '100%', maxWidth: 26,
+                                height: `${Math.max(totalHeight, 4)}px`,
+                                display: 'flex', flexDirection: 'column-reverse',
+                                borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              <div style={{ flex: cashPct, backgroundColor: 'var(--color-success)', minHeight: cash > 0 ? 2 : 0 }} />
+                              <div style={{ flex: qrisPct, backgroundColor: 'var(--color-info)', minHeight: qris > 0 ? 2 : 0 }} />
+                            </div>
+                            <span style={{ fontSize: 9, color: 'var(--color-text-muted)', transform: 'rotate(-45deg)', whiteSpace: 'nowrap', transformOrigin: 'top center' }}>
+                              {d.day.slice(5)}
+                            </span>
                           </div>
-                          {/* Label tanggal */}
-                          <span style={{ fontSize: 9, color: 'var(--color-text-muted)', transform: 'rotate(-45deg)', whiteSpace: 'nowrap', transformOrigin: 'top center' }}>
-                            {d.day.slice(5)}
-                          </span>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </>
           )
         ) : null}

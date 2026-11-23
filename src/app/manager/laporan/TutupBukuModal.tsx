@@ -389,11 +389,8 @@ export default function TutupBukuModal({
                   color: 'var(--color-text)',
                 }}
               >
-                {isLocked ? 'Tutup Buku Terkunci (Locked)' : 'Tutup Buku Finansial Harian'}
+                {isLocked ? 'Tutup Buku Terkunci' : 'Tutup Buku Harian'}
               </h2>
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
-                Penguncian Laporan &amp; Audit Toko (Manager/Dosen)
-              </p>
             </div>
           </div>
           <button
@@ -466,10 +463,10 @@ export default function TutupBukuModal({
                   <CheckCircle2 size={20} style={{ color: 'hsl(142, 70%, 35%)', flexShrink: 0, marginTop: 2 }} />
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 'var(--text-sm)', color: 'hsl(142, 70%, 25%)' }}>
-                      Periode Tanggal Ini Sudah Ditutup &amp; Terkunci
+                      Tanggal Ini Sudah Dikunci
                     </div>
                     <div style={{ fontSize: 'var(--text-xs)', color: 'hsl(142, 70%, 30%)', marginTop: 2 }}>
-                      Transaksi dan data keuangan tanggal ini tidak dapat di-void atau diubah. Seluruh angka resmi telah dibekukan dalam buku besar.
+                      Transaksi pada tanggal ini tidak bisa diubah atau dibatalkan.
                     </div>
                   </div>
                 </div>
@@ -486,23 +483,23 @@ export default function TutupBukuModal({
                   <AlertTriangle size={20} style={{ color: 'hsl(38, 95%, 35%)', flexShrink: 0, marginTop: 2 }} />
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 'var(--text-sm)', color: 'hsl(38, 95%, 25%)' }}>
-                      Perhatian: Ada {preview.activeShiftsCount} Shift Kasir yang Masih Aktif!
+                      Masih ada {preview.activeShiftsCount} shift aktif
                     </div>
                     <div style={{ fontSize: 'var(--text-xs)', color: 'hsl(38, 95%, 30%)', marginTop: 2 }}>
-                      Kasir harus menutup shift (rekap fisik laci) terlebih dahulu sebelum Manager dapat mengunci Tutup Buku.
+                      Tutup semua shift kasir dulu sebelum mengunci laporan.
                     </div>
                   </div>
                 </div>
               ) : null}
 
-              {/* ── BAGIAN 1: Rincian Laci Per-Shift (Sesuai Modal Fisik Awal) ── */}
+              {/* ── BAGIAN 1: Kas Laci Per Shift ── */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    1. Rincian Laci Per-Shift (Sesuai Modal Fisik Awal)
+                    1. Kas Laci Per Shift
                   </div>
                   <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-                    {shiftsData.length} Sesi Terdeteksi
+                    {shiftsData.length} shift
                   </span>
                 </div>
 
@@ -648,9 +645,9 @@ export default function TutupBukuModal({
                 )}
               </div>
 
-              {/* ── BAGIAN 2: Penggabungan Konsolidasi Toko (Jam 15:00 WIB) ── */}
+              {/* ── BAGIAN 2: Ringkasan Keuangan Hari Ini ── */}
               <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-text)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 4 }}>
-                2. Penggabungan Konsolidasi Toko (Jam 15:00 WIB)
+                2. Ringkasan Keuangan
               </div>
 
               {/* Rincian Angka Finansial */}
@@ -721,7 +718,7 @@ export default function TutupBukuModal({
                 }}>
                   <div>
                     <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
-                      Audit Selisih Kas Laci (Toleransi K7)
+                      Selisih Kas Laci
                     </div>
                     <div style={{ fontSize: '0.9rem', fontWeight: 800, marginTop: 2 }}>
                       {preview.totalCashDiscrepancy === 0
@@ -752,51 +749,51 @@ export default function TutupBukuModal({
                 </div>
               )}
 
-              {/* ── BAGIAN 3: Rekonsiliasi Mutasi Stok & Pengesahan MOD (Fase 4) ── */}
+              {/* ── BAGIAN 3: Ringkasan Stok & Pengesahan ── */}
               <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-text)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 10 }}>
-                3. Rekonsiliasi Mutasi Stok &amp; Pengesahan MOD (Fase 4)
+                3. Ringkasan Stok &amp; Pengesahan
               </div>
 
               {/* Kartu Ringkasan Mutasi Stok */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))', gap: 10 }}>
                 <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 'var(--radius-md)', padding: 10 }}>
                   <div style={{ fontSize: '0.7rem', color: '#166534', textTransform: 'uppercase', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <PackageCheck size={13} /> Barang Masuk ACC
+                    <PackageCheck size={13} /> Barang Masuk
                   </div>
                   <div style={{ fontSize: '1rem', fontWeight: 900, color: '#15803d', marginTop: 3 }}>
                     {stockMutation?.itemsReceived.totalQty ?? 0} pcs
                   </div>
                   <div style={{ fontSize: '0.68rem', color: '#4b5563', marginTop: 2 }}>
-                    Nilai HPP: {fmtRp(stockMutation?.itemsReceived.totalHpp ?? 0)} ({stockMutation?.itemsReceived.draftCount ?? 0} kiriman)
+                    HPP {fmtRp(stockMutation?.itemsReceived.totalHpp ?? 0)} ({stockMutation?.itemsReceived.draftCount ?? 0} kiriman)
                   </div>
                 </div>
 
                 <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 'var(--radius-md)', padding: 10 }}>
                   <div style={{ fontSize: '0.7rem', color: '#1e40af', textTransform: 'uppercase', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <TrendingUp size={13} /> Terjual di Kasir
+                    <TrendingUp size={13} /> Terjual
                   </div>
                   <div style={{ fontSize: '1rem', fontWeight: 900, color: '#1d4ed8', marginTop: 3 }}>
                     {stockMutation?.itemsSold.totalQty ?? 0} pcs
                   </div>
                   <div style={{ fontSize: '0.68rem', color: '#4b5563', marginTop: 2 }}>
-                    Termasuk {stockMutation?.itemsSold.discountedItemsQty ?? 0} pcs Obral Diskon
+                    {stockMutation?.itemsSold.discountedItemsQty ?? 0} pcs obral
                   </div>
                 </div>
 
                 <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 'var(--radius-md)', padding: 10 }}>
                   <div style={{ fontSize: '0.7rem', color: '#9a3412', textTransform: 'uppercase', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Trash2 size={13} /> FEFO Write-Off/Retur
+                    <Trash2 size={13} /> Musnah / Retur
                   </div>
                   <div style={{ fontSize: '1rem', fontWeight: 900, color: '#c2410c', marginTop: 3 }}>
                     {(stockMutation?.fefoActions.destroyedQty ?? 0) + (stockMutation?.fefoActions.returnedQty ?? 0)} pcs
                   </div>
                   <div style={{ fontSize: '0.68rem', color: '#4b5563', marginTop: 2 }}>
-                    Musnah: {stockMutation?.fefoActions.destroyedQty ?? 0} | Retur: {stockMutation?.fefoActions.returnedQty ?? 0}
+                    Musnah {stockMutation?.fefoActions.destroyedQty ?? 0} · Retur {stockMutation?.fefoActions.returnedQty ?? 0}
                   </div>
                 </div>
               </div>
 
-              {/* Status Pengesahan Stempel MOD */}
+              {/* Status Pengesahan Manager */}
               {closing?.status === 'AUDITED' || closing?.modSignedAt ? (
                 <div style={{
                   padding: '12px 14px',
@@ -809,16 +806,16 @@ export default function TutupBukuModal({
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <ShieldCheck size={18} color="#15803d" />
-                    <span style={{ fontSize: '0.82rem', fontWeight: 900, color: '#14532d', textTransform: 'uppercase' }}>
-                      Status: AUDITED (Telah Disahkan Manager on Duty)
+                    <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#14532d' }}>
+                      Sudah Disahkan Manager
                     </span>
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#166534', marginTop: 2 }}>
-                    Disahkan pada: {closing.modSignedAt ? new Date(closing.modSignedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) : '-'}
+                    {closing.modSignedAt ? new Date(closing.modSignedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }) : '-'}
                   </div>
                   {closing.modSignNote && (
                     <div style={{ fontSize: '0.75rem', color: '#14532d', background: '#dcfce7', padding: '6px 10px', borderRadius: 6, marginTop: 4 }}>
-                      <strong>Catatan MOD:</strong> &quot;{closing.modSignNote}&quot;
+                      {closing.modSignNote}
                     </div>
                   )}
                 </div>
@@ -834,26 +831,21 @@ export default function TutupBukuModal({
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Stamp size={18} color="#ca8a04" />
-                    <div>
-                      <div style={{ fontSize: '0.82rem', fontWeight: 900, color: '#854d0e' }}>
-                        Wewenang Pengesahan Akhir: Manager on Duty (MOD)
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: '#a16207' }}>
-                        Periksa kecocokan uang kas dan ringkasan mutasi stok di atas sebelum mengesahkan closing harian.
-                      </div>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#854d0e' }}>
+                      Pengesahan Manager
                     </div>
                   </div>
 
                   <div>
                     <label htmlFor={`${uid}-mod-note`} style={{ fontSize: '0.72rem', fontWeight: 700, color: '#713f12', display: 'block', marginBottom: 4 }}>
-                      Catatan Pengesahan MOD (Opsional):
+                      Catatan Pengesahan (Opsional)
                     </label>
                     <input
                       id={`${uid}-mod-note`}
                       type="text"
                       value={modSignNote}
                       onChange={(e) => setModSignNote(e.target.value)}
-                      placeholder="Contoh: Stok fisik dan uang kas sesuai, disahkan oleh Dosen MOD."
+                      placeholder="Contoh: Stok dan kas sesuai."
                       style={{
                         width: '100%',
                         minHeight: 44,
@@ -890,7 +882,6 @@ export default function TutupBukuModal({
                         display: 'flex',
                         alignItems: 'center',
                         gap: 6,
-                        boxShadow: '0 2px 6px rgba(202, 138, 4, 0.25)',
                       }}
                     >
                       {signingOff ? (
@@ -901,7 +892,7 @@ export default function TutupBukuModal({
                       ) : (
                         <>
                           <ShieldCheck size={15} />
-                          Sahkan Laporan Hari Ini (Stempel MOD)
+                          Sahkan Laporan
                         </>
                       )}
                     </button>
@@ -909,16 +900,16 @@ export default function TutupBukuModal({
                 </div>
               ) : null}
 
-              {/* Form Catatan Manager */}
+              {/* Form Catatan */}
               <div>
                 <label htmlFor={`${uid}-notes`} style={{ fontSize: 'var(--text-xs)', fontWeight: 700, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>
-                  Catatan Evaluasi Manager / Dosen:
+                  Catatan Tutup Buku (Opsional)
                 </label>
                 <textarea
                   id={`${uid}-notes`}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Contoh: Shift 1 & 2 selesai tepat waktu, uang setoran Rp 320.000 sudah diserahkan ke bendahara."
+                  placeholder="Contoh: Uang setoran sudah diserahkan."
                   disabled={isLocked}
                   rows={2}
                   style={{
