@@ -67,6 +67,7 @@ export async function PATCH(
     .update(shifts)
     .set({
       shortageStatus: nextStatus,
+      shortageGraceUntil: null,
       shortageOverrideReason: parsed.data.reason,
       shortageOverrideByAdminId: session.sub,
       shortageOverrideAt: now,
@@ -97,7 +98,7 @@ export async function PATCH(
     reason: parsed.data.reason,
     message:
       nextStatus === 'OVERRIDDEN'
-        ? 'Potongan tekor berhasil dibatalkan dan dicatat di log audit.'
-        : 'Potongan tekor diaktifkan kembali dan dicatat di log audit.',
+        ? 'Selisih ditandai wajar (bebas potong gaji) dan dicatat di log audit.'
+        : 'Potongan tekor resmi diterapkan dan dicatat di log audit.',
   });
 }

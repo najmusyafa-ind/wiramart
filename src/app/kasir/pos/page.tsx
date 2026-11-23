@@ -1651,6 +1651,12 @@ export default function PosPage() {
   const [showKasirMenu, setShowKasirMenu] = useState(false); // Option A mobile drawer menu toggle
   const [tutupLoading, setTutupLoading] = useState(false);
   const [showTutupConfirm, setShowTutupConfirm] = useState(false);
+  const [tutupKasSummary, setTutupKasSummary] = useState<{
+    loading: boolean;
+    totalCashOut: number;
+    totalCashIn: number;
+    movements: Array<{ id: string; movementType: string; category: string; amount: string; notes: string }>;
+  } | null>(null);
   const [showKasGerak, setShowKasGerak] = useState(false);
   const [showSisaMakanan, setShowSisaMakanan] = useState(false);
   const [showTitipanModal, setShowTitipanModal] = useState(false);
@@ -2324,7 +2330,7 @@ export default function PosPage() {
         setGraceCountdown('00:00');
         setTutupResult((prev) =>
           prev?.autoChecklist
-            ? { ...prev, autoChecklist: { ...prev.autoChecklist, status: 'AUTO_LOCKED', graceUntil: null } }
+            ? { ...prev, autoChecklist: { ...prev.autoChecklist, status: 'AUDIT_WARNING', graceUntil: null } }
             : prev,
         );
         return;
@@ -2339,6 +2345,39 @@ export default function PosPage() {
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [tutupResult?.autoChecklist?.graceUntil, tutupResult?.autoChecklist?.status]);
+
+  // Muat ringkasan Kas Keluar / Masuk setiap kali modal Tutup Shift dibuka
+  useEffect(() => {
+    if (!showTutupConfirm || showKasGerak) return;
+    let active = true;
+    setTutupKasSummary((prev) => ({
+      loading: true,
+      totalCashOut: prev?.totalCashOut ?? 0,
+      totalCashIn: prev?.totalCashIn ?? 0,
+      movements: prev?.movements ?? [],
+    }));
+    fetch('/api/kasir/shift/kas-gerak', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (!active) return;
+        if (json?.success && json.data) {
+          setTutupKasSummary({
+            loading: false,
+            totalCashOut: Number(json.data.totalCashOut ?? 0),
+            totalCashIn: Number(json.data.totalCashIn ?? 0),
+            movements: Array.isArray(json.data.movements) ? json.data.movements : [],
+          });
+        } else {
+          setTutupKasSummary({ loading: false, totalCashOut: 0, totalCashIn: 0, movements: [] });
+        }
+      })
+      .catch(() => {
+        if (active) setTutupKasSummary({ loading: false, totalCashOut: 0, totalCashIn: 0, movements: [] });
+      });
+    return () => {
+      active = false;
+    };
+  }, [showTutupConfirm, showKasGerak]);
 
   function applyGraceUpdateToTutupResult(graceUpdate?: GraceRecalcResult | null) {
     if (!graceUpdate) return;
@@ -2538,8 +2577,73 @@ export default function PosPage() {
                   Tutup Shift &amp; Rekap Laci
                 </h2>
                 <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
-                  Hitung uang tunai di laci (Blind Count). Data akan dicocokkan otomatis oleh sistem Manajer.
+                  Hitung <strong>SEMUA uang tunai fisik</strong> di kotak sekarang (sudah termasuk modal awal).
                 </p>
+              </div>
+
+              {/* Ringkasan Modal Awal & Kas Laci yang Sudah Tercatat (Anti Salah Hitung) */}
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '0.76rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#475569' }}>Modal Awal Tercatat:</span>
+                  <strong style={{ color: '#0f172a' }}>
+                    {rp(Math.round(Number(session?.shift?.modalAwal ?? 100_000)))}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#475569' }}>Kas Keluar Tercatat (Supplier/Titipan/Setor):</span>
+                  <strong style={{ color: (tutupKasSummary?.totalCashOut ?? 0) > 0 ? '#dc2626' : '#64748b' }}>
+                    {tutupKasSummary?.loading
+                      ? 'Memuat...'
+                      : (tutupKasSummary?.totalCashOut ?? 0) > 0
+                        ? `-${rp(Math.round(tutupKasSummary!.totalCashOut))}`
+                        : 'Rp 0 (belum ada)'}
+                  </strong>
+                </div>
+                {(tutupKasSummary?.totalCashIn ?? 0) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: '#475569' }}>Kas Masuk Tercatat:</span>
+                    <strong style={{ color: '#15803d' }}>
+                      +{rp(Math.round(tutupKasSummary!.totalCashIn))}
+                    </strong>
+                  </div>
+                )}
+                {tutupKasSummary && tutupKasSummary.movements.length > 0 && (
+                  <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {tutupKasSummary.movements.slice(0, 4).map((mv) => (
+                      <div key={mv.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#475569', gap: 6 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          • {mv.notes}
+                        </span>
+                        <span style={{ fontWeight: 700, color: mv.movementType === 'CASH_OUT' ? '#dc2626' : '#15803d', flexShrink: 0 }}>
+                          {mv.movementType === 'CASH_OUT' ? '-' : '+'}
+                          {rp(Math.round(Number(mv.amount)))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTutupConfirm(false);
+                    setShowKasGerak(true);
+                  }}
+                  className="btn btn-secondary"
+                  style={{ minHeight: 36, fontSize: '0.74rem', fontWeight: 700, marginTop: 2 }}
+                >
+                  + Catat Bayar Supplier / Titipan / Diambil Bu Dyah
+                </button>
               </div>
 
               {/* Mode Switcher */}
@@ -2587,8 +2691,11 @@ export default function PosPage() {
               {tutupMode === 'QUICK' ? (
                 <div>
                   <label className="form-label" style={{ fontSize: '0.75rem', fontWeight: 700 }}>
-                    Total Uang Fisik di Laci (Rp) *
+                    Total SEMUA Uang Fisik di Kotak Sekarang (Termasuk Modal Awal) *
                   </label>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', marginBottom: 6 }}>
+                    Hitung semua lembar &amp; koin yang ada di kotak saat ini. Jangan kurangi modal awal.
+                  </div>
                   <input
                     type="text"
                     inputMode="numeric"
@@ -2860,7 +2967,7 @@ export default function PosPage() {
                       <div style={{ color: 'hsl(0 55% 32%)', fontSize: '0.73rem' }}>
                         {tutupResult.autoChecklist.typoSuspected
                           ? 'Angka fisik terlihat terlalu kecil (kemungkinan salah ketik). Segera cek ulang.'
-                          : 'Lengkapi catatan Titipan / Diambil Bu Dyah / hitung ulang sebelum potongan dikunci.'}
+                          : 'Tersedia 5 menit untuk lengkapi Kas Laci / Titipan atau hitung ulang. Jika masih selisih (mis. kendala mati listrik), tidak langsung memotong gaji — masuk catatan cek Admin.'}
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                         <button
@@ -2923,8 +3030,8 @@ export default function PosPage() {
                       )}
                     </>
                   ) : (
-                    <div style={{ color: 'hsl(0 72% 38%)', fontWeight: 700 }}>
-                      Masa jeda selesai — selisih kurang Rp {tutupResult.autoChecklist.shortageAmount.toLocaleString('id-ID')} terkunci di laporan shift.
+                    <div style={{ color: 'hsl(24 85% 32%)', fontWeight: 700 }}>
+                      Masa jeda selesai — selisih kurang Rp {tutupResult.autoChecklist.shortageAmount.toLocaleString('id-ID')} masuk catatan cek Admin Shift (tidak otomatis memotong gaji).
                     </div>
                   )}
                 </div>

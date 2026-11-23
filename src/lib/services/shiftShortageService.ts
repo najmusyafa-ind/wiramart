@@ -4,7 +4,7 @@
 // finalisasi malas (lazy finalization tanpa cron berbayar), dan audit trail.
 // =============================================================
 
-import { and, desc, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   auditLogs,
@@ -24,8 +24,81 @@ export type ShortageStatus =
   | 'NONE'
   | 'AUTO_VERIFIED'
   | 'PENDING_GRACE'
+  | 'AUDIT_WARNING'
   | 'AUTO_LOCKED'
   | 'OVERRIDDEN';
+
+function getWibSessionOfDate(date: Date): 'Pagi' | 'Siang' {
+  const hourWib = parseInt(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Jakarta',
+      hour: 'numeric',
+      hour12: false,
+    }).format(date),
+    10,
+  );
+  return (Number.isFinite(hourWib) ? hourWib % 24 : 0) >= 11 ? 'Siang' : 'Pagi';
+}
+
+/**
+ * Menggabungkan sub-shift yang terputus tanpa hitung fisik (actual_cash IS NULL)
+ * pada tanggal & sesi WIB yang sama agar hitungan Kasir (Tutup Shift) selalu 100% sinkron
+ * dengan laporan konsolidasi Admin (/api/admin/laporan/per-shift).
+ */
+export async function resolveSameSessionShiftContext(targetShift: {
+  id: string;
+  clockIn: Date;
+  modalAwal: string | null;
+}): Promise<{ shiftIds: string[]; effectiveModalAwal: number }> {
+  const targetClockIn = new Date(targetShift.clockIn);
+  const dateWib = getWibDateStr(targetClockIn);
+  const targetSession = getWibSessionOfDate(targetClockIn);
+  const dayStartUtc = new Date(`${dateWib}T00:00:00+07:00`);
+
+  const candidates = await db
+    .select({
+      id: shifts.id,
+      clockIn: shifts.clockIn,
+      modalAwal: shifts.modalAwal,
+      status: shifts.status,
+      actualCash: shifts.actualCash,
+    })
+    .from(shifts)
+    .where(
+      and(
+        gte(shifts.clockIn, dayStartUtc),
+        lte(shifts.clockIn, targetClockIn),
+        or(
+          eq(shifts.id, targetShift.id),
+          and(eq(shifts.status, 'CLOSED'), isNull(shifts.actualCash)),
+        ),
+      ),
+    )
+    .orderBy(asc(shifts.clockIn));
+
+  const sameSessionRows = candidates.filter(
+    (row) => row.id === targetShift.id || getWibSessionOfDate(new Date(row.clockIn)) === targetSession,
+  );
+
+  if (!sameSessionRows.some((r) => r.id === targetShift.id)) {
+    sameSessionRows.push({
+      id: targetShift.id,
+      clockIn: targetClockIn,
+      modalAwal: targetShift.modalAwal,
+      status: 'ACTIVE',
+      actualCash: null,
+    });
+  }
+
+  const earliestModalSource = sameSessionRows.find((r) => r.modalAwal !== null)?.modalAwal ?? targetShift.modalAwal;
+  const rawModal = earliestModalSource !== null ? Number(earliestModalSource) : 100_000;
+  const effectiveModalAwal = Number.isFinite(rawModal) && rawModal >= 0 ? rawModal : 100_000;
+
+  return {
+    shiftIds: [...new Set(sameSessionRows.map((r) => r.id))],
+    effectiveModalAwal,
+  };
+}
 
 export interface ShiftCashEvaluation {
   shiftId: string;
@@ -55,6 +128,11 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
   if (!shiftRow) return null;
 
   const shiftDateWib = getWibDateStr(new Date(shiftRow.clockIn));
+  const sessionCtx = await resolveSameSessionShiftContext({
+    id: shiftRow.id,
+    clockIn: new Date(shiftRow.clockIn),
+    modalAwal: shiftRow.modalAwal,
+  });
 
   const [[paySummary], [directSummary], movements, [openCons]] = await Promise.all([
     db
@@ -67,7 +145,7 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
       })
       .from(transactionPayments)
       .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
-      .where(eq(transactions.shiftId, shiftId)),
+      .where(inArray(transactions.shiftId, sessionCtx.shiftIds)),
     db
       .select({
         directCash: sql<string>`COALESCE(SUM(${transactions.grossAmount}), 0)`,
@@ -75,7 +153,7 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
       .from(transactions)
       .where(
         and(
-          eq(transactions.shiftId, shiftId),
+          inArray(transactions.shiftId, sessionCtx.shiftIds),
           eq(transactions.status, 'COMPLETED'),
           eq(transactions.paymentMethod, 'CASH'),
           eq(transactions.isTest, false),
@@ -88,7 +166,7 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
         amount: shiftCashMovements.amount,
       })
       .from(shiftCashMovements)
-      .where(eq(shiftCashMovements.shiftId, shiftId)),
+      .where(inArray(shiftCashMovements.shiftId, sessionCtx.shiftIds)),
     db
       .select({
         cnt: sql<number>`COUNT(*)::int`,
@@ -102,8 +180,7 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
       ),
   ]);
 
-  const rawModal = shiftRow.modalAwal !== null ? Number(shiftRow.modalAwal) : 100_000;
-  const modalAwal = Number.isFinite(rawModal) && rawModal >= 0 ? rawModal : 100_000;
+  const modalAwal = sessionCtx.effectiveModalAwal;
   const cashSales = Number(paySummary?.payCash ?? 0) + Number(directSummary?.directCash ?? 0);
 
   let cashOut = 0;
@@ -172,7 +249,9 @@ export async function recalculateGraceShiftShortage(shiftId: string): Promise<{
     nextGraceUntil = null;
   } else if (shiftRow.shortageStatus === 'PENDING_GRACE') {
     if (shiftRow.shortageGraceUntil && now >= new Date(shiftRow.shortageGraceUntil)) {
-      nextStatus = 'AUTO_LOCKED';
+      // Opsi A: ubah menjadi peringatan audit (TIDAK otomatis memotong gaji sebelum dikonfirmasi Admin)
+      nextStatus = 'AUDIT_WARNING';
+      nextGraceUntil = null;
     } else {
       nextStatus = 'PENDING_GRACE';
     }
@@ -200,8 +279,9 @@ export async function recalculateGraceShiftShortage(shiftId: string): Promise<{
 }
 
 /**
- * Finalisasi malas (lazy finalization): kunci otomatis shift yang jeda 5 menitnya sudah lewat.
- * Dipanggil otomatis saat laporan atau rekap dibuka (tanpa butuh cron per menit).
+ * Finalisasi malas (lazy finalization — Opsi A):
+ * Setelah jeda 5 menit habis, ubah PENDING_GRACE menjadi AUDIT_WARNING (peringatan audit untuk Admin/Pengelola).
+ * TIDAK otomatis memotong gaji shift; potongan hanya aktif bila Admin Shift/Manager mengonfirmasi secara sadar.
  */
 export async function finalizeExpiredGraceShifts(shiftIds?: readonly string[]): Promise<number> {
   const now = new Date();
@@ -214,13 +294,13 @@ export async function finalizeExpiredGraceShifts(shiftIds?: readonly string[]): 
     baseConditions.push(inArray(shifts.id, [...shiftIds]));
   }
 
-  const locked = await db
+  const flagged = await db
     .update(shifts)
-    .set({ shortageStatus: 'AUTO_LOCKED' })
+    .set({ shortageStatus: 'AUDIT_WARNING', shortageGraceUntil: null })
     .where(and(...baseConditions))
     .returning({ id: shifts.id, shortageAmount: shifts.shortageAmount });
 
-  return locked.length;
+  return flagged.length;
 }
 
 /**

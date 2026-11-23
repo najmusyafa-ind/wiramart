@@ -618,7 +618,7 @@ export async function getCashierDailyRecap(
 
   const netCashSales = totalAmountCash;
   const totalFisikLaci = targetShiftModalAwal + drawerCashSales - totalCashOut + totalCashIn;
-  const uangTinggalDiLaci = targetShiftId || shiftsSaya.length > 0 ? 100_000 : 0;
+  const uangTinggalDiLaci = targetShiftId || shiftsSaya.length > 0 ? targetShiftModalAwal : 0;
   const uangSetoranToko = Math.max(0, totalFisikLaci - uangTinggalDiLaci);
   const totalOmzet = netCashSales + totalAmountQris;
   const isSharedShift = peerNames.size > 0 || shiftsSaya.some((s) => s.isSharedDrawer);

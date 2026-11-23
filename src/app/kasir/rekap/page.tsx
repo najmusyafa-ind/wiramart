@@ -516,84 +516,44 @@ export default function CashierRecapPage() {
         {/* ── Ringkasan Riwayat: Cash, QRIS, & Modal Awal (Sesuai Arahan Anda) ── */}
         {!loading && s && (
           <>
-            {/* ── ALFA / INDOMARET HANDOVER ALLOCATION BANNER ── */}
+            {/* ── RINGKASAN SALDO KAS KOTAK SHIFT (ESTAFET WIRAMART) ── */}
             <div className="rekap-card no-print" style={{
               background: 'hsl(150 45% 96%)',
               border: '1.5px solid hsl(150 55% 68%)',
               borderRadius: 16,
-              padding: '20px 24px',
+              padding: '18px 20px',
               marginBottom: 20,
               boxShadow: 'var(--shadow-sm)',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 16, borderBottom: '1px solid hsl(150 35% 84%)', paddingBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 12, borderBottom: '1px solid hsl(150 35% 84%)', paddingBottom: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ background: 'hsl(150 60% 88%)', padding: 8, borderRadius: 10, color: 'hsl(150 80% 26%)', flexShrink: 0 }}>
                     <HandCoins size={22} />
                   </div>
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--color-text)' }}>
-                      Serah Terima Kas Laci
+                      Estimasi Uang Fisik di Kotak Kasir
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                      Pisahkan modal shift berikut dan setoran toko
+                      Modal Awal + Penjualan Tunai - Kas Keluar + Kas Masuk
                     </div>
                   </div>
                 </div>
                 <div style={{
                   background: 'hsl(150 65% 88%)',
                   border: '1px solid hsl(150 60% 62%)',
-                  padding: '6px 14px',
-                  borderRadius: 20,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: 'hsl(150 85% 20%)',
+                  padding: '8px 16px',
+                  borderRadius: 12,
+                  fontSize: 18,
+                  fontWeight: 900,
+                  color: 'hsl(150 85% 18%)',
                 }}>
-                  Total Fisik Seharusnya: {rp(s.totalFisikLaci)}
+                  {rp(s.totalFisikLaci)}
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: 14 }}>
-                {/* Pos 1: Tinggalkan di Laci */}
-                <div style={{
-                  background: 'hsl(45 95% 94%)',
-                  border: '1px solid hsl(42 85% 65%)',
-                  borderRadius: 12,
-                  padding: '16px 18px',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: 'hsl(35 90% 26%)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      1. Tinggalkan di Laci Kasir
-                    </span>
-                    <Coins size={16} style={{ color: 'hsl(35 90% 28%)' }} />
-                  </div>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: 'hsl(30 95% 22%)', marginBottom: 4 }}>
-                    {rp(s.uangTinggalDiLaci)}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>
-                    Modal paten uang kembalian untuk <strong>Kasir Shift Berikutnya</strong> (Jangan diambil).
-                  </div>
-                </div>
-
-                {/* Pos 2: Setoran Tunai Toko */}
-                <div style={{
-                  background: 'hsl(150 60% 92%)',
-                  border: '1px solid hsl(150 55% 62%)',
-                  borderRadius: 12,
-                  padding: '16px 18px',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: 'hsl(150 80% 22%)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      2. Uang Setoran Tunai Toko
-                    </span>
-                    <Banknote size={16} style={{ color: 'hsl(150 80% 24%)' }} />
-                  </div>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: 'hsl(150 85% 18%)', marginBottom: 4 }}>
-                    {rp(s.uangSetoranToko)}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>
-                    Masukkan amplop setoran shift beserta struk rekap untuk <strong>Manajer / Brankas</strong>.
-                  </div>
-                </div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.55 }}>
+                Saat tutup shift, hitung <strong>seluruh uang tunai fisik di kotak</strong> (sudah termasuk modal awal). Jika ada pembayaran supplier, bayar titipan, atau uang diambil Bu Dyah, catat dulu di menu <strong>Kas Laci</strong> agar hitungan kotak tetap klop dan bisa diteruskan ke shift berikutnya.
               </div>
             </div>
 
@@ -622,7 +582,7 @@ export default function CashierRecapPage() {
                   {rp(s.modalAwal)}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                  Paten uang receh buka shift
+                  Uang fisik awal saat buka shift
                 </div>
               </div>
 

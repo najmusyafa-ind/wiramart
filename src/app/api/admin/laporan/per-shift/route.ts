@@ -577,6 +577,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       let aggCashOut = 0;
       let aggCashIn = 0;
       let earliestIn = group[0]!.clockIn;
+      let earliestModalAwal = group[0]!.modalAwal;
       let latestOut: Date | null = group[0]!.clockOut;
       let latestActualCash = group[0]!.actualCash;
       let combinedFlags = primary.auditFlags;
@@ -609,7 +610,10 @@ export async function GET(req: NextRequest): Promise<Response> {
           if (prev) prev.txCount += c.txCount;
           else mergedTxCashiersMap.set(c.employeeId, { ...c });
         }
-        if (item.clockIn.getTime() < earliestIn.getTime()) earliestIn = item.clockIn;
+        if (item.clockIn.getTime() < earliestIn.getTime()) {
+          earliestIn = item.clockIn;
+          earliestModalAwal = item.modalAwal;
+        }
         if (item.clockOut && (!latestOut || item.clockOut.getTime() > latestOut.getTime())) {
           latestOut = item.clockOut;
         }
@@ -638,6 +642,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         ...primary,
         clockIn: earliestIn,
         clockOut: latestOut,
+        modalAwal: earliestModalAwal ?? primary.modalAwal,
         actualCash: latestActualCash,
         auditFlags: combinedFlags,
         shortageStatus: combinedShortageStatus,

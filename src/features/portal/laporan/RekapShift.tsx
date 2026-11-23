@@ -1009,7 +1009,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         { no: '1.', rule: 'Rasio Utama 50% : 50% (Closed-Loop)', detail: 'Laba Operasional Bersih dibagi 50% untuk Kas Toko dan 50% untuk Pool Upah Shift Mahasiswa.' },
         { no: '2.', rule: 'Komposisi Antar-Shift 50% / 50%', detail: '50% dibagi berdasarkan kehadiran dan ketepatan waktu tim shift; 50% dibagi proporsional berdasarkan laba kotor shift.' },
         { no: '3.', rule: 'Disiplin Waktu & Toleransi 15 Menit', detail: 'Shift Pagi 07:30, Siang 11:30. Toleransi 15 menit; keterlambatan di atas itu dipotong 3% per 5 menit (maks 50%).' },
-        { no: '4.', rule: 'Pembagian Utuh Per Shift (Bukan Per Nama)', detail: 'Gaji diserahkan utuh kepada masing-masing kelompok shift tanpa pemecahan nominal per nama. Tekor kas > Rp 2.000 masuk jeda 5 menit sebelum dikunci otomatis (dapat di-override Admin Shift/Manager dengan alasan).' },
+        { no: '4.', rule: 'Pembagian Utuh Per Shift & Audit Selisih Kas', detail: 'Gaji diserahkan utuh kepada masing-masing kelompok shift tanpa pemecahan nominal per nama. Selisih kurang > Rp 2.000 menjadi peringatan audit untuk dicek Admin Shift/Pengelola (tidak otomatis memotong gaji sebelum dikonfirmasi).' },
         { no: '5.', rule: 'Pembulatan Bulat (Hamilton)', detail: 'Distribusi rupiah antar-shift dibulatkan dengan metode Largest Remainder (Hamilton) sehingga sisa pembulatan selalu Rp 0.' },
       ];
 
@@ -2605,6 +2605,21 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                                       >
                                                         Potong -{formatRupiah(sess.shortageDeduction)}
                                                       </span>
+                                                    ) : sess.shortageStatus === 'AUDIT_WARNING' ? (
+                                                      <span
+                                                        style={{
+                                                          padding: '2px 8px',
+                                                          borderRadius: '6px',
+                                                          backgroundColor: '#fff7ed',
+                                                          border: '1px solid #fdba74',
+                                                          color: '#c2410c',
+                                                          fontSize: '11px',
+                                                          fontWeight: 700,
+                                                        }}
+                                                        title="Peringatan audit kas — belum memotong gaji shift"
+                                                      >
+                                                        Perlu Cek ({formatRupiah(sess.discrepancy ?? 0)})
+                                                      </span>
                                                     ) : sess.shortageStatus === 'OVERRIDDEN' ? (
                                                       <span
                                                         style={{
@@ -2618,7 +2633,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                                         }}
                                                         title={sess.shortageOverrideReason ?? undefined}
                                                       >
-                                                        Potongan Dibatalkan
+                                                        Ditandai Wajar
                                                       </span>
                                                     ) : sess.discrepancy !== undefined && sess.discrepancy !== null ? (
                                                       sess.discrepancy > 2000 ? (
@@ -2634,6 +2649,21 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                                           }}
                                                         >
                                                           +{formatRupiah(sess.discrepancy)}
+                                                        </span>
+                                                      ) : sess.discrepancy < -2000 ? (
+                                                        <span
+                                                          style={{
+                                                            padding: '2px 8px',
+                                                            borderRadius: '6px',
+                                                            backgroundColor: '#fff7ed',
+                                                            border: '1px solid #fdba74',
+                                                            color: '#c2410c',
+                                                            fontSize: '11px',
+                                                            fontWeight: 700,
+                                                          }}
+                                                          title="Peringatan audit kas — belum memotong gaji shift"
+                                                        >
+                                                          Perlu Cek ({formatRupiah(sess.discrepancy)})
                                                         </span>
                                                       ) : (
                                                         <span
@@ -2756,39 +2786,13 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                                         </div>
                                                       )}
 
-                                                      {(sess.shortageStatus === 'AUTO_LOCKED' || sess.shortageStatus === 'PENDING_GRACE' || sess.shortageStatus === 'OVERRIDDEN') && (
-                                                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                                          {sess.shortageStatus === 'OVERRIDDEN' ? (
-                                                            <button
-                                                              type="button"
-                                                              onClick={() => {
-                                                                setOverrideError('');
-                                                                setOverrideReason('');
-                                                                setOverrideTarget({
-                                                                  shiftId: sess.shiftId,
-                                                                  tanggal: sess.tanggal,
-                                                                  sesi: sess.sesi,
-                                                                  mode: 'RESTORE_DEDUCTION',
-                                                                  amount: Math.abs(sess.discrepancy ?? 0),
-                                                                });
-                                                              }}
-                                                              style={{
-                                                                display: 'inline-flex',
-                                                                alignItems: 'center',
-                                                                gap: '5px',
-                                                                padding: '5px 10px',
-                                                                borderRadius: '6px',
-                                                                border: '1px solid #dc2626',
-                                                                backgroundColor: '#fef2f2',
-                                                                color: '#dc2626',
-                                                                fontSize: '11.5px',
-                                                                fontWeight: 700,
-                                                                cursor: 'pointer',
-                                                              }}
-                                                            >
-                                                              <RotateCcw size={12} /> Aktifkan Potongan Kembali
-                                                            </button>
-                                                          ) : (
+                                                      {(sess.shortageStatus === 'AUTO_LOCKED' ||
+                                                        sess.shortageStatus === 'AUDIT_WARNING' ||
+                                                        sess.shortageStatus === 'PENDING_GRACE' ||
+                                                        sess.shortageStatus === 'OVERRIDDEN' ||
+                                                        (sess.discrepancy !== null && sess.discrepancy !== undefined && sess.discrepancy < -2000)) && (
+                                                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+                                                          {sess.shortageStatus !== 'OVERRIDDEN' && (
                                                             <button
                                                               type="button"
                                                               onClick={() => {
@@ -2816,7 +2820,39 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                                                 cursor: 'pointer',
                                                               }}
                                                             >
-                                                              <ShieldAlert size={12} /> Batalkan Potongan (Override)
+                                                              <ShieldAlert size={12} />{' '}
+                                                              {sess.shortageStatus === 'AUTO_LOCKED' ? 'Batalkan Potongan' : 'Tandai Wajar (Bebas Potong)'}
+                                                            </button>
+                                                          )}
+                                                          {sess.shortageStatus !== 'AUTO_LOCKED' && (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => {
+                                                                setOverrideError('');
+                                                                setOverrideReason('');
+                                                                setOverrideTarget({
+                                                                  shiftId: sess.shiftId,
+                                                                  tanggal: sess.tanggal,
+                                                                  sesi: sess.sesi,
+                                                                  mode: 'RESTORE_DEDUCTION',
+                                                                  amount: Math.abs(sess.discrepancy ?? 0),
+                                                                });
+                                                              }}
+                                                              style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '5px',
+                                                                padding: '5px 10px',
+                                                                borderRadius: '6px',
+                                                                border: '1px solid #dc2626',
+                                                                backgroundColor: '#fef2f2',
+                                                                color: '#dc2626',
+                                                                fontSize: '11.5px',
+                                                                fontWeight: 700,
+                                                                cursor: 'pointer',
+                                                              }}
+                                                            >
+                                                              <RotateCcw size={12} /> Terapkan Potong Tekor
                                                             </button>
                                                           )}
                                                         </div>
@@ -3174,13 +3210,21 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                         <span style={{ color: '#dc2626', fontWeight: 700, marginLeft: '5px' }}>
                                           · Potong -{formatRupiah(sess.shortageDeduction)}
                                         </span>
+                                      ) : sess.shortageStatus === 'AUDIT_WARNING' ? (
+                                        <span style={{ color: '#c2410c', fontWeight: 700, marginLeft: '5px' }}>
+                                          · Perlu Cek ({formatRupiah(sess.discrepancy ?? 0)})
+                                        </span>
                                       ) : sess.shortageStatus === 'PENDING_GRACE' ? (
                                         <span style={{ color: '#b45309', fontWeight: 700, marginLeft: '5px' }}>
                                           · Jeda 5 Menit
                                         </span>
                                       ) : sess.shortageStatus === 'OVERRIDDEN' ? (
                                         <span style={{ color: '#1d4ed8', fontWeight: 700, marginLeft: '5px' }}>
-                                          · Override
+                                          · Wajar
+                                        </span>
+                                      ) : sess.discrepancy !== null && sess.discrepancy !== undefined && sess.discrepancy < -2000 ? (
+                                        <span style={{ color: '#c2410c', fontWeight: 700, marginLeft: '5px' }}>
+                                          · Perlu Cek ({formatRupiah(sess.discrepancy)})
                                         </span>
                                       ) : null}
                                     </div>
@@ -3194,34 +3238,69 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                     Ada input Kas Laci saat Jeda 5 Menit ({sess.cashMovements.filter((m) => m.isGraceCorrection).length} item)
                                   </div>
                                 )}
-                                {(sess.shortageStatus === 'AUTO_LOCKED' || sess.shortageStatus === 'PENDING_GRACE' || sess.shortageStatus === 'OVERRIDDEN') && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setOverrideError('');
-                                      setOverrideReason('');
-                                      setOverrideTarget({
-                                        shiftId: sess.shiftId,
-                                        tanggal: sess.tanggal,
-                                        sesi: sess.sesi,
-                                        mode: sess.shortageStatus === 'OVERRIDDEN' ? 'RESTORE_DEDUCTION' : 'CANCEL_DEDUCTION',
-                                        amount: sess.shortageDeduction || Math.abs(sess.discrepancy ?? 0),
-                                      });
-                                    }}
-                                    style={{
-                                      alignSelf: 'flex-start',
-                                      padding: '4px 8px',
-                                      borderRadius: '5px',
-                                      border: '1px solid #1d4ed8',
-                                      backgroundColor: '#eff6ff',
-                                      color: '#1d4ed8',
-                                      fontSize: '10.5px',
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    {sess.shortageStatus === 'OVERRIDDEN' ? 'Aktifkan Potongan' : 'Batalkan Potongan (Override)'}
-                                  </button>
+                                {(sess.shortageStatus === 'AUTO_LOCKED' ||
+                                  sess.shortageStatus === 'AUDIT_WARNING' ||
+                                  sess.shortageStatus === 'PENDING_GRACE' ||
+                                  sess.shortageStatus === 'OVERRIDDEN' ||
+                                  (sess.discrepancy !== null && sess.discrepancy !== undefined && sess.discrepancy < -2000)) && (
+                                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                    {sess.shortageStatus !== 'OVERRIDDEN' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOverrideError('');
+                                          setOverrideReason('');
+                                          setOverrideTarget({
+                                            shiftId: sess.shiftId,
+                                            tanggal: sess.tanggal,
+                                            sesi: sess.sesi,
+                                            mode: 'CANCEL_DEDUCTION',
+                                            amount: sess.shortageDeduction || Math.abs(sess.discrepancy ?? 0),
+                                          });
+                                        }}
+                                        style={{
+                                          padding: '4px 8px',
+                                          borderRadius: '5px',
+                                          border: '1px solid #1d4ed8',
+                                          backgroundColor: '#eff6ff',
+                                          color: '#1d4ed8',
+                                          fontSize: '10.5px',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        {sess.shortageStatus === 'AUTO_LOCKED' ? 'Batalkan Potongan' : 'Tandai Wajar'}
+                                      </button>
+                                    )}
+                                    {sess.shortageStatus !== 'AUTO_LOCKED' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOverrideError('');
+                                          setOverrideReason('');
+                                          setOverrideTarget({
+                                            shiftId: sess.shiftId,
+                                            tanggal: sess.tanggal,
+                                            sesi: sess.sesi,
+                                            mode: 'RESTORE_DEDUCTION',
+                                            amount: Math.abs(sess.discrepancy ?? 0),
+                                          });
+                                        }}
+                                        style={{
+                                          padding: '4px 8px',
+                                          borderRadius: '5px',
+                                          border: '1px solid #dc2626',
+                                          backgroundColor: '#fef2f2',
+                                          color: '#dc2626',
+                                          fontSize: '10.5px',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        Terapkan Potong
+                                      </button>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             ))}
@@ -3313,8 +3392,8 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
               <div>
                 <h3 style={{ fontSize: '1rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
                   {overrideTarget.mode === 'CANCEL_DEDUCTION'
-                    ? 'Batalkan Potongan Tekor'
-                    : 'Aktifkan Kembali Potongan Tekor'}
+                    ? 'Tandai Selisih Wajar (Bebas Potong)'
+                    : 'Terapkan Potongan Tekor Shift'}
                 </h3>
                 <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '3px 0 0' }}>
                   Shift {overrideTarget.sesi} · {formatShortDate(overrideTarget.tanggal)} · Selisih {formatRupiah(overrideTarget.amount)}

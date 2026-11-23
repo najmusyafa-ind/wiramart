@@ -15,7 +15,7 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, desc, isNull, sql } from 'drizzle-orm';
+import { eq, and, desc, inArray, isNull, sql } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import { shifts, transactions, transactionPayments, shiftCashMovements, employees } from '@/lib/db/schema';
@@ -26,6 +26,7 @@ import {
   SHORTAGE_GRACE_MS,
   MAX_GRACE_RECOUNTS,
   getUnsettledConsignmentsForToday,
+  resolveSameSessionShiftContext,
 } from '@/lib/services/shiftShortageService';
 
 export const runtime = 'nodejs';
@@ -89,13 +90,21 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  // 5. Hitung jumlah transaksi completed
+  // 4. Gabungkan sub-shift yang terputus tanpa hitung fisik (actual_cash IS NULL) pada sesi WIB yang sama
+  // agar angka Tutup Shift Kasir selalu 100% sinkron dengan laporan Admin (/api/admin/laporan/per-shift).
+  const sessionCtx = await resolveSameSessionShiftContext({
+    id: activeShift.id,
+    clockIn: new Date(activeShift.clockIn),
+    modalAwal: activeShift.modalAwal,
+  });
+
+  // 5. Hitung jumlah transaksi completed lintas sub-shift sesi ini
   const [summary] = await db
     .select({
-      txCount: sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'COMPLETED')`,
+      txCount: sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.isTest} = false)`,
     })
     .from(transactions)
-    .where(eq(transactions.shiftId, activeShift.id));
+    .where(inArray(transactions.shiftId, sessionCtx.shiftIds));
 
   // 5b. Hitung omzet TUNAI & QRIS murni dari transaction_payments (Split Payment aware)
   const [paySummary] = await db
@@ -113,7 +122,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     })
     .from(transactionPayments)
     .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
-    .where(eq(transactions.shiftId, activeShift.id));
+    .where(inArray(transactions.shiftId, sessionCtx.shiftIds));
 
   // 5c. Transaksi langsung legacy (jika ada baris transaksi tanpa transaction_payments)
   // PENTING: NOT EXISTS wajib di .where() dengan alias eksplisit (tp.transaction_id = transactions.id)
@@ -134,14 +143,14 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     .from(transactions)
     .where(
       and(
-        eq(transactions.shiftId, activeShift.id),
+        inArray(transactions.shiftId, sessionCtx.shiftIds),
         eq(transactions.status, 'COMPLETED'),
         eq(transactions.isTest, false),
         sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = transactions.id)`,
       ),
     );
 
-  // 5d. Ambil potongan bayar supplier / kas gerak pada shift ini + nama kasir
+  // 5d. Ambil potongan bayar supplier / kas gerak pada sesi shift ini + nama kasir
   const [movements, kasirRow] = await Promise.all([
     db
       .select({
@@ -152,7 +161,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         notes: shiftCashMovements.notes,
       })
       .from(shiftCashMovements)
-      .where(eq(shiftCashMovements.shiftId, activeShift.id)),
+      .where(inArray(shiftCashMovements.shiftId, sessionCtx.shiftIds)),
     db.query.employees.findFirst({
       where: eq(employees.id, employeeId),
       columns: { fullName: true },
@@ -200,9 +209,8 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         : '';
   const finalNotes = [earlyPrefix, notes?.trim() ?? ''].filter(Boolean).join(' ') || null;
 
-  // 6b. Auto-Checklist 4 Titik & Jeda 5 Menit Selisih Laci (Hybrid Blind Count + Modal Fisik Fleksibel Opsi A)
-  const rawModal = activeShift.modalAwal !== null ? Number(activeShift.modalAwal) : 100_000;
-  const effectiveModalAwal = Number.isFinite(rawModal) && rawModal >= 0 ? rawModal : 100_000;
+  // 6b. Auto-Checklist & Jeda 5 Menit Selisih Laci (Opsi A: Modal Fisik Fleksibel + Peringatan Audit Non-Auto-Potong)
+  const effectiveModalAwal = sessionCtx.effectiveModalAwal;
   const expectedCash = Math.round(effectiveModalAwal + totalOmzetCash - totalCashOut + totalCashIn);
   const discrepancy = actualCash !== undefined ? Math.round(actualCash) - expectedCash : null;
   const shortageRp =
