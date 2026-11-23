@@ -20,9 +20,10 @@ import {
   type PortalAdminRole,
 } from '@/lib/utils/routes';
 
-// Cookie names — WAJIB sinkron dengan lib/utils/auth.ts
+// Cookie names — WAJIB sinkron dengan lib/utils/auth.ts (Quad-Session)
 const ADMIN_ACCESS_COOKIE = 'sk_admin';
 const KASIR_ACCESS_COOKIE = 'sk_kasir';
+const GUDANG_ACCESS_COOKIE = 'sk_gudang';
 const STATIC_ASSET_REGEX = /\.(?:ico|png|jpg|jpeg|svg|webp|gif|css|js|map|txt|xml|webmanifest|woff2?)$/i;
 
 function getJwtSecret(): Uint8Array | null {
@@ -69,8 +70,11 @@ async function getAdminPayload(request: NextRequest): Promise<AdminSessionPayloa
   }
 }
 
-async function getKasirPayload(request: NextRequest): Promise<KasirSessionPayload> {
-  const token = request.cookies.get(KASIR_ACCESS_COOKIE)?.value;
+async function getEmployeePayloadByCookie(
+  request: NextRequest,
+  cookieName: string,
+): Promise<KasirSessionPayload> {
+  const token = request.cookies.get(cookieName)?.value;
   const secret = getJwtSecret();
   if (!token || !secret) return null;
   try {
@@ -85,6 +89,14 @@ async function getKasirPayload(request: NextRequest): Promise<KasirSessionPayloa
   } catch {
     return null;
   }
+}
+
+async function getKasirPayload(request: NextRequest): Promise<KasirSessionPayload> {
+  return getEmployeePayloadByCookie(request, KASIR_ACCESS_COOKIE);
+}
+
+async function getGudangPayload(request: NextRequest): Promise<KasirSessionPayload> {
+  return getEmployeePayloadByCookie(request, GUDANG_ACCESS_COOKIE);
 }
 
 export async function proxy(request: NextRequest): Promise<NextResponse> {
@@ -107,6 +119,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
   const adminSession = await getAdminPayload(request);
   const kasirSession = await getKasirPayload(request);
+  const gudangSession = await getGudangPayload(request);
 
   // --- Check Maintenance Mode ---
   if (!adminSession) {
@@ -154,11 +167,21 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     return NextResponse.next();
   }
 
-  if (pathname === KASIR_LOGIN_PATH || pathname === GUDANG_LOGIN_PATH) {
+  if (pathname === KASIR_LOGIN_PATH) {
     if (reason === 'invalid_session' || reason === 'idle') {
       const res = NextResponse.next();
       res.cookies.delete(KASIR_ACCESS_COOKIE);
       res.cookies.delete('sk_kasir_r');
+      return res;
+    }
+    return NextResponse.next();
+  }
+
+  if (pathname === GUDANG_LOGIN_PATH) {
+    if (reason === 'invalid_session' || reason === 'idle') {
+      const res = NextResponse.next();
+      res.cookies.delete(GUDANG_ACCESS_COOKIE);
+      res.cookies.delete('sk_gudang_r');
       return res;
     }
     return NextResponse.next();
@@ -172,7 +195,7 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
   // --- Gudang routes (/gudang & /gudang/**) ---
   if (pathname === '/gudang' || pathname.startsWith('/gudang/')) {
-    if (!kasirSession && !adminSession) {
+    if (!gudangSession && !kasirSession && !adminSession) {
       const url = new URL(GUDANG_LOGIN_PATH, request.url);
       url.searchParams.set('from', pathname);
       return NextResponse.redirect(url);

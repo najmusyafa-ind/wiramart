@@ -20,7 +20,7 @@ export type IdleTimeoutPolicy = {
   logoutMs: number;
   warnMs: number;
   timeoutLabel: string;
-  logoutRole: 'admin' | 'employee';
+  logoutRole: 'admin' | 'employee' | 'gudang';
   storageKey: string;
   logoutSyncKey: string;
   redirectUrl: string;
@@ -76,7 +76,7 @@ export const ROLE_IDLE_TIMEOUTS: Record<IdleTimeoutRole, IdleTimeoutPolicy> = {
     logoutMs: 15 * 60 * 1000,
     warnMs: 14 * 60 * 1000,
     timeoutLabel: '15 menit',
-    logoutRole: 'employee',
+    logoutRole: 'gudang',
     storageKey: STORAGE_KEYS.gudang.active,
     logoutSyncKey: STORAGE_KEYS.gudang.sync,
     redirectUrl: '/gudang/login?reason=idle&timeout=15%20menit',

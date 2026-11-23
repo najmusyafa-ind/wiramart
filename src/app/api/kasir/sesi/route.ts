@@ -6,8 +6,8 @@
 
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
-import { employees, qrisSettings } from '@/lib/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { employees, qrisSettings, shifts } from '@/lib/db/schema';
+import { eq, and, isNull, isNotNull, desc, sql } from 'drizzle-orm';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
 import { resolveActiveDrawerShift } from '@/lib/services/activeShiftService';
@@ -62,12 +62,42 @@ export async function GET(req: NextRequest) {
       return errRes;
     }
 
-    const resolution = await resolveActiveDrawerShift({
-      employeeId: employee.id,
-      employeeName: employee.fullName,
-      host: req.headers.get('host'),
-      autoCloseStale: true,
-    });
+    const [resolution, [lastClosedRow]] = await Promise.all([
+      resolveActiveDrawerShift({
+        employeeId: employee.id,
+        employeeName: employee.fullName,
+        host: req.headers.get('host'),
+        autoCloseStale: true,
+      }),
+      db
+        .select({
+          actualCash: shifts.actualCash,
+          clockOut: shifts.clockOut,
+          kasirName: employees.fullName,
+        })
+        .from(shifts)
+        .innerJoin(employees, eq(shifts.employeeId, employees.id))
+        .where(
+          and(
+            eq(shifts.status, 'CLOSED'),
+            isNotNull(shifts.actualCash),
+            sql`LOWER(${employees.fullName}) NOT LIKE '%testing%'`,
+            sql`LOWER(${employees.fullName}) NOT LIKE '%dede%'`,
+            sql`${employees.nim} NOT IN ('02405013')`,
+          ),
+        )
+        .orderBy(desc(shifts.clockOut))
+        .limit(1),
+    ]);
+
+    const lastClosedShift =
+      lastClosedRow && lastClosedRow.actualCash !== null
+        ? {
+            actualCash: Math.round(Number(lastClosedRow.actualCash)),
+            clockOut: lastClosedRow.clockOut ? lastClosedRow.clockOut.toISOString() : null,
+            kasirName: lastClosedRow.kasirName,
+          }
+        : null;
 
     const response = apiOk({
       employee: {
@@ -86,6 +116,7 @@ export async function GET(req: NextRequest) {
             isPeerShared: resolution.activeShift.isPeerShared,
           }
         : null,
+      lastClosedShift,
       // Shift aktif dari kasir lain (handover signal jika shift lama belum ditutup)
       otherActiveShifts: resolution.otherActiveShifts.map((s) => ({
         kasirName: s.kasirName,

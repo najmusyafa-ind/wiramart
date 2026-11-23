@@ -395,10 +395,10 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
     }
   }
 
-  function computeGroupMemberBreakdown(g: ShiftTeamGroup) {
+  function computeGroupTeamAttendance(g: ShiftTeamGroup) {
     const map = new Map<
       string,
-      { fullName: string; nim: string; jabatan: string; hadir: number; telatMenit: number; nominal: number }
+      { fullName: string; nim: string; jabatan: string; hadir: number; telatMenit: number }
     >();
     for (const sess of g.sessions) {
       for (const p of sess.personnel) {
@@ -408,36 +408,40 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           jabatan: p.jabatan,
           hadir: 0,
           telatMenit: 0,
-          nominal: 0,
         };
         cur.hadir += 1;
         cur.telatMenit += p.lateMinutes || 0;
-        cur.nominal += p.nominalBagiHasil || 0;
         map.set(p.employeeId, cur);
       }
     }
-    return Array.from(map.values()).sort((a, b) => b.nominal - a.nominal || a.fullName.localeCompare(b.fullName));
+    return Array.from(map.values()).sort((a, b) => b.hadir - a.hadir || a.fullName.localeCompare(b.fullName));
   }
 
   function buildGroupSlipWaText(g: ShiftTeamGroup): string {
     const periodLabel = data?.range.label ?? '-';
-    const members = computeGroupMemberBreakdown(g);
+    const members = computeGroupTeamAttendance(g);
     const lines = [
-      `SLIP GAJI KELOMPOK SHIFT - WIRAMART UNPERBA`,
+      `SLIP GAJI PER SHIFT - WIRAMART UNPERBA`,
       `Periode: ${periodLabel}`,
-      `Rumus: 50% Kehadiran · 50% Laba · Peran Sama Rata (1,0)`,
-      `Kelompok: ${g.hari} ${g.sesi} (${g.waktuLabel} WIB)`,
+      `Skema: Pembagian Utuh Per Shift (50% Kehadiran Tim · 50% Laba Shift)`,
+      `Kelompok Shift: ${g.hari} ${g.sesi} (${g.waktuLabel} WIB)`,
       `Tanggal Shift: ${g.shiftTglSummary || '-'} (${g.totalShiftCount}x pertemuan)`,
       `Transaksi: ${g.totalTx} tx (${g.totalUnitsSold} pcs) | Omzet: ${formatRupiah(g.totalOmzet)} | Laba Kotor: ${formatRupiah(g.totalLabaKotor)}`,
       ...(g.totalShortageDeduction > 0
         ? [`Potongan Tekor Terkunci: -${formatRupiah(g.totalShortageDeduction)}`]
         : []),
-      `Total Upah Tim (50%): ${formatRupiah(g.upahBersih)}`,
+      `TOTAL UPAH SHIFT (50%): ${formatRupiah(g.upahBersih)}`,
       ``,
-      `Rincian Per Anggota:`,
+      `Daftar Kehadiran Tim Shift (tanpa pemecahan nominal per nama):`,
       ...members.map(
         (m, idx) =>
-          `${idx + 1}. ${m.fullName} (${m.hadir}x hadir${m.telatMenit > 0 ? `, telat ${m.telatMenit} mnt` : ''}) = ${formatRupiah(m.nominal)}`,
+          `${idx + 1}. ${m.fullName} (${m.hadir}x hadir${m.telatMenit > 0 ? `, telat ${m.telatMenit} mnt` : ', tepat waktu'})`,
+      ),
+      ``,
+      `Rincian Upah Per Pertemuan:`,
+      ...g.sessions.map(
+        (s, idx) =>
+          `${idx + 1}. ${s.tanggal} (${s.txCount} tx · ${s.unitsSold} pcs | Omzet ${formatRupiah(s.omzet)}) -> ${formatRupiah(s.upahBersih)}${s.shortageDeduction > 0 ? ` [potong -${formatRupiah(s.shortageDeduction)}]` : ''}`,
       ),
     ];
     return lines.join('\n');
@@ -448,23 +452,19 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
     const lines: string[] = [
       `REKAP GAJI PER SHIFT - WIRAMART UNPERBA`,
       `Periode: ${periodLabel}`,
-      `Rumus: 50% Kehadiran · 50% Laba · Peran Sama Rata (1,0)`,
-      `Total Pool Gaji Mahasiswa (50%): ${formatRupiah(data?.grandTotal.poolGaji ?? 0)}`,
+      `Skema: Pembagian Utuh Per Shift (50% Kehadiran Tim · 50% Laba Shift)`,
+      `Total Pool Gaji Mahasiswa (50%): ${formatRupiah(data?.grandTotal.totalDistributed ?? data?.grandTotal.poolGaji ?? 0)}`,
       `========================================`,
     ];
     for (const g of filteredGroups) {
-      const members = computeGroupMemberBreakdown(g);
-      lines.push(`\n[${g.hari} ${g.sesi}] ${g.totalShiftCount}x shift | Total Tim: ${formatRupiah(g.upahBersih)}`);
-      for (const m of members) {
-        lines.push(`- ${m.fullName} (${m.hadir}x): ${formatRupiah(m.nominal)}`);
-      }
-    }
-    if (data?.summaryPerEmployee && data.summaryPerEmployee.length > 0) {
-      lines.push(`\n========================================`);
-      lines.push(`TOTAL DITERIMA PER MAHASISWA (TERMASUK DOBEL SHIFT):`);
-      data.summaryPerEmployee.forEach((emp, i) => {
-        lines.push(`${i + 1}. ${emp.fullName} (${emp.totalHadir}x hadir): ${formatRupiah(emp.totalNominal)}`);
-      });
+      const members = computeGroupTeamAttendance(g);
+      const memberSummary =
+        members.length > 0
+          ? members.map((m) => `${m.fullName} (${m.hadir}x)`).join(', ')
+          : g.anggotaShift.map((m) => m.fullName).join(', ') || '-';
+      lines.push(`\n[${g.hari} ${g.sesi}] ${g.totalShiftCount}x shift | Omzet ${formatRupiah(g.totalOmzet)}`);
+      lines.push(`Total Upah Shift: ${formatRupiah(g.upahBersih)}${g.totalShortageDeduction > 0 ? ` (potong tekor -${formatRupiah(g.totalShortageDeduction)})` : ''}`);
+      lines.push(`Tim Hadir: ${memberSummary}`);
     }
     return lines.join('\n');
   }
@@ -481,23 +481,23 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
 
   function handlePrintGroupSlip(g: ShiftTeamGroup) {
     const periodLabel = data?.range.label ?? '-';
-    const members = computeGroupMemberBreakdown(g);
+    const members = computeGroupTeamAttendance(g);
     const esc = (s: string) =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const rowsHtml = members
       .map(
         (m, i) =>
-          `<tr><td>${i + 1}</td><td>${esc(m.fullName)}</td><td>${esc(m.nim)}</td><td style="text-align:center">${m.hadir}x</td><td style="text-align:center">${m.telatMenit > 0 ? `${m.telatMenit} mnt` : 'Tepat'}</td><td style="text-align:right;font-weight:700">${esc(formatRupiah(m.nominal))}</td></tr>`,
+          `<tr><td>${i + 1}</td><td>${esc(m.fullName)}</td><td>${esc(m.nim)}</td><td style="text-align:center">${m.hadir}x</td><td style="text-align:center">${m.telatMenit > 0 ? `Telat ${m.telatMenit} mnt` : 'Tepat Waktu'}</td></tr>`,
       )
       .join('');
     const sessHtml = g.sessions
       .map(
         (s) =>
-          `<tr><td>${esc(s.tanggal)}</td><td>${esc(formatTime(s.clockIn))} - ${s.clockOut ? esc(formatTime(s.clockOut)) : 'Aktif'}</td><td style="text-align:center">${s.txCount}</td><td style="text-align:right">${esc(formatRupiah(s.omzet))}</td><td style="text-align:right">${esc(formatRupiah(s.labaKotor))}</td><td style="text-align:right;font-weight:700">${esc(formatRupiah(s.upahBersih))}</td></tr>`,
+          `<tr><td>${esc(s.tanggal)}</td><td>${esc(formatTime(s.clockIn))} - ${s.clockOut ? esc(formatTime(s.clockOut)) : 'Aktif'}</td><td style="text-align:center">${s.txCount} tx / ${s.unitsSold} pcs</td><td style="text-align:right">${esc(formatRupiah(s.omzet))}</td><td style="text-align:right">${esc(formatRupiah(s.labaKotor))}</td><td style="text-align:right;color:${s.shortageDeduction > 0 ? '#dc2626' : '#64748b'}">${s.shortageDeduction > 0 ? `-${esc(formatRupiah(s.shortageDeduction))}` : 'Rp 0'}</td><td style="text-align:right;font-weight:700">${esc(formatRupiah(s.upahBersih))}</td></tr>`,
       )
       .join('');
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slip Gaji ${esc(g.hari)} ${esc(g.sesi)}</title><style>body{font-family:Arial,sans-serif;color:#111;padding:24px;max-width:760px;margin:0 auto}h1{font-size:18px;margin:0 0 4px}p{margin:2px 0;font-size:12px;color:#333}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}th,td{border:1px solid #cbd5e1;padding:6px 8px}th{background:#f1f5f9;text-align:left}.meta{display:flex;justify-content:space-between;margin:12px 0;padding:10px;border:1px solid #cbd5e1;font-size:12px}@media print{button{display:none}}</style></head><body><h1>SLIP GAJI KELOMPOK SHIFT - WIRAMART UNPERBA</h1><p>Periode: ${esc(periodLabel)} | Kelompok: ${esc(g.hari)} ${esc(g.sesi)} (${esc(g.waktuLabel)} WIB)</p><div class="meta"><div><strong>Jumlah Pertemuan:</strong> ${g.totalShiftCount}x</div><div><strong>Total Omzet:</strong> ${esc(formatRupiah(g.totalOmzet))}</div><div><strong>Laba Kotor:</strong> ${esc(formatRupiah(g.totalLabaKotor))}</div><div><strong>Total Upah Tim:</strong> ${esc(formatRupiah(g.upahBersih))}</div></div><h2 style="font-size:14px;margin-top:16px">Rincian Per Anggota</h2><table><thead><tr><th>No</th><th>Nama</th><th>NIM</th><th style="text-align:center">Hadir</th><th style="text-align:center">Disiplin</th><th style="text-align:right">Nominal</th></tr></thead><tbody>${rowsHtml}</tbody></table><h2 style="font-size:14px;margin-top:16px">Rincian Pertemuan Shift</h2><table><thead><tr><th>Tanggal</th><th>Jam</th><th style="text-align:center">Trx</th><th style="text-align:right">Omzet</th><th style="text-align:right">Laba Kotor</th><th style="text-align:right">Upah Shift</th></tr></thead><tbody>${sessHtml}</tbody></table><div style="margin-top:18px"><button onclick="window.print()">Cetak / Simpan PDF</button></div></body></html>`;
-    const win = window.open('', '_blank', 'width=820,height=720');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slip Gaji Shift ${esc(g.hari)} ${esc(g.sesi)}</title><style>body{font-family:Arial,sans-serif;color:#111;padding:24px;max-width:780px;margin:0 auto}h1{font-size:18px;margin:0 0 4px}p{margin:2px 0;font-size:12px;color:#333}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}th,td{border:1px solid #cbd5e1;padding:6px 8px}th{background:#f1f5f9;text-align:left}.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0;padding:10px;border:1px solid #cbd5e1;font-size:12px}.sig{margin-top:28px;display:flex;justify-content:space-between;font-size:12px}.sig-box{width:240px;text-align:center}.sig-line{margin-top:52px;border-top:1px solid #334155;padding-top:4px}@media print{button{display:none}}</style></head><body><h1>SLIP GAJI PER SHIFT - WIRAMART UNPERBA</h1><p>Periode: ${esc(periodLabel)} | Kelompok Shift: <strong>${esc(g.hari)} ${esc(g.sesi)}</strong> (${esc(g.waktuLabel)} WIB)</p><p>Skema: Pembagian Gaji Utuh Per Shift (50% Kehadiran Tim · 50% Laba Shift · Tanpa Pemecahan Per Nama)</p><div class="meta"><div><strong>Jumlah Pertemuan:</strong><br/>${g.totalShiftCount}x Shift</div><div><strong>Total Omzet:</strong><br/>${esc(formatRupiah(g.totalOmzet))}</div><div><strong>Laba Kotor:</strong><br/>${esc(formatRupiah(g.totalLabaKotor))}</div><div><strong>Total Upah Shift:</strong><br/><span style="font-size:15px;font-weight:800;color:#15803d">${esc(formatRupiah(g.upahBersih))}</span></div></div><h2 style="font-size:14px;margin-top:16px">Rincian Pertemuan &amp; Upah Shift</h2><table><thead><tr><th>Tanggal</th><th>Jam</th><th style="text-align:center">Trx / Unit</th><th style="text-align:right">Omzet</th><th style="text-align:right">Laba Kotor</th><th style="text-align:right">Potong Tekor</th><th style="text-align:right">Upah Shift</th></tr></thead><tbody>${sessHtml}</tbody></table><h2 style="font-size:14px;margin-top:16px">Daftar Kehadiran Tim Shift</h2><table><thead><tr><th>No</th><th>Nama</th><th>NIM</th><th style="text-align:center">Hadir</th><th style="text-align:center">Disiplin</th></tr></thead><tbody>${rowsHtml}</tbody></table><div class="sig"><div class="sig-box"><div>Diserahkan oleh,<br/>Pengelola Wiramart UNPERBA</div><div class="sig-line">Tanda Tangan &amp; Nama Terang</div></div><div class="sig-box"><div>Diterima utuh untuk kelompok,<br/>Perwakilan Shift ${esc(g.hari)} ${esc(g.sesi)}</div><div class="sig-line">Tanda Tangan &amp; Nama Terang</div></div></div><div style="margin-top:18px"><button onclick="window.print()">Cetak / Simpan PDF</button></div></body></html>`;
+    const win = window.open('', '_blank', 'width=840,height=740');
     if (win) {
       win.document.write(html);
       win.document.close();
@@ -1006,11 +1006,11 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       ws1.getRow(noteStartRow).height = 24;
 
       const notesList = [
-        { no: '1.', rule: 'Rasio Utama 50% : 50% (Closed-Loop)', detail: 'Laba Operasional Bersih dibagi 50% untuk Kas Toko dan 50% untuk Pool Upah Mahasiswa.' },
-        { no: '2.', rule: 'Komposisi Antar-Shift 50% / 50%', detail: '50% dibagi berdasarkan kehadiran dan ketepatan waktu; 50% dibagi proporsional berdasarkan laba kotor shift.' },
+        { no: '1.', rule: 'Rasio Utama 50% : 50% (Closed-Loop)', detail: 'Laba Operasional Bersih dibagi 50% untuk Kas Toko dan 50% untuk Pool Upah Shift Mahasiswa.' },
+        { no: '2.', rule: 'Komposisi Antar-Shift 50% / 50%', detail: '50% dibagi berdasarkan kehadiran dan ketepatan waktu tim shift; 50% dibagi proporsional berdasarkan laba kotor shift.' },
         { no: '3.', rule: 'Disiplin Waktu & Toleransi 15 Menit', detail: 'Shift Pagi 07:30, Siang 11:30. Toleransi 15 menit; keterlambatan di atas itu dipotong 3% per 5 menit (maks 50%).' },
-        { no: '4.', rule: 'Peran Sama Rata (1,0) & Potong Tekor Otomatis', detail: 'Seluruh peran dalam 1 shift berbobot sama rata (1,0). Tekor kas > Rp 2.000 masuk jeda 5 menit sebelum dikunci otomatis (dapat di-override Admin Shift/Manager dengan alasan).' },
-        { no: '5.', rule: 'Pembulatan Bulat (Hamilton)', detail: 'Distribusi rupiah dibulatkan dengan metode Largest Remainder (Hamilton) sehingga sisa pembulatan selalu Rp 0.' },
+        { no: '4.', rule: 'Pembagian Utuh Per Shift (Bukan Per Nama)', detail: 'Gaji diserahkan utuh kepada masing-masing kelompok shift tanpa pemecahan nominal per nama. Tekor kas > Rp 2.000 masuk jeda 5 menit sebelum dikunci otomatis (dapat di-override Admin Shift/Manager dengan alasan).' },
+        { no: '5.', rule: 'Pembulatan Bulat (Hamilton)', detail: 'Distribusi rupiah antar-shift dibulatkan dengan metode Largest Remainder (Hamilton) sehingga sisa pembulatan selalu Rp 0.' },
       ];
 
       const mergedDescWidth = cols1[1].width + cols1[2].width;
@@ -1049,30 +1049,33 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       applySheetLayout(ws1, { freezeRow: 4, orientation: 'landscape' });
 
       // ─────────────────────────────────────────────────────────────────────
-      // SHEET 2: REKAP KELOMPOK SHIFT (DENGAN DETAIL UPAH PER ANGGOTA)
+      // SHEET 2: REKAP GAJI PER SHIFT (UTUH PER KELOMPOK SHIFT — TANPA PER NAMA)
       // ─────────────────────────────────────────────────────────────────────
-      const ws2 = wb.addWorksheet('Rekap Kelompok Shift');
+      const ws2 = wb.addWorksheet('Rekap Gaji Per Shift');
       const cols2 = [
         { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
         { header: 'Hari', width: 12, align: 'center' as const },
         { header: 'Sesi', width: 10, align: 'center' as const },
         { header: 'Jam Kerja (WIB)', width: 15, align: 'center' as const },
-        { header: 'Personel', width: 11, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Jml Anggota', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
         { header: 'Frekuensi Shift', width: 14, align: 'right' as const, fmt: EXCEL_FMT.INT },
         { header: 'Transaksi', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Unit Laku (pcs)', width: 14, align: 'right' as const, fmt: EXCEL_FMT.INT },
         { header: 'Omzet (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
         { header: 'Laba Kotor (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
-        { header: 'Upah Bersih (Rp)', width: 19, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Potongan Tekor (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Total Upah Shift (Rp)', width: 20, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
         { header: 'Rata-Rata / Shift (Rp)', width: 20, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
-        { header: 'Rincian Pembagian Upah per Anggota', width: 56, align: 'left' as const },
+        { header: 'Anggota Tim Shift (Kehadiran)', width: 46, align: 'left' as const },
+        { header: 'Tanda Tangan Perwakilan', width: 22, align: 'center' as const },
       ];
       cols2.forEach((c, i) => {
         ws2.getColumn(i + 1).width = c.width;
       });
 
       styleBannerBlock(ws2, {
-        title: 'REKAPITULASI UPAH PER KELOMPOK SHIFT RESMI — WIRAMART UNPERBA',
-        subtitle: `${subtitlePeriod} • ${filteredGroups.length} Kelompok Kerja Aktif`,
+        title: 'REKAPITULASI GAJI UTUH PER KELOMPOK SHIFT — WIRAMART UNPERBA',
+        subtitle: `${subtitlePeriod} • ${filteredGroups.length} Kelompok Shift (Pembagian Utuh Per Shift, Bukan Per Nama)`,
         endCol: cols2.length,
         titleRow: 1,
         subtitleRow: 2,
@@ -1090,38 +1093,26 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
       });
 
-      const groupStats = new Map<string, { memberNominals: Map<string, number> }>();
-      for (const s of data.shifts) {
-        const gKey = `${s.hari}-${s.sesi}`;
-        const existing = groupStats.get(gKey) ?? { memberNominals: new Map<string, number>() };
-        for (const p of s.personnel) {
-          existing.memberNominals.set(
-            p.fullName,
-            (existing.memberNominals.get(p.fullName) ?? 0) + Math.round(toSafeExcelNum(p.nominalBagiHasil)),
-          );
-        }
-        groupStats.set(gKey, existing);
-      }
+      let sum2Units = 0;
+      let sum2Shortage = 0;
 
       filteredGroups.forEach((g, idx) => {
         const rowNum = 5 + idx;
         const r = ws2.getRow(rowNum);
         const shiftCount = Math.round(toSafeExcelNum(g.totalShiftCount));
+        const unitsG = Math.round(toSafeExcelNum(g.totalUnitsSold));
+        const shortageG = Math.round(toSafeExcelNum(g.totalShortageDeduction));
         const upahG = Math.round(toSafeExcelNum(g.upahBersih));
         const avgPerMeeting = shiftCount > 0 ? Math.round(upahG / shiftCount) : 0;
+        sum2Units += unitsG;
+        sum2Shortage += shortageG;
 
-        const gStat = groupStats.get(g.groupKey);
-        const memberDetails: string[] = [];
-        if (gStat && gStat.memberNominals.size > 0) {
-          gStat.memberNominals.forEach((nominal, name) => {
-            memberDetails.push(`${name} (Rp ${nominal.toLocaleString('id-ID')})`);
-          });
-        } else {
-          g.anggotaShift.forEach((m) => {
-            memberDetails.push(m.fullName);
-          });
-        }
-        const detailKeterangan = sanitizeExcelText(memberDetails.join(', ')) || '—';
+        const members = computeGroupTeamAttendance(g);
+        const memberDetails =
+          members.length > 0
+            ? members.map((m) => `${m.fullName} (${m.hadir}x${m.telatMenit > 0 ? `, telat ${m.telatMenit}m` : ''})`)
+            : g.anggotaShift.map((m) => m.fullName);
+        const detailTim = sanitizeExcelText(memberDetails.join(', ')) || '—';
 
         const values: (string | number | { formula: string; result: number })[] = [
           idx + 1,
@@ -1131,29 +1122,32 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           Math.round(toSafeExcelNum(g.totalPersonel)),
           shiftCount,
           Math.round(toSafeExcelNum(g.totalTx)),
+          unitsG,
           Math.round(toSafeExcelNum(g.totalOmzet)),
           Math.round(toSafeExcelNum(g.totalLabaKotor)),
+          shortageG,
           upahG,
-          { formula: `IF(F${rowNum}>0,ROUND(J${rowNum}/F${rowNum},0),0)`, result: avgPerMeeting },
-          detailKeterangan,
+          { formula: `IF(F${rowNum}>0,ROUND(L${rowNum}/F${rowNum},0),0)`, result: avgPerMeeting },
+          detailTim,
+          '',
         ];
 
         values.forEach((val, cIdx) => {
           const cell = r.getCell(cIdx + 1);
           const meta = cols2[cIdx];
           cell.value = val;
-          cell.font = EXCEL_FONT.BODY;
+          cell.font = cIdx === 11 ? EXCEL_FONT.BOLD : EXCEL_FONT.BODY;
           cell.border = EXCEL_BORDER.THIN;
           cell.alignment = {
             vertical: 'middle',
             horizontal: meta.align,
-            wrapText: cIdx === 11,
+            wrapText: cIdx === 13,
           };
           if (meta.fmt) cell.numFmt = meta.fmt;
           if (idx % 2 === 1) cell.fill = EXCEL_FILL.ZEBRA;
         });
 
-        r.height = calcWrapRowHeight([{ text: detailKeterangan, width: cols2[11].width }], 22, 14);
+        r.height = calcWrapRowHeight([{ text: detailTim, width: cols2[13].width }], 24, 14);
       });
 
       const end2 = 5 + filteredGroups.length - 1;
@@ -1164,9 +1158,11 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         4: Math.round(toSafeExcelNum(tableTotals.totalPersonel)),
         5: Math.round(toSafeExcelNum(tableTotals.totalShiftCount)),
         6: Math.round(toSafeExcelNum(tableTotals.totalTx)),
-        7: Math.round(toSafeExcelNum(tableTotals.totalOmzet)),
-        8: Math.round(toSafeExcelNum(tableTotals.totalLabaKotor)),
-        9: Math.round(toSafeExcelNum(tableTotals.upahBersih)),
+        7: sum2Units,
+        8: Math.round(toSafeExcelNum(tableTotals.totalOmzet)),
+        9: Math.round(toSafeExcelNum(tableTotals.totalLabaKotor)),
+        10: sum2Shortage,
+        11: Math.round(toSafeExcelNum(tableTotals.upahBersih)),
       };
       const avgAll2 =
         tableTotals.totalShiftCount > 0
@@ -1179,11 +1175,11 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         const colChar = colLetter(cIdx + 1);
         if (cIdx === 1) {
           cell.value = 'TOTAL KESELURUHAN';
-        } else if (cIdx === 10) {
-          cell.value = { formula: `IF(F${tot2Num}>0,ROUND(J${tot2Num}/F${tot2Num},0),0)`, result: avgAll2 };
-        } else if (cIdx === 11) {
+        } else if (cIdx === 12) {
+          cell.value = { formula: `IF(F${tot2Num}>0,ROUND(L${tot2Num}/F${tot2Num},0),0)`, result: avgAll2 };
+        } else if (cIdx === 13) {
           cell.value = sanitizeExcelText(
-            `Distribusi 50:50 terverifikasi — Total Hak Mahasiswa Rp ${Math.round(tableTotals.upahBersih).toLocaleString('id-ID')}`,
+            `Total Upah Per Shift: Rp ${Math.round(tableTotals.upahBersih).toLocaleString('id-ID')}`,
           );
         } else if (cIdx in sumMap2) {
           cell.value = { formula: `SUM(${colChar}5:${colChar}${end2})`, result: sumMap2[cIdx] };
@@ -1207,26 +1203,35 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       });
 
       // ─────────────────────────────────────────────────────────────────────
-      // SHEET 3: RINCIAN UPAH PER MAHASISWA
+      // SHEET 3: LOG PERTEMUAN SHIFT (AUDIT KAS LACI & UPAH PER SHIFT)
       // ─────────────────────────────────────────────────────────────────────
-      const ws3 = wb.addWorksheet('Upah Mahasiswa');
+      const ws3 = wb.addWorksheet('Log Pertemuan Shift');
       const cols3 = [
         { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
-        { header: 'Nama Lengkap', width: 28, align: 'left' as const },
-        { header: 'NIM', width: 15, align: 'center' as const },
-        { header: 'Program Studi', width: 24, align: 'left' as const },
-        { header: 'Jabatan / Peran', width: 22, align: 'left' as const },
-        { header: 'Kehadiran', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
-        { header: 'Upah Diterima (Rp)', width: 21, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
-        { header: 'Tanda Tangan', width: 20, align: 'center' as const },
+        { header: 'Tanggal', width: 13, align: 'center' as const },
+        { header: 'Hari', width: 11, align: 'center' as const },
+        { header: 'Sesi', width: 10, align: 'center' as const },
+        { header: 'Kasir Bertugas', width: 24, align: 'left' as const },
+        { header: 'Buka (WIB)', width: 11, align: 'center' as const },
+        { header: 'Tutup (WIB)', width: 11, align: 'center' as const },
+        { header: 'Trx', width: 9, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Unit (pcs)', width: 11, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Omzet (Rp)', width: 17, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Laba Kotor (Rp)', width: 17, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Modal Awal (Rp)', width: 16, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Kas Keluar (Rp)', width: 16, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Fisik Laci (Rp)', width: 16, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Potong Tekor (Rp)', width: 16, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Upah Shift (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
+        { header: 'Anggota Hadir (Kehadiran & Disiplin)', width: 44, align: 'left' as const },
       ];
       cols3.forEach((c, i) => {
         ws3.getColumn(i + 1).width = c.width;
       });
 
       styleBannerBlock(ws3, {
-        title: 'DAFTAR PENERIMAAN UPAH BAGI HASIL MAHASISWA — WIRAMART UNPERBA',
-        subtitle: `${subtitlePeriod} • ${data.summaryPerEmployee.length} Personel Mahasiswa`,
+        title: 'JURNAL LOG PERTEMUAN, AUDIT KAS & UPAH PER SHIFT — WIRAMART UNPERBA',
+        subtitle: `${subtitlePeriod} • Total Pertemuan Shift: ${data.shifts.length} Shift`,
         endCol: cols3.length,
         titleRow: 1,
         subtitleRow: 2,
@@ -1244,144 +1249,12 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
       });
 
-      let totalHadirEmps = 0;
-      let totalUpahEmps = 0;
-      const sortedEmps = [...data.summaryPerEmployee].sort((a, b) => a.fullName.localeCompare(b.fullName));
-
-      sortedEmps.forEach((emp, idx) => {
-        const hadirN = Math.round(toSafeExcelNum(emp.totalHadir));
-        const upahN = Math.round(toSafeExcelNum(emp.totalNominal));
-        totalHadirEmps += hadirN;
-        totalUpahEmps += upahN;
-
-        const nameTxt = sanitizeExcelText(emp.fullName) || '—';
-        const prodiTxt = sanitizeExcelText(emp.programStudi) || '—';
-        const jabTxt = sanitizeExcelText(emp.jabatan) || '—';
-
-        const r = ws3.getRow(5 + idx);
-        const vals: (string | number)[] = [
-          idx + 1,
-          nameTxt,
-          sanitizeExcelText(emp.nim) || '—',
-          prodiTxt,
-          jabTxt,
-          hadirN,
-          upahN,
-          '',
-        ];
-
-        vals.forEach((val, cIdx) => {
-          const cell = r.getCell(cIdx + 1);
-          const meta = cols3[cIdx];
-          cell.value = val;
-          cell.font = EXCEL_FONT.BODY;
-          cell.border = EXCEL_BORDER.THIN;
-          cell.alignment = {
-            vertical: 'middle',
-            horizontal: meta.align,
-            wrapText: cIdx === 1 || cIdx === 3 || cIdx === 4,
-          };
-          if (meta.fmt) cell.numFmt = meta.fmt;
-          if (idx % 2 === 1) cell.fill = EXCEL_FILL.ZEBRA;
-        });
-
-        r.height = calcWrapRowHeight(
-          [
-            { text: nameTxt, width: cols3[1].width },
-            { text: prodiTxt, width: cols3[3].width },
-            { text: jabTxt, width: cols3[4].width },
-          ],
-          22,
-          14,
-        );
-      });
-
-      if (sortedEmps.length > 0) {
-        const end3 = 5 + sortedEmps.length - 1;
-        const tot3Num = end3 + 1;
-        const r3Total = ws3.getRow(tot3Num);
-        r3Total.height = 25;
-        ws3.mergeCells(`B${tot3Num}:D${tot3Num}`);
-
-        cols3.forEach((c, cIdx) => {
-          const cell = r3Total.getCell(cIdx + 1);
-          const colChar = colLetter(cIdx + 1);
-          if (cIdx === 1) {
-            cell.value = 'TOTAL KESELURUHAN';
-          } else if (cIdx === 4) {
-            cell.value = `${sortedEmps.length} Mahasiswa`;
-          } else if (cIdx === 5) {
-            cell.value = { formula: `SUM(${colChar}5:${colChar}${end3})`, result: totalHadirEmps };
-          } else if (cIdx === 6) {
-            cell.value = { formula: `SUM(${colChar}5:${colChar}${end3})`, result: totalUpahEmps };
-          } else if (cIdx !== 2 && cIdx !== 3) {
-            cell.value = '';
-          }
-          cell.font = EXCEL_FONT.BOLD;
-          cell.fill = EXCEL_FILL.TOTAL;
-          cell.border = EXCEL_BORDER.TOTAL;
-          cell.alignment = {
-            vertical: 'middle',
-            horizontal: cIdx >= 1 && cIdx <= 3 ? 'center' : c.align,
-          };
-          if (c.fmt) cell.numFmt = c.fmt;
-        });
-      }
-
-      applySheetLayout(ws3, {
-        freezeRow: 4,
-        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: cols3.length } },
-        orientation: 'landscape',
-      });
-
-      // ─────────────────────────────────────────────────────────────────────
-      // SHEET 4: LOG SHIFT HARIAN (DENGAN RINCIAN PEMBAGIAN PER ORANG)
-      // ─────────────────────────────────────────────────────────────────────
-      const ws4 = wb.addWorksheet('Log Shift Harian');
-      const cols4 = [
-        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
-        { header: 'Tanggal', width: 13, align: 'center' as const },
-        { header: 'Hari', width: 11, align: 'center' as const },
-        { header: 'Sesi', width: 10, align: 'center' as const },
-        { header: 'Kasir Bertugas', width: 25, align: 'left' as const },
-        { header: 'Buka (WIB)', width: 12, align: 'center' as const },
-        { header: 'Tutup (WIB)', width: 12, align: 'center' as const },
-        { header: 'Transaksi', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
-        { header: 'Omzet (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
-        { header: 'Laba Kotor (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
-        { header: 'Upah Shift (Rp)', width: 18, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
-        { header: 'Personel', width: 11, align: 'right' as const, fmt: EXCEL_FMT.INT },
-        { header: 'Rincian Pembagian Upah Personel Shift', width: 54, align: 'left' as const },
-      ];
-      cols4.forEach((c, i) => {
-        ws4.getColumn(i + 1).width = c.width;
-      });
-
-      styleBannerBlock(ws4, {
-        title: 'JURNAL LOG TRANSAKSI & RINCIAN HASIL OPERASIONAL SETIAP SHIFT — WIRAMART UNPERBA',
-        subtitle: `${subtitlePeriod} • Total Pertemuan Shift: ${data.shifts.length} Shift`,
-        endCol: cols4.length,
-        titleRow: 1,
-        subtitleRow: 2,
-      });
-      ws4.getRow(3).height = 8;
-
-      const r4Header = ws4.getRow(4);
-      r4Header.height = 26;
-      cols4.forEach((c, i) => {
-        const cell = r4Header.getCell(i + 1);
-        cell.value = c.header;
-        cell.font = EXCEL_FONT.HEADER;
-        cell.fill = EXCEL_FILL.HEADER;
-        cell.border = EXCEL_BORDER.HEADER;
-        cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
-      });
-
-      let sum4Tx = 0;
-      let sum4Omzet = 0;
-      let sum4Laba = 0;
-      let sum4Upah = 0;
-      let sum4Pers = 0;
+      let sum3Tx = 0;
+      let sum3Units = 0;
+      let sum3Omzet = 0;
+      let sum3Laba = 0;
+      let sum3Shortage = 0;
+      let sum3Upah = 0;
 
       data.shifts.forEach((s, idx) => {
         const inTime = s.clockIn
@@ -1402,27 +1275,33 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           : 'Berjalan';
 
         const txN = Math.round(toSafeExcelNum(s.txCount));
+        const unitsN = Math.round(toSafeExcelNum(s.unitsSold ?? 0));
         const omzN = Math.round(toSafeExcelNum(s.omzet));
         const labaN = Math.round(toSafeExcelNum(s.labaKotor));
+        const modalN = Math.round(toSafeExcelNum(s.modalAwal ?? 100_000));
+        const cashOutN = Math.round(toSafeExcelNum(s.cashOut ?? 0));
+        const actualCashVal =
+          s.actualCash !== null && s.actualCash !== undefined ? Math.round(toSafeExcelNum(s.actualCash)) : '—';
+        const shortageN = Math.round(toSafeExcelNum(s.shortageDeduction ?? 0));
         const gajiN = Math.round(
           toSafeExcelNum(s.gajiBersih !== undefined ? s.gajiBersih : s.personnelCount > 0 ? s.poolGaji : 0),
         );
-        const persN = Math.round(toSafeExcelNum(s.personnelCount));
 
-        sum4Tx += txN;
-        sum4Omzet += omzN;
-        sum4Laba += labaN;
-        sum4Upah += gajiN;
-        sum4Pers += persN;
+        sum3Tx += txN;
+        sum3Units += unitsN;
+        sum3Omzet += omzN;
+        sum3Laba += labaN;
+        sum3Shortage += shortageN;
+        sum3Upah += gajiN;
 
         const personelList = sanitizeExcelText(
           s.personnel
-            .map((p) => `${p.fullName}: Rp ${Math.round(toSafeExcelNum(p.nominalBagiHasil)).toLocaleString('id-ID')}`)
-            .join(' | '),
+            .map((p) => (p.lateMinutes > 0 ? `${p.fullName} (telat ${p.lateMinutes}m)` : p.fullName))
+            .join(', '),
         ) || 'Hanya Kasir';
         const kasirTxt = sanitizeExcelText(s.kasirName) || '—';
 
-        const r = ws4.getRow(5 + idx);
+        const r = ws3.getRow(5 + idx);
         const vals: (string | number)[] = [
           idx + 1,
           sanitizeExcelText(s.tanggal) || '—',
@@ -1432,32 +1311,36 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           inTime,
           outTime,
           txN,
+          unitsN,
           omzN,
           labaN,
+          modalN,
+          cashOutN,
+          actualCashVal,
+          shortageN,
           gajiN,
-          persN,
           personelList,
         ];
 
         vals.forEach((val, cIdx) => {
           const cell = r.getCell(cIdx + 1);
-          const meta = cols4[cIdx];
+          const meta = cols3[cIdx];
           cell.value = val;
-          cell.font = EXCEL_FONT.BODY;
+          cell.font = cIdx === 15 ? EXCEL_FONT.BOLD : EXCEL_FONT.BODY;
           cell.border = EXCEL_BORDER.THIN;
           cell.alignment = {
             vertical: 'middle',
             horizontal: meta.align,
-            wrapText: cIdx === 4 || cIdx === 12,
+            wrapText: cIdx === 4 || cIdx === 16,
           };
-          if (meta.fmt) cell.numFmt = meta.fmt;
+          if (meta.fmt && typeof val === 'number') cell.numFmt = meta.fmt;
           if (idx % 2 === 1) cell.fill = EXCEL_FILL.ZEBRA;
         });
 
         r.height = calcWrapRowHeight(
           [
-            { text: kasirTxt, width: cols4[4].width },
-            { text: personelList, width: cols4[12].width },
+            { text: kasirTxt, width: cols3[4].width },
+            { text: personelList, width: cols3[16].width },
           ],
           22,
           14,
@@ -1465,28 +1348,29 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       });
 
       if (data.shifts.length > 0) {
-        const end4 = 5 + data.shifts.length - 1;
-        const tot4Num = end4 + 1;
-        const r4Total = ws4.getRow(tot4Num);
-        r4Total.height = 25;
-        const sumMap4: Record<number, number> = {
-          7: sum4Tx,
-          8: sum4Omzet,
-          9: sum4Laba,
-          10: sum4Upah,
-          11: sum4Pers,
+        const end3 = 5 + data.shifts.length - 1;
+        const tot3Num = end3 + 1;
+        const r3Total = ws3.getRow(tot3Num);
+        r3Total.height = 25;
+        const sumMap3: Record<number, number> = {
+          7: sum3Tx,
+          8: sum3Units,
+          9: sum3Omzet,
+          10: sum3Laba,
+          14: sum3Shortage,
+          15: sum3Upah,
         };
-        ws4.mergeCells(`B${tot4Num}:D${tot4Num}`);
+        ws3.mergeCells(`B${tot3Num}:D${tot3Num}`);
 
-        cols4.forEach((c, cIdx) => {
-          const cell = r4Total.getCell(cIdx + 1);
+        cols3.forEach((c, cIdx) => {
+          const cell = r3Total.getCell(cIdx + 1);
           const colChar = colLetter(cIdx + 1);
           if (cIdx === 1) {
             cell.value = 'TOTAL KESELURUHAN';
           } else if (cIdx === 4) {
             cell.value = `${data.shifts.length} Pertemuan Shift`;
-          } else if (cIdx in sumMap4) {
-            cell.value = { formula: `SUM(${colChar}5:${colChar}${end4})`, result: sumMap4[cIdx] };
+          } else if (cIdx in sumMap3) {
+            cell.value = { formula: `SUM(${colChar}5:${colChar}${end3})`, result: sumMap3[cIdx] };
           } else if (cIdx !== 2 && cIdx !== 3) {
             cell.value = '';
           }
@@ -1501,147 +1385,15 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         });
       }
 
-      applySheetLayout(ws4, {
+      applySheetLayout(ws3, {
         freezeRow: 4,
-        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: cols4.length } },
-        orientation: 'landscape',
-      });
-
-      // ─────────────────────────────────────────────────────────────────────
-      // SHEET 5: RINCIAN AUDIT PER SHIFT & PERSONEL (PAYROLL MATRIX)
-      // ─────────────────────────────────────────────────────────────────────
-      const ws5 = wb.addWorksheet('Detail Shift & Personel');
-      const cols5 = [
-        { header: 'No', width: 6, align: 'center' as const, fmt: EXCEL_FMT.INT },
-        { header: 'Tanggal', width: 13, align: 'center' as const },
-        { header: 'Hari', width: 11, align: 'center' as const },
-        { header: 'Sesi', width: 10, align: 'center' as const },
-        { header: 'Nama Mahasiswa', width: 28, align: 'left' as const },
-        { header: 'NIM', width: 14, align: 'center' as const },
-        { header: 'Peran Tugas', width: 22, align: 'left' as const },
-        { header: 'Status Kehadiran', width: 18, align: 'center' as const },
-        { header: 'Bobot Poin', width: 13, align: 'right' as const, fmt: EXCEL_FMT.DEC2 },
-        { header: 'Upah Bersih (Rp)', width: 21, align: 'right' as const, fmt: EXCEL_FMT.RUPIAH },
-      ];
-      cols5.forEach((c, i) => {
-        ws5.getColumn(i + 1).width = c.width;
-      });
-
-      styleBannerBlock(ws5, {
-        title: 'RINCIAN MATRIKS AUDIT PEMBAGIAN UPAH PER SHIFT & PER PERSONEL — WIRAMART UNPERBA',
-        subtitle: `${subtitlePeriod} • Transparansi Distribusi Upah Mahasiswa Berdasarkan Presensi & Kinerja`,
-        endCol: cols5.length,
-        titleRow: 1,
-        subtitleRow: 2,
-      });
-      ws5.getRow(3).height = 8;
-
-      const r5Header = ws5.getRow(4);
-      r5Header.height = 26;
-      cols5.forEach((c, i) => {
-        const cell = r5Header.getCell(i + 1);
-        cell.value = c.header;
-        cell.font = EXCEL_FONT.HEADER;
-        cell.fill = EXCEL_FILL.HEADER;
-        cell.border = EXCEL_BORDER.HEADER;
-        cell.alignment = { vertical: 'middle', horizontal: c.align, wrapText: true };
-      });
-
-      let rowIdx5 = 5;
-      let counter5 = 1;
-      let grandTotalMatrixUpah = 0;
-
-      for (const s of data.shifts) {
-        for (const p of s.personnel) {
-          const upahP = Math.round(toSafeExcelNum(p.nominalBagiHasil));
-          grandTotalMatrixUpah += upahP;
-
-          const r = ws5.getRow(rowIdx5);
-          const lateStr = p.lateMinutes > 0 ? `Terlambat ${p.lateMinutes} mnt` : 'Hadir Tepat Waktu';
-          const weightNum = toSafeExcelNum(p.totalWeight ?? 1) || 1;
-          const nameTxt = sanitizeExcelText(p.fullName) || '—';
-          const jabTxt = sanitizeExcelText(p.jabatan) || '—';
-
-          const vals: (string | number)[] = [
-            counter5,
-            sanitizeExcelText(s.tanggal) || '—',
-            sanitizeExcelText(s.hari) || '—',
-            sanitizeExcelText(s.sesi) || '—',
-            nameTxt,
-            sanitizeExcelText(p.nim) || '—',
-            jabTxt,
-            lateStr,
-            weightNum,
-            upahP,
-          ];
-
-          const isZebra = counter5 % 2 === 0;
-          vals.forEach((val, cIdx) => {
-            const cell = r.getCell(cIdx + 1);
-            const meta = cols5[cIdx];
-            cell.value = val;
-            cell.font = EXCEL_FONT.BODY;
-            cell.border = EXCEL_BORDER.THIN;
-            cell.alignment = {
-              vertical: 'middle',
-              horizontal: meta.align,
-              wrapText: cIdx === 4 || cIdx === 6,
-            };
-            if (meta.fmt) cell.numFmt = meta.fmt;
-            if (isZebra) cell.fill = EXCEL_FILL.ZEBRA;
-          });
-
-          r.height = calcWrapRowHeight(
-            [
-              { text: nameTxt, width: cols5[4].width },
-              { text: jabTxt, width: cols5[6].width },
-            ],
-            21,
-            14,
-          );
-          counter5++;
-          rowIdx5++;
-        }
-      }
-
-      if (counter5 > 1) {
-        const end5 = rowIdx5 - 1;
-        const r5Total = ws5.getRow(rowIdx5);
-        r5Total.height = 25;
-        ws5.mergeCells(`B${rowIdx5}:D${rowIdx5}`);
-
-        cols5.forEach((c, cIdx) => {
-          const cell = r5Total.getCell(cIdx + 1);
-          const colChar = colLetter(cIdx + 1);
-          if (cIdx === 1) {
-            cell.value = 'TOTAL KESELURUHAN';
-          } else if (cIdx === 4) {
-            cell.value = `${counter5 - 1} Penugasan Personel Shift`;
-          } else if (cIdx === 9) {
-            cell.value = { formula: `SUM(${colChar}5:${colChar}${end5})`, result: grandTotalMatrixUpah };
-          } else if (cIdx !== 2 && cIdx !== 3) {
-            cell.value = '';
-          }
-          cell.font = EXCEL_FONT.BOLD;
-          cell.fill = EXCEL_FILL.TOTAL;
-          cell.border = EXCEL_BORDER.TOTAL;
-          cell.alignment = {
-            vertical: 'middle',
-            horizontal: cIdx >= 1 && cIdx <= 3 ? 'center' : c.align,
-          };
-          if (c.fmt) cell.numFmt = c.fmt;
-        });
-      }
-
-      applySheetLayout(ws5, {
-        freezeRow: 4,
-        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: cols5.length } },
+        autoFilter: { from: { row: 4, column: 1 }, to: { row: 4, column: cols3.length } },
         orientation: 'landscape',
       });
 
       await downloadWorkbookBlob(
         wb,
-        `Laporan_Gaji_Wiramart_${data.range.startDate}_sd_${data.range.endDate}.xlsx`,
+        `Laporan_Gaji_Per_Shift_Wiramart_${data.range.startDate}_sd_${data.range.endDate}.xlsx`,
       );
     } catch (e) {
       console.error(e);
@@ -1778,7 +1530,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                 margin: '2px 0 0',
               }}
             >
-              Rumus 50% Kehadiran · 50% Laba · Peran Sama Rata · Klik baris untuk rincian kas laci & anggota
+              Pembagian gaji utuh per kelompok shift (50% Kehadiran Tim · 50% Laba Shift) · Klik baris untuk rincian tanggal &amp; audit kas
             </p>
           </div>
 
@@ -2673,7 +2425,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                     </div>
                                   </div>
 
-                                  {/* Rincian Upah Per Anggota Tim */}
+                                  {/* Daftar Kehadiran Tim Shift (Gaji Diserahkan Utuh Per Shift) */}
                                   <div
                                     style={{
                                       display: 'flex',
@@ -2687,15 +2439,15 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                     }}
                                   >
                                     <div style={{ width: '100%', fontSize: '11px', fontWeight: 700, color: '#475569' }}>
-                                      Rincian Upah Per Anggota (Peran Sama Rata 1,0):
+                                      Anggota &amp; Kehadiran Tim Shift (Gaji Diserahkan Utuh Per Shift — Tanpa Pemecahan Per Nama):
                                     </div>
-                                    {computeGroupMemberBreakdown(g).map((m) => (
+                                    {computeGroupTeamAttendance(g).map((m) => (
                                       <div
                                         key={m.nim || m.fullName}
                                         style={{
                                           display: 'inline-flex',
                                           alignItems: 'center',
-                                          gap: '8px',
+                                          gap: '6px',
                                           padding: '5px 10px',
                                           borderRadius: '8px',
                                           backgroundColor: '#f8fafc',
@@ -2704,10 +2456,14 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                         }}
                                       >
                                         <span style={{ fontWeight: 700, color: '#0f172a' }}>{m.fullName}</span>
-                                        <span style={{ color: '#64748b' }}>
-                                          {m.hadir}x{m.telatMenit > 0 ? ` · telat ${m.telatMenit}m` : ''}
+                                        <span style={{ color: '#475569', fontWeight: 600 }}>
+                                          {m.hadir}x hadir
                                         </span>
-                                        <span style={{ fontWeight: 800, color: '#15803d' }}>{formatRupiah(m.nominal)}</span>
+                                        {m.telatMenit > 0 && (
+                                          <span style={{ color: '#b45309', fontWeight: 700 }}>
+                                            · telat {m.telatMenit}m
+                                          </span>
+                                        )}
                                       </div>
                                     ))}
                                   </div>
@@ -3373,7 +3129,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                           </div>
 
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
-                            {computeGroupMemberBreakdown(g).map((m) => (
+                            {computeGroupTeamAttendance(g).map((m) => (
                               <span
                                 key={m.nim || m.fullName}
                                 style={{
@@ -3384,8 +3140,10 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                   fontSize: '10.5px',
                                 }}
                               >
-                                <strong>{m.fullName}</strong> ({m.hadir}x):{' '}
-                                <strong style={{ color: '#15803d' }}>{formatRupiah(m.nominal)}</strong>
+                                <strong>{m.fullName}</strong> · {m.hadir}x hadir
+                                {m.telatMenit > 0 && (
+                                  <span style={{ color: '#b45309', fontWeight: 700 }}> · telat {m.telatMenit}m</span>
+                                )}
                               </span>
                             ))}
                           </div>

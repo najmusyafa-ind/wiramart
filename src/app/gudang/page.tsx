@@ -872,7 +872,7 @@ export default function GudangPortalPage() {
       await fetch('/api/auth/logout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: isAdminActor ? 'admin' : 'employee' }),
+        body: JSON.stringify({ role: isAdminActor ? 'admin' : 'gudang' }),
       });
     } finally {
       router.push(isAdminActor ? '/login' : '/gudang/login');

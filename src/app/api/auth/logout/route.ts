@@ -1,15 +1,10 @@
 // =============================================================
-// POST /api/auth/logout — Logout (Admin & Employee)
-// Body optional: { role: 'admin' | 'employee' }
-// Jika role disertakan, hanya hapus cookie untuk role itu.
-// Jika tidak, deteksi otomatis dari token yang ada.
-// Untuk employee: close active shift (clock-out)
+// POST /api/auth/logout — Logout Terisolasi (Admin / Kasir / Gudang)
+// Body optional: { role: 'admin' | 'employee' | 'gudang' }
+// Jika role disertakan, hanya hapus cookie untuk role itu (Quad-Session Safe).
 // =============================================================
 
-import { eq } from 'drizzle-orm';
-import { db } from '@/lib/db/client';
-import { shifts } from '@/lib/db/schema';
-import { getAdminSession, getKasirSession, clearAuthCookies } from '@/lib/utils/auth';
+import { getAdminSession, getKasirSession, getGudangSession, clearAuthCookies } from '@/lib/utils/auth';
 import { apiOk } from '@/lib/utils/helpers';
 import { NextRequest } from 'next/server';
 
@@ -17,10 +12,10 @@ export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest): Promise<Response> {
   // Coba baca role dari request body (opsional)
-  let requestedRole: 'admin' | 'employee' | undefined;
+  let requestedRole: 'admin' | 'employee' | 'gudang' | undefined;
   try {
     const body = await request.json();
-    if (body?.role === 'admin' || body?.role === 'employee') {
+    if (body?.role === 'admin' || body?.role === 'employee' || body?.role === 'gudang') {
       requestedRole = body.role;
     }
   } catch {
@@ -28,13 +23,18 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   if (requestedRole === 'admin') {
-    // Logout admin saja
     await clearAuthCookies('admin');
     return apiOk({ message: 'Logout admin berhasil', redirect: '/login' });
   }
 
+  if (requestedRole === 'gudang') {
+    // Hapus cookie sk_gudang SAJA — tidak pernah menyentuh sesi kasir POS (sk_kasir)
+    await clearAuthCookies('gudang');
+    return apiOk({ message: 'Logout gudang berhasil', redirect: '/gudang/login' });
+  }
+
   if (requestedRole === 'employee') {
-    // Logout kasir (Hapus cookie tanpa menutup shift secara diam-diam — Cacat 4 Opsi A)
+    // Logout kasir (Hapus cookie sk_kasir tanpa menutup shift secara diam-diam — Cacat 4 Opsi A)
     // Penutupan shift resmi WAJIB melalui /api/kasir/shift/tutup dengan Blind Count actualCash
     await clearAuthCookies('employee');
     return apiOk({ message: 'Logout kasir berhasil', redirect: '/kasir/login' });
@@ -45,6 +45,12 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (kasirSession) {
     await clearAuthCookies('employee');
     return apiOk({ message: 'Logout kasir berhasil', redirect: '/kasir/login' });
+  }
+
+  const gudangSession = await getGudangSession();
+  if (gudangSession) {
+    await clearAuthCookies('gudang');
+    return apiOk({ message: 'Logout gudang berhasil', redirect: '/gudang/login' });
   }
 
   const adminSession = await getAdminSession();

@@ -70,21 +70,18 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
       .where(eq(transactions.shiftId, shiftId)),
     db
       .select({
-        directCash: sql<string>`COALESCE(
-          SUM(${transactions.grossAmount})
-          FILTER (
-            WHERE ${transactions.status} = 'COMPLETED'
-            AND ${transactions.paymentMethod} = 'CASH'
-            AND ${transactions.isTest} = false
-            AND NOT EXISTS (
-              SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id}
-            )
-          ),
-          0
-        )`,
+        directCash: sql<string>`COALESCE(SUM(${transactions.grossAmount}), 0)`,
       })
       .from(transactions)
-      .where(eq(transactions.shiftId, shiftId)),
+      .where(
+        and(
+          eq(transactions.shiftId, shiftId),
+          eq(transactions.status, 'COMPLETED'),
+          eq(transactions.paymentMethod, 'CASH'),
+          eq(transactions.isTest, false),
+          sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = transactions.id)`,
+        ),
+      ),
     db
       .select({
         movementType: shiftCashMovements.movementType,
@@ -106,7 +103,7 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
   ]);
 
   const rawModal = shiftRow.modalAwal !== null ? Number(shiftRow.modalAwal) : 100_000;
-  const modalAwal = rawModal > 150_000 || rawModal <= 0 ? 100_000 : rawModal;
+  const modalAwal = Number.isFinite(rawModal) && rawModal >= 0 ? rawModal : 100_000;
   const cashSales = Number(paySummary?.payCash ?? 0) + Number(directSummary?.directCash ?? 0);
 
   let cashOut = 0;

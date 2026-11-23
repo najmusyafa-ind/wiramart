@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { db } from '@/lib/db/client';
 import { sql } from 'drizzle-orm';
+import { evaluateShiftCashState } from '@/lib/services/shiftShortageService';
 
 const dbUrl = process.env.DATABASE_URL || '';
 if (!dbUrl) {
@@ -216,6 +217,26 @@ describe('3. Public Schema v4.3, RLS Security, Index & Delivery Buckets (Read-On
       buckets.length,
       3,
       `Bucket storage kurang: ditemukan ${JSON.stringify(buckets.map((b) => b.id))}`,
+    );
+  });
+
+  it('anti hitung ganda 2x: evaluateShiftCashState cocok persis dengan SUM(transaction_payments) tanpa duplikasi legacy', async () => {
+    const shiftId = '6517e16a-87a0-4bf3-a056-07bc1d709c32';
+    const [rawPay] = await db.execute<{ pay_cash: string }>(sql`
+      SELECT COALESCE(SUM(tp.amount), 0)::text AS pay_cash
+      FROM public.transaction_payments tp
+      JOIN public.transactions t ON t.id = tp.transaction_id
+      WHERE t.shift_id = ${shiftId}
+        AND t.status = 'COMPLETED'
+        AND t.is_test = false
+        AND tp.payment_method = 'CASH'
+    `);
+    const state = await evaluateShiftCashState(shiftId);
+    assert.ok(state, 'Shift 23 Nov Pagi harus ditemukan');
+    assert.equal(
+      state.cashSales,
+      Math.round(Number(rawPay?.pay_cash ?? 0)),
+      'cashSales dari evaluateShiftCashState tidak boleh terhitung ganda 2x',
     );
   });
 });

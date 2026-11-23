@@ -129,9 +129,9 @@ export async function POST(req: NextRequest) {
   const isProduction = process.env.NODE_ENV === 'production';
   const cookieOpts = { httpOnly: true, secure: isProduction, sameSite: 'lax' as const, path: '/' };
 
-  // Set cookie sk_kasir (8 jam) & sk_kasir_r (30 hari)
-  response.cookies.set('sk_kasir', accessToken, { ...cookieOpts, maxAge: 60 * 60 * 8 });
-  response.cookies.set('sk_kasir_r', refreshToken, { ...cookieOpts, maxAge: 60 * 60 * 24 * 30 });
+  // Set cookie terisolasi sk_gudang (8 jam) & sk_gudang_r (30 hari) agar tidak menimpa sesi Kasir POS (sk_kasir)
+  response.cookies.set('sk_gudang', accessToken, { ...cookieOpts, maxAge: 60 * 60 * 8 });
+  response.cookies.set('sk_gudang_r', refreshToken, { ...cookieOpts, maxAge: 60 * 60 * 24 * 30 });
 
   return response;
 }

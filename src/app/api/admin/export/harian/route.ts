@@ -178,7 +178,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             eq(transactions.status, 'COMPLETED'),
             eq(transactions.paymentMethod, 'CASH'),
             eq(transactions.isTest, false),
-            sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+            sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = transactions.id)`,
           ),
         )
         .groupBy(transactions.shiftId);

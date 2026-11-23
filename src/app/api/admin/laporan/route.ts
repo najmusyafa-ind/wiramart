@@ -227,7 +227,7 @@ export async function GET(req: NextRequest) {
               eq(transactions.status, 'COMPLETED'),
               eq(transactions.paymentMethod, 'CASH'),
               eq(transactions.isTest, false),
-              sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+              sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = transactions.id)`,
             ),
           )
           .groupBy(transactions.shiftId),
@@ -295,8 +295,8 @@ export async function GET(req: NextRequest) {
         const parsedModal = sh.modalAwal !== null && sh.modalAwal !== undefined && sh.modalAwal !== ''
           ? parseFloat(sh.modalAwal)
           : NaN;
-        const modalAwal = Number.isFinite(parsedModal) ? parsedModal : 100_000;
-        const rawModalWarning = modalAwal > 150_000 || modalAwal <= 0;
+        const modalAwal = Number.isFinite(parsedModal) && parsedModal >= 0 ? parsedModal : 100_000;
+        const rawModalWarning = modalAwal < 0 || modalAwal > 5_000_000;
 
         const parsedActual = sh.actualCash !== null && sh.actualCash !== undefined && sh.actualCash !== ''
           ? parseFloat(sh.actualCash)

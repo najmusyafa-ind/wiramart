@@ -18,7 +18,6 @@ import {
   KETUA_UMKM_NIM,
   KETUA_UMKM_CANONICAL_ID,
   KETUA_UMKM_DUPLICATE_ID,
-  PERSEN_TUNJANGAN_KETUA,
   extractRoleFromNotes,
   computePersonnelWeight,
   type PeriodKey,
@@ -82,13 +81,10 @@ export async function GET(req: NextRequest): Promise<Response> {
       dateTo: effectiveDateTo,
     });
 
-    // 1. Ambil laporan keuangan resmi untuk rentang ini
+    // 1. Ambil laporan keuangan resmi untuk rentang ini (Mode Pembagian Utuh Per Shift)
     const financial = await getFinancialReport(range);
     const poolHakMahasiswa = financial.summary.alokasiGajiKaryawan;
-    const tunjanganKetua = poolHakMahasiswa > 0
-      ? Math.round((poolHakMahasiswa * PERSEN_TUNJANGAN_KETUA) / 100)
-      : 0;
-    const poolShiftMahasiswa = Math.max(0, poolHakMahasiswa - tunjanganKetua);
+    const poolShiftMahasiswa = Math.max(0, poolHakMahasiswa);
 
     const dailyShiftShares = allocateProportional(
       poolShiftMahasiswa,
@@ -102,13 +98,13 @@ export async function GET(req: NextRequest): Promise<Response> {
     // Ambil shifts dalam rentang waktu ini beserta data kasir
     const shiftRows = await db
       .select({
-        id:           shifts.id,
-        clockIn:      shifts.clockIn,
-        clockOut:     shifts.clockOut,
-        employeeId:   shifts.employeeId,
-        kasirName:    employees.fullName,
-        kasirNim:     employees.nim,
-        kasirProdi:   employees.programStudi,
+        id: shifts.id,
+        clockIn: shifts.clockIn,
+        clockOut: shifts.clockOut,
+        employeeId: shifts.employeeId,
+        kasirName: employees.fullName,
+        kasirNim: employees.nim,
+        kasirProdi: employees.programStudi,
         kasirJabatan: employees.jabatan,
       })
       .from(shifts)
@@ -131,7 +127,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     if (shiftIds.length > 0) {
       const shiftProfits = await db
         .select({
-          shiftId:   transactions.shiftId,
+          shiftId: transactions.shiftId,
           labaKotor: sql<string>`ROUND(COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalSell} - ${transactionItems.subtotalCost} ELSE 0 END), 0))`,
         })
         .from(transactionItems)
@@ -232,16 +228,20 @@ export async function GET(req: NextRequest): Promise<Response> {
     };
 
     const dailyBreakdowns: DailyDivision[] = [];
-    const empAggMap = new Map<string, {
-      employeeId: string;
-      fullName: string;
-      nim: string;
-      programStudi: string;
-      jabatan: string;
-      totalHadir: number;
-      totalMenitKerja: number;
-      totalNominal: number;
+    const shiftGroupAggMap = new Map<string, {
+      groupKey: string;
+      hari: string;
+      sesi: 'Pagi' | 'Siang';
+      totalShiftCount: number;
+      totalPoolShift: number;
+      memberNames: Set<string>;
     }>();
+    const HARI_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const dayOfDate = (dateStr: string): string => {
+      const [y, m, day] = dateStr.split('-').map(Number);
+      const dow = new Date(Date.UTC(y ?? 2026, (m ?? 1) - 1, day ?? 1, 12)).getUTCDay();
+      return HARI_NAMES[dow] ?? dateStr;
+    };
 
     // Buat daftar tanggal lengkap dari range
     for (const d of financial.daily) {
@@ -409,6 +409,19 @@ export async function GET(req: NextRequest): Promise<Response> {
           const group = shiftPoolMap.get(s.id)!;
           group.pool = shiftShares[i] ?? 0;
 
+          const hari = dayOfDate(d.date);
+          const gKey = `${hari}-${group.sesi}`;
+          const gAgg = shiftGroupAggMap.get(gKey) ?? {
+            groupKey: gKey,
+            hari,
+            sesi: group.sesi,
+            totalShiftCount: 0,
+            totalPoolShift: 0,
+            memberNames: new Set<string>(),
+          };
+          gAgg.totalShiftCount += 1;
+          gAgg.totalPoolShift += group.pool;
+
           const evaluated = group.attendees.map((att) => {
             let roleTask = extractRoleFromNotes(att.notes, att.employee.jabatan);
             if (att.employee.id === KETUA_UMKM_CANONICAL_ID || att.employee.nim === KETUA_UMKM_NIM) {
@@ -425,16 +438,16 @@ export async function GET(req: NextRequest): Promise<Response> {
               attendanceDate: d.date,
               lateMinutes: att.lateMinutes,
             });
+            gAgg.memberNames.add(att.employee.fullName);
             return { att, roleTask, wInfo };
           });
 
-          const pShares = allocateProportional(
-            group.pool,
-            evaluated.map((e) => e.wInfo.totalWeight),
-          );
-          evaluated.forEach(({ att, roleTask, wInfo }, idx) => {
+          shiftGroupAggMap.set(gKey, gAgg);
+
+          // Mode PER_SHIFT: upah diberikan utuh per shift (nominal per nama = 0)
+          evaluated.forEach(({ att, roleTask, wInfo }) => {
             attendeeNominalMap.set(att.id, {
-              nominal: pShares[idx] ?? 0,
+              nominal: 0,
               roleTask,
               effectiveLate: wInfo.effectiveLateMinutes,
             });
@@ -454,13 +467,9 @@ export async function GET(req: NextRequest): Promise<Response> {
           });
           return { att, roleTask, wInfo };
         });
-        const pShares = allocateProportional(
-          poolHariIni,
-          evaluated.map((e) => e.wInfo.totalWeight),
-        );
-        evaluated.forEach(({ att, roleTask, wInfo }, idx) => {
+        evaluated.forEach(({ att, roleTask, wInfo }) => {
           attendeeNominalMap.set(att.id, {
-            nominal: pShares[idx] ?? 0,
+            nominal: 0,
             roleTask,
             effectiveLate: wInfo.effectiveLateMinutes,
           });
@@ -469,43 +478,17 @@ export async function GET(req: NextRequest): Promise<Response> {
       }
 
       const count = allDayAttendees.length;
-      const defaultNominal = count > 0 ? Math.round(poolHariIni / count) : 0;
 
       const personnelDetails: WorkerDetail[] = allDayAttendees.map((att) => {
         const info = attendeeNominalMap.get(att.id);
-        const nominalPerOrang = info?.nominal ?? 0;
         const roleTask = info?.roleTask ?? extractRoleFromNotes(att.notes, att.employee.jabatan);
         const effectiveLate = info?.effectiveLate ?? 0;
-
-        let durasiMenit = 0;
-        if (att.clockInActual && att.clockOutActual) {
-          durasiMenit = Math.max(0, Math.round(
-            (new Date(att.clockOutActual).getTime() - new Date(att.clockInActual).getTime()) / 60000
-          ));
-        }
 
         const empId = att.employee.id;
         const displayJabatan =
           empId === KETUA_UMKM_CANONICAL_ID || att.employee.nim === KETUA_UMKM_NIM
             ? 'Ketua UMKM / Admin Shift'
             : att.employee.jabatan;
-
-        if (!empAggMap.has(empId)) {
-          empAggMap.set(empId, {
-            employeeId: empId,
-            fullName: att.employee.fullName,
-            nim: att.employee.nim,
-            programStudi: att.employee.programStudi,
-            jabatan: displayJabatan,
-            totalHadir: 0,
-            totalMenitKerja: 0,
-            totalNominal: 0,
-          });
-        }
-        const agg = empAggMap.get(empId)!;
-        agg.totalHadir += 1;
-        agg.totalMenitKerja += durasiMenit;
-        agg.totalNominal += nominalPerOrang;
 
         return {
           attendanceId: att.id,
@@ -515,13 +498,13 @@ export async function GET(req: NextRequest): Promise<Response> {
           programStudi: att.employee.programStudi,
           jabatan: displayJabatan,
           roleTask,
-          slotStart: att.schedule?.slotStart ?? '07:00',
+          slotStart: att.schedule?.slotStart ?? '07:30',
           slotEnd: att.schedule?.slotEnd ?? '11:30',
           status: effectiveLate > 0 ? 'TELAT' : 'HADIR',
           clockInActual: att.clockInActual ? att.clockInActual.toISOString() : null,
           clockOutActual: att.clockOutActual ? att.clockOutActual.toISOString() : null,
           lateMinutes: effectiveLate,
-          nominalBagiHasil: nominalPerOrang,
+          nominalBagiHasil: 0,
         };
       });
 
@@ -532,37 +515,22 @@ export async function GET(req: NextRequest): Promise<Response> {
         biayaOperasional: d.biayaOperasional,
         poolBagiHasil: poolHariIni,
         personnelCount: count,
-        nominalPerOrang: defaultNominal,
+        nominalPerOrang: 0,
         personnel: personnelDetails,
       });
     }
 
-    const totalShiftDistributed = Array.from(empAggMap.values()).reduce(
-      (acc, curr) => acc + curr.totalNominal,
-      0,
-    );
-    if (tunjanganKetua > 0 && totalShiftDistributed > 0) {
-      if (!empAggMap.has(KETUA_UMKM_CANONICAL_ID)) {
-        empAggMap.set(KETUA_UMKM_CANONICAL_ID, {
-          employeeId: KETUA_UMKM_CANONICAL_ID,
-          fullName: 'Gita Aprilianingrum',
-          nim: KETUA_UMKM_NIM,
-          programStudi: 'Akuntansi',
-          jabatan: 'Ketua UMKM / Admin Shift',
-          totalHadir: 0,
-          totalMenitKerja: 0,
-          totalNominal: 0,
-        });
-      }
-      const ketuaAgg = empAggMap.get(KETUA_UMKM_CANONICAL_ID)!;
-      ketuaAgg.jabatan = 'Ketua UMKM / Admin Shift';
-      ketuaAgg.totalNominal += tunjanganKetua;
-    }
-
-    const summaryPerEmployee = Array.from(empAggMap.values())
-      .sort((a, b) => b.totalNominal - a.totalNominal);
+    const summaryPerShiftGroup = Array.from(shiftGroupAggMap.values()).map((g) => ({
+      groupKey: g.groupKey,
+      hari: g.hari,
+      sesi: g.sesi,
+      totalShiftCount: g.totalShiftCount,
+      totalPoolShift: g.totalPoolShift,
+      anggotaTim: Array.from(g.memberNames).sort(),
+    }));
 
     return apiOk({
+      payrollMode: 'PER_SHIFT',
       range: {
         startDate: range.startDate,
         endDate: range.endDate,
@@ -575,9 +543,11 @@ export async function GET(req: NextRequest): Promise<Response> {
         totalBiayaOperasional: financial.summary.biayaOperasional,
         totalAlokasiKaryawan: financial.summary.alokasiGajiKaryawan,
         totalLabaBersihToko: financial.summary.labaBersih,
-        totalPersonelAktif: summaryPerEmployee.length,
+        totalKelompokShiftAktif: summaryPerShiftGroup.length,
+        totalPersonelAktif: 0,
       },
-      summaryPerEmployee,
+      summaryPerShiftGroup,
+      summaryPerEmployee: [],
       dailyBreakdowns,
     });
   } catch (err) {

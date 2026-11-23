@@ -60,6 +60,7 @@ type SplitPaymentDetail = {
 type SessionInfo = {
   employee: { id: string; fullName: string; jabatan: string; nim: string; hasPin?: boolean };
   shift: { id: string; clockIn: string; modalAwal: string | null; isPeerShared?: boolean } | null;
+  lastClosedShift?: { actualCash: number; clockOut: string | null; kasirName: string } | null;
   qris: { qrImageUrl: string | null; bankName: string | null; accountName: string | null; isActive: boolean } | null;
   store: { name: string; address: string; phone: string };
   otherActiveShifts: { kasirName: string; kasirNim: string; clockIn: string; shiftId: string }[];
@@ -201,6 +202,7 @@ function ProductCard({
 function BukaShiftOverlay({
   kasirName,
   otherActiveShifts,
+  lastClosedShift,
   onSuccess,
   canClose = false,
   onClose,
@@ -208,6 +210,7 @@ function BukaShiftOverlay({
 }: {
   kasirName: string;
   otherActiveShifts: SessionInfo['otherActiveShifts'];
+  lastClosedShift?: SessionInfo['lastClosedShift'];
   onSuccess: (modalAwal: number, shiftId?: string) => void;
   canClose?: boolean;
   onClose?: () => void;
@@ -455,7 +458,7 @@ function BukaShiftOverlay({
                 border: '1px solid var(--color-warning)',
                 fontSize: '0.72rem', color: 'var(--color-text)', lineHeight: 1.4,
               }}>
-                <strong>Modal Paten:</strong> Default modal uang kembalian di laci kasir adalah <strong>Rp 100.000</strong>. Sesuaikan nominal jika menerima serah terima saldo berbeda.
+                <strong>Modal Awal Laci:</strong> Masukkan jumlah uang tunai fisik yang benar-benar ada di kotak kasir saat ini (standar kembalian Rp 100.000 atau ikuti saldo estafet shift sebelumnya).
               </div>
 
               {/* Mode Switcher */}
@@ -501,26 +504,85 @@ function BukaShiftOverlay({
               </div>
 
               {inputMode === 'QUICK' ? (
-                <>
-                  {/* Modal Paten Toko Rp 100.000 Sesuai SOP Ritel */}
-                  <div style={{
-                    padding: 'var(--space-4) var(--space-3)',
-                    background: 'var(--color-surface-elevated)',
-                    border: '1px solid var(--color-primary)',
-                    borderRadius: 'var(--radius-md)',
-                    textAlign: 'center',
-                  }}>
-                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-primary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-                      Modal Kas Laci (Paten SOP Ritel)
-                    </div>
-                    <div style={{ fontSize: 'clamp(1.5rem, 6vw, 2rem)', fontWeight: 900, color: 'var(--color-text)' }}>
-                      Rp 100.000
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: 6, lineHeight: 1.4 }}>
-                      Uang receh pecahan wajib untuk kembalian pembeli. Terkunci flat Rp 100.000 per shift.
-                    </div>
+                <div style={{
+                  padding: 'var(--space-3)',
+                  background: 'var(--color-surface-elevated)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}>
+                  <label
+                    htmlFor="input-modal-awal-cepat"
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      color: 'var(--color-primary)',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    Uang Fisik Awal di Kotak Kasir (Rp)
+                  </label>
+                  <input
+                    id="input-modal-awal-cepat"
+                    type="text"
+                    inputMode="numeric"
+                    className="form-input"
+                    placeholder="Contoh: 100.000"
+                    value={!isNaN(modalNominal) ? modalNominal.toLocaleString('id-ID') : ''}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, '');
+                      setBreakdown({});
+                      setModalInput(digits);
+                    }}
+                    style={{
+                      fontSize: 'clamp(1.25rem, 5vw, 1.55rem)',
+                      textAlign: 'center',
+                      fontWeight: 800,
+                      minHeight: 48,
+                    }}
+                  />
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBreakdown({});
+                        setModalInput('100000');
+                      }}
+                      className="btn btn-secondary"
+                      style={{ flex: '1 1 auto', minHeight: 36, fontSize: '0.74rem', fontWeight: 700 }}
+                    >
+                      Standar: Rp 100.000
+                    </button>
+                    {lastClosedShift && lastClosedShift.actualCash > 0 && lastClosedShift.actualCash !== 100_000 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBreakdown({});
+                          setModalInput(String(lastClosedShift.actualCash));
+                        }}
+                        className="btn btn-secondary"
+                        style={{
+                          flex: '1 1 auto',
+                          minHeight: 36,
+                          fontSize: '0.74rem',
+                          fontWeight: 700,
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)',
+                        }}
+                      >
+                        Sisa Shift Lalu: {rp(lastClosedShift.actualCash)}
+                      </button>
+                    )}
                   </div>
-                </>
+                  {lastClosedShift && lastClosedShift.actualCash > 0 && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                      Catatan fisik terakhir ({lastClosedShift.kasirName}): <strong>{rp(lastClosedShift.actualCash)}</strong>. Jika ada uang diambil/disetor sebelum buka, masukkan sisa fisik yang ada di kotak sekarang.
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div style={{ maxHeight: 320, overflowY: 'auto', paddingRight: 4 }}>
                   <KalkulatorPecahan initialBreakdown={breakdown} onChange={handleCalculatorChange} />
@@ -2449,6 +2511,7 @@ export default function PosPage() {
         <BukaShiftOverlay
           kasirName={kasirName}
           otherActiveShifts={session?.otherActiveShifts ?? []}
+          lastClosedShift={session?.lastClosedShift ?? null}
           onSuccess={handleBukaShiftSuccess}
           canClose={canCloseShiftModal}
           onClose={() => setForceShowBukaShift(false)}
@@ -2564,12 +2627,48 @@ export default function PosPage() {
                 <textarea
                   className="form-input"
                   rows={2}
-                  placeholder="Catatan serah terima kunci, uang titipan, dll."
+                  placeholder="Catatan serah terima kunci, kondisi toko, dll."
                   value={tutupNotes}
                   onChange={(e) => setTutupNotes(e.target.value)}
                   maxLength={300}
                   style={{ fontSize: 'var(--text-base)', resize: 'none' }}
                 />
+                {/\b(bayar|supplier|titipan|diambil|setor|keluar|beli|belanja|nota)\b/i.test(tutupNotes) && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: '8px 10px',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'hsl(38 92% 95%)',
+                      border: '1px solid hsl(38 85% 70%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ fontSize: '0.74rem', color: 'hsl(32 85% 24%)', lineHeight: 1.4 }}>
+                      <strong>Pengeluaran di catatan tidak memotong saldo laci otomatis.</strong> Catat lewat menu Kas Laci agar tidak terbaca selisih kurang.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTutupConfirm(false);
+                        setShowKasGerak(true);
+                      }}
+                      className="btn btn-secondary"
+                      style={{
+                        minHeight: 36,
+                        padding: '4px 10px',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
+                    >
+                      Catat Kas Laci
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Status Tutup Shift (Mendukung Tutup Awal Resmi karena Mata Kuliah — Audio 4) */}

@@ -265,7 +265,14 @@ export async function GET(req: NextRequest): Promise<Response> {
     if (shiftRows.length === 0) {
       return apiOk({
         range: { startDate: range.startDate, endDate: range.endDate, label: range.label },
+        formula: {
+          payrollMode: 'PER_SHIFT',
+          attendancePct: Math.round(PAYROLL_ATTENDANCE_RATIO * 100),
+          performancePct: Math.round(PAYROLL_PERFORMANCE_RATIO * 100),
+          equalRoleWeight: true,
+        },
         shifts: [],
+        summaryPerShiftGroup: [],
         summaryPerEmployee: [],
         scheduleTeams,
         availableMonths,
@@ -278,6 +285,8 @@ export async function GET(req: NextRequest): Promise<Response> {
           tunjanganKetua: 0,
           poolShiftMahasiswa: poolHakMahasiswa,
           txCount: fs.txCount,
+          totalUnitsSold: 0,
+          totalShortageDeduction: 0,
           totalDistributed: 0,
           sisaPool: poolHakMahasiswa,
           labaBersihToko: fs.labaBersih,
@@ -473,7 +482,7 @@ export async function GET(req: NextRequest): Promise<Response> {
           eq(transactions.status, 'COMPLETED'),
           eq(transactions.paymentMethod, 'CASH'),
           eq(transactions.isTest, false),
-          sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+          sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = transactions.id)`,
         ))
         .groupBy(transactions.shiftId);
 
@@ -968,7 +977,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     });
 
     // ─────────────────────────────────────────────────────────────
-    // 5. Bangun response per shift + akumulasi per karyawan
+    // 5. Bangun response PER SHIFT (tanpa pemecahan gaji per nama)
     // ─────────────────────────────────────────────────────────────
     type AttendeeRow = {
       employeeId: string;
@@ -982,6 +991,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       roleWeight: number;
       sessionWeight: number;
       totalWeight: number;
+      /** Selalu 0 pada mode PER_SHIFT (gaji diserahkan utuh ke kelompok shift) */
       nominalBagiHasil: number;
     };
 
@@ -1022,24 +1032,61 @@ export async function GET(req: NextRequest): Promise<Response> {
         totalDiscrepancyQty: number;
       } | null;
       personnelCount: number;
+      /** Selalu 0 pada mode PER_SHIFT (tidak dipecah per orang) */
       nominalPerOrang: number;
       personnel: AttendeeRow[];
     };
 
-    const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
-    const empAgg = new Map<string, {
+    type ShiftGroupMemberAttendance = {
       employeeId: string;
       fullName: string;
       nim: string;
-      programStudi: string;
       jabatan: string;
       totalHadir: number;
-      nominalShift: number;
-      tunjanganKetua: number;
-      totalNominal: number;
-      lateCount: number;
       totalLateMinutes: number;
-      shifts: string[];
+    };
+
+    type ShiftGroupSummary = {
+      groupKey: string;
+      hari: string;
+      sesi: 'Pagi' | 'Siang';
+      slotLabel: string;
+      totalShiftCount: number;
+      txCount: number;
+      unitsSold: number;
+      omzet: number;
+      labaKotor: number;
+      poolGaji: number;
+      shortageDeduction: number;
+      gajiBersih: number;
+      rataRataPerShift: number;
+      tanggalList: string[];
+      anggotaTim: ShiftGroupMemberAttendance[];
+    };
+
+    const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+    const HARI_SORT_ORDER: Record<string, number> = {
+      Senin: 1,
+      Selasa: 2,
+      Rabu: 3,
+      Kamis: 4,
+      Jumat: 5,
+    };
+
+    const groupAggMap = new Map<string, {
+      groupKey: string;
+      hari: string;
+      sesi: 'Pagi' | 'Siang';
+      slotLabel: string;
+      datesSet: Set<string>;
+      txCount: number;
+      unitsSold: number;
+      omzet: number;
+      labaKotor: number;
+      poolGaji: number;
+      shortageDeduction: number;
+      gajiBersih: number;
+      membersMap: Map<string, ShiftGroupMemberAttendance>;
     }>();
 
     const builtShifts: ShiftRow[] = [];
@@ -1054,9 +1101,9 @@ export async function GET(req: NextRequest): Promise<Response> {
       const fin = finByShift.get(s.id) ?? { omzet: 0, labaKotor: 0, txCount: 0, unitsSold: 0 };
       const poolGaji = poolByShift.get(s.id) ?? 0;
 
-      // Audit Kas Laci + Auto-Checklist Potong Tekor (hanya aktif jika status AUTO_LOCKED setelah jeda 5 menit)
-      const rawModal = s.modalAwal ? parseFloat(s.modalAwal) : 100_000;
-      const modalAwal = rawModal > 150_000 ? 100_000 : (rawModal <= 0 ? 100_000 : rawModal);
+      // Audit Kas Laci (Modal Fisik Fleksibel Opsi A) + Auto-Checklist Potong Tekor (hanya jika AUTO_LOCKED)
+      const rawModal = s.modalAwal !== null && s.modalAwal !== undefined ? parseFloat(s.modalAwal) : 100_000;
+      const modalAwal = Number.isFinite(rawModal) && rawModal >= 0 ? rawModal : 100_000;
       const actualCash = s.actualCash ? parseFloat(s.actualCash) : null;
       const cashSales = Math.round(cashSalesMap.get(s.id) ?? 0);
       const cashOut = Math.round(cashOutMap.get(s.id) ?? 0);
@@ -1076,7 +1123,6 @@ export async function GET(req: NextRequest): Promise<Response> {
 
       const attendeesRaw = attByShift.get(s.id) ?? [];
       const count = attendeesRaw.length;
-      const nominalPerOrang = count > 0 ? Math.round(gajiBersih / count) : 0;
 
       const dayOfWeek = wibDayOfWeek(wibDate);
       const hariStr = HARI[dayOfWeek] ?? wibDate;
@@ -1099,17 +1145,40 @@ export async function GET(req: NextRequest): Promise<Response> {
           lateMinutes: att.lateMinutes,
         });
 
-        // Tidak ada lagi special case Minggu — weekend sudah di-exclude di tahap 4b
         return { att, roleTask, wInfo };
       });
 
-      const personShares = allocateProportional(
-        gajiBersih,
-        evaluated.map((e) => e.wInfo.totalWeight),
-      );
+      const groupKey = `${hariStr}-${sesi}`;
+      let gAgg = groupAggMap.get(groupKey);
+      if (!gAgg) {
+        gAgg = {
+          groupKey,
+          hari: hariStr,
+          sesi,
+          slotLabel,
+          datesSet: new Set<string>(),
+          txCount: 0,
+          unitsSold: 0,
+          omzet: 0,
+          labaKotor: 0,
+          poolGaji: 0,
+          shortageDeduction: 0,
+          gajiBersih: 0,
+          membersMap: new Map<string, ShiftGroupMemberAttendance>(),
+        };
+        groupAggMap.set(groupKey, gAgg);
+      }
 
-      const personnel: AttendeeRow[] = evaluated.map(({ att, roleTask, wInfo }, idx) => {
-        const share = personShares[idx] ?? 0;
+      gAgg.datesSet.add(wibDate);
+      gAgg.txCount += fin.txCount;
+      gAgg.unitsSold += fin.unitsSold;
+      gAgg.omzet += fin.omzet;
+      gAgg.labaKotor += fin.labaKotor;
+      gAgg.poolGaji += poolGaji;
+      gAgg.shortageDeduction += shortageDeduction;
+      gAgg.gajiBersih += gajiBersih;
+
+      const personnel: AttendeeRow[] = evaluated.map(({ att, roleTask, wInfo }) => {
         const empId = att.employee.id;
         const displayJabatan =
           empId === KETUA_UMKM_CANONICAL_ID || att.employee.nim === KETUA_UMKM_NIM
@@ -1117,31 +1186,17 @@ export async function GET(req: NextRequest): Promise<Response> {
             : att.employee.jabatan;
 
         if (!isExcludedAccount(att.employee.fullName, att.employee.nim)) {
-          if (!empAgg.has(empId)) {
-            empAgg.set(empId, {
-              employeeId: empId,
-              fullName: att.employee.fullName,
-              nim: att.employee.nim,
-              programStudi: att.employee.programStudi,
-              jabatan: displayJabatan,
-              totalHadir: 0,
-              nominalShift: 0,
-              tunjanganKetua: 0,
-              totalNominal: 0,
-              lateCount: 0,
-              totalLateMinutes: 0,
-              shifts: [],
-            });
-          }
-          const agg = empAgg.get(empId)!;
-          agg.totalHadir += 1;
-          agg.nominalShift += share;
-          agg.totalNominal += share;
-          if (wInfo.effectiveLateMinutes > 0) {
-            agg.lateCount += 1;
-            agg.totalLateMinutes += wInfo.effectiveLateMinutes;
-          }
-          agg.shifts.push(`${wibDate} ${sesi}`);
+          const existingMember = gAgg.membersMap.get(empId) ?? {
+            employeeId: empId,
+            fullName: att.employee.fullName,
+            nim: att.employee.nim,
+            jabatan: displayJabatan,
+            totalHadir: 0,
+            totalLateMinutes: 0,
+          };
+          existingMember.totalHadir += 1;
+          existingMember.totalLateMinutes += wInfo.effectiveLateMinutes;
+          gAgg.membersMap.set(empId, existingMember);
         }
 
         return {
@@ -1156,7 +1211,7 @@ export async function GET(req: NextRequest): Promise<Response> {
           roleWeight: wInfo.roleWeight,
           sessionWeight: wInfo.sessionWeight,
           totalWeight: wInfo.totalWeight,
-          nominalBagiHasil: share,
+          nominalBagiHasil: 0,
         };
       });
 
@@ -1192,15 +1247,42 @@ export async function GET(req: NextRequest): Promise<Response> {
         cashMovements: cashMovementsByShift.get(s.id) ?? [],
         consignmentSummary: consignmentByDate.get(wibDate) ?? null,
         personnelCount: count,
-        nominalPerOrang,
+        nominalPerOrang: 0,
         personnel,
       });
     }
 
-    const summaryPerEmployee = Array.from(empAgg.values())
-      .sort((a, b) => b.totalNominal - a.totalNominal);
+    const summaryPerShiftGroup: ShiftGroupSummary[] = Array.from(groupAggMap.values())
+      .map((g) => {
+        const tanggalList = Array.from(g.datesSet).sort();
+        const totalShiftCount = tanggalList.length;
+        return {
+          groupKey: g.groupKey,
+          hari: g.hari,
+          sesi: g.sesi,
+          slotLabel: g.slotLabel,
+          totalShiftCount,
+          txCount: g.txCount,
+          unitsSold: g.unitsSold,
+          omzet: g.omzet,
+          labaKotor: g.labaKotor,
+          poolGaji: g.poolGaji,
+          shortageDeduction: g.shortageDeduction,
+          gajiBersih: g.gajiBersih,
+          rataRataPerShift: totalShiftCount > 0 ? Math.round(g.gajiBersih / totalShiftCount) : 0,
+          tanggalList,
+          anggotaTim: Array.from(g.membersMap.values()).sort(
+            (a, b) => b.totalHadir - a.totalHadir || a.fullName.localeCompare(b.fullName),
+          ),
+        };
+      })
+      .sort((a, b) => {
+        const hDiff = (HARI_SORT_ORDER[a.hari] ?? 99) - (HARI_SORT_ORDER[b.hari] ?? 99);
+        if (hDiff !== 0) return hDiff;
+        return a.sesi === 'Pagi' ? -1 : 1;
+      });
 
-    // Rumus 50% Kehadiran / 50% Laba (Sama Rata Peran 1.0) + potongan tekor terkunci kembali ke Kas Toko
+    // Rumus 50% Kehadiran Tim / 50% Laba Shift (Pembagian Utuh Per Shift) + potongan tekor terkunci kembali ke Kas Toko
     const totalDistributed = Math.max(0, poolShiftMahasiswa - totalShortageDeduction);
     const sisaPool = 0;
     const labaBersihToko = fs.labaBersih + totalShortageDeduction;
@@ -1213,6 +1295,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         period: period ?? 'custom',
       },
       formula: {
+        payrollMode: 'PER_SHIFT',
         attendancePct: Math.round(PAYROLL_ATTENDANCE_RATIO * 100),
         performancePct: Math.round(PAYROLL_PERFORMANCE_RATIO * 100),
         equalRoleWeight: true,
@@ -1233,7 +1316,8 @@ export async function GET(req: NextRequest): Promise<Response> {
         labaBersihToko,
       },
       shifts: builtShifts,
-      summaryPerEmployee,
+      summaryPerShiftGroup,
+      summaryPerEmployee: [],
       scheduleTeams,
       availableMonths,
     });

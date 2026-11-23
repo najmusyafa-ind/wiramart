@@ -116,35 +116,30 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     .where(eq(transactions.shiftId, activeShift.id));
 
   // 5c. Transaksi langsung legacy (jika ada baris transaksi tanpa transaction_payments)
+  // PENTING: NOT EXISTS wajib di .where() dengan alias eksplisit (tp.transaction_id = transactions.id)
+  // karena Drizzle ORM men-strip qualifier tabel jika ditaruh di dalam .select() FILTER (...).
   const [directSummary] = await db
     .select({
       directCash: sql<string>`COALESCE(
         SUM(${transactions.grossAmount})
-        FILTER (
-          WHERE ${transactions.status} = 'COMPLETED'
-          AND ${transactions.paymentMethod} = 'CASH'
-          AND ${transactions.isTest} = false
-          AND NOT EXISTS (
-            SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id}
-          )
-        ),
+        FILTER (WHERE ${transactions.paymentMethod} = 'CASH'),
         0
       )`,
       directQris: sql<string>`COALESCE(
         SUM(${transactions.grossAmount})
-        FILTER (
-          WHERE ${transactions.status} = 'COMPLETED'
-          AND ${transactions.paymentMethod} = 'QRIS'
-          AND ${transactions.isTest} = false
-          AND NOT EXISTS (
-            SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id}
-          )
-        ),
+        FILTER (WHERE ${transactions.paymentMethod} = 'QRIS'),
         0
       )`,
     })
     .from(transactions)
-    .where(eq(transactions.shiftId, activeShift.id));
+    .where(
+      and(
+        eq(transactions.shiftId, activeShift.id),
+        eq(transactions.status, 'COMPLETED'),
+        eq(transactions.isTest, false),
+        sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = transactions.id)`,
+      ),
+    );
 
   // 5d. Ambil potongan bayar supplier / kas gerak pada shift ini + nama kasir
   const [movements, kasirRow] = await Promise.all([
@@ -205,9 +200,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         : '';
   const finalNotes = [earlyPrefix, notes?.trim() ?? ''].filter(Boolean).join(' ') || null;
 
-  // 6b. Auto-Checklist 4 Titik & Jeda 5 Menit Selisih Laci (Hybrid Blind Count + Koreksi Mandiri)
+  // 6b. Auto-Checklist 4 Titik & Jeda 5 Menit Selisih Laci (Hybrid Blind Count + Modal Fisik Fleksibel Opsi A)
   const rawModal = activeShift.modalAwal !== null ? Number(activeShift.modalAwal) : 100_000;
-  const effectiveModalAwal = rawModal > 150_000 || rawModal <= 0 ? 100_000 : rawModal;
+  const effectiveModalAwal = Number.isFinite(rawModal) && rawModal >= 0 ? rawModal : 100_000;
   const expectedCash = Math.round(effectiveModalAwal + totalOmzetCash - totalCashOut + totalCashIn);
   const discrepancy = actualCash !== undefined ? Math.round(actualCash) - expectedCash : null;
   const shortageRp =

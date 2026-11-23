@@ -138,15 +138,13 @@ export async function GET(req: NextRequest): Promise<Response> {
             eq(transactions.shiftId, sh.id),
             eq(transactions.status, 'COMPLETED'),
             eq(transactions.isTest, false),
-            sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+            sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = transactions.id)`,
           ),
         );
 
-      // Normalisasi Modal Awal Ritel Toko:
-      // Standar ritel paten adalah Rp 100.000. Jika tercatat angka rolling (> 150rb),
-      // gunakan Rp 100.000 agar tidak memicu tekor semu (phantom deficit) pada laporan Dosen.
-      const rawModal = sh.modalAwal ? Number(sh.modalAwal) : 100_000;
-      const modal = rawModal > 150_000 ? 100_000 : (rawModal <= 0 ? 100_000 : rawModal);
+      // Modal Awal Fleksibel (Opsi A): mengikuti uang fisik awal di laci saat buka shift
+      const rawModal = sh.modalAwal !== null && sh.modalAwal !== undefined ? Number(sh.modalAwal) : 100_000;
+      const modal = Number.isFinite(rawModal) && rawModal >= 0 ? rawModal : 100_000;
       const cashSales = Number(payRow?.cash ?? 0) + Number(directPayRow?.cash ?? 0);
       const qrisSales = Number(payRow?.qris ?? 0);
       const txCount = Number(payRow?.txCount ?? 0);
@@ -331,12 +329,12 @@ export async function POST(req: NextRequest): Promise<Response> {
               eq(transactions.shiftId, sh.id),
               eq(transactions.status, 'COMPLETED'),
               eq(transactions.isTest, false),
-              sql`NOT EXISTS (SELECT 1 FROM ${transactionPayments} WHERE ${transactionPayments.transactionId} = ${transactions.id})`,
+              sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = transactions.id)`,
             ),
           );
 
-        const rawModal = sh.modalAwal ? Number(sh.modalAwal) : 100_000;
-        const modal = rawModal > 150_000 ? 100_000 : (rawModal <= 0 ? 100_000 : rawModal);
+        const rawModal = sh.modalAwal !== null && sh.modalAwal !== undefined ? Number(sh.modalAwal) : 100_000;
+        const modal = Number.isFinite(rawModal) && rawModal >= 0 ? rawModal : 100_000;
         const actual = Number(sh.actualCash);
         const cashSales = Number(sales?.total ?? 0) + Number(directSales?.total ?? 0);
         const cashIn = Number(movements?.cashIn ?? 0);

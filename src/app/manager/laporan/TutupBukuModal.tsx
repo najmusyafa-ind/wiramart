@@ -495,11 +495,11 @@ export default function TutupBukuModal({
                 </div>
               ) : null}
 
-              {/* ── BAGIAN 1: Rincian Laci Per-Shift (Modal Rp 100k Absolut) ── */}
+              {/* ── BAGIAN 1: Rincian Laci Per-Shift (Sesuai Modal Fisik Awal) ── */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--color-text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    1. Rincian Laci Per-Shift (Modal Rp 100k Absolut)
+                    1. Rincian Laci Per-Shift (Sesuai Modal Fisik Awal)
                   </div>
                   <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
                     {shiftsData.length} Sesi Terdeteksi

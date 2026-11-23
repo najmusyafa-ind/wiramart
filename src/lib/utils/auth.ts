@@ -1,10 +1,11 @@
 // =============================================================
 // Smartkasir Perwira — Auth Library
-// TRIPLE SESSION SUPPORT:
+// QUAD SESSION SUPPORT (1 Perangkat Multi-Tab Tanpa Tabrakan):
 //   Admin  → cookie: sk_admin  (path: /)
 //   Kasir  → cookie: sk_kasir  (path: /)
-//   Buyer  → cookie: sk_buyer  (path: /order, 7 hari)
-// Semua sesi bisa berjalan bersamaan di browser yang sama.
+//   Gudang → cookie: sk_gudang (path: /)
+//   Buyer  → cookie: sk_buyer  (path: /, 7 hari)
+// Semua 4 sesi bisa berjalan bersamaan di browser yang sama.
 // =============================================================
 
 import bcrypt from 'bcryptjs';
@@ -22,12 +23,14 @@ const ACCESS_TOKEN_EXPIRY = '8h';
 const REFRESH_TOKEN_EXPIRY = '30d';
 const ACCESS_TOKEN_MAX_AGE_SECONDS = 60 * 60 * 8; // 8 jam dalam detik
 
-// Terpisah per role agar dua sesi bisa berjalan bersamaan
+// Terpisah per role agar 4 sesi bisa berjalan bersamaan di 1 perangkat
 const ADMIN_ACCESS_COOKIE   = 'sk_admin';
 const ADMIN_REFRESH_COOKIE  = 'sk_admin_r';
 const KASIR_ACCESS_COOKIE   = 'sk_kasir';
 const KASIR_REFRESH_COOKIE  = 'sk_kasir_r';
-const BUYER_ACCESS_COOKIE   = 'sk_buyer'; // path=/order, 7 hari
+const GUDANG_ACCESS_COOKIE  = 'sk_gudang';
+const GUDANG_REFRESH_COOKIE = 'sk_gudang_r';
+const BUYER_ACCESS_COOKIE   = 'sk_buyer'; // path=/, 7 hari
 
 // --- JWT Secret ---
 function getJwtSecret(): Uint8Array {
@@ -119,15 +122,25 @@ export async function verifyToken(token: string): Promise<TokenPayload | null> {
 type SetCookieOptions = {
   accessToken: string;
   refreshToken: string;
-  role: 'admin' | 'employee';
+  role: 'admin' | 'employee' | 'gudang';
 };
 
 export async function setAuthCookies({ accessToken, refreshToken, role }: SetCookieOptions): Promise<void> {
   const cookieStore = await cookies();
   const isProduction = process.env.NODE_ENV === 'production';
 
-  const accessCookieName  = role === 'admin' ? ADMIN_ACCESS_COOKIE  : KASIR_ACCESS_COOKIE;
-  const refreshCookieName = role === 'admin' ? ADMIN_REFRESH_COOKIE : KASIR_REFRESH_COOKIE;
+  const accessCookieName =
+    role === 'admin'
+      ? ADMIN_ACCESS_COOKIE
+      : role === 'gudang'
+      ? GUDANG_ACCESS_COOKIE
+      : KASIR_ACCESS_COOKIE;
+  const refreshCookieName =
+    role === 'admin'
+      ? ADMIN_REFRESH_COOKIE
+      : role === 'gudang'
+      ? GUDANG_REFRESH_COOKIE
+      : KASIR_REFRESH_COOKIE;
 
   cookieStore.set(accessCookieName, accessToken, {
     httpOnly: true,
@@ -146,7 +159,7 @@ export async function setAuthCookies({ accessToken, refreshToken, role }: SetCoo
   });
 }
 
-export async function clearAuthCookies(role?: 'admin' | 'employee'): Promise<void> {
+export async function clearAuthCookies(role?: 'admin' | 'employee' | 'gudang'): Promise<void> {
   const cookieStore = await cookies();
 
   if (!role || role === 'admin') {
@@ -156,6 +169,10 @@ export async function clearAuthCookies(role?: 'admin' | 'employee'): Promise<voi
   if (!role || role === 'employee') {
     cookieStore.delete({ name: KASIR_ACCESS_COOKIE, path: '/' });
     cookieStore.delete({ name: KASIR_REFRESH_COOKIE, path: '/' });
+  }
+  if (!role || role === 'gudang') {
+    cookieStore.delete({ name: GUDANG_ACCESS_COOKIE, path: '/' });
+    cookieStore.delete({ name: GUDANG_REFRESH_COOKIE, path: '/' });
   }
 }
 
@@ -181,16 +198,27 @@ export async function getKasirSession(): Promise<EmployeeTokenPayload | null> {
   return payload as EmployeeTokenPayload;
 }
 
+/** Baca session petugas gudang dari cookie sk_gudang */
+export async function getGudangSession(): Promise<EmployeeTokenPayload | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(GUDANG_ACCESS_COOKIE)?.value;
+  if (!token) return null;
+  const payload = await verifyToken(token);
+  if (!payload || payload.role !== 'employee') return null;
+  return payload as EmployeeTokenPayload;
+}
+
 /**
  * getCurrentSession — backward-compat:
- * Cek admin cookie dulu, lalu kasir.
+ * Cek admin cookie dulu, lalu kasir, lalu gudang.
  * Digunakan di logout route untuk mendeteksi role aktif.
  */
 export async function getCurrentSession(): Promise<TokenPayload | null> {
   const adminSession = await getAdminSession();
   if (adminSession) return adminSession;
   const kasirSession = await getKasirSession();
-  return kasirSession;
+  if (kasirSession) return kasirSession;
+  return getGudangSession();
 }
 
 export async function requireAuth(): Promise<TokenPayload> {
@@ -228,40 +256,39 @@ export async function requireEmployee(): Promise<EmployeeTokenPayload> {
 // --- API Route Helpers ---
 
 /**
- * Baca dan verifikasi JWT dari cookie di API route request.
- * Prioritas otomatis berdasarkan path:
- * - Jika route /api/admin/* → cek sk_admin dulu, fallback sk_kasir
- * - Jika route /api/kasir/* atau lainnya → cek sk_kasir dulu, fallback sk_admin
- * Role dicek secara eksplisit di masing-masing route handler.
+ * Baca dan verifikasi JWT dari cookie di API route request (Quad-Session Isolated).
+ * Prioritas otomatis berdasarkan header `x-portal-scope` & path:
+ * - Header `x-portal-scope: admin` atau `/api/admin/*` → sk_admin → sk_kasir → sk_gudang
+ * - Header `x-portal-scope: gudang` atau `/api/gudang/*` atau `/api/kasir/gudang` → sk_gudang → sk_admin → sk_kasir
+ * - `/api/kasir/*` (POS, shift, transaksi) atau lainnya → sk_kasir → sk_admin (TIDAK pernah membaca sk_gudang)
  */
 export async function verifyJwt(req: NextRequest): Promise<TokenPayload | null> {
   const pathname = req.nextUrl.pathname;
-  const isAdminRoute = pathname.startsWith('/api/admin');
+  const portalScope = req.headers.get('x-portal-scope')?.toLowerCase();
 
-  if (isAdminRoute) {
-    // Prioritaskan admin token untuk /api/admin/*
-    const adminToken = req.cookies.get(ADMIN_ACCESS_COOKIE)?.value;
-    if (adminToken) {
-      const payload = await verifyToken(adminToken);
-      if (payload) return payload;
-    }
-    const kasirToken = req.cookies.get(KASIR_ACCESS_COOKIE)?.value;
-    if (kasirToken) {
-      const payload = await verifyToken(kasirToken);
-      if (payload) return payload;
-    }
-  } else {
-    // Prioritaskan kasir token untuk /api/kasir/* dan route publik lainnya
-    const kasirToken = req.cookies.get(KASIR_ACCESS_COOKIE)?.value;
-    if (kasirToken) {
-      const payload = await verifyToken(kasirToken);
-      if (payload) return payload;
-    }
-    const adminToken = req.cookies.get(ADMIN_ACCESS_COOKIE)?.value;
-    if (adminToken) {
-      const payload = await verifyToken(adminToken);
-      if (payload) return payload;
-    }
+  const tryCookie = async (cookieName: string): Promise<TokenPayload | null> => {
+    const token = req.cookies.get(cookieName)?.value;
+    if (!token) return null;
+    return verifyToken(token);
+  };
+
+  const isAdminScoped = portalScope === 'admin' || pathname.startsWith('/api/admin');
+  const isGudangScoped =
+    !isAdminScoped &&
+    (portalScope === 'gudang' ||
+      pathname.startsWith('/api/gudang') ||
+      pathname === '/api/kasir/gudang' ||
+      pathname.startsWith('/api/kasir/gudang/'));
+
+  const cookieOrder: readonly string[] = isAdminScoped
+    ? [ADMIN_ACCESS_COOKIE, KASIR_ACCESS_COOKIE, GUDANG_ACCESS_COOKIE]
+    : isGudangScoped
+    ? [GUDANG_ACCESS_COOKIE, ADMIN_ACCESS_COOKIE, KASIR_ACCESS_COOKIE]
+    : [KASIR_ACCESS_COOKIE, ADMIN_ACCESS_COOKIE];
+
+  for (const cookieName of cookieOrder) {
+    const payload = await tryCookie(cookieName);
+    if (payload) return payload;
   }
 
   return null;

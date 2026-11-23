@@ -1426,7 +1426,7 @@ function ShiftModal({ kasir, shifts, onClose }: { kasir: KasirSummary; shifts: S
                 <th style={{ textAlign: 'right', color: '#16a34a' }}>Hak 50% (Bruto)</th>
                 <th style={{ textAlign: 'right' }}>Selisih Laci</th>
                 <th style={{ textAlign: 'right', color: '#dc2626' }}>Potong Tekor</th>
-                <th style={{ textAlign: 'right', color: '#15803d', fontWeight: 800 }}>Upah Bersih</th>
+                <th style={{ textAlign: 'right', color: '#15803d', fontWeight: 800 }}>Upah Shift Bersih</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
               </tr>
             </thead>

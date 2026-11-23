@@ -172,7 +172,10 @@ async function requestSuppliers(query: string, signal?: AbortSignal): Promise<Su
 
 async function requestSubmissions(filter: string, signal?: AbortSignal): Promise<SubmissionItem[]> {
   const statusParam = filter === 'semua' ? '' : `?status=${filter.toUpperCase()}`;
-  const res = await fetch(`/api/gudang/penerimaan${statusParam}`, { signal });
+  const res = await fetch(`/api/gudang/penerimaan${statusParam}`, {
+    signal,
+    headers: { 'x-portal-scope': 'admin' },
+  });
   const json = await res.json();
   if (!res.ok || !json.success) {
     throw new Error(json.error ?? 'Gagal memuat antrian persetujuan');
@@ -187,7 +190,10 @@ async function requestFefoReports(status: string, searchQuery: string, signal?: 
     ...(status !== 'semua' && { status }),
     ...(searchQuery.trim() && { search: searchQuery.trim() }),
   });
-  const res = await fetch(`/api/gudang/fefo-alerts?${params}`, { signal });
+  const res = await fetch(`/api/gudang/fefo-alerts?${params}`, {
+    signal,
+    headers: { 'x-portal-scope': 'admin' },
+  });
   const json = await res.json();
   return json.success && json.data ? ((json.data.items || []) as ConditionReportItem[]) : null;
 }
@@ -678,7 +684,9 @@ export default function GudangApprovalPage() {
     setLoadingDetail(true);
     setExpandedDetail(null);
     try {
-      const res = await fetch(`/api/gudang/penerimaan/${subId}`);
+      const res = await fetch(`/api/gudang/penerimaan/${subId}`, {
+        headers: { 'x-portal-scope': 'admin' },
+      });
       const json = await res.json();
       if (res.ok && json.success) {
         setExpandedDetail(json.data);
@@ -705,7 +713,9 @@ export default function GudangApprovalPage() {
 
     if (type === 'APPROVE') {
       try {
-        const res = await fetch(`/api/gudang/penerimaan/${sub.id}`);
+        const res = await fetch(`/api/gudang/penerimaan/${sub.id}`, {
+          headers: { 'x-portal-scope': 'admin' },
+        });
         const json = await res.json();
         if (res.ok && json.success && json.data?.items) {
           const detailItems = json.data.items as ItemDetail[];

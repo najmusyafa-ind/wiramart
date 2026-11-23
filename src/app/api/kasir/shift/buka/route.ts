@@ -167,10 +167,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     }
   }
 
-  // 4. Kontrol K3: Cek fisik tutup shift sebelumnya untuk mendeteksi selisih serah-terima
-  // Opsi A (Model Kasir Kas Tetap Rp 100.000 per shift):
-  // Modal awal toko adalah uang kembalian standar (Rp 100.000 per shift).
-  // Uang hasil penjualan shift sebelumnya disetorkan ke brankas/manajer toko.
+  // 4. Kontrol K3: Cek fisik tutup shift sebelumnya (Modal Awal Fleksibel — Opsi A)
+  // Kasir mencatat nominal uang fisik yang benar-benar ada di kotak saat membuka shift
+  // (bisa Rp 100.000 standar kembalian jika sudah disetor, atau saldo estafet shift sebelumnya).
   const [lastClosedShift] = await db
     .select({
       id: shifts.id,
@@ -193,14 +192,13 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   let serahTerimaDiff: number | null = null;
   let auditFlags = 'NORMAL';
 
-  const MODAL_PATEN_TOKO = 100_000;
-  // Kunci modal awal flat Rp 100.000 sesuai standar ritel modern (Alfamart / Indomaret)
-  const finalModalAwal = (modalAwal && modalAwal > 0 && modalAwal <= 150_000) ? modalAwal : MODAL_PATEN_TOKO;
-  const isModalPaten = Math.abs(finalModalAwal - MODAL_PATEN_TOKO) <= 2000;
+  const MODAL_STANDAR_TOKO = 100_000;
+  // Simpan nominal persis sesuai hitungan fisik kasir (0 .. 10.000.000) tanpa pemotongan paksa
+  const finalModalAwal = Math.round(modalAwal);
+  const isModalStandarReset = Math.abs(finalModalAwal - MODAL_STANDAR_TOKO) <= 2000;
 
-  if (isTestingMode || isModalPaten) {
-    // Mode testing ATAU kasir menggunakan modal paten toko (Rp 100.000):
-    // Uang shift sebelumnya dianggap sudah disetor ke kasir/manajer toko.
+  if (isTestingMode || isModalStandarReset) {
+    // Mode testing ATAU uang kotak sudah disetorkan kembali ke modal standar Rp 100.000
     serahTerimaDiff = null;
     auditFlags = 'NORMAL';
   } else if (lastClosedShift && lastClosedShift.actualCash !== null) {
@@ -278,9 +276,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   }
 
   return apiOk({
-    message: `Shift dibuka. Modal awal Rp ${modalAwal.toLocaleString('id-ID')} tercatat.`,
+    message: `Shift dibuka. Modal awal Rp ${finalModalAwal.toLocaleString('id-ID')} tercatat.`,
     shiftId: activeShiftId,
-    modalAwal,
+    modalAwal: finalModalAwal,
     serahTerimaDiff,
     auditFlags,
   });
