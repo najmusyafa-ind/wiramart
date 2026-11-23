@@ -14,26 +14,23 @@ import {
   X,
   Loader2,
   FileText,
-  CheckCircle,
   QrCode,
   Receipt,
   Wallet,
   Users,
   Users2,
-  ArrowLeftRight,
   Lock,
   Boxes,
 } from 'lucide-react';
 import type { PeriodKey, MonthlyBreakdownRow } from '@/lib/finance/report';
-import { useTableSelection } from '@/hooks/useTableSelection';
-import { SelectAllCheckbox, SelectedRowsBar } from '@/components/admin/SelectedRowsBar';
-import { exportSelectedRowsToExcel, todayWibSlug } from '@/lib/utils/exportSelectedExcel';
+import { todayWibSlug } from '@/lib/utils/exportSelectedExcel';
 import RekapHarian from './RekapHarian';
 import BiayaOperasionalPanel from './BiayaOperasionalPanel';
 import TutupBukuModal from './TutupBukuModal';
 import LaporanMutasiStokSection from '@/features/portal/laporan/LaporanMutasiStokSection';
 import RekapKasir from './RekapKasir';
 import RekapShift from '@/features/portal/laporan/RekapShift';
+import TransaksiQrisPanel from '@/features/portal/laporan/TransaksiQrisPanel';
 import JejakTransaksiPanel from './JejakTransaksiPanel';
 import {
   formatRupiah,
@@ -130,13 +127,6 @@ type LaporanData = {
 function formatRp(n: number | string) {
   const num = typeof n === 'string' ? parseFloat(n) : n;
   return 'Rp ' + (isNaN(num) ? 0 : num).toLocaleString('id-ID');
-}
-
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString('id-ID', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  });
 }
 
 const PERIODS: { key: PeriodKey; label: string }[] = [
@@ -335,7 +325,9 @@ function VoidModal({ transaction, onClose, onSuccess }: VoidModalProps) {
 // ─────────────────────────────────────────────────────────────
 export default function LaporanPage() {
   const uid = useId();
-  const [mainTab, setMainTab] = useState<'finansial' | 'mutasi_stok' | 'rekap_kasir' | 'rekap_shift' | 'jejak_transaksi'>('finansial');
+  const [mainTab, setMainTab] = useState<'keuangan' | 'shift_gaji' | 'transaksi_qris' | 'stok_log'>('keuangan');
+  const [shiftSubTab, setShiftSubTab] = useState<'rekap_shift' | 'rekap_kasir'>('rekap_shift');
+  const [stokLogSubTab, setStokLogSubTab] = useState<'mutasi_stok' | 'log_sistem'>('mutasi_stok');
   const [period, setPeriod] = useState<PeriodKey>('daily');
   const [useCustomDates, setUseCustomDates] = useState(false);
   const [draftFrom, setDraftFrom] = useState(() => `${todayWibSlug().slice(0, 7)}-01`);
@@ -359,17 +351,29 @@ export default function LaporanPage() {
   const [voidTarget, setVoidTarget] = useState<RecentTransaction | null>(null);
   const [showTutupBuku, setShowTutupBuku] = useState(false);
 
-  const txSelection = useTableSelection();
-  const shiftSelection = useTableSelection();
-
-  // Sync tab jika dibuka via query parameter ?tab=mutasi_stok (async microtask agar bebas setState-in-effect)
+  // Sync tab jika dibuka via query parameter ?tab=... (async microtask agar bebas setState-in-effect)
   useEffect(() => {
     let cancelled = false;
     if (typeof window !== 'undefined') {
       const tabParam = new URLSearchParams(window.location.search).get('tab');
-      if (tabParam === 'mutasi' || tabParam === 'mutasi_stok') {
+      if (tabParam) {
         Promise.resolve().then(() => {
-          if (!cancelled) setMainTab('mutasi_stok');
+          if (cancelled) return;
+          if (tabParam === 'transaksi_qris' || tabParam === 'qris') {
+            setMainTab('transaksi_qris');
+          } else if (tabParam === 'shift_gaji' || tabParam === 'rekap_shift') {
+            setMainTab('shift_gaji');
+            setShiftSubTab('rekap_shift');
+          } else if (tabParam === 'rekap_kasir') {
+            setMainTab('shift_gaji');
+            setShiftSubTab('rekap_kasir');
+          } else if (tabParam === 'mutasi' || tabParam === 'mutasi_stok' || tabParam === 'stok_log') {
+            setMainTab('stok_log');
+            setStokLogSubTab('mutasi_stok');
+          } else if (tabParam === 'jejak_transaksi' || tabParam === 'log_sistem') {
+            setMainTab('stok_log');
+            setStokLogSubTab('log_sistem');
+          }
         });
       }
     }
@@ -529,112 +533,6 @@ export default function LaporanPage() {
     } finally {
       setExportLoading(false);
     }
-  }
-
-  // ── Selection helpers untuk Transaksi Terbaru & Audit Shift ───
-  const visibleTxIds = useMemo(
-    () => (data?.recentTransactions ?? []).map((t) => t.id),
-    [data?.recentTransactions],
-  );
-  const selectedTxs = useMemo(
-    () => txSelection.getSelectedRows(data?.recentTransactions ?? [], (t) => t.id),
-    [txSelection, data?.recentTransactions],
-  );
-  const selectedTxStats = useMemo(() => {
-    return selectedTxs.reduce(
-      (acc, t) => {
-        const amt = parseFloat(t.grossAmount) || 0;
-        if (t.status === 'VOID') {
-          acc.voidCount += 1;
-          acc.voidAmount += amt;
-        } else {
-          acc.validCount += 1;
-          acc.validAmount += amt;
-        }
-        if (t.paymentMethod === 'CASH') acc.cashCount += 1;
-        else if (t.paymentMethod === 'QRIS') acc.qrisCount += 1;
-        else acc.splitCount += 1;
-        return acc;
-      },
-      { validCount: 0, validAmount: 0, voidCount: 0, voidAmount: 0, cashCount: 0, qrisCount: 0, splitCount: 0 },
-    );
-  }, [selectedTxs]);
-
-  async function handleExportSelectedTx(): Promise<void> {
-    if (selectedTxs.length === 0) return;
-    await exportSelectedRowsToExcel({
-      filename: `transaksi-terpilih-${todayWibSlug()}.xlsx`,
-      sheetName: 'Transaksi Terpilih',
-      title: `TRANSAKSI TERPILIH (${selectedTxs.length} Struk)`,
-      subtitle: `Periode: ${data?.label ?? '-'} | Dicetak ${todayWibSlug()} WIB`,
-      rows: selectedTxs,
-      columns: [
-        { header: 'Invoice', key: 'invoiceNumber', width: 22, format: 'text', aggregate: 'count', value: (t) => t.invoiceNumber },
-        { header: 'Waktu (WIB)', key: 'createdAt', width: 20, format: 'text', aggregate: 'none', value: (t) => formatDateTime(t.createdAt) },
-        { header: 'Kasir', key: 'employeeName', width: 24, format: 'text', aggregate: 'none', value: (t) => t.employeeName },
-        { header: 'Metode', key: 'paymentMethod', width: 12, format: 'text', aggregate: 'none', value: (t) => t.paymentMethod },
-        { header: 'Status', key: 'status', width: 12, format: 'text', aggregate: 'none', value: (t) => t.status === 'VOID' ? 'VOID' : 'OK' },
-        { header: 'Nominal Bruto (Rp)', key: 'grossAmount', width: 18, format: 'currency', aggregate: 'sum', value: (t) => parseFloat(t.grossAmount) || 0 },
-        { header: 'Nominal Valid (Rp)', key: 'validAmount', width: 18, format: 'currency', aggregate: 'sum', value: (t) => (t.status === 'COMPLETED' ? parseFloat(t.grossAmount) || 0 : 0) },
-        { header: 'Alasan Void', key: 'voidReason', width: 28, format: 'text', aggregate: 'none', value: (t) => t.voidReason ?? '' },
-      ],
-    });
-  }
-
-  const visibleShiftIds = useMemo(
-    () => (data?.shifts ?? []).map((s) => s.shiftId),
-    [data?.shifts],
-  );
-  const selectedShifts = useMemo(
-    () => shiftSelection.getSelectedRows(data?.shifts ?? [], (s) => s.shiftId),
-    [shiftSelection, data?.shifts],
-  );
-  const selectedShiftStats = useMemo(() => {
-    return selectedShifts.reduce(
-      (acc, sh) => {
-        acc.modalAwal += sh.modalAwal ?? 0;
-        acc.cashSales += sh.cashSales ?? 0;
-        acc.cashOut += sh.cashOut ?? 0;
-        acc.cashIn += sh.cashIn ?? 0;
-        acc.expectedCash += sh.expectedCash ?? 0;
-        if (sh.actualCash !== null && sh.actualCash !== undefined) {
-          acc.actualCash += sh.actualCash;
-          acc.countedCount += 1;
-        }
-        if (sh.status === 'CLOSED' && sh.discrepancy !== null && sh.discrepancy !== undefined) {
-          acc.discrepancy += sh.discrepancy;
-          acc.closedDiffCount += 1;
-        }
-        return acc;
-      },
-      { modalAwal: 0, cashSales: 0, cashOut: 0, cashIn: 0, expectedCash: 0, actualCash: 0, countedCount: 0, discrepancy: 0, closedDiffCount: 0 },
-    );
-  }, [selectedShifts]);
-
-  async function handleExportSelectedShifts(): Promise<void> {
-    if (selectedShifts.length === 0) return;
-    await exportSelectedRowsToExcel({
-      filename: `audit-shift-terpilih-${todayWibSlug()}.xlsx`,
-      sheetName: 'Audit Shift Terpilih',
-      title: `AUDIT LACI SHIFT TERPILIH (${selectedShifts.length} Shift)`,
-      subtitle: `Periode: ${data?.label ?? '-'} | Dicetak ${todayWibSlug()} WIB`,
-      rows: selectedShifts,
-      columns: [
-        { header: 'Kasir', key: 'kasirName', width: 24, format: 'text', aggregate: 'count', value: (s) => s.kasirName },
-        { header: 'NIM', key: 'kasirNim', width: 14, format: 'text', aggregate: 'none', value: (s) => s.kasirNim },
-        { header: 'Clock In', key: 'clockIn', width: 18, format: 'text', aggregate: 'none', value: (s) => formatDateTime(s.clockIn) },
-        { header: 'Clock Out', key: 'clockOut', width: 18, format: 'text', aggregate: 'none', value: (s) => s.clockOut ? formatDateTime(s.clockOut) : 'Sedang Berjalan' },
-        { header: 'Status', key: 'status', width: 12, format: 'text', aggregate: 'none', value: (s) => s.status },
-        { header: 'Modal Awal', key: 'modalAwal', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.modalAwal ?? 0 },
-        { header: 'Tunai Terjual', key: 'cashSales', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.cashSales ?? 0 },
-        { header: 'Petty Cash (-)', key: 'cashOut', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.cashOut ?? 0 },
-        { header: 'Kas Masuk (+)', key: 'cashIn', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.cashIn ?? 0 },
-        { header: 'Expected Kas', key: 'expectedCash', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.expectedCash ?? 0 },
-        { header: 'Fisik Laci', key: 'actualCash', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.actualCash ?? 0 },
-        { header: 'Selisih', key: 'discrepancy', width: 16, format: 'currency', aggregate: 'sum', value: (s) => s.discrepancy ?? 0 },
-        { header: 'Catatan', key: 'notes', width: 28, format: 'text', aggregate: 'none', value: (s) => s.notes ?? '' },
-      ],
-    });
   }
 
   // ── Chart helpers ───────────────────────────────────────────
@@ -881,41 +779,33 @@ export default function LaporanPage() {
         >
           {([
             {
-              id: 'finansial',
+              id: 'keuangan',
               icon: <BarChart3 size={14} />,
-              label: 'Finansial & Kasir',
+              label: 'Ringkasan Keuangan',
               activeColor: '#166534',
               activeBg: '#f0fdf4',
               activeBorder: '#16a34a',
             },
             {
-              id: 'mutasi_stok',
-              icon: <Boxes size={14} />,
-              label: 'Stok Gudang',
-              activeColor: '#0369a1',
-              activeBg: '#e0f2fe',
-              activeBorder: '#0284c7',
-            },
-            {
-              id: 'rekap_kasir',
-              icon: <Users2 size={14} />,
-              label: 'Rekap Kasir',
-              activeColor: '#6d28d9',
-              activeBg: '#f5f3ff',
-              activeBorder: '#7c3aed',
-            },
-            {
-              id: 'rekap_shift',
+              id: 'shift_gaji',
               icon: <TrendingUp size={14} />,
-              label: 'Rekap Shift',
+              label: 'Shift & Gaji',
               activeColor: '#4338ca',
               activeBg: '#eef2ff',
               activeBorder: '#6366f1',
             },
             {
-              id: 'jejak_transaksi',
-              icon: <FileText size={14} />,
-              label: 'Jejak Transaksi (TCL)',
+              id: 'transaksi_qris',
+              icon: <QrCode size={14} />,
+              label: 'Transaksi & QRIS',
+              activeColor: '#0369a1',
+              activeBg: '#e0f2fe',
+              activeBorder: '#0284c7',
+            },
+            {
+              id: 'stok_log',
+              icon: <Boxes size={14} />,
+              label: 'Stok & Log',
               activeColor: '#0f766e',
               activeBg: '#f0fdfa',
               activeBorder: '#0d9488',
@@ -943,7 +833,7 @@ export default function LaporanPage() {
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                   flexShrink: 0,
-                  transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                  transition: 'background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
                   boxShadow: isActive ? `0 0 0 3px ${tab.activeBorder}22` : 'none',
                 }}
               >
@@ -954,14 +844,54 @@ export default function LaporanPage() {
           })}
         </div>
 
-        {mainTab === 'rekap_kasir' ? (
-          <RekapKasir />
-        ) : mainTab === 'mutasi_stok' ? (
-          <LaporanMutasiStokSection />
-        ) : mainTab === 'rekap_shift' ? (
-          <RekapShift />
-        ) : mainTab === 'jejak_transaksi' ? (
-          <JejakTransaksiPanel />
+        {mainTab === 'shift_gaji' ? (
+          <div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setShiftSubTab('rekap_shift')}
+                className={`btn btn-sm ${shiftSubTab === 'rekap_shift' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <TrendingUp size={14} aria-hidden="true" />
+                <span>Rekap Shift &amp; Slip Gaji</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShiftSubTab('rekap_kasir')}
+                className={`btn btn-sm ${shiftSubTab === 'rekap_kasir' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Users2 size={14} aria-hidden="true" />
+                <span>Performa Per Kasir</span>
+              </button>
+            </div>
+            {shiftSubTab === 'rekap_shift' ? <RekapShift /> : <RekapKasir />}
+          </div>
+        ) : mainTab === 'stok_log' ? (
+          <div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 'var(--space-4)', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setStokLogSubTab('mutasi_stok')}
+                className={`btn btn-sm ${stokLogSubTab === 'mutasi_stok' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Boxes size={14} aria-hidden="true" />
+                <span>Mutasi Stok Gudang</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStokLogSubTab('log_sistem')}
+                className={`btn btn-sm ${stokLogSubTab === 'log_sistem' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <FileText size={14} aria-hidden="true" />
+                <span>Log Transaksi Sistem</span>
+              </button>
+            </div>
+            {stokLogSubTab === 'mutasi_stok' ? <LaporanMutasiStokSection /> : <JejakTransaksiPanel />}
+          </div>
         ) : (
           <>
             {/* Period selector + custom date range */}
@@ -1092,6 +1022,15 @@ export default function LaporanPage() {
             </div>
           </div>
         ) : data ? (
+          mainTab === 'transaksi_qris' ? (
+            <TransaksiQrisPanel
+              dailyRows={data.daily}
+              transactions={data.recentTransactions}
+              summary={data.summary}
+              periodLabel={data.label}
+              onVoidRequest={(tx) => setVoidTarget(tx)}
+            />
+          ) : (
           <>
             {/* ─── Peringatan keakuratan ──────────────────────── */}
             {!data.summary.labaLengkap && (
@@ -1502,439 +1441,8 @@ export default function LaporanPage() {
                 </div>
               </div>
             )}
-
-            {/* ─── Tabel Transaksi Terbaru + Void ──────────────── */}
-            <div className="card">
-              <div className="card-header">
-                <h2 className="card-title" style={{ fontSize: 'var(--text-sm)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                  <FileText size={16} aria-hidden="true" /> Transaksi Terbaru
-                </h2>
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  {data.recentTransactions.length} transaksi ditampilkan
-                </span>
-              </div>
-              <div className="card-body" style={{ padding: 0, overflowX: 'auto' }}>
-                {data.recentTransactions.length === 0 ? (
-                  <p style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
-                    Belum ada transaksi pada periode ini
-                  </p>
-                ) : (
-                  <>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                          <th scope="col" style={{ padding: 'var(--space-3) var(--space-3)', width: 38, textAlign: 'center' }}>
-                            <SelectAllCheckbox
-                              checked={txSelection.allVisibleSelected(visibleTxIds)}
-                              indeterminate={txSelection.someVisibleSelected(visibleTxIds)}
-                              onChange={() => txSelection.toggleAll(visibleTxIds)}
-                              ariaLabel="Pilih semua transaksi terlihat"
-                            />
-                          </th>
-                          {['Invoice', 'Waktu', 'Kasir', 'Metode', 'Total', 'Status', 'Aksi'].map((h) => (
-                            <th
-                              key={h}
-                              scope="col"
-                              style={{
-                                padding: 'var(--space-3) var(--space-4)',
-                                textAlign: 'left', fontWeight: 'var(--weight-semibold)',
-                                color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {h}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.recentTransactions.map((t) => {
-                          const isSelected = txSelection.isSelected(t.id);
-                          return (
-                            <tr
-                              key={t.id}
-                              style={{
-                                borderBottom: '1px solid var(--color-border)',
-                                opacity: t.status === 'VOID' ? 0.55 : 1,
-                                backgroundColor: isSelected ? 'hsl(152 60% 96% / 0.7)' : undefined,
-                                transition: 'background-color var(--duration-fast)',
-                              }}
-                            >
-                              <td style={{ padding: 'var(--space-3) var(--space-3)', textAlign: 'center' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => txSelection.toggleRow(t.id)}
-                                  aria-label={`Pilih transaksi ${t.invoiceNumber}`}
-                                  style={{
-                                    width: 16,
-                                    height: 16,
-                                    cursor: 'pointer',
-                                    accentColor: 'var(--color-primary)',
-                                    verticalAlign: 'middle',
-                                  }}
-                                />
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', fontFamily: 'monospace', fontSize: 'var(--text-xs)', whiteSpace: 'nowrap' }}>
-                                {t.invoiceNumber}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
-                                {formatDateTime(t.createdAt)}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
-                                {t.employeeName}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                                <span
-                                  title={
-                                    t.paymentMethod === 'SPLIT' && t.payments && t.payments.length > 0
-                                      ? t.payments.map((p) => `${p.paymentMethod}: ${formatRp(p.amount)}`).join(' + ')
-                                      : undefined
-                                  }
-                                  style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                                    fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
-                                    backgroundColor: t.paymentMethod === 'CASH'
-                                      ? 'var(--color-success-light)'
-                                      : t.paymentMethod === 'QRIS'
-                                      ? 'var(--color-info-light)'
-                                      : 'hsl(var(--color-primary-h, 220), 80%, 93%)',
-                                    color: t.paymentMethod === 'CASH'
-                                      ? 'var(--color-success)'
-                                      : t.paymentMethod === 'QRIS'
-                                      ? 'var(--color-info)'
-                                      : 'var(--color-primary)',
-                                  }}>
-                                  {t.paymentMethod === 'CASH' ? (
-                                    <Banknote size={11} aria-hidden="true" />
-                                  ) : t.paymentMethod === 'QRIS' ? (
-                                    <QrCode size={11} aria-hidden="true" />
-                                  ) : (
-                                    <ArrowLeftRight size={11} aria-hidden="true" />
-                                  )}
-                                  {t.paymentMethod === 'SPLIT' ? 'SPLIT' : t.paymentMethod}
-                                </span>
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)', whiteSpace: 'nowrap' }}>
-                                {formatRp(t.grossAmount)}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                                {t.status === 'VOID' ? (
-                                  <span
-                                    title={t.voidReason ?? ''}
-                                    style={{
-                                      display: 'inline-flex', alignItems: 'center', gap: 4,
-                                      padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                                      fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
-                                      backgroundColor: 'var(--color-error-light)',
-                                      color: 'var(--color-error)',
-                                    }}
-                                  >
-                                    <AlertTriangle size={11} aria-hidden="true" /> VOID
-                                  </span>
-                                ) : (
-                                  <span style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                                    fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
-                                    backgroundColor: 'var(--color-success-light)',
-                                    color: 'var(--color-success)',
-                                  }}>
-                                    <CheckCircle size={11} aria-hidden="true" /> OK
-                                  </span>
-                                )}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                                {t.status === 'COMPLETED' && (
-                                  <button
-                                    onClick={() => setVoidTarget(t)}
-                                    aria-label={`Void transaksi ${t.invoiceNumber}`}
-                                    style={{
-                                      background: 'none',
-                                      border: '1px solid var(--color-error)',
-                                      color: 'var(--color-error)',
-                                      borderRadius: 'var(--radius-sm)',
-                                      padding: '3px 10px',
-                                      fontSize: 'var(--text-xs)',
-                                      cursor: 'pointer',
-                                      fontWeight: 'var(--weight-semibold)',
-                                      transition: 'background-color var(--duration-fast)',
-                                    }}
-                                  >
-                                    Void
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    <SelectedRowsBar
-                      selectedCount={selectedTxs.length}
-                      itemLabel="transaksi"
-                      metrics={[
-                        { label: 'Valid (OK)', value: `${selectedTxStats.validCount} trx · ${formatRp(selectedTxStats.validAmount)}`, tone: 'success' },
-                        { label: 'Void', value: `${selectedTxStats.voidCount} trx · ${formatRp(selectedTxStats.voidAmount)}`, tone: selectedTxStats.voidCount > 0 ? 'danger' : 'default' },
-                        { label: 'Metode', value: `Cash ${selectedTxStats.cashCount} · QRIS ${selectedTxStats.qrisCount} · Split ${selectedTxStats.splitCount}`, tone: 'info' },
-                      ]}
-                      onExportExcel={handleExportSelectedTx}
-                      onClear={txSelection.clearSelection}
-                    />
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* ── CARD AUDIT LACI & REKAP SHIFT KASIR ────────────────── */}
-            <div className="card" style={{ marginTop: 'var(--space-6)', overflow: 'hidden' }}>
-              <div
-                className="card-header"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: 'var(--space-4) var(--space-5)',
-                  borderBottom: '1px solid var(--color-border)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                  <Wallet size={18} style={{ color: 'var(--color-primary)' }} aria-hidden="true" />
-                  <h2 style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-semibold)', margin: 0 }}>
-                    Audit Laci &amp; Riwayat Shift Kasir
-                  </h2>
-                </div>
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  {data.shifts?.length ?? 0} shift dalam periode ini
-                </span>
-              </div>
-
-              <div style={{ overflowX: 'auto' }}>
-                {!data.shifts || data.shifts.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--color-text-muted)' }}>
-                    Tidak ada sesi shift tercatat dalam periode ini.
-                  </div>
-                ) : (
-                  <>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-xs)' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface-elevated)', textAlign: 'left' }}>
-                          <th scope="col" style={{ padding: 'var(--space-3) var(--space-3)', width: 38, textAlign: 'center' }}>
-                            <SelectAllCheckbox
-                              checked={shiftSelection.allVisibleSelected(visibleShiftIds)}
-                              indeterminate={shiftSelection.someVisibleSelected(visibleShiftIds)}
-                              onChange={() => shiftSelection.toggleAll(visibleShiftIds)}
-                              ariaLabel="Pilih semua audit shift terlihat"
-                            />
-                          </th>
-                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Kasir</th>
-                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Waktu Sesi</th>
-                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Modal Awal</th>
-                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Penjualan Tunai</th>
-                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Petty Cash (-)</th>
-                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Kas Masuk (+)</th>
-                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Expected Kas</th>
-                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Fisik Laci (Blind Count)</th>
-                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Selisih</th>
-                          <th style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 'var(--weight-semibold)' }}>Status Audit</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.shifts.map((sh) => {
-                          const isClosed = sh.status === 'CLOSED';
-                          const isShortage = sh.statusLaci === 'SHORTAGE';
-                          const isOverage = sh.statusLaci === 'OVERAGE';
-                          const isBalanced = sh.statusLaci === 'BALANCED';
-                          const isSelected = shiftSelection.isSelected(sh.shiftId);
-
-                          return (
-                            <tr
-                              key={sh.shiftId}
-                              style={{
-                                borderBottom: '1px solid var(--color-border)',
-                                backgroundColor: isSelected ? 'hsl(214 85% 96% / 0.75)' : undefined,
-                              }}
-                            >
-                              <td style={{ padding: 'var(--space-3) var(--space-3)', textAlign: 'center' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => shiftSelection.toggleRow(sh.shiftId)}
-                                  aria-label={`Pilih shift ${sh.kasirName}`}
-                                  style={{
-                                    width: 16,
-                                    height: 16,
-                                    cursor: 'pointer',
-                                    accentColor: 'var(--color-primary)',
-                                    verticalAlign: 'middle',
-                                  }}
-                                />
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                                <div style={{ fontWeight: 'var(--weight-semibold)', color: 'var(--color-text)' }}>
-                                  {sh.kasirName}
-                                </div>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
-                                  NIM {sh.kasirNim}
-                                </div>
-                                {sh.notes && (
-                                  <div style={{ fontSize: '0.68rem', color: 'var(--color-text-secondary)', marginTop: 2, fontStyle: 'italic' }}>
-                                    Catatan: &ldquo;{sh.notes}&rdquo;
-                                  </div>
-                                )}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
-                                <div>{formatDateTime(sh.clockIn)}</div>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)' }}>
-                                  {sh.clockOut ? `s/d ${formatDateTime(sh.clockOut)}` : 'Sedang Berjalan'}
-                                </div>
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap' }}>
-                                <div>{sh.modalAwal !== null ? formatRp(sh.modalAwal) : '—'}</div>
-                                {sh.rawModalWarning && (
-                                  <div style={{ fontSize: '0.68rem', color: 'var(--color-warning)', fontWeight: 600, marginTop: 2 }}>
-                                    Modal awal di luar kewajaran
-                                  </div>
-                                )}
-                                {sh.serahTerimaDiff !== null && sh.serahTerimaDiff !== undefined && Math.abs(sh.serahTerimaDiff) > 0 && (
-                                  <div style={{ fontSize: '0.68rem', color: 'var(--color-error)', fontWeight: 600, marginTop: 2 }}>
-                                    Beda serah terima: {sh.serahTerimaDiff > 0 ? `+${formatRp(sh.serahTerimaDiff)}` : formatRp(sh.serahTerimaDiff)}
-                                  </div>
-                                )}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: 'var(--color-success)', fontWeight: 600 }}>
-                                +{formatRp(sh.cashSales ?? 0)}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: (sh.cashOut ?? 0) > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
-                                {(sh.cashOut ?? 0) > 0 ? `-${formatRp(sh.cashOut ?? 0)}` : 'Rp 0'}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', color: (sh.cashIn ?? 0) > 0 ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
-                                {(sh.cashIn ?? 0) > 0 ? `+${formatRp(sh.cashIn ?? 0)}` : 'Rp 0'}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', fontWeight: 700 }}>
-                                {sh.expectedCash !== undefined ? formatRp(sh.expectedCash) : '—'}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', fontWeight: 700 }}>
-                                {sh.actualCash !== null && sh.actualCash !== undefined
-                                  ? formatRp(sh.actualCash)
-                                  : isClosed ? 'Tidak diisi' : 'Belum tutup'}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)', whiteSpace: 'nowrap', fontWeight: 800 }}>
-                                {sh.discrepancy !== null && sh.discrepancy !== undefined ? (
-                                  <span style={{
-                                    color: isShortage
-                                      ? 'var(--color-error)'
-                                      : isOverage
-                                      ? 'var(--color-info)'
-                                      : 'var(--color-success)',
-                                  }}>
-                                    {sh.discrepancy > 0 ? `+${formatRp(sh.discrepancy)}` : formatRp(sh.discrepancy)}
-                                  </span>
-                                ) : (
-                                  '—'
-                                )}
-                              </td>
-                              <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                                {!isClosed ? (
-                                  <span style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                                    backgroundColor: 'var(--color-warning-light)', color: 'var(--color-warning)',
-                                    fontWeight: 600,
-                                  }}>
-                                    AKTIF
-                                  </span>
-                                ) : sh.discrepancyTier === 'HIJAU' || isBalanced ? (
-                                  <span style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                                    backgroundColor: 'var(--color-success-light)', color: 'var(--color-success)',
-                                    fontWeight: 600,
-                                  }}>
-                                    <CheckCircle size={11} /> PAS (≤ 2k)
-                                  </span>
-                                ) : sh.discrepancyTier === 'KUNING' ? (
-                                  <span style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                                    backgroundColor: 'hsl(38 92% 95%)', color: 'hsl(38 92% 35%)',
-                                    fontWeight: 600, border: '1px solid hsl(38 92% 80%)',
-                                  }}>
-                                    <AlertTriangle size={11} /> TEKOR SEDANG (≤ 20k)
-                                  </span>
-                                ) : sh.discrepancyTier === 'MERAH' || isShortage ? (
-                                  <span style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                                    backgroundColor: 'var(--color-error-light)', color: 'var(--color-error)',
-                                    fontWeight: 600, border: '1px solid var(--color-error)',
-                                  }}>
-                                    <AlertTriangle size={11} /> TEKOR BERAT (&gt; 20k)
-                                  </span>
-                                ) : (
-                                  <span style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                    padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                                    backgroundColor: 'var(--color-info-light)', color: 'var(--color-info)',
-                                    fontWeight: 600,
-                                  }}>
-                                    LEBIH
-                                  </span>
-                                )}
-
-                                {sh.auditFlags?.includes('FRAUD_CASH_SUSPICIOUS') && (
-                                  <div style={{ marginTop: 4 }}>
-                                    <span
-                                      className="badge badge-error"
-                                      style={{ fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}
-                                      title="Ada penjualan tunai tetapi kasir menutup shift dengan fisik uang persis modal awal"
-                                    >
-                                      FRAUD LACI PERSIS MODAL
-                                    </span>
-                                  </div>
-                                )}
-                                {sh.auditFlags?.includes('SERAH_TERIMA_DIFF') && (
-                                  <div style={{ marginTop: 4 }}>
-                                    <span
-                                      className="badge badge-warning"
-                                      style={{ fontSize: '0.65rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}
-                                      title="Modal awal buka shift berbeda dari fisik tutup shift sebelumnya"
-                                    >
-                                      SELISIH SERAH TERIMA
-                                    </span>
-                                  </div>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    <SelectedRowsBar
-                      selectedCount={selectedShifts.length}
-                      itemLabel="shift"
-                      metrics={[
-                        { label: 'Modal Awal', value: formatRp(selectedShiftStats.modalAwal), tone: 'default' },
-                        { label: 'Tunai Terjual', value: formatRp(selectedShiftStats.cashSales), tone: 'success' },
-                        { label: 'Expected Kas', value: formatRp(selectedShiftStats.expectedCash), tone: 'info' },
-                        { label: `Fisik Laci (${selectedShiftStats.countedCount})`, value: formatRp(selectedShiftStats.actualCash), tone: 'default' },
-                        {
-                          label: `Selisih (${selectedShiftStats.closedDiffCount} tutup)`,
-                          value: selectedShiftStats.discrepancy > 0
-                            ? `+${formatRp(selectedShiftStats.discrepancy)}`
-                            : formatRp(selectedShiftStats.discrepancy),
-                          tone: selectedShiftStats.discrepancy < -2000 ? 'danger' : selectedShiftStats.discrepancy > 2000 ? 'info' : 'success',
-                        },
-                      ]}
-                      onExportExcel={handleExportSelectedShifts}
-                      onClear={shiftSelection.clearSelection}
-                    />
-                  </>
-                )}
-              </div>
-            </div>
           </>
+          )
         ) : null}
           </>
         )}

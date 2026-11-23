@@ -40,6 +40,8 @@ import {
   ShieldAlert,
   X,
   RotateCcw,
+  FileText,
+  Calendar,
 } from 'lucide-react';
 import { formatRupiah } from './shared';
 import type { PeriodKey as ReportPeriodKey } from '@/lib/finance/report';
@@ -332,10 +334,12 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
   const [rangeStart, setRangeStart] = useState<string>(propDateFrom || `${currentMonthWib}-01`);
   const [rangeEnd, setRangeEnd] = useState<string>(propDateTo || todayWib);
 
-  // Filter tabel shift
+  // Filter tabel shift & mode tampilan
+  const [viewMode, setViewMode] = useState<'groups' | 'daily_combined'>('groups');
   const [filterSesi, setFilterSesi] = useState<'Semua' | 'Pagi' | 'Siang'>('Semua');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [slipPreviewGroup, setSlipPreviewGroup] = useState<ShiftTeamGroup | null>(null);
 
   // Data fetching states (derived loading untuk menghindari setState sinkron di dalam useEffect)
   const [refreshTick, setRefreshTick] = useState(0);
@@ -392,115 +396,6 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       setOverrideError('Kesalahan jaringan saat memproses override.');
     } finally {
       setOverrideSubmitting(false);
-    }
-  }
-
-  function computeGroupTeamAttendance(g: ShiftTeamGroup) {
-    const map = new Map<
-      string,
-      { fullName: string; nim: string; jabatan: string; hadir: number; telatMenit: number }
-    >();
-    for (const sess of g.sessions) {
-      for (const p of sess.personnel) {
-        const cur = map.get(p.employeeId) ?? {
-          fullName: p.fullName,
-          nim: p.nim,
-          jabatan: p.jabatan,
-          hadir: 0,
-          telatMenit: 0,
-        };
-        cur.hadir += 1;
-        cur.telatMenit += p.lateMinutes || 0;
-        map.set(p.employeeId, cur);
-      }
-    }
-    return Array.from(map.values()).sort((a, b) => b.hadir - a.hadir || a.fullName.localeCompare(b.fullName));
-  }
-
-  function buildGroupSlipWaText(g: ShiftTeamGroup): string {
-    const periodLabel = data?.range.label ?? '-';
-    const members = computeGroupTeamAttendance(g);
-    const lines = [
-      `SLIP GAJI PER SHIFT - WIRAMART UNPERBA`,
-      `Periode: ${periodLabel}`,
-      `Skema: Pembagian Utuh Per Shift (50% Kehadiran Tim · 50% Laba Shift)`,
-      `Kelompok Shift: ${g.hari} ${g.sesi} (${g.waktuLabel} WIB)`,
-      `Tanggal Shift: ${g.shiftTglSummary || '-'} (${g.totalShiftCount}x pertemuan)`,
-      `Transaksi: ${g.totalTx} tx (${g.totalUnitsSold} pcs) | Omzet: ${formatRupiah(g.totalOmzet)} | Laba Kotor: ${formatRupiah(g.totalLabaKotor)}`,
-      ...(g.totalShortageDeduction > 0
-        ? [`Potongan Tekor Terkunci: -${formatRupiah(g.totalShortageDeduction)}`]
-        : []),
-      `TOTAL UPAH SHIFT (50%): ${formatRupiah(g.upahBersih)}`,
-      ``,
-      `Daftar Kehadiran Tim Shift (tanpa pemecahan nominal per nama):`,
-      ...members.map(
-        (m, idx) =>
-          `${idx + 1}. ${m.fullName} (${m.hadir}x hadir${m.telatMenit > 0 ? `, telat ${m.telatMenit} mnt` : ', tepat waktu'})`,
-      ),
-      ``,
-      `Rincian Upah Per Pertemuan:`,
-      ...g.sessions.map(
-        (s, idx) =>
-          `${idx + 1}. ${s.tanggal} (${s.txCount} tx · ${s.unitsSold} pcs | Omzet ${formatRupiah(s.omzet)}) -> ${formatRupiah(s.upahBersih)}${s.shortageDeduction > 0 ? ` [potong -${formatRupiah(s.shortageDeduction)}]` : ''}`,
-      ),
-    ];
-    return lines.join('\n');
-  }
-
-  function buildAllShiftsWaText(): string {
-    const periodLabel = data?.range.label ?? '-';
-    const lines: string[] = [
-      `REKAP GAJI PER SHIFT - WIRAMART UNPERBA`,
-      `Periode: ${periodLabel}`,
-      `Skema: Pembagian Utuh Per Shift (50% Kehadiran Tim · 50% Laba Shift)`,
-      `Total Pool Gaji Mahasiswa (50%): ${formatRupiah(data?.grandTotal.totalDistributed ?? data?.grandTotal.poolGaji ?? 0)}`,
-      `========================================`,
-    ];
-    for (const g of filteredGroups) {
-      const members = computeGroupTeamAttendance(g);
-      const memberSummary =
-        members.length > 0
-          ? members.map((m) => `${m.fullName} (${m.hadir}x)`).join(', ')
-          : g.anggotaShift.map((m) => m.fullName).join(', ') || '-';
-      lines.push(`\n[${g.hari} ${g.sesi}] ${g.totalShiftCount}x shift | Omzet ${formatRupiah(g.totalOmzet)}`);
-      lines.push(`Total Upah Shift: ${formatRupiah(g.upahBersih)}${g.totalShortageDeduction > 0 ? ` (potong tekor -${formatRupiah(g.totalShortageDeduction)})` : ''}`);
-      lines.push(`Tim Hadir: ${memberSummary}`);
-    }
-    return lines.join('\n');
-  }
-
-  async function handleCopySlip(key: string, text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedSlipKey(key);
-      window.setTimeout(() => setCopiedSlipKey((prev) => (prev === key ? null : prev)), 2500);
-    } catch {
-      window.alert('Gagal menyalin teks ke clipboard browser.');
-    }
-  }
-
-  function handlePrintGroupSlip(g: ShiftTeamGroup) {
-    const periodLabel = data?.range.label ?? '-';
-    const members = computeGroupTeamAttendance(g);
-    const esc = (s: string) =>
-      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const rowsHtml = members
-      .map(
-        (m, i) =>
-          `<tr><td>${i + 1}</td><td>${esc(m.fullName)}</td><td>${esc(m.nim)}</td><td style="text-align:center">${m.hadir}x</td><td style="text-align:center">${m.telatMenit > 0 ? `Telat ${m.telatMenit} mnt` : 'Tepat Waktu'}</td></tr>`,
-      )
-      .join('');
-    const sessHtml = g.sessions
-      .map(
-        (s) =>
-          `<tr><td>${esc(s.tanggal)}</td><td>${esc(formatTime(s.clockIn))} - ${s.clockOut ? esc(formatTime(s.clockOut)) : 'Aktif'}</td><td style="text-align:center">${s.txCount} tx / ${s.unitsSold} pcs</td><td style="text-align:right">${esc(formatRupiah(s.omzet))}</td><td style="text-align:right">${esc(formatRupiah(s.labaKotor))}</td><td style="text-align:right;color:${s.shortageDeduction > 0 ? '#dc2626' : '#64748b'}">${s.shortageDeduction > 0 ? `-${esc(formatRupiah(s.shortageDeduction))}` : 'Rp 0'}</td><td style="text-align:right;font-weight:700">${esc(formatRupiah(s.upahBersih))}</td></tr>`,
-      )
-      .join('');
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slip Gaji Shift ${esc(g.hari)} ${esc(g.sesi)}</title><style>body{font-family:Arial,sans-serif;color:#111;padding:24px;max-width:780px;margin:0 auto}h1{font-size:18px;margin:0 0 4px}p{margin:2px 0;font-size:12px;color:#333}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}th,td{border:1px solid #cbd5e1;padding:6px 8px}th{background:#f1f5f9;text-align:left}.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0;padding:10px;border:1px solid #cbd5e1;font-size:12px}.sig{margin-top:28px;display:flex;justify-content:space-between;font-size:12px}.sig-box{width:240px;text-align:center}.sig-line{margin-top:52px;border-top:1px solid #334155;padding-top:4px}@media print{button{display:none}}</style></head><body><h1>SLIP GAJI PER SHIFT - WIRAMART UNPERBA</h1><p>Periode: ${esc(periodLabel)} | Kelompok Shift: <strong>${esc(g.hari)} ${esc(g.sesi)}</strong> (${esc(g.waktuLabel)} WIB)</p><p>Skema: Pembagian Gaji Utuh Per Shift (50% Kehadiran Tim · 50% Laba Shift · Tanpa Pemecahan Per Nama)</p><div class="meta"><div><strong>Jumlah Pertemuan:</strong><br/>${g.totalShiftCount}x Shift</div><div><strong>Total Omzet:</strong><br/>${esc(formatRupiah(g.totalOmzet))}</div><div><strong>Laba Kotor:</strong><br/>${esc(formatRupiah(g.totalLabaKotor))}</div><div><strong>Total Upah Shift:</strong><br/><span style="font-size:15px;font-weight:800;color:#15803d">${esc(formatRupiah(g.upahBersih))}</span></div></div><h2 style="font-size:14px;margin-top:16px">Rincian Pertemuan &amp; Upah Shift</h2><table><thead><tr><th>Tanggal</th><th>Jam</th><th style="text-align:center">Trx / Unit</th><th style="text-align:right">Omzet</th><th style="text-align:right">Laba Kotor</th><th style="text-align:right">Potong Tekor</th><th style="text-align:right">Upah Shift</th></tr></thead><tbody>${sessHtml}</tbody></table><h2 style="font-size:14px;margin-top:16px">Daftar Kehadiran Tim Shift</h2><table><thead><tr><th>No</th><th>Nama</th><th>NIM</th><th style="text-align:center">Hadir</th><th style="text-align:center">Disiplin</th></tr></thead><tbody>${rowsHtml}</tbody></table><div class="sig"><div class="sig-box"><div>Diserahkan oleh,<br/>Pengelola Wiramart UNPERBA</div><div class="sig-line">Tanda Tangan &amp; Nama Terang</div></div><div class="sig-box"><div>Diterima utuh untuk kelompok,<br/>Perwakilan Shift ${esc(g.hari)} ${esc(g.sesi)}</div><div class="sig-line">Tanda Tangan &amp; Nama Terang</div></div></div><div style="margin-top:18px"><button onclick="window.print()">Cetak / Simpan PDF</button></div></body></html>`;
-    const win = window.open('', '_blank', 'width=840,height=740');
-    if (win) {
-      win.document.write(html);
-      win.document.close();
     }
   }
 
@@ -836,6 +731,141 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
     );
   }, [filteredGroups]);
 
+  const groupByKey = useMemo(() => {
+    const map = new Map<string, ShiftTeamGroup>();
+    for (const g of allGroups) {
+      map.set(g.groupKey, g);
+    }
+    return map;
+  }, [allGroups]);
+
+  // Ringkasan Perbandingan & Gabungan Shift Pagi + Shift Siang (Omzet, Absen, Gaji)
+  const pagiSiangSummary = useMemo(() => {
+    const makeBucket = () => ({
+      shiftCount: 0,
+      txCount: 0,
+      unitsSold: 0,
+      omzet: 0,
+      labaKotor: 0,
+      upahBersih: 0,
+      totalHadir: 0,
+      totalTelat: 0,
+    });
+    const pagi = makeBucket();
+    const siang = makeBucket();
+
+    for (const g of allGroups) {
+      const target = g.sesi === 'Pagi' ? pagi : siang;
+      target.shiftCount += g.totalShiftCount;
+      target.txCount += g.totalTx;
+      target.unitsSold += g.totalUnitsSold;
+      target.omzet += g.totalOmzet;
+      target.labaKotor += g.totalLabaKotor;
+      target.upahBersih += g.upahBersih;
+      for (const sess of g.sessions) {
+        target.totalHadir += sess.personnel.length;
+        target.totalTelat += sess.personnel.filter((p) => p.lateMinutes > 0).length;
+      }
+    }
+
+    const gabungan = {
+      shiftCount: pagi.shiftCount + siang.shiftCount,
+      txCount: pagi.txCount + siang.txCount,
+      unitsSold: pagi.unitsSold + siang.unitsSold,
+      omzet: pagi.omzet + siang.omzet,
+      labaKotor: pagi.labaKotor + siang.labaKotor,
+      upahBersih: pagi.upahBersih + siang.upahBersih,
+      totalHadir: pagi.totalHadir + siang.totalHadir,
+      totalTelat: pagi.totalTelat + siang.totalTelat,
+    };
+
+    return { pagi, siang, gabungan };
+  }, [allGroups]);
+
+  // Tabel Harian Gabungan Pagi + Siang (per tanggal, menampilkan omzet, absen hadir, dan gaji per shift)
+  const dailyCombinedRows = useMemo(() => {
+    const byDate = new Map<
+      string,
+      {
+        tanggal: string;
+        hari: string;
+        pagi: DailyShiftSession | null;
+        siang: DailyShiftSession | null;
+      }
+    >();
+
+    for (const g of allGroups) {
+      for (const sess of g.sessions) {
+        const cur = byDate.get(sess.tanggal) ?? {
+          tanggal: sess.tanggal,
+          hari: sess.hari,
+          pagi: null,
+          siang: null,
+        };
+        if (sess.sesi === 'Pagi') {
+          cur.pagi = sess;
+        } else {
+          cur.siang = sess;
+        }
+        byDate.set(sess.tanggal, cur);
+      }
+    }
+
+    const q = searchQuery.trim().toLowerCase();
+    return Array.from(byDate.values())
+      .map((row) => ({
+        ...row,
+        totalOmzet: (row.pagi?.omzet ?? 0) + (row.siang?.omzet ?? 0),
+        totalLabaKotor: (row.pagi?.labaKotor ?? 0) + (row.siang?.labaKotor ?? 0),
+        totalTx: (row.pagi?.txCount ?? 0) + (row.siang?.txCount ?? 0),
+        totalUnits: (row.pagi?.unitsSold ?? 0) + (row.siang?.unitsSold ?? 0),
+        totalHadir: (row.pagi?.personnel.length ?? 0) + (row.siang?.personnel.length ?? 0),
+        totalUpah: (row.pagi?.upahBersih ?? 0) + (row.siang?.upahBersih ?? 0),
+      }))
+      .filter((row) => {
+        if (!q) return true;
+        return (
+          row.tanggal.includes(q) ||
+          row.hari.toLowerCase().includes(q) ||
+          (row.pagi?.personnel.some((p) => p.fullName.toLowerCase().includes(q)) ?? false) ||
+          (row.siang?.personnel.some((p) => p.fullName.toLowerCase().includes(q)) ?? false) ||
+          (row.pagi?.kasirName.toLowerCase().includes(q) ?? false) ||
+          (row.siang?.kasirName.toLowerCase().includes(q) ?? false)
+        );
+      })
+      .sort((a, b) => b.tanggal.localeCompare(a.tanggal));
+  }, [allGroups, searchQuery]);
+
+  const dailyCombinedTotals = useMemo(() => {
+    return dailyCombinedRows.reduce(
+      (acc, r) => {
+        acc.pagiOmzet += r.pagi?.omzet ?? 0;
+        acc.pagiUpah += r.pagi?.upahBersih ?? 0;
+        acc.pagiHadir += r.pagi?.personnel.length ?? 0;
+        acc.siangOmzet += r.siang?.omzet ?? 0;
+        acc.siangUpah += r.siang?.upahBersih ?? 0;
+        acc.siangHadir += r.siang?.personnel.length ?? 0;
+        acc.totalOmzet += r.totalOmzet;
+        acc.totalUpah += r.totalUpah;
+        acc.totalHadir += r.totalHadir;
+        acc.totalTx += r.totalTx;
+        return acc;
+      },
+      {
+        pagiOmzet: 0,
+        pagiUpah: 0,
+        pagiHadir: 0,
+        siangOmzet: 0,
+        siangUpah: 0,
+        siangHadir: 0,
+        totalOmzet: 0,
+        totalUpah: 0,
+        totalHadir: 0,
+        totalTx: 0,
+      },
+    );
+  }, [dailyCombinedRows]);
+
   const visibleGroupKeys = useMemo(
     () => filteredGroups.map((g) => g.groupKey),
     [filteredGroups],
@@ -867,6 +897,134 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       ),
     [selectedGroups],
   );
+
+  function computeGroupTeamAttendance(g: ShiftTeamGroup) {
+    const map = new Map<
+      string,
+      { fullName: string; nim: string; jabatan: string; hadir: number; telatMenit: number }
+    >();
+    for (const sess of g.sessions) {
+      for (const p of sess.personnel) {
+        const cur = map.get(p.employeeId) ?? {
+          fullName: p.fullName,
+          nim: p.nim,
+          jabatan: p.jabatan,
+          hadir: 0,
+          telatMenit: 0,
+        };
+        cur.hadir += 1;
+        cur.telatMenit += p.lateMinutes || 0;
+        map.set(p.employeeId, cur);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.hadir - a.hadir || a.fullName.localeCompare(b.fullName));
+  }
+
+  function buildGroupSlipWaText(g: ShiftTeamGroup): string {
+    const periodLabel = data?.range.label ?? '-';
+    const members = computeGroupTeamAttendance(g);
+    const lines = [
+      `SLIP GAJI PER SHIFT - WIRAMART UNPERBA`,
+      `Periode: ${periodLabel}`,
+      `Skema: Pembagian Utuh Per Shift (50% Kehadiran Tim · 50% Laba Shift)`,
+      `Kelompok Shift: ${g.hari} ${g.sesi} (${g.waktuLabel} WIB)`,
+      `Tanggal Shift: ${g.shiftTglSummary || '-'} (${g.totalShiftCount}x pertemuan)`,
+      `Transaksi: ${g.totalTx} tx (${g.totalUnitsSold} pcs) | Omzet: ${formatRupiah(g.totalOmzet)} | Laba Kotor: ${formatRupiah(g.totalLabaKotor)}`,
+      ...(g.totalShortageDeduction > 0
+        ? [`Potongan Tekor Terkunci: -${formatRupiah(g.totalShortageDeduction)}`]
+        : []),
+      `TOTAL UPAH SHIFT (50%): ${formatRupiah(g.upahBersih)}`,
+      ``,
+      `Daftar Kehadiran Tim Shift (tanpa pemecahan nominal per nama):`,
+      ...members.map(
+        (m, idx) =>
+          `${idx + 1}. ${m.fullName} (${m.hadir}x hadir${m.telatMenit > 0 ? `, telat ${m.telatMenit} mnt` : ', tepat waktu'})`,
+      ),
+      ``,
+      `Rincian Upah Per Pertemuan:`,
+      ...g.sessions.map(
+        (s, idx) =>
+          `${idx + 1}. ${s.tanggal} (${s.txCount} tx · ${s.unitsSold} pcs | Omzet ${formatRupiah(s.omzet)}) -> ${formatRupiah(s.upahBersih)}${s.shortageDeduction > 0 ? ` [potong -${formatRupiah(s.shortageDeduction)}]` : ''}`,
+      ),
+    ];
+    return lines.join('\n');
+  }
+
+  function buildAllShiftsWaText(): string {
+    const periodLabel = data?.range.label ?? '-';
+    const lines: string[] = [
+      `REKAP GAJI PER SHIFT - WIRAMART UNPERBA`,
+      `Periode: ${periodLabel}`,
+      `Skema: Pembagian Utuh Per Shift (50% Kehadiran Tim · 50% Laba Shift)`,
+      `Total Pool Gaji Mahasiswa (50%): ${formatRupiah(data?.grandTotal.totalDistributed ?? data?.grandTotal.poolGaji ?? 0)}`,
+      `========================================`,
+    ];
+    for (const g of filteredGroups) {
+      const members = computeGroupTeamAttendance(g);
+      const memberSummary =
+        members.length > 0
+          ? members.map((m) => `${m.fullName} (${m.hadir}x)`).join(', ')
+          : g.anggotaShift.map((m) => m.fullName).join(', ') || '-';
+      lines.push(`\n[${g.hari} ${g.sesi}] ${g.totalShiftCount}x shift | Omzet ${formatRupiah(g.totalOmzet)}`);
+      lines.push(`Total Upah Shift: ${formatRupiah(g.upahBersih)}${g.totalShortageDeduction > 0 ? ` (potong tekor -${formatRupiah(g.totalShortageDeduction)})` : ''}`);
+      lines.push(`Tim Hadir: ${memberSummary}`);
+    }
+    return lines.join('\n');
+  }
+
+  async function handleCopySlip(key: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedSlipKey(key);
+      window.setTimeout(() => setCopiedSlipKey((prev) => (prev === key ? null : prev)), 2500);
+    } catch {
+      window.alert('Gagal menyalin teks ke clipboard browser.');
+    }
+  }
+
+  function buildPrintableSlipBodyHtml(g: ShiftTeamGroup): string {
+    const periodLabel = data?.range.label ?? '-';
+    const members = computeGroupTeamAttendance(g);
+    const esc = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const rowsHtml = members
+      .map(
+        (m, i) =>
+          `<tr><td>${i + 1}</td><td>${esc(m.fullName)}</td><td>${esc(m.nim)}</td><td style="text-align:center">${m.hadir}x</td><td style="text-align:center">${m.telatMenit > 0 ? `Telat ${m.telatMenit} mnt` : 'Tepat Waktu'}</td></tr>`,
+      )
+      .join('');
+    const sessHtml = g.sessions
+      .map(
+        (s) =>
+          `<tr><td>${esc(s.tanggal)}</td><td>${esc(formatTime(s.clockIn))} - ${s.clockOut ? esc(formatTime(s.clockOut)) : 'Aktif'}</td><td style="text-align:center">${s.txCount} tx / ${s.unitsSold} pcs</td><td style="text-align:right">${esc(formatRupiah(s.omzet))}</td><td style="text-align:right">${esc(formatRupiah(s.labaKotor))}</td><td style="text-align:right;color:${s.shortageDeduction > 0 ? '#dc2626' : '#64748b'}">${s.shortageDeduction > 0 ? `-${esc(formatRupiah(s.shortageDeduction))}` : 'Rp 0'}</td><td style="text-align:right;font-weight:700">${esc(formatRupiah(s.upahBersih))}</td></tr>`,
+      )
+      .join('');
+    return `<div class="slip-page"><h1>SLIP GAJI PER SHIFT - WIRAMART UNPERBA</h1><p>Periode: ${esc(periodLabel)} | Kelompok Shift: <strong>${esc(g.hari)} ${esc(g.sesi)}</strong> (${esc(g.waktuLabel)} WIB)</p><p>Skema: Pembagian Gaji Utuh Per Shift (50% Kehadiran Tim · 50% Laba Shift · Tanpa Pemecahan Per Nama)</p><div class="meta"><div><strong>Jumlah Pertemuan:</strong><br/>${g.totalShiftCount}x Shift</div><div><strong>Total Omzet:</strong><br/>${esc(formatRupiah(g.totalOmzet))}</div><div><strong>Laba Kotor:</strong><br/>${esc(formatRupiah(g.totalLabaKotor))}</div><div><strong>Total Upah Shift:</strong><br/><span style="font-size:15px;font-weight:800;color:#15803d">${esc(formatRupiah(g.upahBersih))}</span></div></div><h2 style="font-size:14px;margin-top:16px">Rincian Pertemuan &amp; Upah Shift</h2><table><thead><tr><th>Tanggal</th><th>Jam</th><th style="text-align:center">Trx / Unit</th><th style="text-align:right">Omzet</th><th style="text-align:right">Laba Kotor</th><th style="text-align:right">Potong Tekor</th><th style="text-align:right">Upah Shift</th></tr></thead><tbody>${sessHtml}</tbody></table><h2 style="font-size:14px;margin-top:16px">Daftar Absensi Tim Shift</h2><table><thead><tr><th>No</th><th>Nama</th><th>NIM</th><th style="text-align:center">Hadir</th><th style="text-align:center">Disiplin</th></tr></thead><tbody>${rowsHtml}</tbody></table><div class="sig"><div class="sig-box"><div>Diserahkan oleh,<br/>Pengelola Wiramart UNPERBA</div><div class="sig-line">Tanda Tangan &amp; Nama Terang</div></div><div class="sig-box"><div>Diterima utuh untuk kelompok,<br/>Perwakilan Shift ${esc(g.hari)} ${esc(g.sesi)}</div><div class="sig-line">Tanda Tangan &amp; Nama Terang</div></div></div></div>`;
+  }
+
+  function handlePrintGroupSlip(g: ShiftTeamGroup) {
+    const esc = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slip Gaji Shift ${esc(g.hari)} ${esc(g.sesi)}</title><style>body{font-family:Arial,sans-serif;color:#111;padding:24px;max-width:780px;margin:0 auto}h1{font-size:18px;margin:0 0 4px}p{margin:2px 0;font-size:12px;color:#333}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}th,td{border:1px solid #cbd5e1;padding:6px 8px}th{background:#f1f5f9;text-align:left}.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0;padding:10px;border:1px solid #cbd5e1;font-size:12px}.sig{margin-top:28px;display:flex;justify-content:space-between;font-size:12px}.sig-box{width:240px;text-align:center}.sig-line{margin-top:52px;border-top:1px solid #334155;padding-top:4px}@media print{button{display:none}}</style></head><body>${buildPrintableSlipBodyHtml(g)}<div style="margin-top:18px"><button onclick="window.print()">Cetak / Simpan PDF</button></div></body></html>`;
+    const win = window.open('', '_blank', 'width=840,height=740');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
+  }
+
+  function handlePrintAllSlips() {
+    if (filteredGroups.length === 0) return;
+    const esc = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const pagesHtml = filteredGroups.map((g) => buildPrintableSlipBodyHtml(g)).join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Semua Slip Gaji Per Shift - ${esc(data?.range.label ?? '')}</title><style>body{font-family:Arial,sans-serif;color:#111;padding:20px;max-width:780px;margin:0 auto}h1{font-size:18px;margin:0 0 4px}p{margin:2px 0;font-size:12px;color:#333}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}th,td{border:1px solid #cbd5e1;padding:6px 8px}th{background:#f1f5f9;text-align:left}.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0;padding:10px;border:1px solid #cbd5e1;font-size:12px}.sig{margin-top:24px;display:flex;justify-content:space-between;font-size:12px}.sig-box{width:240px;text-align:center}.sig-line{margin-top:48px;border-top:1px solid #334155;padding-top:4px}.slip-page{padding-bottom:24px;margin-bottom:28px;border-bottom:2px dashed #cbd5e1;page-break-after:always}.slip-page:last-child{border-bottom:none;page-break-after:auto}@media print{.no-print{display:none}.slip-page{border-bottom:none;margin-bottom:0;padding-bottom:0}}</style></head><body><div class="no-print" style="margin-bottom:16px;padding:10px 14px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;display:flex;justify-content:space-between;align-items:center"><span><strong>${filteredGroups.length} Slip Gaji Per Shift</strong> siap cetak (1 halaman per shift).</span><button onclick="window.print()" style="padding:8px 16px;background:#166534;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer">Cetak / Simpan Semua PDF</button></div>${pagesHtml}</body></html>`;
+    const win = window.open('', '_blank', 'width=860,height=760');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
+  }
 
   async function handleExportSelected(): Promise<void> {
     if (selectedGroups.length === 0) return;
@@ -1874,44 +2032,220 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          3. TOOLBAR TABEL: FILTER SESI, PENCARIAN & EXPORT EXCEL
+          2B. RINGKASAN SHIFT PAGI, SHIFT SIANG & GABUNGAN (OMZET, ABSEN, GAJI)
+          ───────────────────────────────────────────────────────────── */}
+      {!loading && !error && allGroups.length > 0 && (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+            gap: '10px',
+            marginBottom: '14px',
+          }}
+        >
+          {[
+            {
+              title: 'Shift Pagi (07:30–11:30 WIB)',
+              icon: <Sun size={15} />,
+              accent: '#b45309',
+              bg: '#fffbeb',
+              border: '#fde68a',
+              omzet: pagiSiangSummary.pagi.omzet,
+              upah: pagiSiangSummary.pagi.upahBersih,
+              hadir: pagiSiangSummary.pagi.totalHadir,
+              telat: pagiSiangSummary.pagi.totalTelat,
+              shiftCount: pagiSiangSummary.pagi.shiftCount,
+              txCount: pagiSiangSummary.pagi.txCount,
+              unitsSold: pagiSiangSummary.pagi.unitsSold,
+            },
+            {
+              title: 'Shift Siang (11:30–15:00 WIB)',
+              icon: <Sunset size={15} />,
+              accent: '#4338ca',
+              bg: '#eef2ff',
+              border: '#c7d2fe',
+              omzet: pagiSiangSummary.siang.omzet,
+              upah: pagiSiangSummary.siang.upahBersih,
+              hadir: pagiSiangSummary.siang.totalHadir,
+              telat: pagiSiangSummary.siang.totalTelat,
+              shiftCount: pagiSiangSummary.siang.shiftCount,
+              txCount: pagiSiangSummary.siang.txCount,
+              unitsSold: pagiSiangSummary.siang.unitsSold,
+            },
+            {
+              title: 'Gabungan Shift (Pagi + Siang)',
+              icon: <TrendingUp size={15} />,
+              accent: '#166534',
+              bg: '#f0fdf4',
+              border: '#86efac',
+              omzet: pagiSiangSummary.gabungan.omzet,
+              upah: pagiSiangSummary.gabungan.upahBersih,
+              hadir: pagiSiangSummary.gabungan.totalHadir,
+              telat: pagiSiangSummary.gabungan.totalTelat,
+              shiftCount: pagiSiangSummary.gabungan.shiftCount,
+              txCount: pagiSiangSummary.gabungan.txCount,
+              unitsSold: pagiSiangSummary.gabungan.unitsSold,
+            },
+          ].map((box) => (
+            <div
+              key={box.title}
+              className="card"
+              style={{
+                padding: '12px 14px',
+                borderRadius: '10px',
+                backgroundColor: box.bg,
+                border: `1px solid ${box.border}`,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 6 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.76rem', fontWeight: 800, color: box.accent }}>
+                  {box.icon}
+                  {box.title}
+                </span>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#475569' }}>
+                  {box.shiftCount}x shift
+                </span>
+              </div>
+
+              <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', lineHeight: 1.2 }}>
+                {formatRupiah(box.omzet)}
+              </div>
+              <div style={{ fontSize: '0.7rem', color: '#475569', marginBottom: 8 }}>
+                Omzet · {box.txCount.toLocaleString('id-ID')} tx ({box.unitsSold.toLocaleString('id-ID')} pcs)
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '8px',
+                  paddingTop: '8px',
+                  borderTop: `1px solid ${box.border}`,
+                  fontSize: '0.72rem',
+                }}
+              >
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '0.67rem', fontWeight: 600 }}>Absensi Hadir</div>
+                  <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                    {box.hadir} hadir
+                    {box.telat > 0 && (
+                      <span style={{ color: '#b45309', fontWeight: 700 }}> · {box.telat} telat</span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ color: '#64748b', fontSize: '0.67rem', fontWeight: 600 }}>Total Gaji Shift</div>
+                  <div style={{ fontWeight: 800, color: '#15803d' }}>
+                    {formatRupiah(box.upah)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────
+          3. TOOLBAR TABEL: MODE TAMPILAN, FILTER SESI, PENCARIAN & AKSI
           ───────────────────────────────────────────────────────────── */}
       <div className="rs-toolbar-actions">
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {(
-            [
-              { key: 'Semua', label: `Semua Shift (${sesiCounts.semua})` },
-              { key: 'Pagi', label: `Pagi (${sesiCounts.pagi})` },
-              { key: 'Siang', label: `Siang (${sesiCounts.siang})` },
-            ] as const
-          ).map((item) => {
-            const active = filterSesi === item.key;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => setFilterSesi(item.key)}
-                style={{
-                  minHeight: 44,
-                  padding: '8px 14px',
-                  borderRadius: '99px',
-                  border: active ? '1.5px solid #166534' : '1px solid var(--color-border)',
-                  background: active ? '#f0fdf4' : '#ffffff',
-                  color: active ? '#166534' : 'var(--color-text-secondary)',
-                  cursor: 'pointer',
-                  fontSize: '0.82rem',
-                  fontWeight: active ? 700 : 500,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                }}
-              >
-                {item.key === 'Pagi' && <Sun size={13} style={{ color: '#d97706' }} />}
-                {item.key === 'Siang' && <Sunset size={13} style={{ color: '#4f46e5' }} />}
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+          {/* Mode Switcher: Kelompok & Slip Gaji vs Harian Pagi+Siang */}
+          <div
+            role="tablist"
+            aria-label="Mode tampilan rekap shift"
+            style={{
+              display: 'inline-flex',
+              padding: '3px',
+              borderRadius: '10px',
+              backgroundColor: '#f1f5f9',
+              border: '1px solid #cbd5e1',
+              gap: '3px',
+            }}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'groups'}
+              onClick={() => setViewMode('groups')}
+              style={{
+                minHeight: 38,
+                padding: '6px 12px',
+                borderRadius: '7px',
+                border: 'none',
+                backgroundColor: viewMode === 'groups' ? '#166534' : 'transparent',
+                color: viewMode === 'groups' ? '#ffffff' : '#475569',
+                fontWeight: 700,
+                fontSize: '0.78rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+              }}
+            >
+              <FileText size={13} />
+              <span>Kelompok &amp; Slip Gaji</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'daily_combined'}
+              onClick={() => setViewMode('daily_combined')}
+              style={{
+                minHeight: 38,
+                padding: '6px 12px',
+                borderRadius: '7px',
+                border: 'none',
+                backgroundColor: viewMode === 'daily_combined' ? '#0f766e' : 'transparent',
+                color: viewMode === 'daily_combined' ? '#ffffff' : '#475569',
+                fontWeight: 700,
+                fontSize: '0.78rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+              }}
+            >
+              <Calendar size={13} />
+              <span>Harian (Pagi + Siang)</span>
+            </button>
+          </div>
+
+          {viewMode === 'groups' &&
+            (
+              [
+                { key: 'Semua', label: `Semua (${sesiCounts.semua})` },
+                { key: 'Pagi', label: `Pagi (${sesiCounts.pagi})` },
+                { key: 'Siang', label: `Siang (${sesiCounts.siang})` },
+              ] as const
+            ).map((item) => {
+              const active = filterSesi === item.key;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setFilterSesi(item.key)}
+                  style={{
+                    minHeight: 44,
+                    padding: '8px 13px',
+                    borderRadius: '99px',
+                    border: active ? '1.5px solid #166534' : '1px solid var(--color-border)',
+                    background: active ? '#f0fdf4' : '#ffffff',
+                    color: active ? '#166534' : 'var(--color-text-secondary)',
+                    cursor: 'pointer',
+                    fontSize: '0.8rem',
+                    fontWeight: active ? 700 : 500,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                  }}
+                >
+                  {item.key === 'Pagi' && <Sun size={13} style={{ color: '#d97706' }} />}
+                  {item.key === 'Siang' && <Sunset size={13} style={{ color: '#4f46e5' }} />}
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
         </div>
 
         <div className="rs-search-box">
@@ -1931,6 +2265,30 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
             type="button"
+            onClick={handlePrintAllSlips}
+            disabled={filteredGroups.length === 0}
+            className="btn btn-sm"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: '#f0fdf4',
+              color: '#166534',
+              border: '1px solid #86efac',
+              minHeight: 44,
+              padding: '8px 13px',
+              fontWeight: 700,
+              fontSize: '0.8rem',
+              borderRadius: '8px',
+              cursor: filteredGroups.length === 0 ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <Printer size={14} />
+            <span>Cetak Semua Slip</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => handleCopySlip('__ALL__', buildAllShiftsWaText())}
             disabled={filteredGroups.length === 0}
             className="btn btn-sm"
@@ -1942,9 +2300,9 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
               color: copiedSlipKey === '__ALL__' ? '#ffffff' : '#0f172a',
               border: '1px solid #cbd5e1',
               minHeight: 44,
-              padding: '8px 14px',
+              padding: '8px 13px',
               fontWeight: 700,
-              fontSize: '0.82rem',
+              fontSize: '0.8rem',
               borderRadius: '8px',
               cursor: filteredGroups.length === 0 ? 'not-allowed' : 'pointer',
             }}
@@ -1965,9 +2323,9 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
               backgroundColor: '#166534',
               borderColor: '#166534',
               minHeight: 44,
-              padding: '8px 16px',
+              padding: '8px 14px',
               fontWeight: 700,
-              fontSize: '0.82rem',
+              fontSize: '0.8rem',
             }}
           >
             {exportLoading ? <Loader2 size={14} className="spin-icon" /> : <Download size={14} />}
@@ -2043,9 +2401,297 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                 Silakan pilih bulan atau tanggal lain yang memiliki riwayat operasional.
               </p>
             </div>
+          ) : viewMode === 'daily_combined' ? (
+            <>
+              {/* ── MODE HARIAN: PERBANDINGAN & GABUNGAN SHIFT PAGI + SIANG + ABSEN ── */}
+              {dailyCombinedRows.length === 0 ? (
+                <div className="card" style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--color-text-muted)' }}>
+                  Tidak ada catatan harian shift yang cocok dengan pencarian.
+                </div>
+              ) : (
+                <>
+                  {/* Desktop Table Harian Pagi + Siang */}
+                  <div
+                    className="card rs-desktop-table"
+                    style={{
+                      overflow: 'hidden',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '10px',
+                      backgroundColor: '#ffffff',
+                    }}
+                  >
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead>
+                          <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid var(--color-border)' }}>
+                            <th style={{ padding: '11px 14px', textAlign: 'left', color: '#475569', fontSize: '11px', textTransform: 'uppercase' }}>
+                              Tanggal &amp; Hari
+                            </th>
+                            <th style={{ padding: '11px 14px', textAlign: 'left', color: '#b45309', fontSize: '11px', textTransform: 'uppercase', backgroundColor: '#fffbeb' }}>
+                              Shift Pagi (Omzet · Absen · Gaji)
+                            </th>
+                            <th style={{ padding: '11px 14px', textAlign: 'left', color: '#4338ca', fontSize: '11px', textTransform: 'uppercase', backgroundColor: '#eef2ff' }}>
+                              Shift Siang (Omzet · Absen · Gaji)
+                            </th>
+                            <th style={{ padding: '11px 14px', textAlign: 'right', color: '#166534', fontSize: '11px', textTransform: 'uppercase', backgroundColor: '#f0fdf4' }}>
+                              Gabungan (Pagi + Siang)
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dailyCombinedRows.map((row) => {
+                            const pagiGroup = groupByKey.get(`${row.hari}-Pagi`);
+                            const siangGroup = groupByKey.get(`${row.hari}-Siang`);
+                            return (
+                              <tr key={row.tanggal} style={{ borderBottom: '1px solid #f1f5f9', verticalAlign: 'top' }}>
+                                <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                                  <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '13px' }}>{row.hari}</div>
+                                  <div style={{ fontSize: '11.5px', color: '#475569' }}>{formatShortDate(row.tanggal)}</div>
+                                  <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: 3 }}>
+                                    {row.totalTx} tx · {row.totalUnits} pcs
+                                  </div>
+                                </td>
+
+                                {/* Shift Pagi */}
+                                <td style={{ padding: '12px 14px', backgroundColor: '#fffbeb40' }}>
+                                  {row.pagi ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                        <span style={{ fontWeight: 800, color: '#0f172a', fontSize: '13px' }}>
+                                          {formatRupiah(row.pagi.omzet)}
+                                        </span>
+                                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#15803d', backgroundColor: '#dcfce7', padding: '2px 7px', borderRadius: '6px' }}>
+                                          Gaji {formatRupiah(row.pagi.upahBersih)}
+                                        </span>
+                                      </div>
+                                      <div style={{ fontSize: '11px', color: '#475569' }}>
+                                        {row.pagi.txCount} tx · {row.pagi.unitsSold} pcs · {formatTime(row.pagi.clockIn)}–{row.pagi.clockOut ? formatTime(row.pagi.clockOut) : 'Aktif'}
+                                      </div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#b45309', backgroundColor: '#fef3c7', padding: '2px 6px', borderRadius: '99px' }}>
+                                          Absen: {row.pagi.personnel.length} hadir
+                                        </span>
+                                        {row.pagi.personnel.map((p) => (
+                                          <span
+                                            key={p.employeeId}
+                                            style={{
+                                              fontSize: '10.5px',
+                                              padding: '2px 6px',
+                                              borderRadius: '5px',
+                                              backgroundColor: '#ffffff',
+                                              border: '1px solid #e2e8f0',
+                                              color: '#1e293b',
+                                            }}
+                                          >
+                                            {p.fullName}
+                                            {p.lateMinutes > 0 && <strong style={{ color: '#b45309' }}> +{p.lateMinutes}m</strong>}
+                                          </span>
+                                        ))}
+                                      </div>
+                                      {pagiGroup && (
+                                        <div>
+                                          <button
+                                            type="button"
+                                            onClick={() => setSlipPreviewGroup(pagiGroup)}
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '4px',
+                                              padding: '3px 8px',
+                                              borderRadius: '6px',
+                                              border: '1px solid #166534',
+                                              backgroundColor: '#f0fdf4',
+                                              color: '#166534',
+                                              fontSize: '11px',
+                                              fontWeight: 700,
+                                              cursor: 'pointer',
+                                            }}
+                                          >
+                                            <FileText size={11} /> Slip Shift Pagi
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span style={{ color: '#94a3b8', fontSize: '11.5px' }}>Tidak ada sesi pagi</span>
+                                  )}
+                                </td>
+
+                                {/* Shift Siang */}
+                                <td style={{ padding: '12px 14px', backgroundColor: '#eef2ff40' }}>
+                                  {row.siang ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                        <span style={{ fontWeight: 800, color: '#0f172a', fontSize: '13px' }}>
+                                          {formatRupiah(row.siang.omzet)}
+                                        </span>
+                                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#15803d', backgroundColor: '#dcfce7', padding: '2px 7px', borderRadius: '6px' }}>
+                                          Gaji {formatRupiah(row.siang.upahBersih)}
+                                        </span>
+                                      </div>
+                                      <div style={{ fontSize: '11px', color: '#475569' }}>
+                                        {row.siang.txCount} tx · {row.siang.unitsSold} pcs · {formatTime(row.siang.clockIn)}–{row.siang.clockOut ? formatTime(row.siang.clockOut) : 'Aktif'}
+                                      </div>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#4338ca', backgroundColor: '#e0e7ff', padding: '2px 6px', borderRadius: '99px' }}>
+                                          Absen: {row.siang.personnel.length} hadir
+                                        </span>
+                                        {row.siang.personnel.map((p) => (
+                                          <span
+                                            key={p.employeeId}
+                                            style={{
+                                              fontSize: '10.5px',
+                                              padding: '2px 6px',
+                                              borderRadius: '5px',
+                                              backgroundColor: '#ffffff',
+                                              border: '1px solid #e2e8f0',
+                                              color: '#1e293b',
+                                            }}
+                                          >
+                                            {p.fullName}
+                                            {p.lateMinutes > 0 && <strong style={{ color: '#b45309' }}> +{p.lateMinutes}m</strong>}
+                                          </span>
+                                        ))}
+                                      </div>
+                                      {siangGroup && (
+                                        <div>
+                                          <button
+                                            type="button"
+                                            onClick={() => setSlipPreviewGroup(siangGroup)}
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '4px',
+                                              padding: '3px 8px',
+                                              borderRadius: '6px',
+                                              border: '1px solid #166534',
+                                              backgroundColor: '#f0fdf4',
+                                              color: '#166534',
+                                              fontSize: '11px',
+                                              fontWeight: 700,
+                                              cursor: 'pointer',
+                                            }}
+                                          >
+                                            <FileText size={11} /> Slip Shift Siang
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span style={{ color: '#94a3b8', fontSize: '11.5px' }}>Tidak ada sesi siang</span>
+                                  )}
+                                </td>
+
+                                {/* Gabungan Pagi + Siang */}
+                                <td style={{ padding: '12px 14px', textAlign: 'right', backgroundColor: '#f0fdf450', whiteSpace: 'nowrap' }}>
+                                  <div style={{ fontWeight: 800, fontSize: '13.5px', color: '#0f172a' }}>
+                                    {formatRupiah(row.totalOmzet)}
+                                  </div>
+                                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#15803d', marginTop: 3 }}>
+                                    Total Gaji: {formatRupiah(row.totalUpah)}
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: '#475569', marginTop: 3 }}>
+                                    Total Absen: <strong>{row.totalHadir} hadir</strong>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ borderTop: '2px solid var(--color-border)', backgroundColor: '#f8fafc' }}>
+                            <td style={{ padding: '12px 14px', fontWeight: 800, color: '#0f172a' }}>
+                              TOTAL ({dailyCombinedRows.length} Hari · {dailyCombinedTotals.totalTx} tx)
+                            </td>
+                            <td style={{ padding: '12px 14px', backgroundColor: '#fffbeb' }}>
+                              <div style={{ fontWeight: 800, color: '#b45309' }}>Omzet: {formatRupiah(dailyCombinedTotals.pagiOmzet)}</div>
+                              <div style={{ fontSize: '11px', color: '#475569' }}>
+                                Absen: {dailyCombinedTotals.pagiHadir} hadir · Gaji: <strong style={{ color: '#15803d' }}>{formatRupiah(dailyCombinedTotals.pagiUpah)}</strong>
+                              </div>
+                            </td>
+                            <td style={{ padding: '12px 14px', backgroundColor: '#eef2ff' }}>
+                              <div style={{ fontWeight: 800, color: '#4338ca' }}>Omzet: {formatRupiah(dailyCombinedTotals.siangOmzet)}</div>
+                              <div style={{ fontSize: '11px', color: '#475569' }}>
+                                Absen: {dailyCombinedTotals.siangHadir} hadir · Gaji: <strong style={{ color: '#15803d' }}>{formatRupiah(dailyCombinedTotals.siangUpah)}</strong>
+                              </div>
+                            </td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right', backgroundColor: '#f0fdf4' }}>
+                              <div style={{ fontWeight: 800, fontSize: '14px', color: '#166534' }}>
+                                {formatRupiah(dailyCombinedTotals.totalOmzet)}
+                              </div>
+                              <div style={{ fontSize: '11px', fontWeight: 700, color: '#15803d' }}>
+                                Gaji: {formatRupiah(dailyCombinedTotals.totalUpah)} · {dailyCombinedTotals.totalHadir} hadir
+                              </div>
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Mobile Cards Harian Pagi + Siang */}
+                  <div className="rs-mobile-list">
+                    {dailyCombinedRows.map((row) => (
+                      <div
+                        key={row.tanggal}
+                        className="card"
+                        style={{ padding: '12px', borderRadius: '10px', border: '1px solid var(--color-border)', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '8px' }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.9rem' }}>
+                              {row.hari}, {formatShortDate(row.tanggal)}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>
+                              Gabungan: {row.totalTx} tx · {row.totalHadir} hadir
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontWeight: 800, color: '#166534', fontSize: '0.92rem' }}>{formatRupiah(row.totalOmzet)}</div>
+                            <div style={{ fontSize: '10.5px', fontWeight: 700, color: '#15803d' }}>Gaji {formatRupiah(row.totalUpah)}</div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                          <div style={{ padding: '8px', borderRadius: '8px', backgroundColor: '#fffbeb', border: '1px solid #fde68a' }}>
+                            <div style={{ fontSize: '10.5px', fontWeight: 800, color: '#b45309' }}>Shift Pagi</div>
+                            {row.pagi ? (
+                              <>
+                                <div style={{ fontWeight: 800, fontSize: '0.82rem', color: '#0f172a', marginTop: 2 }}>{formatRupiah(row.pagi.omzet)}</div>
+                                <div style={{ fontSize: '10px', color: '#15803d', fontWeight: 700 }}>Gaji {formatRupiah(row.pagi.upahBersih)}</div>
+                                <div style={{ fontSize: '10px', color: '#475569', marginTop: 3 }}>
+                                  Absen ({row.pagi.personnel.length}): {row.pagi.personnel.map((p) => p.fullName).join(', ') || '-'}
+                                </div>
+                              </>
+                            ) : (
+                              <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: 4 }}>—</div>
+                            )}
+                          </div>
+
+                          <div style={{ padding: '8px', borderRadius: '8px', backgroundColor: '#eef2ff', border: '1px solid #c7d2fe' }}>
+                            <div style={{ fontSize: '10.5px', fontWeight: 800, color: '#4338ca' }}>Shift Siang</div>
+                            {row.siang ? (
+                              <>
+                                <div style={{ fontWeight: 800, fontSize: '0.82rem', color: '#0f172a', marginTop: 2 }}>{formatRupiah(row.siang.omzet)}</div>
+                                <div style={{ fontSize: '10px', color: '#15803d', fontWeight: 700 }}>Gaji {formatRupiah(row.siang.upahBersih)}</div>
+                                <div style={{ fontSize: '10px', color: '#475569', marginTop: 3 }}>
+                                  Absen ({row.siang.personnel.length}): {row.siang.personnel.map((p) => p.fullName).join(', ') || '-'}
+                                </div>
+                              </>
+                            ) : (
+                              <div style={{ fontSize: '10.5px', color: '#94a3b8', marginTop: 4 }}>—</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
           ) : (
             <>
-              {/* ── A. DESKTOP TABLE (6 KOLOM + PANAH ▼) ── */}
+              {/* ── A. DESKTOP TABLE (6 KOLOM + SLIP GAJI & PANAH ▼) ── */}
               <div
                 className="card rs-desktop-table"
                 style={{
@@ -2092,7 +2738,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                           { label: 'Personel', align: 'center' },
                           { label: 'Jumlah Shift', align: 'center' },
                           { label: 'Upah Bersih', align: 'right' },
-                          { label: '', align: 'center' },
+                          { label: 'Slip & Detail', align: 'center' },
                         ].map((col, idx) => (
                           <th
                             key={col.label || idx}
@@ -2300,31 +2946,57 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                 </span>
                               </td>
 
-                              {/* 7. Panah Detail (▼) */}
-                              <td style={{ padding: '12px 14px', textAlign: 'center', width: '44px' }}>
-                                <button
-                                  type="button"
-                                  aria-label="Lihat rincian transaksi shift"
-                                  aria-expanded={isExpanded}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleGroup(g.groupKey);
-                                  }}
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    width: '28px',
-                                    height: '28px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #cbd5e1',
-                                    backgroundColor: isExpanded ? '#166534' : '#ffffff',
-                                    color: isExpanded ? '#ffffff' : '#475569',
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                                </button>
+                              {/* 7. Slip Gaji + Panah Detail (▼) */}
+                              <td style={{ padding: '12px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSlipPreviewGroup(g);
+                                    }}
+                                    aria-label={`Lihat slip gaji ${g.hari} ${g.sesi}`}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      padding: '5px 9px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #166534',
+                                      backgroundColor: '#f0fdf4',
+                                      color: '#166534',
+                                      fontSize: '11.5px',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    <FileText size={13} />
+                                    <span>Slip Gaji</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label="Lihat rincian transaksi shift"
+                                    aria-expanded={isExpanded}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleGroup(g.groupKey);
+                                    }}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      width: '28px',
+                                      height: '28px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #cbd5e1',
+                                      backgroundColor: isExpanded ? '#166534' : '#ffffff',
+                                      color: isExpanded ? '#ffffff' : '#475569',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                  </button>
+                                </div>
                               </td>
                             </tr>
 
@@ -2381,10 +3053,30 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                                         )}
                                       </div>
                                     </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleCopySlip(g.groupKey, buildGroupSlipWaText(g))}
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => setSlipPreviewGroup(g)}
+                                          style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '5px',
+                                            padding: '7px 11px',
+                                            borderRadius: '7px',
+                                            border: '1px solid #166534',
+                                            backgroundColor: '#166534',
+                                            color: '#ffffff',
+                                            fontSize: '12px',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                          }}
+                                        >
+                                          <FileText size={13} />
+                                          <span>Lihat Slip</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCopySlip(g.groupKey, buildGroupSlipWaText(g))}
                                         style={{
                                           display: 'inline-flex',
                                           alignItems: 'center',
@@ -3122,6 +3814,85 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
                             {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                           </div>
                         </div>
+
+                        {/* Baris 4: Tombol Cepat Slip Gaji Per Shift di Mobile */}
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            display: 'flex',
+                            gap: '6px',
+                            marginTop: '8px',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setSlipPreviewGroup(g)}
+                            style={{
+                              flex: 1,
+                              minHeight: 36,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '5px',
+                              padding: '6px 10px',
+                              borderRadius: '7px',
+                              border: '1px solid #166534',
+                              backgroundColor: '#f0fdf4',
+                              color: '#166534',
+                              fontSize: '11.5px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <FileText size={13} />
+                            <span>Lihat Slip Gaji</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCopySlip(g.groupKey, buildGroupSlipWaText(g))}
+                            style={{
+                              minHeight: 36,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '4px',
+                              padding: '6px 10px',
+                              borderRadius: '7px',
+                              border: '1px solid #cbd5e1',
+                              backgroundColor: copiedSlipKey === g.groupKey ? '#15803d' : '#ffffff',
+                              color: copiedSlipKey === g.groupKey ? '#ffffff' : '#0f172a',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {copiedSlipKey === g.groupKey ? <Check size={12} /> : <Copy size={12} />}
+                            <span>{copiedSlipKey === g.groupKey ? 'Tersalin' : 'WA'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handlePrintGroupSlip(g)}
+                            style={{
+                              minHeight: 36,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '4px',
+                              padding: '6px 10px',
+                              borderRadius: '7px',
+                              border: '1px solid #cbd5e1',
+                              backgroundColor: '#ffffff',
+                              color: '#334155',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Printer size={12} />
+                            <span>Cetak</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* Rincian Transaksi Tersembunyi di Mobile HP */}
@@ -3457,6 +4228,291 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo 
           </div>
         </div>
       )}
+
+      {/* Modal Pratinjau Slip Gaji Per Shift (Siap Screenshot / Cetak PDF / Salin WA) */}
+      {slipPreviewGroup && (() => {
+        const g = slipPreviewGroup;
+        const members = computeGroupTeamAttendance(g);
+        const isPagi = g.sesi === 'Pagi';
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Slip Gaji Shift ${g.hari} ${g.sesi}`}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 1150,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '16px',
+              backgroundColor: 'rgba(15, 23, 42, 0.6)',
+              backdropFilter: 'blur(4px)',
+            }}
+            onClick={(e) => e.target === e.currentTarget && setSlipPreviewGroup(null)}
+          >
+            <div
+              style={{
+                backgroundColor: '#ffffff',
+                borderRadius: '14px',
+                border: '1px solid #cbd5e1',
+                width: '100%',
+                maxWidth: '660px',
+                maxHeight: '90vh',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+              }}
+            >
+              {/* Header Slip */}
+              <div
+                style={{
+                  padding: '16px 20px',
+                  backgroundColor: '#f8fafc',
+                  borderBottom: '2px solid #e2e8f0',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#166534', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                    SLIP GAJI PER SHIFT — WIRAMART UNPERBA
+                  </div>
+                  <h3 style={{ margin: '3px 0 2px', fontSize: '1.1rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span>Shift {g.hari} {g.sesi}</span>
+                    <span
+                      style={{
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        padding: '2px 9px',
+                        borderRadius: '99px',
+                        backgroundColor: isPagi ? '#fef3c7' : '#e0e7ff',
+                        color: isPagi ? '#b45309' : '#4338ca',
+                      }}
+                    >
+                      {g.waktuLabel} WIB
+                    </span>
+                  </h3>
+                  <div style={{ fontSize: '0.75rem', color: '#475569' }}>
+                    Periode: <strong>{data?.range.label ?? '-'}</strong> · Tanggal: {g.shiftTglSummary} ({g.totalShiftCount}x pertemuan)
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSlipPreviewGroup(null)}
+                  aria-label="Tutup slip gaji"
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    backgroundColor: '#ffffff',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Isi Slip (Scrollable) */}
+              <div style={{ padding: '16px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {/* Banner Total Upah Shift */}
+                <div
+                  style={{
+                    padding: '14px 16px',
+                    borderRadius: '10px',
+                    backgroundColor: '#f0fdf4',
+                    border: '1.5px solid #86efac',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '10px',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#166534', textTransform: 'uppercase' }}>
+                      Total Upah Diterima Shift (Utuh Per Kelompok)
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#15803d', marginTop: 2 }}>
+                      Skema 50% Kehadiran Tim · 50% Laba Shift · Tanpa pemecahan nominal per nama
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '1.45rem', fontWeight: 900, color: '#15803d' }}>
+                    {formatRupiah(g.upahBersih)}
+                  </div>
+                </div>
+
+                {/* Ringkasan Angka Operasional */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px' }}>
+                  {[
+                    { label: 'Total Omzet Shift', val: formatRupiah(g.totalOmzet), color: '#0369a1' },
+                    { label: 'Laba Kotor Shift', val: formatRupiah(g.totalLabaKotor), color: '#0f172a' },
+                    { label: 'Transaksi & Unit', val: `${g.totalTx} tx · ${g.totalUnitsSold} pcs`, color: '#4338ca' },
+                    {
+                      label: 'Potongan Tekor',
+                      val: g.totalShortageDeduction > 0 ? `-${formatRupiah(g.totalShortageDeduction)}` : 'Rp 0',
+                      color: g.totalShortageDeduction > 0 ? '#dc2626' : '#64748b',
+                    },
+                  ].map((m) => (
+                    <div key={m.label} style={{ padding: '9px 11px', borderRadius: '8px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 600 }}>{m.label}</div>
+                      <div style={{ fontSize: '0.88rem', fontWeight: 800, color: m.color, marginTop: 2 }}>{m.val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Daftar Absensi Tim Shift */}
+                <div>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: '6px' }}>
+                    Daftar Absensi Tim Shift ({members.length} Personel Tercatat)
+                  </div>
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
+                          <th style={{ padding: '7px 10px', textAlign: 'center', width: 32 }}>No</th>
+                          <th style={{ padding: '7px 10px', textAlign: 'left' }}>Nama</th>
+                          <th style={{ padding: '7px 10px', textAlign: 'left' }}>NIM</th>
+                          <th style={{ padding: '7px 10px', textAlign: 'center' }}>Hadir</th>
+                          <th style={{ padding: '7px 10px', textAlign: 'center' }}>Disiplin</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {members.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} style={{ padding: '10px', textAlign: 'center', color: '#64748b' }}>
+                              Belum ada catatan absensi pada periode ini.
+                            </td>
+                          </tr>
+                        ) : (
+                          members.map((m, idx) => (
+                            <tr key={m.nim || m.fullName} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '7px 10px', textAlign: 'center', color: '#64748b' }}>{idx + 1}</td>
+                              <td style={{ padding: '7px 10px', fontWeight: 700, color: '#0f172a' }}>{m.fullName}</td>
+                              <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: '#475569' }}>{m.nim}</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'center', fontWeight: 700, color: '#166534' }}>{m.hadir}x</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'center' }}>
+                                {m.telatMenit > 0 ? (
+                                  <span style={{ color: '#b45309', fontWeight: 700 }}>Telat {m.telatMenit} mnt</span>
+                                ) : (
+                                  <span style={{ color: '#15803d', fontWeight: 600 }}>Tepat Waktu</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Rincian Pertemuan Per Tanggal */}
+                <div>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: '6px' }}>
+                    Rincian Pertemuan &amp; Upah Per Tanggal
+                  </div>
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
+                          <th style={{ padding: '7px 10px', textAlign: 'left' }}>Tanggal</th>
+                          <th style={{ padding: '7px 10px', textAlign: 'center' }}>Trx / Unit</th>
+                          <th style={{ padding: '7px 10px', textAlign: 'right' }}>Omzet</th>
+                          <th style={{ padding: '7px 10px', textAlign: 'right' }}>Laba Kotor</th>
+                          <th style={{ padding: '7px 10px', textAlign: 'right' }}>Upah Shift</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {g.sessions.map((s) => (
+                          <tr key={s.sessionKey} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '7px 10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{formatShortDate(s.tanggal)}</td>
+                            <td style={{ padding: '7px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>{s.txCount} tx · {s.unitsSold} pcs</td>
+                            <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>{formatRupiah(s.omzet)}</td>
+                            <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>{formatRupiah(s.labaKotor)}</td>
+                            <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 800, color: '#15803d', whiteSpace: 'nowrap' }}>{formatRupiah(s.upahBersih)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Kolom Pengesahan Preview */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', paddingTop: '8px', borderTop: '1px dashed #cbd5e1', fontSize: '0.73rem', color: '#475569', textAlign: 'center' }}>
+                  <div>
+                    <div>Diserahkan oleh,</div>
+                    <div style={{ fontWeight: 700, color: '#0f172a' }}>Pengelola Wiramart UNPERBA</div>
+                  </div>
+                  <div>
+                    <div>Diterima utuh untuk kelompok,</div>
+                    <div style={{ fontWeight: 700, color: '#0f172a' }}>Perwakilan Shift {g.hari} {g.sesi}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer Tombol Aksi */}
+              <div
+                style={{
+                  padding: '12px 20px',
+                  backgroundColor: '#f8fafc',
+                  borderTop: '1px solid #e2e8f0',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '8px',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleCopySlip(`modal-${g.groupKey}`, buildGroupSlipWaText(g))}
+                  className="btn btn-sm"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    backgroundColor: copiedSlipKey === `modal-${g.groupKey}` ? '#15803d' : '#ffffff',
+                    color: copiedSlipKey === `modal-${g.groupKey}` ? '#ffffff' : '#0f172a',
+                    border: '1px solid #cbd5e1',
+                    padding: '8px 14px',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {copiedSlipKey === `modal-${g.groupKey}` ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{copiedSlipKey === `modal-${g.groupKey}` ? 'Teks WA Tersalin' : 'Salin Teks WA'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePrintGroupSlip(g)}
+                  className="btn btn-primary btn-sm"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    backgroundColor: '#166534',
+                    borderColor: '#166534',
+                    padding: '8px 16px',
+                    fontWeight: 700,
+                  }}
+                >
+                  <Printer size={14} />
+                  <span>Cetak / Simpan PDF</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </section>
   );
 }

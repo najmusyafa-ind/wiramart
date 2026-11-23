@@ -5,16 +5,13 @@ import {
   ShieldAlert,
   Truck,
   ArrowLeftRight,
-  Clock,
   AlertTriangle,
   QrCode,
   Coins,
   CheckCircle2,
-  ExternalLink,
   ChevronRight,
   Download,
   Calendar,
-  Users,
   Lightbulb,
   Package,
 } from 'lucide-react';
@@ -235,11 +232,11 @@ export default function ApprovalCenterWidget({
                 }}
               >
                 <QrCode size={16} />
-                Rekonsiliasi Bank QRIS
+                Ringkasan QRIS Bu Dyah
               </span>
               <span
                 className={`badge ${
-                  qrisNeedsAttention ? 'badge-error' : 'badge-success'
+                  qrisNeedsAttention ? 'badge-warning' : 'badge-success'
                 }`}
                 style={{ fontSize: '0.72rem' }}
               >
@@ -247,14 +244,12 @@ export default function ApprovalCenterWidget({
               </span>
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '0 0 var(--space-3)' }}>
-              {qrisNeedsAttention
-                ? 'Mutasi kredit bank Mandiri / Livin&apos; belum sinkron atau ada nota yang perlu diaudit.'
-                : 'Seluruh transaksi QRIS bulan ini telah dicocokkan dengan mutasi rekening.'}
+              Cek rekap total QRIS per tanggal dan rincian per jam untuk dicocokkan dengan HP atau grup bukti QRIS.
             </p>
           </div>
 
           <Link
-            href="/manager/qris"
+            href="/manager/laporan?tab=transaksi_qris"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -265,7 +260,7 @@ export default function ApprovalCenterWidget({
               textDecoration: 'none',
             }}
           >
-            Buka Tabel Rekonsiliasi <ChevronRight size={14} />
+            Buka Tab Transaksi &amp; QRIS <ChevronRight size={14} />
           </Link>
         </div>
 
