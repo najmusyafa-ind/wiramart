@@ -44,15 +44,16 @@ function Toast({ msg, type, onClose }: { msg: string; type: 'success' | 'error';
   useEffect(() => { const t = setTimeout(onClose, 3500); return () => clearTimeout(t); }, [onClose]);
   return (
     <div style={{
-      position: 'fixed', bottom: 90, left: '50%', transform: 'translateX(-50%)',
+      position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
       background: type === 'success' ? 'hsl(142 60% 38%)' : 'hsl(0 72% 51%)',
-      color: '#fff', padding: '10px 20px', borderRadius: 12,
-      display: 'flex', alignItems: 'center', gap: 8,
+      color: '#fff', padding: '10px 18px', borderRadius: 12,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
       boxShadow: '0 4px 20px rgba(0,0,0,0.2)', zIndex: 9999,
-      fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap',
+      fontSize: 13, fontWeight: 600, maxWidth: 'calc(100vw - 32px)',
+      width: 'max-content', textAlign: 'center', lineHeight: 1.35,
     }}>
-      {type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
-      {msg}
+      {type === 'success' ? <CheckCircle size={16} style={{ flexShrink: 0 }} /> : <AlertCircle size={16} style={{ flexShrink: 0 }} />}
+      <span>{msg}</span>
     </div>
   );
 }
@@ -327,17 +328,9 @@ function ProdukModal({
     unit: editData?.unit ?? 'pcs',
     barcode: editData?.barcode ?? prefillBarcode ?? '',
   });
-  const [foto, setFoto] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(editData?.photoUrl ?? null);
+  const preview = editData?.photoUrl ?? null;
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
-
-  function handleFoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setFoto(f);
-    setPreview(URL.createObjectURL(f));
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -347,7 +340,6 @@ function ProdukModal({
     setSaving(true);
     try {
       if (!isEdit) {
-        // K8: Kasir hanya mengusulkan produk (nama, kategori, barcode, satuan)
         const res = await fetch('/api/kasir/produk/usulkan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -360,11 +352,10 @@ function ProdukModal({
         });
         const json = await res.json();
         if (!res.ok) { setErr(json.error ?? 'Gagal mengirim usulan produk.'); setSaving(false); return; }
-        onSaved('Usulan produk berhasil dikirim ke Gudang / Admin untuk penentuan HPP!');
+        onSaved('Usulan produk berhasil dikirim ke Gudang / Admin.');
         return;
       }
 
-      // Mode Edit (hanya jika diizinkan)
       const payload = {
         ...form,
         barcode: form.barcode?.trim() || null,
@@ -378,12 +369,6 @@ function ProdukModal({
       });
       const json = await res.json();
       if (!res.ok) { setErr(json.error ?? 'Gagal mengupdate produk.'); setSaving(false); return; }
-
-      if (foto && editData?.id) {
-        const fd = new FormData();
-        fd.append('foto', foto);
-        await fetch(`/api/admin/produk/${editData.id}/foto`, { method: 'POST', body: fd });
-      }
 
       onSaved('Produk berhasil diperbarui!');
     } catch {
@@ -448,53 +433,44 @@ function ProdukModal({
           </div>
         )}
 
-        {/* Penjelasan Kebijakan K8 untuk Kasir */}
+        {/* Info ringkas usulan produk */}
         {!isEdit && (
           <div style={{
-            background: 'rgba(59, 130, 246, 0.08)',
-            border: '1px solid rgba(59, 130, 246, 0.25)',
+            background: 'var(--color-surface-muted)',
+            border: '1px solid var(--color-border)',
             borderRadius: 10,
-            padding: '10px 14px',
+            padding: '10px 12px',
             fontSize: 12,
             color: 'var(--color-text-secondary)',
-            lineHeight: 1.5,
-            marginBottom: 12,
+            lineHeight: 1.45,
+            marginBottom: 14,
           }}>
-            <strong style={{ color: 'var(--color-primary)', display: 'block', marginBottom: 2 }}>
-              Kebijakan Wiramart UNPERBA (K8 & K2):
-            </strong>
-            Kasir hanya mengusulkan nama, barcode, foto, dan kategori. HPP dan Harga Jual akan diverifikasi & ditetapkan langsung oleh Kepala Gudang / Admin sesuai margin global toko.
+            Usulan akan diverifikasi Gudang/Admin untuk penetapan HPP &amp; harga jual.
           </div>
         )}
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          {/* Foto */}
-          <div>
-            <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Foto Produk (opsional)</label>
+          {/* Foto (hanya tampil pada detail produk yang sudah ada) */}
+          {isEdit && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{
-                width: 80, height: 80, borderRadius: 10,
+                width: 72, height: 72, borderRadius: 10,
                 background: 'var(--color-surface-muted)', overflow: 'hidden',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: '1.5px dashed var(--color-border)',
+                border: '1px solid var(--color-border)', flexShrink: 0,
               }}>
                 {preview
                   ? <img src={preview} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : <Package size={28} color="var(--color-text-muted)" />}
+                  : <Package size={26} color="var(--color-text-muted)" />}
               </div>
-              {!isEdit && (
-                <label style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  background: 'var(--color-primary-light)', color: 'var(--color-primary)',
-                  minHeight: 44, padding: '8px 16px', borderRadius: 8, cursor: 'pointer',
-                  fontSize: 'var(--text-sm)', fontWeight: 600,
-                }}>
-                  {preview ? 'Ganti Foto' : 'Pilih Foto'}
-                  <input type="file" accept="image/*" onChange={handleFoto} style={{ display: 'none' }} />
-                </label>
-              )}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-text)' }}>{f.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                  {categories.find(c => c.id === f.categoryId)?.name ?? '—'}
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Kategori */}
           <div>
@@ -502,7 +478,7 @@ function ProdukModal({
             {isEdit ? (
               <input className="form-input" value={categories.find(c => c.id === f.categoryId)?.name ?? '—'} disabled />
             ) : (
-              <select value={f.categoryId} onChange={e => set('categoryId', e.target.value)} className="form-input" required>
+              <select value={f.categoryId} onChange={e => set('categoryId', e.target.value)} className="form-input form-select" required>
                 <option value="">-- Pilih Kategori --</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
@@ -526,12 +502,11 @@ function ProdukModal({
           <div>
             <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>
               Satuan
-              <span style={{ display: 'block', fontSize: 11, fontWeight: 400, color: 'var(--color-text-muted)' }}>Bentuk kemasan / eceran</span>
             </label>
             {isEdit ? (
               <input className="form-input" value={f.unit} disabled />
             ) : (
-              <select className="form-input" value={f.unit} onChange={e => set('unit', e.target.value)}>
+              <select className="form-input form-select" value={f.unit} onChange={e => set('unit', e.target.value)}>
                 <option value="pcs">pcs</option>
                 <option value="botol">botol</option>
                 <option value="pak">pak</option>
@@ -541,12 +516,13 @@ function ProdukModal({
             )}
           </div>
 
-          {/* Deskripsi */}
-          <div>
-            <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Catatan Tambahan untuk Gudang (opsional)</label>
-            <textarea className="form-input" value={f.description} onChange={e => set('description', e.target.value)}
-              placeholder="Keterangan kulakan, supplier, atau lokasi rak..." rows={2} style={{ resize: 'none' }} disabled={isEdit} />
-          </div>
+          {/* Deskripsi (hanya tampil pada detail jika ada) */}
+          {isEdit && f.description && (
+            <div>
+              <label style={{ fontSize: 'var(--text-sm)', fontWeight: 600, display: 'block', marginBottom: 6 }}>Catatan</label>
+              <textarea className="form-input" value={f.description} rows={2} style={{ resize: 'none' }} disabled />
+            </div>
+          )}
 
           {/* Jika modal sedang membuka detail produk yang sudah ada */}
           {isEdit && (
@@ -704,7 +680,7 @@ export default function KasirProdukPage() {
   }
 
   return (
-    <div style={{ minHeight: '100svh', background: 'var(--color-bg)', paddingBottom: 'calc(92px + env(safe-area-inset-bottom, 0px))' }}>
+    <div style={{ minHeight: '100svh', background: 'var(--color-bg)', paddingBottom: 'calc(32px + env(safe-area-inset-bottom, 0px))' }}>
       {/* Header */}
       <div style={{
         background: 'var(--color-surface)',
@@ -736,7 +712,7 @@ export default function KasirProdukPage() {
           <ChevronLeft size={22} />
         </button>
         <div style={{ flex: '1 1 120px', minWidth: 0 }}>
-          <h1 style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-bold)', lineHeight: 1.2, margin: 0 }}>Kelola Produk</h1>
+          <h1 style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-bold)', lineHeight: 1.2, margin: 0 }}>Katalog Produk</h1>
           <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: 0 }}>{products.length} produk tersedia</p>
         </div>
         {/* Tombol Scan Barcode */}
@@ -745,13 +721,14 @@ export default function KasirProdukPage() {
           type="button"
           onClick={() => { setEditData(null); setShowScanner(true); }}
           className="btn btn-secondary btn-sm"
-          style={{ minWidth: 44, minHeight: 44, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-          title="Scan barcode untuk tambah produk"
+          style={{ minWidth: 44, minHeight: 44, padding: '0 12px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexShrink: 0 }}
+          title="Scan barcode produk"
           aria-label="Scan barcode produk"
         >
           <ScanLine size={16} />
+          <span className="kasir-hide-mobile">Scan</span>
         </button>
-        {/* Tombol Tambah Manual */}
+        {/* Tombol Usul Produk */}
         <button
           id="btn-tambah-produk-kasir"
           type="button"
@@ -763,75 +740,9 @@ export default function KasirProdukPage() {
         </button>
       </div>
 
-      {/* Banner 2 Tombol Aksi Utama (Sangat Jelas & Mencolok untuk Mahasiswa Shift) */}
-      <div style={{
-        margin: '12px 16px 6px',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))',
-        gap: 10,
-      }}>
-        <button
-          id="btn-tambah-produk-banner"
-          type="button"
-          onClick={() => { setEditData(null); setPrefillBarcode(undefined); setPrefillName(undefined); setShowModal(true); }}
-          style={{
-            background: 'var(--color-primary)',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 12,
-            minHeight: 60,
-            padding: '12px 14px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 4,
-            fontWeight: 700,
-            fontSize: 13,
-            cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-            transition: 'transform 0.1s ease',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Plus size={18} />
-            <span>Usul Produk Baru</span>
-          </div>
-          <span style={{ fontSize: 11, opacity: 0.9, fontWeight: 400 }}>Ajukan ke Gudang/Admin</span>
-        </button>
-
-        <button
-          id="btn-scan-barcode-banner"
-          type="button"
-          onClick={() => { setEditData(null); setShowScanner(true); }}
-          style={{
-            background: 'var(--color-surface)',
-            color: 'var(--color-primary)',
-            border: '1.5px solid var(--color-primary)',
-            borderRadius: 12,
-            minHeight: 60,
-            padding: '12px 14px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 4,
-            fontWeight: 700,
-            fontSize: 13,
-            cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <ScanLine size={18} />
-            <span>Scan Barcode</span>
-          </div>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 400 }}>Via kamera HP</span>
-        </button>
-      </div>
-
+      <div style={{ maxWidth: 720, margin: '0 auto' }}>
       {/* Search */}
-      <div style={{ padding: '8px 16px' }}>
+      <div style={{ padding: '14px 16px 10px' }}>
         <div className="form-input-icon">
           <Search size={16} className="form-input-icon__icon" />
           <input
@@ -886,7 +797,7 @@ export default function KasirProdukPage() {
               className="btn btn-primary btn-sm"
               style={{ marginTop: 12, minHeight: 44, padding: '8px 16px' }}
             >
-              <Plus size={14} /> + Tambah Produk &ldquo;{search || 'Baru'}&rdquo;
+              <Plus size={14} /> Usul Produk &ldquo;{search || 'Baru'}&rdquo;
             </button>
           </div>
         ) : (
@@ -898,13 +809,13 @@ export default function KasirProdukPage() {
             }}>
               {/* Foto */}
               <div style={{
-                width: 64, height: 64, borderRadius: 10, flexShrink: 0,
+                width: 60, height: 60, borderRadius: 10, flexShrink: 0,
                 background: 'var(--color-surface-muted)', overflow: 'hidden',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 {p.photoUrl
                   ? <img src={p.photoUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : <Package size={28} color="var(--color-text-muted)" />}
+                  : <Package size={26} color="var(--color-text-muted)" />}
               </div>
               {/* Info */}
               <div style={{ flex: '1 1 140px', minWidth: 0 }}>
@@ -930,7 +841,7 @@ export default function KasirProdukPage() {
                   Rp {Number(p.sellingPrice).toLocaleString('id-ID')}
                 </div>
               </div>
-              {/* Tombol Aksi Ubah Stok & Harga (Sangat Jelas Ada Tulisannya) */}
+              {/* Tombol Detail */}
               <button
                 id={`btn-edit-produk-${p.id}`}
                 type="button"
@@ -939,8 +850,8 @@ export default function KasirProdukPage() {
                   background: 'var(--color-primary-light)',
                   border: '1px solid var(--color-primary)',
                   borderRadius: 8,
-                  minHeight: 44,
-                  padding: '8px 12px',
+                  minHeight: 40,
+                  padding: '6px 12px',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 5,
@@ -956,42 +867,13 @@ export default function KasirProdukPage() {
                 aria-label={`Detail produk ${p.name}`}
               >
                 <Eye size={13} />
-                <span>Detail Produk</span>
+                <span>Detail</span>
               </button>
             </div>
           ))
         )}
       </div>
-
-      {/* Floating Action Button (FAB) Tambah Produk untuk Kemudahan di HP Kasir */}
-      <button
-        id="fab-tambah-produk-kasir"
-        type="button"
-        onClick={() => { setEditData(null); setPrefillBarcode(undefined); setPrefillName(undefined); setShowModal(true); }}
-        style={{
-          position: 'fixed',
-          bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
-          right: 16,
-          zIndex: 30,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          minHeight: 48,
-          padding: '12px 18px',
-          borderRadius: 9999,
-          background: 'var(--color-primary)',
-          color: '#fff',
-          border: 'none',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.28)',
-          fontWeight: 700,
-          fontSize: 13,
-          cursor: 'pointer',
-        }}
-        aria-label="Usulkan produk baru"
-      >
-        <Plus size={18} />
-        <span>Usul Produk</span>
-      </button>
+      </div>
 
       {/* Scanner Modal */}
       {showScanner && (

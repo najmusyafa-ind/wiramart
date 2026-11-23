@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  ChevronLeft, Calculator, Banknote, QrCode, AlertTriangle,
+  ChevronLeft, Calculator, QrCode, AlertTriangle,
   Receipt, Calendar, Loader2, ArrowLeft, ArrowRight,
   Printer, RefreshCw, CheckCircle2, XCircle, Clock,
   Coins, TrendingDown, TrendingUp, HandCoins,
@@ -262,11 +263,11 @@ export default function CashierRecapPage() {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Calculator size={18} style={{ color: 'hsl(150 75% 32%)', flexShrink: 0 }} />
-              <span>Rekapitulasi Shift Saya</span>
+              <span>Rekap Shift</span>
             </div>
             {data && (
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                Kasir: <strong style={{ color: 'var(--color-text)' }}>{data.kasir.fullName}</strong> ({data.kasir.nim})
+                <strong style={{ color: 'var(--color-text)' }}>{data.kasir.fullName}</strong> · {data.kasir.nim}
               </div>
             )}
           </div>
@@ -295,8 +296,8 @@ export default function CashierRecapPage() {
               gap: 6,
             }}
           >
-            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-            <span className="hidden sm:inline">Segarkan</span>
+            <RefreshCw size={15} className={loading ? 'spin-icon' : ''} />
+            <span className="kasir-hide-mobile">Segarkan</span>
           </button>
 
           <button
@@ -319,70 +320,30 @@ export default function CashierRecapPage() {
             }}
           >
             <Printer size={15} />
-            <span>Cetak Slip Rekap</span>
+            <span>Cetak Slip</span>
           </button>
         </div>
       </header>
 
-      {/* ── Area Cetak Struk Ringkas (Print-Only) ── */}
-      <div className="print-only" style={{ padding: 20, maxWidth: 360, margin: '0 auto', fontSize: 12, color: '#000' }}>
-        <div style={{ textAlign: 'center', marginBottom: 12 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 'bold', margin: 0 }}>SMARTKASIR PERWIRA</h2>
-          <div style={{ fontSize: 12 }}>WIRAMART UNPERBA</div>
-          <div style={{ fontSize: 11, borderBottom: '1px dashed #000', paddingBottom: 6 }}>
-            SLIP REKAPITULASI FISIK KASIR
-          </div>
-        </div>
-        <div style={{ marginBottom: 10, lineHeight: 1.4 }}>
-          <div>Kasir: {data?.kasir.fullName} ({data?.kasir.nim})</div>
-          <div>Sesi: {data?.activeShiftName ?? 'Shift Kerja'}</div>
-          <div>Tanggal: {fmtTanggalPanjang(tanggal)}</div>
-          <div>Waktu Cetak: {new Date().toLocaleTimeString('id-ID')} WIB</div>
-        </div>
-        <div style={{ borderTop: '1px dashed #000', borderBottom: '1px dashed #000', padding: '8px 0', marginBottom: 10 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Modal Awal Kasir:</span>
-            <strong>{rp(s?.modalAwal ?? 100000)}</strong>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Total Struk Selesai:</span>
-            <strong>{s?.totalTransaksi ?? 0} transaksi</strong>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-            <span>Penjualan Tunai (Bersih):</span>
-            <span>{rp(s?.netCashSales ?? 0)}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginTop: 4, paddingTop: 4, borderTop: '1px dotted #000' }}>
-            <span>TOTAL FISIK DI LACI:</span>
-            <span>{rp(s?.totalFisikLaci ?? 0)}</span>
-          </div>
-          <div style={{ fontSize: 10, color: '#444', fontStyle: 'italic', marginBottom: 4 }}>
-            *(Wajib ada di laci: Modal Awal + Tunai Bersih)
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-            <span>Penjualan QRIS:</span>
-            <span>{rp(s?.totalAmountQris ?? 0)}</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginTop: 4, paddingTop: 4, borderTop: '1px dotted #000' }}>
-            <span>TOTAL OMZET SHIFT:</span>
-            <span>{rp(s?.totalOmzet ?? 0)}</span>
-          </div>
-          {Number(s?.totalVoid ?? 0) > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666', marginTop: 4 }}>
-              <span>Transaksi VOID:</span>
-              <span>{s?.totalVoid} struk ({rp(s?.totalVoidAmount ?? 0)})</span>
-            </div>
-          )}
-        </div>
-        <div style={{ textAlign: 'center', marginTop: 16, fontSize: 11 }}>
-          <p>Tanda Tangan Kasir Bertugas,</p>
-          <div style={{ height: 40 }}></div>
-          <p>({data?.kasir.fullName})</p>
-        </div>
-      </div>
-
       {/* ── Main Dashboard Container ── */}
-      <main style={{ maxWidth: 1080, margin: '0 auto', padding: '20px 16px' }}>
+      <main style={{ maxWidth: 1080, margin: '0 auto', padding: '16px 16px 20px' }}>
+
+        {/* ── Navigasi Terpadu Rekap & Detail Struk ── */}
+        <div className="no-print rep-seg" style={{ width: '100%', maxWidth: 420, marginBottom: 14 }}>
+          <span
+            className="rep-seg-btn active"
+            style={{ flex: 1, textAlign: 'center', cursor: 'default' }}
+          >
+            Rekap &amp; Cetak
+          </span>
+          <Link
+            href="/kasir/riwayat"
+            className="rep-seg-btn"
+            style={{ flex: 1, textAlign: 'center', textDecoration: 'none' }}
+          >
+            Detail Struk &amp; WA
+          </Link>
+        </div>
 
         {/* ── Filter Tanggal & Pilihan Shift Saya ── */}
         <section className="no-print" style={{
@@ -491,8 +452,8 @@ export default function CashierRecapPage() {
         {/* ── Status Loading & Error Alert ── */}
         {loading && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '40px 0', color: 'var(--color-text-muted)' }}>
-            <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} />
-            <span style={{ fontSize: 14 }}>Mengkalkulasi transaksi & uang laci...</span>
+            <Loader2 size={24} className="spin-icon" />
+            <span style={{ fontSize: 14 }}>Memuat rekap shift...</span>
           </div>
         )}
 
@@ -513,143 +474,89 @@ export default function CashierRecapPage() {
           </div>
         )}
 
-        {/* ── Ringkasan Riwayat: Cash, QRIS, & Modal Awal (Sesuai Arahan Anda) ── */}
+        {/* ── Ringkasan Riwayat: Cash, QRIS, & Modal Awal ── */}
         {!loading && s && (
           <>
-            {/* ── RINGKASAN SALDO KAS KOTAK SHIFT (ESTAFET WIRAMART) ── */}
+            {/* ── RINGKASAN SALDO KAS KOTAK SHIFT ── */}
             <div className="rekap-card no-print" style={{
               background: 'hsl(150 45% 96%)',
               border: '1.5px solid hsl(150 55% 68%)',
               borderRadius: 16,
-              padding: '18px 20px',
-              marginBottom: 20,
+              padding: '16px 18px',
+              marginBottom: 16,
               boxShadow: 'var(--shadow-sm)',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 12, borderBottom: '1px solid hsl(150 35% 84%)', paddingBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 10, borderBottom: '1px solid hsl(150 35% 84%)', paddingBottom: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ background: 'hsl(150 60% 88%)', padding: 8, borderRadius: 10, color: 'hsl(150 80% 26%)', flexShrink: 0 }}>
-                    <HandCoins size={22} />
+                    <HandCoins size={20} />
                   </div>
                   <div>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--color-text)' }}>
-                      Estimasi Uang Fisik di Kotak Kasir
+                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--color-text)' }}>
+                      Estimasi Uang Fisik di Kotak
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                      Modal Awal + Penjualan Tunai - Kas Keluar + Kas Masuk
+                      Modal Awal + Tunai − Kas Keluar + Kas Masuk
                     </div>
                   </div>
                 </div>
                 <div style={{
                   background: 'hsl(150 65% 88%)',
                   border: '1px solid hsl(150 60% 62%)',
-                  padding: '8px 16px',
-                  borderRadius: 12,
+                  padding: '6px 14px',
+                  borderRadius: 10,
                   fontSize: 18,
                   fontWeight: 900,
                   color: 'hsl(150 85% 18%)',
+                  fontVariantNumeric: 'tabular-nums',
                 }}>
                   {rp(s.totalFisikLaci)}
                 </div>
               </div>
 
-              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.55 }}>
-                Saat tutup shift, hitung <strong>seluruh uang tunai fisik di kotak</strong> (sudah termasuk modal awal). Jika ada pembayaran supplier, bayar titipan, atau uang diambil Bu Dyah, catat dulu di menu <strong>Kas Laci</strong> agar hitungan kotak tetap klop dan bisa diteruskan ke shift berikutnya.
+              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+                Hitung semua uang tunai di kotak termasuk modal awal. Catat pembayaran supplier, titipan, atau pengambilan uang di menu <strong>Kas Laci</strong> agar saldo tetap cocok.
               </div>
             </div>
 
-            {/* ── GRID RINCIAN ARUS KAS SHIFT ── */}
-            <div className="no-print" style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
-              gap: 14,
-              marginBottom: 24,
-            }}>
-              {/* Card 1: Modal Awal Kasir */}
-              <div className="rekap-card" style={{
-                background: 'var(--color-surface)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 16,
-                padding: '16px 18px',
-                boxShadow: 'var(--shadow-sm)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(38 92% 30%)', textTransform: 'uppercase' }}>
-                    Modal Awal Laci
-                  </span>
-                  <Coins size={16} style={{ color: 'hsl(38 92% 32%)' }} />
+            {/* ── GRID RINCIAN ARUS KAS SHIFT (2x2 di HP, 4-kolom di Desktop) ── */}
+            <div className="no-print rep-kpi-grid" style={{ marginBottom: 20 }}>
+              <div className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">Modal Awal</span>
+                  <Coins size={14} style={{ color: 'hsl(38 92% 32%)' }} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text)', marginBottom: 4 }}>
-                  {rp(s.modalAwal)}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                  Uang fisik awal saat buka shift
-                </div>
+                <div className="rep-kpi__val">{rp(s.modalAwal)}</div>
+                <div className="rep-kpi__sub">Uang awal di kotak</div>
               </div>
 
-              {/* Card 2: Penjualan Tunai Bersih */}
-              <div className="rekap-card" style={{
-                background: 'var(--color-surface)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 16,
-                padding: '16px 18px',
-                boxShadow: 'var(--shadow-sm)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(150 75% 28%)', textTransform: 'uppercase' }}>
-                    Penjualan Tunai (+)
-                  </span>
-                  <TrendingUp size={16} style={{ color: 'hsl(150 75% 30%)' }} />
+              <div className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">Tunai (+)</span>
+                  <TrendingUp size={14} style={{ color: 'hsl(150 75% 30%)' }} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text)', marginBottom: 4 }}>
-                  {rp(s.netCashSales)}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                  Total {s.totalTransaksi} transaksi belanja
-                </div>
+                <div className="rep-kpi__val" style={{ color: 'hsl(150 75% 26%)' }}>{rp(s.netCashSales)}</div>
+                <div className="rep-kpi__sub">{s.totalTransaksi} transaksi</div>
               </div>
 
-              {/* Card 3: Kas Keluar (Titipan Makanan, Beli Lepas, Galon) */}
-              <div className="rekap-card" style={{
-                background: 'var(--color-surface)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 16,
-                padding: '16px 18px',
-                boxShadow: 'var(--shadow-sm)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(0 72% 38%)', textTransform: 'uppercase' }}>
-                    Kas Keluar Laci (-)
-                  </span>
-                  <TrendingDown size={16} style={{ color: 'hsl(0 72% 40%)' }} />
+              <div className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">Kas Keluar (-)</span>
+                  <TrendingDown size={14} style={{ color: 'hsl(0 72% 40%)' }} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: s.totalCashOut > 0 ? 'hsl(0 72% 38%)' : 'var(--color-text)', marginBottom: 4 }}>
+                <div className="rep-kpi__val" style={{ color: s.totalCashOut > 0 ? 'hsl(0 72% 38%)' : '#0f172a' }}>
                   {s.totalCashOut > 0 ? `-${rp(s.totalCashOut)}` : 'Rp 0'}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                  Titipan makanan, beli lepas, galon
-                </div>
+                <div className="rep-kpi__sub">Supplier &amp; operasional</div>
               </div>
 
-              {/* Card 4: Penjualan QRIS */}
-              <div className="rekap-card" style={{
-                background: 'var(--color-surface)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 16,
-                padding: '16px 18px',
-                boxShadow: 'var(--shadow-sm)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(200 85% 32%)', textTransform: 'uppercase' }}>
-                    Penjualan QRIS
-                  </span>
-                  <QrCode size={16} style={{ color: 'hsl(200 85% 34%)' }} />
+              <div className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">QRIS</span>
+                  <QrCode size={14} style={{ color: 'hsl(200 85% 34%)' }} />
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text)', marginBottom: 4 }}>
-                  {rp(s.totalAmountQris)}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                  Total Omzet Kasir: <strong style={{ color: 'var(--color-text)' }}>{rp(s.totalOmzet)}</strong>
-                </div>
+                <div className="rep-kpi__val">{rp(s.totalAmountQris)}</div>
+                <div className="rep-kpi__sub">Omzet {rp(s.totalOmzet)}</div>
               </div>
             </div>
 
@@ -692,108 +599,164 @@ export default function CashierRecapPage() {
                   </div>
                 </div>
               ) : (
-                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ background: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                        <th style={{ padding: '12px 18px', fontWeight: 600 }}>No. Struk (Invoice)</th>
-                        <th style={{ padding: '12px 16px', fontWeight: 600 }}>Waktu</th>
-                        <th style={{ padding: '12px 16px', fontWeight: 600 }}>Metode</th>
-                        <th style={{ padding: '12px 16px', fontWeight: 600 }}>Total Belanja</th>
-                        <th style={{ padding: '12px 16px', fontWeight: 600 }}>Kembalian</th>
-                        <th style={{ padding: '12px 18px', fontWeight: 600 }}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.transaksi.map((t: CashierRecapItemDTO) => {
-                        const isSplit = t.payments.length > 1;
+                <>
+                  <div className="rep-desktop-only" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ background: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                          <th style={{ padding: '12px 18px', fontWeight: 600 }}>No. Struk (Invoice)</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 600 }}>Waktu</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 600 }}>Metode</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 600 }}>Total Belanja</th>
+                          <th style={{ padding: '12px 16px', fontWeight: 600 }}>Kembalian</th>
+                          <th style={{ padding: '12px 18px', fontWeight: 600 }}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.transaksi.map((t: CashierRecapItemDTO) => {
+                          const isSplit = t.payments.length > 1;
 
-                        return (
-                          <tr
-                            key={t.id}
-                            style={{
-                              borderBottom: '1px solid var(--color-border)',
-                              background: t.isVoid ? 'hsl(0 84% 97%)' : 'transparent',
-                            }}
-                          >
-                            <td style={{ padding: '14px 18px' }}>
-                              <div style={{ fontWeight: 700, color: t.isVoid ? 'hsl(0 72% 38%)' : 'var(--color-text)' }}>
+                          return (
+                            <tr
+                              key={t.id}
+                              style={{
+                                borderBottom: '1px solid var(--color-border)',
+                                background: t.isVoid ? 'hsl(0 84% 97%)' : 'transparent',
+                              }}
+                            >
+                              <td style={{ padding: '14px 18px' }}>
+                                <div style={{ fontWeight: 700, color: t.isVoid ? 'hsl(0 72% 38%)' : 'var(--color-text)' }}>
+                                  {t.invoiceNumber}
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                                  {t.itemCount} jenis produk
+                                </div>
+                              </td>
+
+                              <td style={{ padding: '14px 16px', color: 'var(--color-text-secondary)' }}>
+                                {fmtWaktu(t.createdAt)} WIB
+                              </td>
+
+                              <td style={{ padding: '14px 16px' }}>
+                                <span style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                  padding: '3px 8px',
+                                  borderRadius: 6,
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  background: isSplit
+                                    ? 'hsl(260 70% 94%)'
+                                    : t.paymentMethod === 'CASH'
+                                    ? 'hsl(150 65% 92%)'
+                                    : 'hsl(200 80% 92%)',
+                                  color: isSplit
+                                    ? 'hsl(260 65% 35%)'
+                                    : t.paymentMethod === 'CASH'
+                                    ? 'hsl(150 75% 24%)'
+                                    : 'hsl(200 85% 28%)',
+                                }}>
+                                  {isSplit ? 'SPLIT' : t.paymentMethod}
+                                </span>
+                              </td>
+
+                              <td style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--color-text)' }}>
+                                {rp(t.grossAmount)}
+                              </td>
+
+                              <td style={{ padding: '14px 16px', color: 'var(--color-text-muted)' }}>
+                                {t.changeAmount ? rp(t.changeAmount) : '-'}
+                              </td>
+
+                              <td style={{ padding: '14px 18px' }}>
+                                {t.status === 'COMPLETED' ? (
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    color: 'hsl(150 75% 28%)',
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                  }}>
+                                    <CheckCircle2 size={14} />
+                                    Selesai
+                                  </span>
+                                ) : (
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    color: 'hsl(0 75% 38%)',
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                  }}>
+                                    <XCircle size={14} />
+                                    VOID
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Mobile Cards — Transaksi */}
+                  <div className="rep-mobile-only" style={{ padding: 12 }}>
+                    {data.transaksi.map((t: CashierRecapItemDTO) => {
+                      const isSplit = t.payments.length > 1;
+                      return (
+                        <div
+                          key={t.id}
+                          className="rep-mcard"
+                          style={{ background: t.isVoid ? 'hsl(0 84% 98%)' : '#ffffff' }}
+                        >
+                          <div className="rep-mcard__top">
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: t.isVoid ? 'hsl(0 72% 38%)' : 'var(--color-text)' }}>
                                 {t.invoiceNumber}
                               </div>
                               <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                                {t.itemCount} jenis produk
+                                {fmtWaktu(t.createdAt)} WIB · {t.itemCount} jenis produk
                               </div>
-                            </td>
-
-                            <td style={{ padding: '14px 16px', color: 'var(--color-text-secondary)' }}>
-                              {fmtWaktu(t.createdAt)} WIB
-                            </td>
-
-                            <td style={{ padding: '14px 16px' }}>
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                              <div style={{ fontWeight: 800, fontSize: 14, color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
+                                {rp(t.grossAmount)}
+                              </div>
                               <span style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 4,
-                                padding: '3px 8px',
+                                display: 'inline-block',
+                                marginTop: 2,
+                                padding: '2px 7px',
                                 borderRadius: 6,
-                                fontSize: 11,
+                                fontSize: 10,
                                 fontWeight: 700,
-                                background: isSplit
-                                  ? 'hsl(260 70% 94%)'
-                                  : t.paymentMethod === 'CASH'
-                                  ? 'hsl(150 65% 92%)'
-                                  : 'hsl(200 80% 92%)',
-                                color: isSplit
-                                  ? 'hsl(260 65% 35%)'
-                                  : t.paymentMethod === 'CASH'
-                                  ? 'hsl(150 75% 24%)'
-                                  : 'hsl(200 85% 28%)',
+                                background: isSplit ? 'hsl(260 70% 94%)' : t.paymentMethod === 'CASH' ? 'hsl(150 65% 92%)' : 'hsl(200 80% 92%)',
+                                color: isSplit ? 'hsl(260 65% 35%)' : t.paymentMethod === 'CASH' ? 'hsl(150 75% 24%)' : 'hsl(200 85% 28%)',
                               }}>
                                 {isSplit ? 'SPLIT' : t.paymentMethod}
                               </span>
-                            </td>
-
-                            <td style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--color-text)' }}>
-                              {rp(t.grossAmount)}
-                            </td>
-
-                            <td style={{ padding: '14px 16px', color: 'var(--color-text-muted)' }}>
-                              {t.changeAmount ? rp(t.changeAmount) : '-'}
-                            </td>
-
-                            <td style={{ padding: '14px 18px' }}>
-                              {t.status === 'COMPLETED' ? (
-                                <span style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 4,
-                                  color: 'hsl(150 75% 28%)',
-                                  fontSize: 12,
-                                  fontWeight: 600,
-                                }}>
-                                  <CheckCircle2 size={14} />
-                                  Selesai
-                                </span>
-                              ) : (
-                                <span style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 4,
-                                  color: 'hsl(0 75% 38%)',
-                                  fontSize: 12,
-                                  fontWeight: 600,
-                                }}>
-                                  <XCircle size={14} />
-                                  VOID
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                            </div>
+                          </div>
+                          <div className="rep-mcard__grid">
+                            <div>
+                              <div className="rep-mcard__k">Kembalian</div>
+                              <div className="rep-mcard__v">{t.changeAmount ? rp(t.changeAmount) : '-'}</div>
+                            </div>
+                            <div>
+                              <div className="rep-mcard__k">Status</div>
+                              <div className="rep-mcard__v" style={{ color: t.status === 'COMPLETED' ? 'hsl(150 75% 28%)' : 'hsl(0 75% 38%)' }}>
+                                {t.status === 'COMPLETED' ? 'Selesai' : 'VOID'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               )}
 
               {/* ── Pagination Controls ── */}
@@ -902,11 +865,10 @@ export default function CashierRecapPage() {
                       </p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => router.push('/gudang')}
+                    <Link
+                      href="/gudang"
                       style={{
-                        minHeight: 44,
+                        minHeight: 40,
                         padding: '8px 14px',
                         borderRadius: 10,
                         border: '1px solid var(--color-primary)',
@@ -914,39 +876,41 @@ export default function CashierRecapPage() {
                         color: 'var(--color-primary)',
                         fontSize: 12,
                         fontWeight: 700,
-                        cursor: 'pointer',
+                        textDecoration: 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
                       }}
                     >
-                      Buka Arsip &amp; Unggah Faktur Pemasok →
-                    </button>
+                      Buka Gudang
+                    </Link>
                   </div>
 
                   {/* Ringkasan Angka Cepat */}
                   <div
+                    className="rep-kpi-grid rep-kpi-grid--3"
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))',
-                      gap: 12,
-                      padding: '14px 20px',
+                      padding: '12px 16px',
+                      marginBottom: 0,
                       background: 'var(--color-surface-muted)',
                       borderBottom: '1px solid var(--color-border)',
                     }}
                   >
-                    <div style={{ padding: '10px 12px', background: 'var(--color-surface)', borderRadius: 10, border: '1px solid var(--color-border)' }}>
-                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Kuantitas Penerimaan Faktur</div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: 'hsl(200 85% 32%)', marginTop: 2 }}>
+                    <div className="rep-kpi">
+                      <span className="rep-kpi__label">Barang Masuk</span>
+                      <div className="rep-kpi__val" style={{ color: 'hsl(200 85% 32%)' }}>
                         {totalMasuk.toLocaleString('id-ID')} pcs
                       </div>
                     </div>
-                    <div style={{ padding: '10px 12px', background: 'var(--color-surface)', borderRadius: 10, border: '1px solid var(--color-border)' }}>
-                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Total Kuantitas Terjual (POS)</div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: 'hsl(150 75% 28%)', marginTop: 2 }}>
-                        {totalLaku.toLocaleString('id-ID')} pcs <span style={{ fontSize: 12, fontWeight: 600 }}>({rp(totalOmzetBarang)})</span>
+                    <div className="rep-kpi">
+                      <span className="rep-kpi__label">Terjual</span>
+                      <div className="rep-kpi__val" style={{ color: 'hsl(150 75% 28%)' }}>
+                        {totalLaku.toLocaleString('id-ID')} pcs
                       </div>
+                      <div className="rep-kpi__sub">{rp(totalOmzetBarang)}</div>
                     </div>
-                    <div style={{ padding: '10px 12px', background: 'var(--color-surface)', borderRadius: 10, border: '1px solid var(--color-border)' }}>
-                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600 }}>Total Kuantitas Retur &amp; Kedaluwarsa</div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: totalRetur > 0 ? 'hsl(0 75% 42%)' : 'var(--color-text)', marginTop: 2 }}>
+                    <div className="rep-kpi">
+                      <span className="rep-kpi__label">Retur / Rusak</span>
+                      <div className="rep-kpi__val" style={{ color: totalRetur > 0 ? 'hsl(0 75% 42%)' : '#0f172a' }}>
                         {totalRetur.toLocaleString('id-ID')} pcs
                       </div>
                     </div>
@@ -954,70 +918,115 @@ export default function CashierRecapPage() {
 
                   {itemsRecap.length === 0 ? (
                     <div style={{ padding: '32px 20px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 13 }}>
-                      Belum terdapat pergerakan barang (penerimaan faktur, penjualan POS, maupun retur pemasok) pada tanggal ini.
+                      Belum ada pergerakan barang pada tanggal ini.
                     </div>
                   ) : (
-                    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
-                        <thead>
-                          <tr style={{ background: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)', textAlign: 'left', color: 'var(--color-text-secondary)' }}>
-                            <th style={{ padding: '12px 18px', fontWeight: 700 }}>Nama Produk &amp; Pemasok</th>
-                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Diterima (Faktur)</th>
-                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Terjual (POS)</th>
-                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Diretur</th>
-                            <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Nilai Penjualan (Rp)</th>
-                            <th style={{ padding: '12px 18px', fontWeight: 700, textAlign: 'right' }}>Saldo Stok Akhir</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {itemsRecap.map((item) => (
-                            <tr key={item.productId} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                              <td style={{ padding: '12px 18px' }}>
-                                <div style={{ fontWeight: 700, color: 'var(--color-text)' }}>{item.productName}</div>
-                                {item.supplierName && (
-                                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                                    Pemasok: {item.supplierName}
-                                  </div>
-                                )}
-                              </td>
-                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: item.qtyReceived > 0 ? 'hsl(200 85% 32%)' : 'var(--color-text-muted)' }}>
-                                {item.qtyReceived > 0 ? `+${item.qtyReceived} ${item.unit}` : '-'}
-                              </td>
-                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800, color: item.qtySold > 0 ? 'hsl(150 75% 28%)' : 'var(--color-text-muted)' }}>
-                                {item.qtySold > 0 ? `${item.qtySold} ${item.unit}` : '0'}
-                              </td>
-                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800, color: item.qtyReturned > 0 ? 'hsl(0 75% 42%)' : 'var(--color-text-muted)' }}>
-                                {item.qtyReturned > 0 ? `${item.qtyReturned} ${item.unit}` : '0'}
-                              </td>
-                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--color-text)' }}>
-                                {item.omzetSold > 0 ? rp(item.omzetSold) : '-'}
-                              </td>
-                              <td style={{ padding: '12px 18px', textAlign: 'right', fontWeight: 700, color: 'var(--color-text-secondary)' }}>
-                                {item.stockRemaining} {item.unit}
-                              </td>
+                    <>
+                      <div className="rep-desktop-only" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
+                          <thead>
+                            <tr style={{ background: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)', textAlign: 'left', color: 'var(--color-text-secondary)' }}>
+                              <th style={{ padding: '12px 18px', fontWeight: 700 }}>Nama Produk &amp; Pemasok</th>
+                              <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Diterima (Faktur)</th>
+                              <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Terjual (POS)</th>
+                              <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Diretur</th>
+                              <th style={{ padding: '12px 14px', fontWeight: 700, textAlign: 'right' }}>Nilai Penjualan (Rp)</th>
+                              <th style={{ padding: '12px 18px', fontWeight: 700, textAlign: 'right' }}>Saldo Stok Akhir</th>
                             </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr style={{ background: 'var(--color-surface-muted)', borderTop: '2px solid var(--color-border)', fontWeight: 800 }}>
-                            <td style={{ padding: '12px 18px' }}>TOTAL REKAPITULASI BARANG ({itemsRecap.length} produk)</td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right', color: 'hsl(200 85% 32%)' }}>
-                              {totalMasuk} pcs
-                            </td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right', color: 'hsl(150 75% 28%)' }}>
-                              {totalLaku} pcs
-                            </td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right', color: totalRetur > 0 ? 'hsl(0 75% 42%)' : 'var(--color-text)' }}>
-                              {totalRetur} pcs
-                            </td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right', color: 'var(--color-text)' }}>
-                              {rp(totalOmzetBarang)}
-                            </td>
-                            <td style={{ padding: '12px 18px' }} />
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
+                          </thead>
+                          <tbody>
+                            {itemsRecap.map((item) => (
+                              <tr key={item.productId} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                                <td style={{ padding: '12px 18px' }}>
+                                  <div style={{ fontWeight: 700, color: 'var(--color-text)' }}>{item.productName}</div>
+                                  {item.supplierName && (
+                                    <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                                      Pemasok: {item.supplierName}
+                                    </div>
+                                  )}
+                                </td>
+                                <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: item.qtyReceived > 0 ? 'hsl(200 85% 32%)' : 'var(--color-text-muted)' }}>
+                                  {item.qtyReceived > 0 ? `+${item.qtyReceived} ${item.unit}` : '-'}
+                                </td>
+                                <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800, color: item.qtySold > 0 ? 'hsl(150 75% 28%)' : 'var(--color-text-muted)' }}>
+                                  {item.qtySold > 0 ? `${item.qtySold} ${item.unit}` : '0'}
+                                </td>
+                                <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 800, color: item.qtyReturned > 0 ? 'hsl(0 75% 42%)' : 'var(--color-text-muted)' }}>
+                                  {item.qtyReturned > 0 ? `${item.qtyReturned} ${item.unit}` : '0'}
+                                </td>
+                                <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: 'var(--color-text)' }}>
+                                  {item.omzetSold > 0 ? rp(item.omzetSold) : '-'}
+                                </td>
+                                <td style={{ padding: '12px 18px', textAlign: 'right', fontWeight: 700, color: 'var(--color-text-secondary)' }}>
+                                  {item.stockRemaining} {item.unit}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr style={{ background: 'var(--color-surface-muted)', borderTop: '2px solid var(--color-border)', fontWeight: 800 }}>
+                              <td style={{ padding: '12px 18px' }}>TOTAL REKAPITULASI BARANG ({itemsRecap.length} produk)</td>
+                              <td style={{ padding: '12px 14px', textAlign: 'right', color: 'hsl(200 85% 32%)' }}>
+                                {totalMasuk} pcs
+                              </td>
+                              <td style={{ padding: '12px 14px', textAlign: 'right', color: 'hsl(150 75% 28%)' }}>
+                                {totalLaku} pcs
+                              </td>
+                              <td style={{ padding: '12px 14px', textAlign: 'right', color: totalRetur > 0 ? 'hsl(0 75% 42%)' : 'var(--color-text)' }}>
+                                {totalRetur} pcs
+                              </td>
+                              <td style={{ padding: '12px 14px', textAlign: 'right', color: 'var(--color-text)' }}>
+                                {rp(totalOmzetBarang)}
+                              </td>
+                              <td style={{ padding: '12px 18px' }} />
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+
+                      {/* Mobile Cards — Rekap Barang */}
+                      <div className="rep-mobile-only" style={{ padding: 12 }}>
+                        {itemsRecap.map((item) => (
+                          <div key={item.productId} className="rep-mcard">
+                            <div className="rep-mcard__top">
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--color-text)' }}>{item.productName}</div>
+                                {item.supplierName && (
+                                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{item.supplierName}</div>
+                                )}
+                              </div>
+                              <div style={{ fontWeight: 800, fontSize: 13, color: 'var(--color-text)', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+                                {item.omzetSold > 0 ? rp(item.omzetSold) : '-'}
+                              </div>
+                            </div>
+                            <div className="rep-mcard__grid rep-mcard__grid--4">
+                              <div>
+                                <div className="rep-mcard__k">Masuk</div>
+                                <div className="rep-mcard__v" style={{ color: item.qtyReceived > 0 ? 'hsl(200 85% 32%)' : '#64748b' }}>
+                                  {item.qtyReceived > 0 ? `+${item.qtyReceived}` : '-'}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="rep-mcard__k">Laku</div>
+                                <div className="rep-mcard__v" style={{ color: item.qtySold > 0 ? 'hsl(150 75% 28%)' : '#64748b' }}>
+                                  {item.qtySold}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="rep-mcard__k">Retur</div>
+                                <div className="rep-mcard__v" style={{ color: item.qtyReturned > 0 ? 'hsl(0 75% 42%)' : '#64748b' }}>
+                                  {item.qtyReturned}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="rep-mcard__k">Sisa</div>
+                                <div className="rep-mcard__v">{item.stockRemaining}</div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   )}
                 </div>
               );
@@ -1039,7 +1048,7 @@ export default function CashierRecapPage() {
                 <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)', fontWeight: 800, fontSize: 15 }}>
                   Titipan Harian ({titipanRows.length})
                 </div>
-                <div style={{ overflowX: 'auto' }}>
+                <div className="rep-desktop-only" style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 520 }}>
                     <thead>
                       <tr style={{ background: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)', textAlign: 'left' }}>
@@ -1076,6 +1085,56 @@ export default function CashierRecapPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+
+                {/* Mobile Cards — Titipan Harian */}
+                <div className="rep-mobile-only" style={{ padding: 12 }}>
+                  {titipanRows.map((tr) => (
+                    <div key={tr.id} className="rep-mcard">
+                      <div className="rep-mcard__top">
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>{tr.productName}</div>
+                          <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{tr.mitraName}</div>
+                        </div>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 6,
+                          background: tr.status === 'SETTLED' ? 'hsl(150 65% 92%)' : tr.status === 'CARRYOVER' ? 'hsl(38 95% 92%)' : 'var(--color-surface-muted)',
+                          color: tr.status === 'SETTLED' ? 'hsl(150 75% 26%)' : tr.status === 'CARRYOVER' ? 'hsl(32 85% 30%)' : 'var(--color-text-secondary)',
+                          flexShrink: 0,
+                        }}>
+                          {tr.status === 'SETTLED' ? 'Selesai' : tr.status === 'CARRYOVER' ? 'Susulan' : 'Aktif'}
+                        </span>
+                      </div>
+                      <div className="rep-mcard__grid rep-mcard__grid--4">
+                        <div>
+                          <div className="rep-mcard__k">Titip</div>
+                          <div className="rep-mcard__v">{tr.qtyInitial}</div>
+                        </div>
+                        <div>
+                          <div className="rep-mcard__k">Laku</div>
+                          <div className="rep-mcard__v">
+                            {tr.qtySoldPhysical ?? tr.qtySoldPos}
+                            {tr.qtyDiscrepancy !== 0 && (
+                              <span style={{ display: 'block', fontSize: 10, color: 'hsl(0 72% 42%)' }}>
+                                ({tr.qtyDiscrepancy > 0 ? `+${tr.qtyDiscrepancy}` : tr.qtyDiscrepancy})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="rep-mcard__k">Sisa</div>
+                          <div className="rep-mcard__v">{tr.qtyRemaining ?? '-'}</div>
+                        </div>
+                        <div>
+                          <div className="rep-mcard__k">Setor</div>
+                          <div className="rep-mcard__v">{rp(tr.totalPayout)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -1161,14 +1220,14 @@ export default function CashierRecapPage() {
               <div style={{ borderBottom: '1px solid #000', margin: '8px 0' }} />
 
               <div style={{ fontWeight: 900, textAlign: 'center', marginBottom: 4 }}>
-                SOP SERAH TERIMA (ALFA / INDOMARET)
+                SERAH TERIMA KAS SHIFT
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
                 <span>1. TINGGAL DI LACI</span>
                 <span>{rp(s.uangTinggalDiLaci)}</span>
               </div>
               <div style={{ fontSize: 10, color: '#444', marginBottom: 4 }}>
-                *Modal paten kasir shift berikutnya
+                *Modal awal kasir shift berikutnya
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: 13 }}>
@@ -1176,7 +1235,7 @@ export default function CashierRecapPage() {
                 <span>{rp(s.uangSetoranToko)}</span>
               </div>
               <div style={{ fontSize: 10, color: '#444', marginBottom: 8 }}>
-                *Disetor ke amplop + serahkan ke Manajer
+                *Disetor ke amplop &amp; serahkan ke Pengelola
               </div>
 
               <div style={{ borderBottom: '1px dashed #000', margin: '8px 0' }} />

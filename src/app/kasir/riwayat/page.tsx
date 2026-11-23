@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ChevronLeft, Receipt, Banknote, QrCode, Clock,
@@ -82,33 +83,6 @@ const fmtTanggal = (s: string) =>
 const fmtWaktu = (s: string) =>
   new Date(s).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-// ── Kartu Summary ────────────────────────────────────────────
-function SummaryCard({ label, value, icon: Icon, color }: {
-  label: string; value: string; icon: React.ElementType; color: string;
-}) {
-  return (
-    <div style={{
-      background: 'var(--color-surface)',
-      border: '1px solid var(--color-border)',
-      borderRadius: 12, padding: '14px 16px',
-      display: 'flex', alignItems: 'center', gap: 12,
-    }}>
-      <div style={{
-        width: 40, height: 40, borderRadius: 10,
-        background: color + '18',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        flexShrink: 0,
-      }}>
-        <Icon size={18} color={color} />
-      </div>
-      <div>
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 500, marginBottom: 2 }}>{label}</div>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-text)' }}>{value}</div>
-      </div>
-    </div>
-  );
-}
-
 // ── Baris Transaksi ──────────────────────────────────────────
 function TrxRow({ trx }: { trx: Transaksi }) {
   const [open, setOpen] = useState(false);
@@ -153,7 +127,7 @@ function TrxRow({ trx }: { trx: Transaksi }) {
           <BadgeIcon size={16} color={badgeColor} />
         </div>
 
-        {/* Info — tampilkan ringkasan item langsung tanpa harus klik panah (Masukan Tim Audio 6) */}
+        {/* Info — ringkasan item langsung tanpa harus klik panah */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 2 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)' }}>
@@ -165,7 +139,7 @@ function TrxRow({ trx }: { trx: Transaksi }) {
                 background: '#fef3c7', border: '1px solid #fcd34d',
                 borderRadius: 4, padding: '1px 5px',
               }}>
-                Diskon FEFO (Tempel Stiker)
+                Diskon Obral
               </span>
             )}
           </div>
@@ -176,7 +150,7 @@ function TrxRow({ trx }: { trx: Transaksi }) {
             {inlineItemsPreview || `${trx.items.length} item`}
           </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-            {fmtWaktu(trx.createdAt)} · {trx.items.length} item · Klik untuk rincian harga
+            {fmtWaktu(trx.createdAt)} · {trx.items.length} item
           </div>
         </div>
 
@@ -374,7 +348,24 @@ export default function KasirRiwayatPage() {
         <Receipt size={20} color="var(--color-primary)" style={{ flexShrink: 0 }} />
       </div>
 
-      <div style={{ padding: '16px 16px 0' }}>
+      <div style={{ maxWidth: 680, margin: '0 auto', padding: '14px 16px 0' }}>
+
+        {/* ── Navigasi Terpadu Rekap & Detail Struk ── */}
+        <div className="rep-seg" style={{ width: '100%', marginBottom: 14 }}>
+          <Link
+            href="/kasir/rekap"
+            className="rep-seg-btn"
+            style={{ flex: 1, textAlign: 'center', textDecoration: 'none' }}
+          >
+            Rekap &amp; Cetak
+          </Link>
+          <span
+            className="rep-seg-btn active"
+            style={{ flex: 1, textAlign: 'center', cursor: 'default' }}
+          >
+            Detail Struk &amp; WA
+          </span>
+        </div>
 
         {/* ── Filter Tanggal ── */}
         <div style={{
@@ -415,7 +406,7 @@ export default function KasirRiwayatPage() {
 
         {loading && (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: '48px 0', color: 'var(--color-text-muted)' }}>
-            <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
+            <Loader2 size={20} className="spin-icon" />
             <span style={{ fontSize: 14 }}>Memuat riwayat...</span>
           </div>
         )}
@@ -475,14 +466,42 @@ export default function KasirRiwayatPage() {
             )}
 
             {/* Summary cards 2x2 */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))', gap: 10, marginBottom: 14 }}>
-              <SummaryCard label="Total Struk" value={`${s?.jumlahStruk ?? 0} transaksi`} icon={ShoppingBag} color="hsl(220 80% 55%)" />
-              <SummaryCard label="Total Omzet" value={rp(s?.totalOmzet ?? 0)} icon={TrendingUp} color="hsl(142 60% 38%)" />
-              <SummaryCard label="Tunai (Cash)" value={rp(s?.totalCash ?? 0)} icon={Banknote} color="hsl(35 90% 50%)" />
-              <SummaryCard label="QRIS" value={rp(s?.totalQris ?? 0)} icon={QrCode} color="hsl(262 80% 58%)" />
+            <div className="rep-kpi-grid" style={{ marginBottom: 14 }}>
+              <div className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">Total Struk</span>
+                  <ShoppingBag size={14} style={{ color: '#2563eb' }} />
+                </div>
+                <div className="rep-kpi__val">{s?.jumlahStruk ?? 0}</div>
+                <div className="rep-kpi__sub">Transaksi selesai</div>
+              </div>
+              <div className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">Total Omzet</span>
+                  <TrendingUp size={14} style={{ color: '#15803d' }} />
+                </div>
+                <div className="rep-kpi__val" style={{ color: '#15803d' }}>{rp(s?.totalOmzet ?? 0)}</div>
+                <div className="rep-kpi__sub">Tunai + QRIS</div>
+              </div>
+              <div className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">Tunai</span>
+                  <Banknote size={14} style={{ color: '#b45309' }} />
+                </div>
+                <div className="rep-kpi__val">{rp(s?.totalCash ?? 0)}</div>
+                <div className="rep-kpi__sub">Masuk laci</div>
+              </div>
+              <div className="rep-kpi">
+                <div className="rep-kpi__top">
+                  <span className="rep-kpi__label">QRIS</span>
+                  <QrCode size={14} style={{ color: '#7c3aed' }} />
+                </div>
+                <div className="rep-kpi__val">{rp(s?.totalQris ?? 0)}</div>
+                <div className="rep-kpi__sub">Non-tunai</div>
+              </div>
             </div>
 
-            {/* Ringkasan Serah Terima Kas & Potongan Supplier (Permintaan Bu Dyah) */}
+            {/* Ringkasan Serah Terima Kas & Potongan Supplier */}
             {s?.statusShift && (
               <div style={{
                 background: 'var(--color-surface)',

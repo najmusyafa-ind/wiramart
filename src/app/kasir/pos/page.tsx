@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useId, useRef } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import {
   ShoppingCart, Search, Plus, Minus, Trash2, Banknote,
   CheckCircle, X, Loader2, Package, LogOut, ArrowLeftRight,
@@ -619,7 +620,7 @@ function BukaShiftOverlay({
                 style={{ width: '100%', minHeight: 52, fontSize: 'var(--text-base)', gap: 'var(--space-2)' }}
               >
                 {loading
-                  ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Membuka shift...</>
+                  ? <><Loader2 size={16} className="spin-icon" /> Membuka shift...</>
                   : <><CheckCircle size={16} /> Buka Shift &amp; Mulai Jaga</>}
               </button>
 
@@ -1063,7 +1064,7 @@ function PaymentModal({
               }
             >
               {loading
-                ? <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Memproses...</>
+                ? <><Loader2 size={16} className="spin-icon" /> Memproses...</>
                 : <><CheckCircle size={16} /> {
                   selectedMethod === 'CASH' ? 'Konfirmasi Bayar'
                   : selectedMethod === 'QRIS' ? 'Konfirmasi Diterima'
@@ -2041,7 +2042,7 @@ export default function PosPage() {
         // addToCart sudah menampilkan pesan sendiri jika stok habis / melebihi stok
         if (addToCart(json.data.product)) {
           playScanBeep();
-          const toastPrefix = json.data.isDiscounted ? 'Diskon FEFO: ' : 'Ditambahkan: ';
+          const toastPrefix = json.data.isDiscounted ? 'Diskon Obral: ' : 'Ditambahkan: ';
           setScanToast(`${toastPrefix}${json.data.product.name}`);
           setTimeout(() => setScanToast(null), 2500);
         }
@@ -2308,11 +2309,16 @@ export default function PosPage() {
 
   useEffect(() => {
     if (!session?.shift) return;
-    void fetchTitipanReminder();
+    const kickoff = setTimeout(() => {
+      void fetchTitipanReminder();
+    }, 0);
     const timer = setInterval(() => {
       void fetchTitipanReminder();
     }, 90_000);
-    return () => clearInterval(timer);
+    return () => {
+      clearTimeout(kickoff);
+      clearInterval(timer);
+    };
   }, [session?.shift, fetchTitipanReminder]);
 
   // Countdown real-time untuk Jeda 5 Menit setelah Tutup Shift
@@ -2320,7 +2326,6 @@ export default function PosPage() {
     const graceUntil = tutupResult?.autoChecklist?.graceUntil;
     const status = tutupResult?.autoChecklist?.status;
     if (status !== 'PENDING_GRACE' || !graceUntil) {
-      setGraceCountdown('');
       return;
     }
 
@@ -2341,21 +2346,18 @@ export default function PosPage() {
       setGraceCountdown(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`);
     };
 
-    tick();
+    const kickoff = setTimeout(tick, 0);
     const interval = setInterval(tick, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(kickoff);
+      clearInterval(interval);
+    };
   }, [tutupResult?.autoChecklist?.graceUntil, tutupResult?.autoChecklist?.status]);
 
   // Muat ringkasan Kas Keluar / Masuk setiap kali modal Tutup Shift dibuka
   useEffect(() => {
     if (!showTutupConfirm || showKasGerak) return;
     let active = true;
-    setTutupKasSummary((prev) => ({
-      loading: true,
-      totalCashOut: prev?.totalCashOut ?? 0,
-      totalCashIn: prev?.totalCashIn ?? 0,
-      movements: prev?.movements ?? [],
-    }));
     fetch('/api/kasir/shift/kas-gerak', { cache: 'no-store' })
       .then((res) => res.json())
       .then((json) => {
@@ -2534,7 +2536,7 @@ export default function PosPage() {
   if (sessionLoading) {
     return (
       <div style={{ minHeight: '100svh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-subtle, #f8fafc)' }}>
-        <Loader2 size={36} style={{ animation: 'spin 1s linear infinite', color: 'var(--color-primary, #2563eb)' }} />
+        <Loader2 size={36} className="spin-icon" style={{ color: 'var(--color-primary, #15803d)' }} />
         <p style={{ marginTop: 16, fontWeight: 600, color: 'var(--color-text-muted, #64748b)', fontSize: '0.9rem' }}>
           Menghubungkan Sesi &amp; Laci Kasir...
         </p>
@@ -2642,7 +2644,7 @@ export default function PosPage() {
                   className="btn btn-secondary"
                   style={{ minHeight: 36, fontSize: '0.74rem', fontWeight: 700, marginTop: 2 }}
                 >
-                  + Catat Bayar Supplier / Titipan / Diambil Bu Dyah
+                  Catat Kas Laci (Supplier / Titipan / Ambil Uang)
                 </button>
               </div>
 
@@ -2763,12 +2765,16 @@ export default function PosPage() {
                         setShowTutupConfirm(false);
                         setShowKasGerak(true);
                       }}
-                      className="btn btn-secondary"
                       style={{
                         minHeight: 36,
                         padding: '4px 10px',
+                        borderRadius: 8,
+                        border: '1px solid hsl(35 75% 65%)',
+                        background: '#ffffff',
+                        color: 'hsl(32 85% 24%)',
                         fontSize: '0.74rem',
                         fontWeight: 700,
+                        cursor: 'pointer',
                         flexShrink: 0,
                       }}
                     >
@@ -2778,7 +2784,7 @@ export default function PosPage() {
                 )}
               </div>
 
-              {/* Status Tutup Shift (Mendukung Tutup Awal Resmi karena Mata Kuliah — Audio 4) */}
+              {/* Status Tutup Shift */}
               <div>
                 <label
                   htmlFor="tutup-early-reason"
@@ -2788,7 +2794,7 @@ export default function PosPage() {
                 </label>
                 <select
                   id="tutup-early-reason"
-                  className="form-input"
+                  className="form-input form-select"
                   value={tutupEarlyReason}
                   onChange={(e) => setTutupEarlyReason(e.target.value as 'NORMAL' | 'KULIAH' | 'IZIN_DOSEN')}
                   style={{ width: '100%', minHeight: 42, fontSize: '0.85rem' }}
@@ -2824,8 +2830,18 @@ export default function PosPage() {
                       setShowTutupConfirm(false);
                       setShowTitipanModal(true);
                     }}
-                    className="btn btn-secondary"
-                    style={{ minHeight: 38, padding: '4px 10px', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 }}
+                    style={{
+                      minHeight: 38,
+                      padding: '4px 10px',
+                      borderRadius: 8,
+                      border: '1px solid hsl(35 75% 65%)',
+                      background: '#ffffff',
+                      color: 'hsl(32 85% 24%)',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                    }}
                   >
                     Buka Titipan
                   </button>
@@ -2859,14 +2875,16 @@ export default function PosPage() {
                       setShowTutupConfirm(false);
                       setShowSisaMakanan(true);
                     }}
-                    className="btn btn-secondary"
                     style={{
                       padding: '8px 12px',
-                      minHeight: 44,
+                      minHeight: 40,
+                      borderRadius: 8,
+                      border: '1px solid hsl(35 75% 65%)',
                       fontSize: '0.78rem',
                       fontWeight: 700,
-                      color: 'hsl(38 92% 25%)',
+                      color: 'hsl(32 85% 24%)',
                       background: '#fff',
+                      cursor: 'pointer',
                       flexShrink: 0,
                     }}
                   >
@@ -2893,7 +2911,7 @@ export default function PosPage() {
                   style={{ flex: 2, background: 'hsl(0 70% 50%)', minHeight: 46, fontWeight: 700 }}
                 >
                   {tutupLoading
-                    ? <><Loader2 size={16} className="spin" /> Menutup Shift...</>
+                    ? <><Loader2 size={16} className="spin-icon" /> Menutup Shift...</>
                     : <><X size={16} /> Tutup Shift &amp; Simpan</>}
                 </button>
               </div>
@@ -3231,10 +3249,10 @@ export default function PosPage() {
               fontSize: 12,
               color: 'var(--color-text)',
             }}>
-              Mau langsung input nama barang, HPP, harga jual, dan stoknya sekarang?
+              Usulkan produk ini ke Gudang / Admin agar masuk katalog?
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <a
+              <Link
                 href={`/kasir/produk?barcode=${encodeURIComponent(unknownBarcodePrompt)}`}
                 className="btn btn-primary"
                 style={{
@@ -3242,8 +3260,8 @@ export default function PosPage() {
                   textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                 }}
               >
-                <Plus size={16} /> + Daftarkan Produk Ini Sekarang
-              </a>
+                <Plus size={16} /> Usulkan Produk Ini
+              </Link>
               <button
                 type="button"
                 onClick={() => setUnknownBarcodePrompt(null)}
@@ -3470,8 +3488,17 @@ export default function PosPage() {
               <button
                 type="button"
                 onClick={() => setTitipanBannerDismissed(true)}
-                className="btn btn-secondary"
-                style={{ padding: '6px 12px', minHeight: 40, fontSize: '0.78rem' }}
+                style={{
+                  padding: '6px 12px',
+                  minHeight: 40,
+                  borderRadius: 8,
+                  border: '1px solid hsl(35 75% 65%)',
+                  background: '#ffffff',
+                  color: 'hsl(32 85% 24%)',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
               >
                 Nanti
               </button>
@@ -3513,8 +3540,17 @@ export default function PosPage() {
               <button
                 type="button"
                 onClick={handleDismissCutOffBanner}
-                className="btn btn-secondary"
-                style={{ padding: '8px 12px', minHeight: 44, fontSize: '0.8rem' }}
+                style={{
+                  padding: '8px 12px',
+                  minHeight: 40,
+                  borderRadius: 8,
+                  border: '1px solid hsl(32 75% 65%)',
+                  background: '#ffffff',
+                  color: 'hsl(32 85% 24%)',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
               >
                 Nanti
               </button>
@@ -3640,7 +3676,7 @@ export default function PosPage() {
         <div className="pos-products-grid" role="list" aria-label="Daftar produk">
           {loading ? (
             <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 'var(--space-16)', color: 'var(--color-text-muted)' }}>
-              <Loader2 size={32} style={{ margin: '0 auto', animation: 'spin 1s linear infinite' }} />
+              <Loader2 size={32} className="spin-icon" style={{ margin: '0 auto' }} />
               <p style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>Memuat produk...</p>
             </div>
           ) : displayedProducts.length === 0 ? (
@@ -3654,13 +3690,13 @@ export default function PosPage() {
                   <button onClick={() => setSearch('')} className="btn btn-secondary btn-sm" style={{ fontSize: 'var(--text-sm)' }}>
                     Reset pencarian
                   </button>
-                  <a
+                  <Link
                     href={`/kasir/produk?tambah=1&nama=${encodeURIComponent(search)}`}
                     className="btn btn-primary btn-sm"
                     style={{ fontSize: 'var(--text-sm)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }}
                   >
-                    <Plus size={14} /> + Tambah Produk &ldquo;{search}&rdquo;
-                  </a>
+                    <Plus size={14} /> Usul Produk &ldquo;{search}&rdquo;
+                  </Link>
                 </div>
               )}
             </div>
@@ -3964,8 +4000,10 @@ export default function PosPage() {
               </div>
             </div>
 
-            {/* Menu Items List */}
+            {/* Menu Items List — Dikelompokkan: Shift & Kas, Produk & Tugas, Akun */}
             <div className="pos-drawer-items">
+              <div className="pos-drawer-section-label">Shift &amp; Kas</div>
+
               {!session?.shift && (
                 <button
                   type="button"
@@ -3974,63 +4012,18 @@ export default function PosPage() {
                     setShowKasirMenu(false);
                     setForceShowBukaShift(true);
                   }}
-                  style={{ width: '100%', background: 'hsl(38 95% 95%)', border: '1px solid hsl(38 92% 70%)', borderRadius: 'var(--radius-md)', cursor: 'pointer', textAlign: 'left', padding: '12px', marginBottom: 6 }}
+                  style={{ width: '100%', background: 'hsl(38 95% 95%)', border: '1px solid hsl(38 92% 70%)', borderRadius: 'var(--radius-md)', cursor: 'pointer', textAlign: 'left', padding: '12px' }}
                 >
                   <div className="pos-drawer-icon-box" style={{ background: 'hsl(38 95% 85%)', color: 'hsl(38 90% 30%)' }}>
                     <Banknote size={20} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div className="pos-drawer-link-title" style={{ color: 'hsl(38 90% 25%)', fontWeight: 800 }}>Buka Shift &amp; Modal Laci</div>
-                    <div className="pos-drawer-link-sub">Input modal awal Rp 100.000 untuk transaksi</div>
+                    <div className="pos-drawer-link-sub">Input modal awal untuk mulai transaksi</div>
                   </div>
                   <ChevronRight size={18} style={{ color: 'hsl(38 90% 40%)' }} />
                 </button>
               )}
-
-              <a
-                href="/kasir/produk"
-                className="pos-drawer-link"
-                onClick={() => setShowKasirMenu(false)}
-              >
-                <div className="pos-drawer-icon-box">
-                  <Package size={20} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div className="pos-drawer-link-title">Kelola Katalog Produk</div>
-                  <div className="pos-drawer-link-sub">Lihat daftar harga, barcode & sisa stok</div>
-                </div>
-                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
-              </a>
-
-              <a
-                href="/kasir/tukar-shift"
-                className="pos-drawer-link"
-                onClick={() => setShowKasirMenu(false)}
-              >
-                <div className="pos-drawer-icon-box">
-                  <ArrowLeftRight size={20} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div className="pos-drawer-link-title">Ajukan Tukar Shift</div>
-                  <div className="pos-drawer-link-sub">Permohonan pergantian jadwal tugas kasir</div>
-                </div>
-                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
-              </a>
-
-              <a
-                href="/kasir/pengiriman"
-                className="pos-drawer-link"
-                onClick={() => setShowKasirMenu(false)}
-              >
-                <div className="pos-drawer-icon-box">
-                  <Send size={20} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div className="pos-drawer-link-title">Pengiriman Saya (Runner)</div>
-                  <div className="pos-drawer-link-sub">Daftar tugas pengantaran & verifikasi PIN</div>
-                </div>
-                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
-              </a>
 
               {session?.shift && (
                 <button
@@ -4040,14 +4033,14 @@ export default function PosPage() {
                     setShowKasirMenu(false);
                     setShowKasGerak(true);
                   }}
-                  style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                  style={{ textAlign: 'left' }}
                 >
                   <div className="pos-drawer-icon-box" style={{ background: 'hsl(45 95% 90%)', color: 'hsl(45 90% 35%)' }}>
                     <Receipt size={20} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div className="pos-drawer-link-title">Kas Laci</div>
-                    <div className="pos-drawer-link-sub">Uang keluar, diambil Bu Dyah, tip</div>
+                    <div className="pos-drawer-link-sub">Bayar supplier, ambil uang, kas masuk</div>
                   </div>
                   <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
                 </button>
@@ -4061,7 +4054,7 @@ export default function PosPage() {
                     setShowKasirMenu(false);
                     setShowTitipanModal(true);
                   }}
-                  style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                  style={{ textAlign: 'left' }}
                 >
                   <div className="pos-drawer-icon-box" style={{ background: 'hsl(145 65% 92%)', color: 'hsl(145 70% 28%)' }}>
                     <Utensils size={20} />
@@ -4089,7 +4082,7 @@ export default function PosPage() {
                     setShowKasirMenu(false);
                     setShowSisaMakanan(true);
                   }}
-                  style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                  style={{ textAlign: 'left' }}
                 >
                   <div className="pos-drawer-icon-box" style={{ background: 'hsl(32 95% 90%)', color: 'hsl(32 90% 35%)' }}>
                     <Utensils size={20} />
@@ -4102,65 +4095,84 @@ export default function PosPage() {
                 </button>
               )}
 
-              {/* ── Riwayat Transaksi Saya ── */}
-              <button
-                type="button"
+              <Link
+                href="/kasir/rekap"
                 className="pos-drawer-link"
-                onClick={() => {
-                  setShowKasirMenu(false);
-                  router.push('/kasir/riwayat');
-                }}
-                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
-              >
-                <div className="pos-drawer-icon-box" style={{ background: 'hsl(220 80% 55% / 0.15)', color: 'hsl(220 80% 55%)' }}>
-                  <Receipt size={20} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div className="pos-drawer-link-title">Riwayat Transaksi Saya</div>
-                  <div className="pos-drawer-link-sub">Lihat struk, cash & QRIS shift hari ini</div>
-                </div>
-                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
-              </button>
-
-              {/* ── Rekap Harian Kasir (PRD 4.0) ── */}
-              <button
-                type="button"
-                className="pos-drawer-link"
-                onClick={() => {
-                  setShowKasirMenu(false);
-                  router.push('/kasir/rekap');
-                }}
-                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                onClick={() => setShowKasirMenu(false)}
               >
                 <div className="pos-drawer-icon-box" style={{ background: 'hsl(150 80% 45% / 0.15)', color: 'hsl(150 80% 35%)' }}>
                   <Calculator size={20} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div className="pos-drawer-link-title">Rekap Harian Kasir</div>
-                  <div className="pos-drawer-link-sub">Balancing fisik uang laci & cetak slip rekap</div>
+                  <div className="pos-drawer-link-title">Rekap &amp; Riwayat Shift</div>
+                  <div className="pos-drawer-link-sub">Saldo laci, daftar struk &amp; cetak slip</div>
                 </div>
                 <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
-              </button>
+              </Link>
 
-              {/* ── Penerimaan & Radar Gudang (PRD 3.0) ── */}
-              <button
-                type="button"
+              <div className="pos-drawer-section-label">Produk &amp; Tugas</div>
+
+              <Link
+                href="/kasir/produk"
                 className="pos-drawer-link"
-                onClick={() => {
-                  setShowKasirMenu(false);
-                  router.push('/gudang');
-                }}
-                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                onClick={() => setShowKasirMenu(false)}
+              >
+                <div className="pos-drawer-icon-box">
+                  <Package size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="pos-drawer-link-title">Katalog Produk</div>
+                  <div className="pos-drawer-link-sub">Cek harga, stok &amp; usul produk baru</div>
+                </div>
+                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+              </Link>
+
+              <Link
+                href="/kasir/tukar-shift"
+                className="pos-drawer-link"
+                onClick={() => setShowKasirMenu(false)}
+              >
+                <div className="pos-drawer-icon-box">
+                  <ArrowLeftRight size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="pos-drawer-link-title">Tukar Shift</div>
+                  <div className="pos-drawer-link-sub">Ajukan atau setujui tukar jadwal</div>
+                </div>
+                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+              </Link>
+
+              <Link
+                href="/kasir/pengiriman"
+                className="pos-drawer-link"
+                onClick={() => setShowKasirMenu(false)}
+              >
+                <div className="pos-drawer-icon-box">
+                  <Send size={20} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="pos-drawer-link-title">Pengiriman (Runner)</div>
+                  <div className="pos-drawer-link-sub">Daftar tugas antar &amp; verifikasi PIN</div>
+                </div>
+                <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
+              </Link>
+
+              <Link
+                href="/gudang"
+                className="pos-drawer-link"
+                onClick={() => setShowKasirMenu(false)}
               >
                 <div className="pos-drawer-icon-box" style={{ background: 'hsl(35 90% 50% / 0.15)', color: 'hsl(35 90% 40%)' }}>
                   <Package size={20} />
                 </div>
                 <div style={{ flex: 1 }}>
                   <div className="pos-drawer-link-title">Operasional Gudang</div>
-                  <div className="pos-drawer-link-sub">Penerimaan barang & radar FEFO fisik</div>
+                  <div className="pos-drawer-link-sub">Barang masuk &amp; pantau kedaluwarsa</div>
                 </div>
                 <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
-              </button>
+              </Link>
+
+              <div className="pos-drawer-section-label">Akun</div>
 
               {/* Pengaturan PIN Keamanan Login */}
               <button
@@ -4170,7 +4182,7 @@ export default function PosPage() {
                   setShowKasirMenu(false);
                   setShowPinModal(true);
                 }}
-                style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                style={{ textAlign: 'left' }}
               >
                 <div
                   className="pos-drawer-icon-box"
@@ -4188,13 +4200,11 @@ export default function PosPage() {
                   <div className="pos-drawer-link-sub">
                     {session?.employee?.hasPin
                       ? 'Ubah PIN pribadi 6–8 angka akun Anda'
-                      : 'Belum diatur — buat PIN agar login cukup NIM + PIN'}
+                      : 'Buat PIN agar login cukup NIM + PIN'}
                   </div>
                 </div>
                 <ChevronRight size={18} style={{ color: 'var(--color-text-muted)' }} />
               </button>
-
-              <div className="pos-drawer-divider" />
 
               {session?.shift && (
                 <button
@@ -4210,7 +4220,7 @@ export default function PosPage() {
                   </div>
                   <div style={{ flex: 1, textAlign: 'left' }}>
                     <div className="pos-drawer-danger-title">Tutup Sesi Kasir</div>
-                    <div className="pos-drawer-danger-sub">Selesaikan shift kerja & rekap uang laci</div>
+                    <div className="pos-drawer-danger-sub">Selesaikan shift &amp; rekap uang laci</div>
                   </div>
                   <ChevronRight size={18} style={{ opacity: 0.7 }} />
                 </button>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { ArrowLeftRight, Clock, Send, ChevronLeft, CheckCircle, XCircle, Loader2, Calendar, AlertTriangle, RefreshCw } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -237,79 +238,104 @@ export default function TukarShiftPage() {
         <div style={{
           position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
           zIndex: 9999, background: toast.ok ? 'hsl(142 60% 35%)' : 'hsl(0 65% 42%)',
-          color: '#fff', padding: '10px 20px', borderRadius: 12,
-          display: 'flex', alignItems: 'center', gap: 8,
-          boxShadow: '0 4px 24px rgba(0,0,0,0.3)', fontSize: 14, fontWeight: 600,
-          whiteSpace: 'nowrap', animation: 'fade-in 0.2s ease',
+          color: '#fff', padding: '10px 18px', borderRadius: 12,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.28)', fontSize: 13, fontWeight: 600,
+          maxWidth: 'calc(100vw - 32px)', width: 'max-content', textAlign: 'center',
+          lineHeight: 1.35,
         }}>
-          {toast.ok ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
-          {toast.msg}
+          {toast.ok ? <CheckCircle size={16} style={{ flexShrink: 0 }} /> : <AlertTriangle size={16} style={{ flexShrink: 0 }} />}
+          <span>{toast.msg}</span>
         </div>
       )}
 
       {/* Header */}
       <div style={{
-        background: 'var(--color-sidebar)',
-        borderBottom: '1px solid var(--color-sidebar-border)',
-        padding: '14px 20px',
+        background: 'var(--color-surface)',
+        borderBottom: '1px solid var(--color-border)',
+        padding: '12px 16px',
         display: 'flex', alignItems: 'center', gap: 12,
         position: 'sticky', top: 0, zIndex: 100,
+        boxShadow: 'var(--shadow-xs)',
       }}>
-        <a href="/kasir/pos" aria-label="Kembali ke POS" style={{ color: 'var(--color-sidebar-muted)', display: 'flex' }}>
+        <Link
+          href="/kasir/pos"
+          aria-label="Kembali ke POS"
+          style={{
+            background: 'var(--color-surface-muted)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 10,
+            color: 'var(--color-text)',
+            minWidth: 44,
+            minHeight: 44,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+            textDecoration: 'none',
+          }}
+        >
           <ChevronLeft size={20} />
-        </a>
-        <ArrowLeftRight size={18} style={{ color: 'var(--color-primary)' }} />
-        <div>
-          <h1 style={{ fontSize: 'var(--text-base)', fontWeight: 'var(--weight-bold)', color: 'var(--color-sidebar-fg)', margin: 0 }}>
-            Ajukan Tukar Shift
+        </Link>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h1 style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>
+            Tukar Shift
           </h1>
-          <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-sidebar-muted)', margin: 0 }}>
-            Tukar 2 arah otomatis setelah rekan setuju · Slot kosong otomatis 5 menit
+          <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: 0 }}>
+            Tukar jadwal dengan rekan shift
           </p>
         </div>
         <button
+          type="button"
           onClick={() => void fetchAll()}
-          style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--color-sidebar-muted)', cursor: 'pointer', padding: 4 }}
-          aria-label="Refresh"
+          style={{
+            background: 'var(--color-surface-muted)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 10,
+            color: 'var(--color-text)',
+            minWidth: 44,
+            minHeight: 44,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+          aria-label="Segarkan jadwal"
         >
           <RefreshCw size={16} />
         </button>
       </div>
 
-      <div style={{ padding: '20px 16px', maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ padding: '16px', maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--color-text-muted)' }}>
-            <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+            <Loader2 size={28} className="spin-icon" style={{ margin: '0 auto 12px' }} />
             <p style={{ fontSize: 'var(--text-sm)' }}>Memuat data jadwal...</p>
           </div>
         ) : (
           <>
-            {/* ── Inbox Permintaan Tukar Masuk dari Rekan (K4) ── */}
+            {/* ── Inbox Permintaan Tukar Masuk dari Rekan ── */}
             {incoming.length > 0 && (
               <section className="card" style={{
-                background: 'rgba(59, 130, 246, 0.04)',
-                border: '1.5px solid rgba(59, 130, 246, 0.35)',
-                boxShadow: 'var(--shadow-md)',
+                background: 'hsl(150 45% 97%)',
+                border: '1.5px solid hsl(150 55% 72%)',
+                boxShadow: 'var(--shadow-sm)',
               }}>
-                <div className="card-body" style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ArrowLeftRight size={18} style={{ color: 'var(--color-primary)' }} />
-                      <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 700, margin: 0, color: 'var(--color-primary)' }}>
-                        Permintaan Tukar Masuk ({incoming.length})
-                      </h2>
-                    </div>
-                    <span style={{ fontSize: 11, background: 'var(--color-primary)', color: '#fff', padding: '2px 8px', borderRadius: 9999, fontWeight: 700 }}>
-                      K4 2-Arah
-                    </span>
+                <div className="card-body" style={{ padding: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <ArrowLeftRight size={17} style={{ color: 'var(--color-primary)' }} />
+                    <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 700, margin: 0, color: 'var(--color-primary)' }}>
+                      Permintaan Tukar Masuk ({incoming.length})
+                    </h2>
                   </div>
 
                   <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: '0 0 12px 0', lineHeight: 1.4 }}>
-                    Rekan kerja berikut mengajak Anda bertukar jadwal shift. Jika Anda setuju, jadwal kedua belah pihak akan otomatis bertukar!
+                    Jika disetujui, jadwal Anda dan rekan akan otomatis tertukar.
                   </p>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {incoming.map((req) => (
                       <div
                         key={req.id}
@@ -320,11 +346,11 @@ export default function TukarShiftPage() {
                           padding: '12px 14px',
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
                           <span style={{ fontWeight: 700, fontSize: 13 }}>
                             {req.requester?.fullName ?? 'Rekan Kerja'} ({req.requester?.nim ?? '—'})
                           </span>
-                          <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', flexShrink: 0 }}>
                             {new Date(req.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
                           </span>
                         </div>
@@ -334,7 +360,7 @@ export default function TukarShiftPage() {
                           padding: '8px 10px',
                           borderRadius: 8,
                           fontSize: 12,
-                          marginBottom: 8,
+                          marginBottom: 10,
                           display: 'flex',
                           flexDirection: 'column',
                           gap: 4,
@@ -357,8 +383,17 @@ export default function TukarShiftPage() {
                             type="button"
                             onClick={() => handlePeerAction(req.id, 'REJECT')}
                             disabled={actionLoadingId === req.id}
-                            className="btn btn-secondary btn-sm"
-                            style={{ color: 'var(--color-error)' }}
+                            style={{
+                              minHeight: 38,
+                              padding: '6px 14px',
+                              borderRadius: 8,
+                              border: '1px solid hsl(0 72% 80%)',
+                              background: 'hsl(0 84% 97%)',
+                              color: 'hsl(0 72% 40%)',
+                              fontSize: 13,
+                              fontWeight: 600,
+                              cursor: actionLoadingId === req.id ? 'not-allowed' : 'pointer',
+                            }}
                           >
                             Tolak
                           </button>
@@ -367,14 +402,14 @@ export default function TukarShiftPage() {
                             onClick={() => handlePeerAction(req.id, 'APPROVE')}
                             disabled={actionLoadingId === req.id}
                             className="btn btn-primary btn-sm"
-                            style={{ fontWeight: 700 }}
+                            style={{ minHeight: 38, fontWeight: 700 }}
                           >
                             {actionLoadingId === req.id ? (
                               <Loader2 size={13} className="spin-icon" />
                             ) : (
                               <CheckCircle size={13} />
                             )}
-                            Setujui Tukar Jadwal
+                            Setujui
                           </button>
                         </div>
                       </div>
@@ -386,7 +421,7 @@ export default function TukarShiftPage() {
 
             {/* Jadwal Anda */}
             <section className="card">
-              <div className="card-body" style={{ padding: '16px 20px' }}>
+              <div className="card-body" style={{ padding: '16px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                   <Calendar size={16} style={{ color: 'var(--color-primary)' }} />
                   <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', margin: 0 }}>
@@ -404,7 +439,7 @@ export default function TukarShiftPage() {
                         display: 'inline-flex', alignItems: 'center', gap: 6,
                         background: 'hsl(142 70% 45% / 0.12)',
                         color: 'hsl(142 55% 35%)',
-                        padding: '4px 12px', borderRadius: '999px',
+                        padding: '5px 12px', borderRadius: '999px',
                         fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)',
                       }}>
                         <Clock size={11} />
@@ -419,11 +454,11 @@ export default function TukarShiftPage() {
             {/* Form pengajuan */}
             {jadwalSaya.length > 0 ? (
               <section className="card">
-                <div className="card-body" style={{ padding: '16px 20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                <div className="card-body" style={{ padding: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                     <ArrowLeftRight size={16} style={{ color: 'var(--color-primary)' }} />
                     <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', margin: 0 }}>
-                      Formulir Pengajuan Pertukaran Jadwal
+                      Ajukan Tukar Shift
                     </h2>
                   </div>
 
@@ -431,11 +466,11 @@ export default function TukarShiftPage() {
                     {/* Dari jadwal mana */}
                     <div>
                       <label className="form-label" htmlFor="from-schedule">
-                        Jadwal Shift yang Diajukan untuk Pertukaran *
+                        Jadwal Anda yang Ditukar *
                       </label>
                       <select
                         id="from-schedule"
-                        className="form-input"
+                        className="form-input form-select"
                         value={fromId}
                         onChange={e => setFromId(e.target.value)}
                         required
@@ -451,21 +486,21 @@ export default function TukarShiftPage() {
                     {/* Ke jadwal mana */}
                     <div>
                       <label className="form-label" htmlFor="to-schedule">
-                        Jadwal Shift Tujuan (Milik Rekan Kerja) *
+                        Tukar dengan Jadwal Rekan *
                       </label>
                       {filteredSlot.length === 0 ? (
                         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                          Tidak terdapat slot jadwal tujuan yang tersedia saat ini.
+                          Belum ada jadwal rekan yang tersedia saat ini.
                         </p>
                       ) : (
                         <select
                           id="to-schedule"
-                          className="form-input"
+                          className="form-input form-select"
                           value={toId}
                           onChange={e => setToId(e.target.value)}
                           required
                         >
-                          <option value="">-- Pilih jadwal shift tujuan --</option>
+                          <option value="">-- Pilih jadwal rekan --</option>
                           {filteredSlot.map(s => (
                             <option key={s.id} value={s.id}>
                               {formatShiftLabel(s.dayOfWeek, s.slotStart, s.slotEnd)} — {s.employeeName}
@@ -478,13 +513,13 @@ export default function TukarShiftPage() {
                     {/* Alasan */}
                     <div>
                       <label className="form-label" htmlFor="reason">
-                        Alasan Pengajuan * <span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}>(min. 10 karakter)</span>
+                        Alasan * <span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}>(min. 10 karakter)</span>
                       </label>
                       <textarea
                         id="reason"
                         className="form-input"
                         rows={3}
-                        placeholder="Contoh: Mengikuti kegiatan akademik / keperluan mendesak pada hari tersebut..."
+                        placeholder="Contoh: Ada jadwal kuliah atau keperluan mendesak..."
                         value={reason}
                         onChange={e => setReason(e.target.value)}
                         required
@@ -501,11 +536,11 @@ export default function TukarShiftPage() {
                       type="submit"
                       className="btn btn-primary"
                       disabled={submitting || !fromId || !toId || reason.trim().length < 10}
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 44 }}
                     >
                       {submitting
-                        ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Mengirim Pengajuan...</>
-                        : <><Send size={15} /> Kirim Pengajuan Pertukaran</>}
+                        ? <><Loader2 size={15} className="spin-icon" /> Mengirim...</>
+                        : <><Send size={15} /> Kirim Pengajuan</>}
                     </button>
                   </form>
                 </div>
@@ -514,9 +549,9 @@ export default function TukarShiftPage() {
 
             {/* Riwayat pengajuan */}
             <section className="card">
-              <div className="card-body" style={{ padding: '16px 20px' }}>
-                <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', marginBottom: 14 }}>
-                  Riwayat Pengajuan Pertukaran Jadwal Anda
+              <div className="card-body" style={{ padding: '16px' }}>
+                <h2 style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-semibold)', marginBottom: 12 }}>
+                  Riwayat Pengajuan
                 </h2>
 
                 {history.length === 0 ? (
