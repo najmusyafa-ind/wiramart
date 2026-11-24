@@ -149,16 +149,16 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
         if (triggerScan && json.data.scanMeta) {
           const { scannedBatches, newAlerts, updatedAlerts } = json.data.scanMeta;
           showToast(
-            `Radar FEFO: ${scannedBatches} batch dipindai. +${newAlerts} alert baru, ${updatedAlerts} diperbarui.`,
+            `Pemindaian selesai: ${scannedBatches} batch diperiksa. +${newAlerts} baru, ${updatedAlerts} diperbarui.`,
             'success',
           );
           if (onBadgeUpdateRef.current) onBadgeUpdateRef.current();
         }
       } else {
-        showToast(json.error || 'Gagal memuat To-Do List FEFO', 'error');
+        showToast(json.error || 'Gagal memuat daftar kedaluwarsa', 'error');
       }
     } catch {
-      showToast('Koneksi terputus saat mengambil data FEFO', 'error');
+      showToast('Koneksi terputus saat mengambil data kedaluwarsa', 'error');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -175,12 +175,12 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
         if (json.success && json.data) {
           setItems(json.data.items ?? []);
         } else {
-          showToast(json.error || 'Gagal memuat To-Do List FEFO', 'error');
+          showToast(json.error || 'Gagal memuat daftar kedaluwarsa', 'error');
         }
       })
       .catch(() => {
         if (!controller.signal.aborted) {
-          showToast('Koneksi terputus saat mengambil data FEFO', 'error');
+          showToast('Koneksi terputus saat mengambil data kedaluwarsa', 'error');
         }
       })
       .finally(() => {
@@ -223,7 +223,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
             : !expiredNow && gudangSuggestion === 'RELOCATE'
             ? 'Usul Pindah ke Rak Display Depan'
             : gudangSuggestion === 'DISPOSE'
-            ? 'Usul Pemusnahan / Write-off'
+            ? 'Usul Pemusnahan'
             : 'Usul Retur ke Supplier',
         suggestedDiscountPct:
           !expiredNow && gudangSuggestion === 'DISCOUNT' ? suggestedDiscountPct : null,
@@ -359,6 +359,14 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
     H7: items.filter((i) => i.alertLevel === 'H7' && i.status !== 'EXECUTED').length,
   };
 
+  const DECISION_LABELS: Record<ManagerDecision, string> = {
+    DISCOUNT: 'Diskon Obral',
+    DISPLAY_FRONT: 'Pajang Rak Depan',
+    DESTROY: 'Musnahkan',
+    RETURN_SUPPLIER: 'Retur ke Supplier',
+    HOLD: 'Tahan Sementara',
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
       {/* ── Toast Notifikasi ─────────────────────────────────── */}
@@ -367,12 +375,14 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
           style={{
             position: 'fixed',
             bottom: 24,
-            right: 24,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            maxWidth: 'calc(100vw - 32px)',
             zIndex: 9999,
             padding: '12px 18px',
-            borderRadius: 8,
+            borderRadius: 10,
             backgroundColor:
-              toastMsg.type === 'success' ? '#059669' : toastMsg.type === 'error' ? '#dc2626' : '#2563eb',
+              toastMsg.type === 'success' ? '#059669' : toastMsg.type === 'error' ? '#dc2626' : '#15803d',
             color: '#fff',
             fontSize: '0.85rem',
             fontWeight: 600,
@@ -388,7 +398,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
         </div>
       )}
 
-      {/* ── Header & Radar Trigger ───────────────────────────── */}
+      {/* ── Header & Pemindaian Kedaluwarsa ─────────────────── */}
       <div
         style={{
           background: 'linear-gradient(135deg, hsl(24 95% 97%) 0%, hsl(30 100% 98%) 100%)',
@@ -402,7 +412,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
               <span
                 style={{
                   background: 'hsl(14 90% 50%)',
@@ -414,15 +424,15 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                   letterSpacing: 0.5,
                 }}
               >
-                FEFO RADAR v3.0
+                PANTAU KEDALUWARSA
               </span>
               <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-bold)', color: 'hsl(20 80% 20%)', margin: 0 }}>
-                To-Do List Pemeriksaan & Penanganan Kedaluwarsa
+                Pemeriksaan &amp; Penanganan Kedaluwarsa
               </h2>
             </div>
             <p style={{ fontSize: '0.82rem', color: 'hsl(20 40% 40%)', margin: 0, maxWidth: 650, lineHeight: 1.45 }}>
-              Deteksi otomatis batch yang mendekati masa kedaluwarsa. Petugas gudang wajib memeriksa kondisi fisik,
-              memberikan saran penanganan, dan mencetak stiker obral darurat jika disetujui Manager.
+              Daftar batch yang mendekati masa kedaluwarsa. Periksa kondisi fisik, ajukan saran penanganan,
+              dan cetak stiker diskon obral jika disetujui.
             </p>
           </div>
 
@@ -445,8 +455,8 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                 fontWeight: 600,
               }}
             >
-              <RefreshCw size={14} className={scanningRadar ? 'animate-spin' : ''} />
-              {scanningRadar ? 'Memindai...' : 'Scan Radar FEFO'}
+              <RefreshCw size={14} className={scanningRadar ? 'spin-icon' : ''} />
+              {scanningRadar ? 'Memindai...' : 'Pindai Ulang'}
             </button>
           </div>
         </div>
@@ -468,7 +478,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
             },
             {
               key: 'H3' as const,
-              label: 'H-3 Urgent',
+              label: 'H-3 Mendesak',
               count: counts.H3,
               Icon: Zap,
               iconColor: '#f97316',
@@ -480,7 +490,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
             },
             {
               key: 'H5' as const,
-              label: 'H-5 Warning',
+              label: 'H-5 Waspada',
               count: counts.H5,
               Icon: AlertTriangle,
               iconColor: '#ca8a04',
@@ -492,15 +502,15 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
             },
             {
               key: 'H7' as const,
-              label: 'H-7 Watch',
+              label: 'H-7 Pantau',
               count: counts.H7,
               Icon: Eye,
-              iconColor: '#3b82f6',
-              activeBg: 'hsl(215 100% 96%)',
-              activeBorder: '1.5px solid #3b82f6',
-              inactiveBorder: '1px solid hsl(215 60% 90%)',
-              labelColor: '#1e40af',
-              countColor: '#2563eb',
+              iconColor: '#15803d',
+              activeBg: '#f0fdf4',
+              activeBorder: '1.5px solid #16a34a',
+              inactiveBorder: '1px solid #bbf7d0',
+              labelColor: '#166534',
+              countColor: '#15803d',
             },
           ]).map((pill) => {
             const isActive = alertFilter === pill.key;
@@ -565,6 +575,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
           </div>
 
           <select
+            className="form-select"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as ReportStatus | 'semua')}
             style={{
@@ -591,8 +602,8 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
       {/* ── List / Cards To-Do Gudang ────────────────────────── */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: 'var(--space-10)', color: '#64748b' }}>
-          <RefreshCw size={28} className="animate-spin" style={{ margin: '0 auto 12px' }} />
-          <p style={{ fontSize: '0.85rem' }}>Memuat To-Do List kedaluwarsa FEFO...</p>
+          <RefreshCw size={28} className="spin-icon" style={{ margin: '0 auto 12px' }} />
+          <p style={{ fontSize: '0.85rem' }}>Memuat daftar kedaluwarsa...</p>
         </div>
       ) : items.length === 0 ? (
         <div
@@ -704,8 +715,8 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                       }}
                     >
                       {item.status === 'ALERT_ONLY' && 'Belum Dicek'}
-                      {item.status === 'SUBMITTED' && 'Menunggu ACC Manager'}
-                      {item.status === 'APPROVED' && `Disetujui: ${item.managerDecision}`}
+                      {item.status === 'SUBMITTED' && 'Menunggu Persetujuan'}
+                      {item.status === 'APPROVED' && `Disetujui: ${item.managerDecision ? DECISION_LABELS[item.managerDecision] : '—'}`}
                       {item.status === 'EXECUTED' && 'Selesai Ditangani'}
                       {item.status === 'REJECTED' && 'Ditolak Manager'}
                     </span>
@@ -1019,7 +1030,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                   lineHeight: 1.45,
                 }}
               >
-                BARANG SUDAH KEDALUWARSA (ED: {laporModalItem.expiryDate}). Dilarang didiskon atau dijual kembali! Pilih <strong>Musnahkan (Write-Off)</strong> atau <strong>Retur ke Supplier</strong> untuk menolkan stok batch ini setelah di-ACC Manager.
+                BARANG SUDAH KEDALUWARSA (ED: {laporModalItem.expiryDate}). Dilarang didiskon atau dijual kembali! Pilih <strong>Musnahkan</strong> atau <strong>Retur ke Supplier</strong> untuk menolkan stok batch ini setelah disetujui Manager.
               </div>
             )}
 
@@ -1029,6 +1040,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
                 Rekomendasi Tindakan Petugas Gudang
               </label>
               <select
+                className="form-select"
                 value={gudangSuggestion}
                 onChange={(e) => setGudangSuggestion(e.target.value)}
                 style={{
@@ -1170,7 +1182,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
             </div>
 
             <p style={{ fontSize: '0.8rem', color: '#64748b', margin: 0 }}>
-              Tempel stiker ini pada kemasan fisik barang. Saat kasir men-scan barcode ini, harga otomatis ter-override
+              Tempel stiker ini pada kemasan fisik barang. Saat kasir memindai barcode ini, harga otomatis berubah
               menjadi harga diskon secara resmi.
             </p>
 
@@ -1344,7 +1356,7 @@ export default function FEFOActionSection({ onBadgeUpdate }: FEFOActionSectionPr
 
             <div style={{ padding: '8px 12px', background: '#ecfdf5', borderRadius: 8, fontSize: '0.8rem', border: '1px solid #a7f3d0' }}>
               <div style={{ fontWeight: 700, color: '#065f46' }}>
-                Keputusan Manager: {executeModalItem.managerDecision}
+                Keputusan Manager: {executeModalItem.managerDecision ? DECISION_LABELS[executeModalItem.managerDecision] : '—'}
                 {executeModalItem.approvedDiscountPct && ` (${executeModalItem.approvedDiscountPct}% OFF)`}
               </div>
               <div style={{ color: '#047857', marginTop: 2 }}>

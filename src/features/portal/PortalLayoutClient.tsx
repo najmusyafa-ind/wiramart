@@ -91,7 +91,7 @@ function buildPortalNavItems(adminRole: 'MANAGER' | 'ADMIN_SHIFT'): NavItem[] {
       section: 'Produk & Gudang',
     },
     {
-      label: 'Portal Gudang (FEFO)',
+      label: 'Portal Gudang',
       href: GUDANG_BASE_PATH,
       icon: <Boxes size={18} aria-hidden="true" />,
       section: 'Produk & Gudang',

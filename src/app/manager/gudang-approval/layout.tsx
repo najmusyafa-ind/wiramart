@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { requireManagerActor } from '@/features/portal/server-auth';
 
 export const metadata: Metadata = {
-  title: 'Approval Gudang & FEFO',
+  title: 'Persetujuan Gudang',
 };
 
 export default async function GudangApprovalLayout({

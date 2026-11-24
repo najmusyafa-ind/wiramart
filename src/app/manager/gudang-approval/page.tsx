@@ -137,6 +137,23 @@ function getTodayWibIsoManager(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
 }
 
+function formatDecisionLabel(decision: ManagerDecision | null | undefined): string {
+  switch (decision) {
+    case 'DISCOUNT':
+      return 'Diskon Obral';
+    case 'DISPLAY_FRONT':
+      return 'Pajang Rak Depan';
+    case 'DESTROY':
+      return 'Musnahkan';
+    case 'RETURN_SUPPLIER':
+      return 'Retur ke Supplier';
+    case 'HOLD':
+      return 'Tahan Sementara';
+    default:
+      return decision || '—';
+  }
+}
+
 type ModTodayStatus = {
   isCheckedIn: boolean;
   isCheckedOut: boolean;
@@ -221,6 +238,8 @@ export default function GudangApprovalPage() {
   });
   const [submittingSupplier, setSubmittingSupplier] = useState(false);
   const [supplierError, setSupplierError] = useState<string | null>(null);
+  const [confirmDeleteSupplier, setConfirmDeleteSupplier] = useState<{ id: string; name: string } | null>(null);
+  const [deletingSupplier, setDeletingSupplier] = useState(false);
 
   // State Penerimaan Barang (Fase 1)
   const [activeTab, setActiveTab] = useState<'submitted' | 'semua' | 'approved' | 'revised' | 'rejected'>('submitted');
@@ -520,19 +539,26 @@ export default function GudangApprovalPage() {
   }
 
   // ── Hapus / Soft Delete Supplier ─────────────────────────────
-  async function handleDeleteSupplier(id: string, name: string) {
-    if (!confirm(`Hapus pemasok "${name}" dari sistem?`)) return;
+  async function handleConfirmDeleteSupplier() {
+    if (!confirmDeleteSupplier) return;
+    const { id, name } = confirmDeleteSupplier;
+    setDeletingSupplier(true);
     try {
       const res = await fetch(`/api/admin/suppliers/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (res.ok && json.success) {
         setSuccessToast(`Pemasok "${name}" berhasil dihapus.`);
+        setConfirmDeleteSupplier(null);
         fetchSuppliers();
       } else {
-        alert(json.error ?? 'Gagal menghapus pemasok.');
+        setErrorMsg(json.error ?? 'Gagal menghapus pemasok.');
+        setConfirmDeleteSupplier(null);
       }
     } catch {
-      alert('Gagal terhubung ke server.');
+      setErrorMsg('Gagal terhubung ke server.');
+      setConfirmDeleteSupplier(null);
+    } finally {
+      setDeletingSupplier(false);
     }
   }
 
@@ -651,10 +677,10 @@ export default function GudangApprovalPage() {
 
       if (json.data?.discountBarcode) {
         setCreatedBarcodeToast(
-          `Diskon ${approvedDiscountPct}% disetujui! Barcode override diterbitkan: ${json.data.discountBarcode}`,
+          `Diskon ${approvedDiscountPct}% disetujui. Barcode diskon diterbitkan: ${json.data.discountBarcode}`,
         );
       } else {
-        setSuccessToast(`Keputusan ${fefoDecision} berhasil ditetapkan untuk produk ${selectedFefo.productName}.`);
+        setSuccessToast(`Keputusan ${formatDecisionLabel(fefoDecision)} berhasil ditetapkan untuk produk ${selectedFefo.productName}.`);
       }
 
       setSelectedFefo(null);
@@ -933,21 +959,22 @@ export default function GudangApprovalPage() {
               width: 46,
               height: 46,
               borderRadius: 12,
-              background: '#e0f2fe',
-              color: '#0284c7',
+              background: '#dcfce7',
+              color: '#15803d',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              flexShrink: 0,
             }}
           >
             <ShieldCheck size={26} />
           </div>
           <div>
             <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>
-              Persetujuan Barang Masuk & FEFO
+              Persetujuan Gudang
             </h1>
             <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: '#64748b' }}>
-              Auto-Checklist jeda 5 menit untuk barang masuk · Admin Shift & Manager dapat meninjau, merevisi, atau menetapkan diskon FEFO.
+              Tinjau barang masuk, keputusan stok mendekati kedaluwarsa, data pemasok, dan mutasi stok.
             </p>
           </div>
         </div>
@@ -956,10 +983,12 @@ export default function GudangApprovalPage() {
           type="button"
           onClick={() => {
             if (mainSection === 'PENERIMAAN') fetchSubmissions(activeTab);
-            else fetchFefoReports(fefoStatusFilter);
+            else if (mainSection === 'FEFO') fetchFefoReports(fefoStatusFilter);
+            else if (mainSection === 'SUPPLIERS') fetchSuppliers();
           }}
           style={{
-            padding: '9px 14px',
+            minHeight: 40,
+            padding: '8px 14px',
             borderRadius: 10,
             border: '1px solid #cbd5e1',
             background: '#ffffff',
@@ -972,15 +1001,15 @@ export default function GudangApprovalPage() {
             gap: 6,
           }}
         >
-          <RefreshCw size={14} className={loading || loadingFefo ? 'animate-spin' : ''} /> Segarkan Data
+          <RefreshCw size={14} className={loading || loadingFefo || loadingSuppliers ? 'spin-icon' : ''} /> Segarkan Data
         </button>
       </div>
 
-      {/* ── AUTO-CHECKLIST JEDA 5 MENIT BANNER ── */}
+      {/* ── INFO PERSETUJUAN OTOMATIS 5 MENIT ── */}
       <div
         style={{
           background: '#f0fdf4',
-          border: '1px solid #86efac',
+          border: '1px solid #bbf7d0',
           borderRadius: 10,
           padding: '10px 14px',
           display: 'flex',
@@ -995,7 +1024,7 @@ export default function GudangApprovalPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <ShieldCheck size={17} color="#16a34a" style={{ flexShrink: 0 }} />
           <span>
-            <strong>Auto-Checklist Jeda 5 Menit Aktif:</strong> Pengajuan barang masuk dengan margin &amp; tanggal kadaluwarsa valid otomatis masuk stok setelah 5 menit tanpa perlu menunggu Dosen login. Item bermasalah tetap ditahan untuk cek manual.
+            <strong>Persetujuan Otomatis 5 Menit Aktif:</strong> Pengajuan barang masuk dengan data margin &amp; tanggal kedaluwarsa lengkap otomatis masuk stok setelah 5 menit. Item yang perlu perhatian tetap ditahan untuk cek manual.
           </span>
         </div>
         {modStatus?.isCheckedIn && (
@@ -1005,38 +1034,26 @@ export default function GudangApprovalPage() {
         )}
       </div>
 
-      {/* ── TOP-LEVEL EXECUTIVE TAB SWITCHER ── */}
-      <div style={{ display: 'flex', gap: 10, borderBottom: '2px solid #e2e8f0', paddingBottom: 2, overflowX: 'auto' }}>
+      {/* ── TAB UTAMA PERSETUJUAN GUDANG ── */}
+      <div className="rep-tabs" role="tablist" aria-label="Kategori Persetujuan Gudang">
         <button
           type="button"
+          role="tab"
+          aria-selected={mainSection === 'PENERIMAAN'}
+          className={`rep-tab${mainSection === 'PENERIMAAN' ? ' active' : ''}`}
           onClick={() => setMainSection('PENERIMAAN')}
-          style={{
-            padding: '10px 18px',
-            fontSize: '0.88rem',
-            fontWeight: 800,
-            borderRadius: '10px 10px 0 0',
-            border: 'none',
-            background: mainSection === 'PENERIMAAN' ? '#0284c7' : 'transparent',
-            color: mainSection === 'PENERIMAAN' ? '#ffffff' : '#64748b',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            whiteSpace: 'nowrap',
-            transition: 'all 0.15s ease',
-          }}
         >
-          <Truck size={17} />
-          <span>Barang Masuk (ACC 2-Layer)</span>
+          <Truck size={16} />
+          <span>Barang Masuk</span>
           {pendingCount > 0 && (
             <span
               style={{
-                background: mainSection === 'PENERIMAAN' ? '#ffffff' : '#0284c7',
-                color: mainSection === 'PENERIMAAN' ? '#0284c7' : '#ffffff',
-                padding: '2px 7px',
-                borderRadius: 12,
-                fontSize: '0.72rem',
-                fontWeight: 900,
+                background: '#dc2626',
+                color: '#ffffff',
+                padding: '1px 7px',
+                borderRadius: 999,
+                fontSize: '0.7rem',
+                fontWeight: 800,
               }}
             >
               {pendingCount}
@@ -1046,37 +1063,25 @@ export default function GudangApprovalPage() {
 
         <button
           type="button"
+          role="tab"
+          aria-selected={mainSection === 'FEFO'}
+          className={`rep-tab${mainSection === 'FEFO' ? ' active' : ''}`}
           onClick={() => {
             setMainSection('FEFO');
             fetchFefoReports();
           }}
-          style={{
-            padding: '10px 18px',
-            fontSize: '0.88rem',
-            fontWeight: 800,
-            borderRadius: '10px 10px 0 0',
-            border: 'none',
-            background: mainSection === 'FEFO' ? '#ea580c' : 'transparent',
-            color: mainSection === 'FEFO' ? '#ffffff' : '#64748b',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            whiteSpace: 'nowrap',
-            transition: 'all 0.15s ease',
-          }}
         >
-          <Flame size={17} />
-          <span>Persetujuan Diskon & FEFO</span>
+          <Flame size={16} />
+          <span>Kondisi &amp; Diskon</span>
           {pendingFefoCount > 0 && (
             <span
               style={{
-                background: mainSection === 'FEFO' ? '#ffffff' : '#ea580c',
-                color: mainSection === 'FEFO' ? '#ea580c' : '#ffffff',
-                padding: '2px 7px',
-                borderRadius: 12,
-                fontSize: '0.72rem',
-                fontWeight: 900,
+                background: '#ea580c',
+                color: '#ffffff',
+                padding: '1px 7px',
+                borderRadius: 999,
+                fontSize: '0.7rem',
+                fontWeight: 800,
               }}
             >
               {pendingFefoCount}
@@ -1086,37 +1091,25 @@ export default function GudangApprovalPage() {
 
         <button
           type="button"
+          role="tab"
+          aria-selected={mainSection === 'SUPPLIERS'}
+          className={`rep-tab${mainSection === 'SUPPLIERS' ? ' active' : ''}`}
           onClick={() => {
             setMainSection('SUPPLIERS');
             fetchSuppliers();
           }}
-          style={{
-            padding: '10px 18px',
-            fontSize: '0.88rem',
-            fontWeight: 800,
-            borderRadius: '10px 10px 0 0',
-            border: 'none',
-            background: mainSection === 'SUPPLIERS' ? '#16a34a' : 'transparent',
-            color: mainSection === 'SUPPLIERS' ? '#ffffff' : '#64748b',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            whiteSpace: 'nowrap',
-            transition: 'all 0.15s ease',
-          }}
         >
-          <Building2 size={17} />
-          <span>Database Supplier</span>
+          <Building2 size={16} />
+          <span>Pemasok</span>
           {suppliers.length > 0 && (
             <span
               style={{
-                background: mainSection === 'SUPPLIERS' ? '#ffffff' : '#16a34a',
-                color: mainSection === 'SUPPLIERS' ? '#16a34a' : '#ffffff',
-                padding: '2px 7px',
-                borderRadius: 12,
-                fontSize: '0.72rem',
-                fontWeight: 900,
+                background: '#dcfce7',
+                color: '#15803d',
+                padding: '1px 7px',
+                borderRadius: 999,
+                fontSize: '0.7rem',
+                fontWeight: 800,
               }}
             >
               {suppliers.length}
@@ -1126,25 +1119,13 @@ export default function GudangApprovalPage() {
 
         <button
           type="button"
+          role="tab"
+          aria-selected={mainSection === 'MUTASI'}
+          className={`rep-tab${mainSection === 'MUTASI' ? ' active' : ''}`}
           onClick={() => setMainSection('MUTASI')}
-          style={{
-            padding: '10px 18px',
-            fontSize: '0.88rem',
-            fontWeight: 800,
-            borderRadius: '10px 10px 0 0',
-            border: 'none',
-            background: mainSection === 'MUTASI' ? '#0f172a' : 'transparent',
-            color: mainSection === 'MUTASI' ? '#ffffff' : '#64748b',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            whiteSpace: 'nowrap',
-            transition: 'all 0.15s ease',
-          }}
         >
-          <FileSpreadsheet size={17} />
-          <span>Laporan Mutasi Stok (Excel)</span>
+          <FileSpreadsheet size={16} />
+          <span>Mutasi Stok</span>
         </button>
       </div>
 
@@ -1196,11 +1177,11 @@ export default function GudangApprovalPage() {
       {mainSection === 'PENERIMAAN' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* ── FILTER TABS ── */}
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+          <div className="rep-chip-bar">
         {[
-          { id: 'submitted', label: 'Antrian Menunggu ACC', badge: pendingCount > 0 ? pendingCount : null },
-          { id: 'semua', label: 'Semua Status' },
-          { id: 'approved', label: 'Telah Disetujui' },
+          { id: 'submitted', label: 'Menunggu', badge: pendingCount > 0 ? pendingCount : null },
+          { id: 'semua', label: 'Semua' },
+          { id: 'approved', label: 'Disetujui' },
           { id: 'revised', label: 'Perlu Revisi' },
           { id: 'rejected', label: 'Ditolak' },
         ].map((tab) => {
@@ -1209,22 +1190,8 @@ export default function GudangApprovalPage() {
             <button
               key={tab.id}
               type="button"
+              className={`rep-chip${isActive ? ' active' : ''}`}
               onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              style={{
-                padding: '9px 16px',
-                borderRadius: 22,
-                fontSize: '0.82rem',
-                fontWeight: isActive ? 800 : 500,
-                border: isActive ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                backgroundColor: isActive ? '#e0f2fe' : '#ffffff',
-                color: isActive ? '#0369a1' : '#475569',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
-              }}
             >
               <span>{tab.label}</span>
               {tab.badge !== null && tab.badge !== undefined && (
@@ -1232,10 +1199,11 @@ export default function GudangApprovalPage() {
                   style={{
                     backgroundColor: '#ef4444',
                     color: '#ffffff',
-                    borderRadius: 10,
-                    padding: '1px 7px',
-                    fontSize: '0.72rem',
+                    borderRadius: 999,
+                    padding: '1px 6px',
+                    fontSize: '0.7rem',
                     fontWeight: 800,
+                    marginLeft: 4,
                   }}
                 >
                   {tab.badge}
@@ -1249,7 +1217,7 @@ export default function GudangApprovalPage() {
       {/* ── DAFTAR ANTRIAN PENERIMAAN ── */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: '60px 20px', background: '#ffffff', borderRadius: 16, border: '1px solid #e2e8f0', color: '#64748b' }}>
-          <RefreshCw size={28} className="animate-spin" style={{ margin: '0 auto 12px' }} />
+          <RefreshCw size={28} className="spin-icon" style={{ margin: '0 auto 12px' }} />
           <p style={{ margin: 0, fontSize: '0.9rem' }}>Memeriksa antrian penerimaan barang...</p>
         </div>
       ) : errorMsg ? (
@@ -1261,11 +1229,11 @@ export default function GudangApprovalPage() {
         <div style={{ textAlign: 'center', padding: '60px 20px', background: '#ffffff', borderRadius: 16, border: '1px solid #e2e8f0', color: '#64748b' }}>
           <Truck size={48} color="#cbd5e1" style={{ margin: '0 auto 14px' }} />
           <h3 style={{ margin: '0 0 6px 0', fontSize: '1rem', color: '#1e293b' }}>
-            {activeTab === 'submitted' ? 'Semua Beres! Tidak Ada Antrian Menunggu ACC' : 'Tidak Ada Data Penerimaan'}
+            {activeTab === 'submitted' ? 'Tidak Ada Antrian Menunggu' : 'Tidak Ada Data Penerimaan'}
           </h3>
           <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>
             {activeTab === 'submitted'
-              ? 'Seluruh kiriman barang yang diajukan petugas gudang telah Anda tindak lanjuti.'
+              ? 'Semua kiriman barang yang diajukan petugas gudang sudah ditindaklanjuti.'
               : `Belum ada riwayat pada status "${activeTab}".`}
           </p>
         </div>
@@ -1282,13 +1250,13 @@ export default function GudangApprovalPage() {
                   borderRadius: 14,
                   border:
                     sub.status === 'SUBMITTED'
-                      ? '1.5px solid #38bdf8'
+                      ? '1.5px solid #86efac'
                       : sub.status === 'APPROVED'
                         ? '1px solid #bbf7d0'
                         : sub.status === 'REVISED'
                           ? '1px solid #fed7aa'
                           : '1px solid #e2e8f0',
-                  boxShadow: sub.status === 'SUBMITTED' ? '0 4px 12px rgba(2, 132, 199, 0.08)' : '0 1px 3px rgba(0,0,0,0.03)',
+                  boxShadow: sub.status === 'SUBMITTED' ? '0 4px 12px rgba(22, 163, 74, 0.08)' : '0 1px 3px rgba(0,0,0,0.03)',
                   overflow: 'hidden',
                 }}
               >
@@ -1365,9 +1333,9 @@ export default function GudangApprovalPage() {
                       style={{
                         padding: '9px 12px',
                         borderRadius: 8,
-                        background: sub.autoChecklist.passed ? '#f0f9ff' : '#fffbeb',
-                        border: sub.autoChecklist.passed ? '1px solid #bae6fd' : '1px solid #fcd34d',
-                        color: sub.autoChecklist.passed ? '#0369a1' : '#b45309',
+                        background: sub.autoChecklist.passed ? '#f0fdf4' : '#fffbeb',
+                        border: sub.autoChecklist.passed ? '1px solid #bbf7d0' : '1px solid #fcd34d',
+                        color: sub.autoChecklist.passed ? '#15803d' : '#b45309',
                         fontSize: '0.78rem',
                         fontWeight: 700,
                         display: 'flex',
@@ -1379,14 +1347,14 @@ export default function GudangApprovalPage() {
                     >
                       {sub.autoChecklist.passed ? (
                         <span>
-                          Lolos Auto-Checklist · Otomatis masuk stok setelah jeda 5 menit
+                          Lolos pemeriksaan otomatis · Stok otomatis masuk setelah jeda 5 menit
                           {sub.autoChecklist.graceUntil
                             ? ` (pukul ${new Date(sub.autoChecklist.graceUntil).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false })} WIB)`
                             : ''}.
                         </span>
                       ) : (
                         <span>
-                          Perlu Cek Manual (Auto-ACC ditahan): {sub.autoChecklist.warnings.join(' | ')}
+                          Perlu Cek Manual: {sub.autoChecklist.warnings.join(' | ')}
                         </span>
                       )}
                     </div>
@@ -1423,27 +1391,29 @@ export default function GudangApprovalPage() {
                       style={{
                         background: 'transparent',
                         border: 'none',
-                        color: '#0284c7',
+                        color: '#15803d',
                         fontSize: '0.82rem',
                         fontWeight: 700,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         gap: 4,
-                        padding: 0,
+                        padding: '4px 0',
+                        minHeight: 36,
                       }}
                     >
                       {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                      {isExpanded ? 'Tutup Rincian Item' : 'Buka & Periksa Rincian Item'}
+                      {isExpanded ? 'Tutup Rincian Item' : 'Lihat Rincian Item'}
                     </button>
 
-                    {/* Tombol Otorisasi Manager (Hanya aktif saat status SUBMITTED) */}
+                    {/* Tombol Persetujuan (Hanya aktif saat status SUBMITTED) */}
                     {sub.status === 'SUBMITTED' && (
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button
                           type="button"
                           onClick={() => openActionModal(sub, 'REVISI')}
                           style={{
+                            minHeight: 38,
                             padding: '7px 14px',
                             borderRadius: 8,
                             border: '1px solid #fed7aa',
@@ -1464,6 +1434,7 @@ export default function GudangApprovalPage() {
                           type="button"
                           onClick={() => openActionModal(sub, 'TOLAK')}
                           style={{
+                            minHeight: 38,
                             padding: '7px 14px',
                             borderRadius: 8,
                             border: '1px solid #fecaca',
@@ -1484,6 +1455,7 @@ export default function GudangApprovalPage() {
                           type="button"
                           onClick={() => openActionModal(sub, 'APPROVE')}
                           style={{
+                            minHeight: 38,
                             padding: '7px 16px',
                             borderRadius: 8,
                             border: 'none',
@@ -1498,7 +1470,7 @@ export default function GudangApprovalPage() {
                             boxShadow: '0 2px 6px rgba(22, 163, 74, 0.3)',
                           }}
                         >
-                          <CheckCircle2 size={15} /> Setujui (ACC)
+                          <CheckCircle2 size={15} /> Setujui
                         </button>
                       </div>
                     )}
@@ -1510,16 +1482,16 @@ export default function GudangApprovalPage() {
                   <div style={{ borderTop: '1px solid #f1f5f9', background: '#fafafa', padding: '16px 18px' }}>
                     {loadingDetail || !expandedDetail ? (
                       <div style={{ textAlign: 'center', padding: '24px 0', color: '#64748b' }}>
-                        <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto 6px' }} />
+                        <RefreshCw size={20} className="spin-icon" style={{ margin: '0 auto 6px' }} />
                         <span style={{ fontSize: '0.8rem' }}>Mengambil rincian produk...</span>
                       </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                           <h4 style={{ margin: 0, fontSize: '0.88rem', fontWeight: 800, color: '#1e293b' }}>
                             Daftar Produk Masuk ({expandedDetail.items.length} jenis)
                           </h4>
-                          <span style={{ fontSize: '0.8rem', color: '#0369a1', fontWeight: 700 }}>
+                          <span style={{ fontSize: '0.8rem', color: '#15803d', fontWeight: 700 }}>
                             Total HPP: Rp{' '}
                             {expandedDetail.items
                               .reduce((sum, it) => sum + Number(it.costPrice) * it.qty, 0)
@@ -1527,8 +1499,8 @@ export default function GudangApprovalPage() {
                           </span>
                         </div>
 
-                        {/* Tabel Produk */}
-                        <div style={{ overflowX: 'auto' }}>
+                        {/* Tabel Produk (Desktop) */}
+                        <div className="rep-desktop-only" style={{ overflowX: 'auto' }}>
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left' }}>
                             <thead>
                               <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #e2e8f0' }}>
@@ -1536,7 +1508,7 @@ export default function GudangApprovalPage() {
                                 <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty</th>
                                 <th style={{ padding: '8px 10px', textAlign: 'right' }}>Harga Beli (HPP)</th>
                                 <th style={{ padding: '8px 10px', textAlign: 'right' }}>Subtotal</th>
-                                <th style={{ padding: '8px 10px' }}>Expired Date</th>
+                                <th style={{ padding: '8px 10px' }}>Kedaluwarsa</th>
                                 <th style={{ padding: '8px 10px' }}>Kode Batch</th>
                                 <th style={{ padding: '8px 10px', borderRadius: '0 6px 6px 0' }}>Kondisi Fisik</th>
                               </tr>
@@ -1560,7 +1532,7 @@ export default function GudangApprovalPage() {
                                               fontWeight: 800,
                                             }}
                                           >
-                                            PRODUK BARU (Menunggu ACC)
+                                            PRODUK BARU
                                           </span>
                                           {it.productCategoryName && (
                                             <span style={{ fontSize: '0.68rem', color: '#475569' }}>
@@ -1575,7 +1547,7 @@ export default function GudangApprovalPage() {
                                         </div>
                                       )}
                                     </td>
-                                    <td style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 800, color: '#0284c7' }}>
+                                    <td style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 800, color: '#15803d' }}>
                                       {it.qty}
                                     </td>
                                     <td style={{ padding: '10px 10px', textAlign: 'right', color: '#334155' }}>
@@ -1603,6 +1575,74 @@ export default function GudangApprovalPage() {
                             </tbody>
                           </table>
                         </div>
+
+                        {/* Kartu Produk (Mobile) */}
+                        <div className="rep-mobile-only" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          {expandedDetail.items.map((it, idx) => {
+                            const subtotal = Number(it.costPrice) * it.qty;
+                            return (
+                              <div key={idx} className="rep-mcard">
+                                <div className="rep-mcard__top">
+                                  <div>
+                                    <div style={{ fontWeight: 800, fontSize: '0.86rem', color: '#0f172a' }}>
+                                      {it.productName}
+                                    </div>
+                                    <div style={{ fontSize: '0.72rem', color: '#64748b', fontFamily: 'monospace', marginTop: 2 }}>
+                                      Batch: {it.batchCode}
+                                    </div>
+                                  </div>
+                                  {it.productIsActive === false && (
+                                    <span
+                                      style={{
+                                        padding: '2px 7px',
+                                        borderRadius: 6,
+                                        background: '#ede9fe',
+                                        color: '#6d28d9',
+                                        fontSize: '0.68rem',
+                                        fontWeight: 800,
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      PRODUK BARU
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="rep-mcard__grid">
+                                  <div>
+                                    <div className="rep-mcard__k">Qty</div>
+                                    <div className="rep-mcard__v" style={{ color: '#15803d' }}>
+                                      {it.qty} {it.productUnit || 'pcs'}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div className="rep-mcard__k">Harga Beli</div>
+                                    <div className="rep-mcard__v">Rp {Number(it.costPrice).toLocaleString('id-ID')}</div>
+                                  </div>
+                                  <div>
+                                    <div className="rep-mcard__k">Subtotal</div>
+                                    <div className="rep-mcard__v">Rp {subtotal.toLocaleString('id-ID')}</div>
+                                  </div>
+                                  <div>
+                                    <div className="rep-mcard__k">Kedaluwarsa</div>
+                                    <div className="rep-mcard__v" style={{ color: it.expiryDate ? '#d97706' : '#94a3b8' }}>
+                                      {it.expiryDate || '—'}
+                                    </div>
+                                  </div>
+                                </div>
+                                {(it.conditionNote || (it.productIsActive === false && it.productSellingPrice !== undefined)) && (
+                                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #f1f5f9', fontSize: '0.74rem', color: '#475569', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                    {it.productIsActive === false && it.productSellingPrice !== undefined && (
+                                      <span style={{ color: '#047857', fontWeight: 700 }}>
+                                        Usulan Harga Jual: Rp {Math.round(Number(it.productSellingPrice)).toLocaleString('id-ID')}
+                                      </span>
+                                    )}
+                                    {it.conditionNote && <span>Kondisi: {it.conditionNote}</span>}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1615,35 +1655,21 @@ export default function GudangApprovalPage() {
         </div>
       ) : mainSection === 'FEFO' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* ── FILTER TABS FEFO & SEARCH BAR ── */}
+          {/* ── FILTER LAPORAN KONDISI & SEARCH BAR ── */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+            <div className="rep-chip-bar">
               {[
                 { id: 'SUBMITTED', label: 'Menunggu Keputusan', badge: pendingFefoCount > 0 ? pendingFefoCount : null },
-                { id: 'APPROVED', label: 'Telah Disetujui / Diskon Aktif' },
-                { id: 'semua', label: 'Semua Laporan FEFO' },
+                { id: 'APPROVED', label: 'Disetujui / Diskon Aktif' },
+                { id: 'semua', label: 'Semua Laporan' },
               ].map((tab) => {
                 const isActive = fefoStatusFilter === tab.id;
                 return (
                   <button
                     key={tab.id}
                     type="button"
+                    className={`rep-chip${isActive ? ' active' : ''}`}
                     onClick={() => setFefoStatusFilter(tab.id as typeof fefoStatusFilter)}
-                    style={{
-                      padding: '9px 16px',
-                      borderRadius: 22,
-                      fontSize: '0.82rem',
-                      fontWeight: isActive ? 800 : 500,
-                      border: isActive ? '1.5px solid #ea580c' : '1px solid #cbd5e1',
-                      backgroundColor: isActive ? '#ffedd5' : '#ffffff',
-                      color: isActive ? '#9a3412' : '#475569',
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
-                    }}
                   >
                     <span>{tab.label}</span>
                     {tab.badge !== null && tab.badge !== undefined && (
@@ -1651,10 +1677,11 @@ export default function GudangApprovalPage() {
                         style={{
                           backgroundColor: '#ef4444',
                           color: '#ffffff',
-                          borderRadius: 10,
-                          padding: '1px 7px',
-                          fontSize: '0.72rem',
+                          borderRadius: 999,
+                          padding: '1px 6px',
+                          fontSize: '0.7rem',
                           fontWeight: 800,
+                          marginLeft: 4,
                         }}
                       >
                         {tab.badge}
@@ -1666,12 +1693,13 @@ export default function GudangApprovalPage() {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              {/* Tombol Export Excel Rekap FEFO */}
+              {/* Tombol Export Excel Rekap */}
               <button
                 type="button"
                 onClick={handleExportFefoExcel}
                 disabled={loadingFefo || exportingFefoExcel || fefoReports.length === 0}
                 style={{
+                  minHeight: 40,
                   padding: '8px 16px',
                   borderRadius: 10,
                   border: 'none',
@@ -1689,19 +1717,19 @@ export default function GudangApprovalPage() {
               >
                 {exportingFefoExcel ? (
                   <>
-                    <RefreshCw size={14} className="animate-spin" />
+                    <RefreshCw size={14} className="spin-icon" />
                     <span>Mengekspor...</span>
                   </>
                 ) : (
                   <>
-                    <FileSpreadsheet size={15} color="#38bdf8" />
-                    <span>Unduh Rekap FEFO (.xlsx)</span>
+                    <FileSpreadsheet size={15} color="#86efac" />
+                    <span>Unduh Rekap (.xlsx)</span>
                   </>
                 )}
               </button>
 
               {/* Search Input */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 10, padding: '6px 12px', minWidth: 220 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: 10, padding: '6px 12px', minWidth: 'min(100%, 220px)', minHeight: 40 }}>
                 <Search size={15} color="#64748b" />
                 <input
                   type="text"
@@ -1717,21 +1745,21 @@ export default function GudangApprovalPage() {
             </div>
           </div>
 
-          {/* ── DAFTAR LAPORAN FEFO ── */}
+          {/* ── DAFTAR LAPORAN KONDISI ── */}
           {loadingFefo ? (
             <div style={{ textAlign: 'center', padding: '60px 20px', background: '#ffffff', borderRadius: 16, border: '1px solid #e2e8f0', color: '#64748b' }}>
-              <RefreshCw size={28} className="animate-spin" style={{ margin: '0 auto 12px' }} />
-              <p style={{ margin: 0, fontSize: '0.9rem' }}>Memuat laporan kondisi fisik FEFO...</p>
+              <RefreshCw size={28} className="spin-icon" style={{ margin: '0 auto 12px' }} />
+              <p style={{ margin: 0, fontSize: '0.9rem' }}>Memuat laporan kondisi fisik...</p>
             </div>
           ) : fefoReports.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '60px 20px', background: '#ffffff', borderRadius: 16, border: '1px solid #e2e8f0', color: '#64748b' }}>
               <Flame size={48} color="#cbd5e1" style={{ margin: '0 auto 14px' }} />
               <h3 style={{ margin: '0 0 6px 0', fontSize: '1rem', color: '#1e293b' }}>
-                {fefoStatusFilter === 'SUBMITTED' ? 'Semua Beres! Tidak Ada Antrian Laporan FEFO' : 'Tidak Ada Data Laporan FEFO'}
+                {fefoStatusFilter === 'SUBMITTED' ? 'Tidak Ada Laporan Menunggu' : 'Belum Ada Laporan Kondisi'}
               </h3>
               <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>
                 {fefoStatusFilter === 'SUBMITTED'
-                  ? 'Semua laporan pemeriksaan batch kedaluwarsa telah Anda tetapkan keputusannya.'
+                  ? 'Semua laporan pemeriksaan batch kedaluwarsa sudah ditindaklanjuti.'
                   : `Belum ada laporan pada filter "${fefoStatusFilter}".`}
               </p>
             </div>
@@ -1811,7 +1839,7 @@ export default function GudangApprovalPage() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#166534' }}>
-                              KEPUTUSAN: {rep.managerDecision}
+                              KEPUTUSAN: {formatDecisionLabel(rep.managerDecision)}
                             </span>
                             {rep.approvedDiscountPct && (
                               <span style={{ background: '#dc2626', color: '#ffffff', padding: '2px 8px', borderRadius: 6, fontSize: '0.72rem', fontWeight: 900 }}>
@@ -1820,9 +1848,9 @@ export default function GudangApprovalPage() {
                             )}
                           </div>
                           {rep.discountBarcode && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: '#15803d' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: '#15803d', flexWrap: 'wrap' }}>
                               <Barcode size={16} />
-                              <span>Barcode Override: <code style={{ fontWeight: 800, background: '#dcfce7', padding: '2px 6px', borderRadius: 4 }}>{rep.discountBarcode}</code></span>
+                              <span>Barcode Diskon: <code style={{ fontWeight: 800, background: '#dcfce7', padding: '2px 6px', borderRadius: 4 }}>{rep.discountBarcode}</code></span>
                               <span style={{ color: '#64748b' }}>({formatRupiah(discountedPrice)})</span>
                             </div>
                           )}
@@ -1990,8 +2018,8 @@ export default function GudangApprovalPage() {
           {/* List Pemasok Grid */}
           {loadingSuppliers ? (
             <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
-              <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 8px' }} />
-              <p style={{ margin: 0, fontSize: '0.88rem' }}>Memuat database pemasok...</p>
+              <RefreshCw size={24} className="spin-icon" style={{ margin: '0 auto 8px' }} />
+              <p style={{ margin: 0, fontSize: '0.88rem' }}>Memuat data pemasok...</p>
             </div>
           ) : suppliers.length === 0 ? (
             <div
@@ -2049,7 +2077,7 @@ export default function GudangApprovalPage() {
               )}
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: 14 }}>
               {suppliers.map((sup) => (
                 <div
                   key={sup.id}
@@ -2123,7 +2151,7 @@ export default function GudangApprovalPage() {
                             href={`https://wa.me/${sup.phone.replace(/[^0-9]/g, '')}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            style={{ color: '#0284c7', textDecoration: 'none', fontWeight: 700 }}
+                            style={{ color: '#15803d', textDecoration: 'none', fontWeight: 700 }}
                           >
                             {sup.phone}
                           </a>
@@ -2179,7 +2207,7 @@ export default function GudangApprovalPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDeleteSupplier(sup.id, sup.name)}
+                      onClick={() => setConfirmDeleteSupplier({ id: sup.id, name: sup.name })}
                       style={{
                         padding: '6px 10px',
                         borderRadius: 8,
@@ -2230,6 +2258,8 @@ export default function GudangApprovalPage() {
               borderRadius: 16,
               maxWidth: 520,
               width: '100%',
+              maxHeight: '90dvh',
+              overflowY: 'auto',
               padding: '24px 22px',
               display: 'flex',
               flexDirection: 'column',
@@ -2268,7 +2298,7 @@ export default function GudangApprovalPage() {
               </div>
               <div>
                 <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>
-                  {actionType === 'APPROVE' && 'Setujui Penerimaan Barang (ACC)'}
+                  {actionType === 'APPROVE' && 'Setujui Penerimaan Barang'}
                   {actionType === 'REVISI' && 'Minta Revisi ke Petugas Gudang'}
                   {actionType === 'TOLAK' && 'Tolak Penerimaan Barang'}
                 </h3>
@@ -2292,9 +2322,9 @@ export default function GudangApprovalPage() {
                     Dengan menyetujui penerimaan barang ini:
                   </p>
                   <ul style={{ margin: 0, paddingLeft: 18, color: '#475569' }}>
-                    <li>Batch stok baru akan dibuat secara atomik di tabel <code>stock_batches</code>.</li>
+                    <li>Batch stok baru akan dibuat dan langsung aktif di gudang.</li>
                     <li>Usulan produk baru (jika ada) akan <strong>langsung diaktifkan</strong> &amp; stok produk di kasir <strong>langsung bertambah</strong>.</li>
-                    <li>Tindakan Anda tercatat permanen di <code>stock_adjustments</code> &amp; <code>audit_logs</code>.</li>
+                    <li>Tindakan persetujuan akan tercatat di riwayat perubahan stok.</li>
                   </ul>
                 </div>
 
@@ -2441,13 +2471,13 @@ export default function GudangApprovalPage() {
               >
                 {processingAction ? (
                   <>
-                    <RefreshCw size={14} className="animate-spin" />
+                    <RefreshCw size={14} className="spin-icon" />
                     <span>Memproses...</span>
                   </>
                 ) : (
                   <>
                     {actionType === 'APPROVE' && <CheckCircle2 size={16} />}
-                    {actionType === 'APPROVE' ? 'Konfirmasi ACC Sekarang' : actionType === 'REVISI' ? 'Kirim Catatan Revisi' : 'Tolak Pengajuan'}
+                    {actionType === 'APPROVE' ? 'Konfirmasi Persetujuan' : actionType === 'REVISI' ? 'Kirim Catatan Revisi' : 'Tolak Pengajuan'}
                   </>
                 )}
               </button>
@@ -2456,7 +2486,7 @@ export default function GudangApprovalPage() {
         </div>
       )}
 
-      {/* ── MODAL KEPUTUSAN MANAGER UNTUK FEFO & DISKON ── */}
+      {/* ── MODAL KEPUTUSAN PENANGANAN STOK & DISKON ── */}
       {selectedFefo && (
         <div
           role="dialog"
@@ -2480,6 +2510,8 @@ export default function GudangApprovalPage() {
               borderRadius: 16,
               maxWidth: 500,
               width: '100%',
+              maxHeight: '90dvh',
+              overflowY: 'auto',
               padding: '24px 22px',
               display: 'flex',
               flexDirection: 'column',
@@ -2506,15 +2538,16 @@ export default function GudangApprovalPage() {
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>
-                    Keputusan Penanganan FEFO
+                    Keputusan Penanganan Stok
                   </h3>
                   <p style={{ margin: 0, fontSize: '0.78rem', color: '#64748b' }}>
-                    Wewenang Manager menetapkan diskon atau write-off.
+                    Tetapkan diskon obral, pindah rak depan, retur, atau pemusnahan.
                   </p>
                 </div>
               </div>
               <button
                 type="button"
+                aria-label="Tutup modal keputusan"
                 onClick={() => setSelectedFefo(null)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}
               >
@@ -2547,16 +2580,17 @@ export default function GudangApprovalPage() {
                   fontWeight: 700,
                 }}
               >
-                BATCH SUDAH KEDALUWARSA (ED: {selectedFefo.expiryDate}). Opsi Diskon &amp; Rak Depan dikunci otomatis; pilih <strong>Pemusnahan (DESTROY)</strong> atau <strong>Retur Supplier (RETURN_SUPPLIER)</strong> agar stok dinolkan.
+                BATCH SUDAH KEDALUWARSA (ED: {selectedFefo.expiryDate}). Opsi Diskon &amp; Rak Depan dikunci otomatis; pilih <strong>Pemusnahan</strong> atau <strong>Retur Supplier</strong> agar stok dinolkan.
               </div>
             )}
 
             {/* Pilihan Keputusan */}
             <div>
               <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155', display: 'block', marginBottom: 4 }}>
-                Pilih Keputusan Manager *
+                Pilih Keputusan *
               </label>
               <select
+                className="form-select"
                 value={fefoDecision}
                 onChange={(e) => setFefoDecision(e.target.value as ManagerDecision)}
                 style={{
@@ -2570,12 +2604,12 @@ export default function GudangApprovalPage() {
               >
                 {!(selectedFefo.isExpired || (selectedFefo.expiryDate && selectedFefo.expiryDate < getTodayWibIsoManager())) && (
                   <>
-                    <option value="DISCOUNT">ACC Diskon Obral Darurat (Auto-Generate Barcode Kasir)</option>
+                    <option value="DISCOUNT">Setujui Diskon Obral (Otomatis Buat Barcode Diskon)</option>
                     <option value="DISPLAY_FRONT">Pindahkan ke Rak Depan Kasir (Jual Normal)</option>
                   </>
                 )}
-                <option value="DESTROY">ACC Pemusnahan / Write-Off (Tarik &amp; Nol-kan Stok)</option>
-                <option value="RETURN_SUPPLIER">ACC Retur ke Supplier (Tarik &amp; Nol-kan Stok)</option>
+                <option value="DESTROY">Setujui Pemusnahan (Tarik &amp; Nolkan Stok)</option>
+                <option value="RETURN_SUPPLIER">Setujui Retur ke Supplier (Tarik &amp; Nolkan Stok)</option>
                 <option value="HOLD">Tahan Sementara (Pantau Kondisi)</option>
               </select>
             </div>
@@ -2608,7 +2642,7 @@ export default function GudangApprovalPage() {
                   </span>
                 </div>
                 <p style={{ margin: '8px 0 0', fontSize: '0.7rem', color: '#7f1d1d', lineHeight: 1.4 }}>
-                  * Sistem otomatis membuat stiker barcode override unik (<code>DISC-XXXXXX-XXXX</code>) dan kebijakan diskon kasir.
+                  * Sistem otomatis membuat kode barcode diskon khusus untuk dipindai di kasir.
                 </p>
               </div>
             )}
@@ -2676,13 +2710,13 @@ export default function GudangApprovalPage() {
               >
                 {submittingFefoDecision ? (
                   <>
-                    <RefreshCw size={14} className="animate-spin" />
+                    <RefreshCw size={14} className="spin-icon" />
                     <span>Memproses...</span>
                   </>
                 ) : (
                   <>
                     <ShieldCheck size={16} />
-                    <span>Konfirmasi Keputusan Manager</span>
+                    <span>Simpan Keputusan</span>
                   </>
                 )}
               </button>
@@ -2713,6 +2747,8 @@ export default function GudangApprovalPage() {
               borderRadius: 16,
               maxWidth: 520,
               width: '100%',
+              maxHeight: '90dvh',
+              overflowY: 'auto',
               padding: '24px 22px',
               display: 'flex',
               flexDirection: 'column',
@@ -2923,7 +2959,7 @@ export default function GudangApprovalPage() {
                 >
                   {submittingSupplier ? (
                     <>
-                      <RefreshCw size={14} className="animate-spin" />
+                      <RefreshCw size={14} className="spin-icon" />
                       <span>Menyimpan...</span>
                     </>
                   ) : (
@@ -2935,6 +2971,120 @@ export default function GudangApprovalPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL KONFIRMASI HAPUS PEMASOK ── */}
+      {confirmDeleteSupplier && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.7)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 1150,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => !deletingSupplier && setConfirmDeleteSupplier(null)}
+        >
+          <div
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: 16,
+              maxWidth: 420,
+              width: '100%',
+              maxHeight: '90dvh',
+              overflowY: 'auto',
+              padding: '22px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+              boxShadow: '0 25px 30px -5px rgba(0,0,0,0.2)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  background: '#fee2e2',
+                  color: '#dc2626',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>
+                  Hapus Pemasok?
+                </h3>
+                <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+                  Data pemasok <strong>{confirmDeleteSupplier.name}</strong> akan dihapus dari daftar aktif.
+                </p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+              <button
+                type="button"
+                disabled={deletingSupplier}
+                onClick={() => setConfirmDeleteSupplier(null)}
+                style={{
+                  minHeight: 40,
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={deletingSupplier}
+                onClick={handleConfirmDeleteSupplier}
+                style={{
+                  minHeight: 40,
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  fontSize: '0.82rem',
+                  fontWeight: 800,
+                  cursor: deletingSupplier ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {deletingSupplier ? (
+                  <>
+                    <RefreshCw size={14} className="spin-icon" />
+                    <span>Menghapus...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    <span>Hapus Pemasok</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

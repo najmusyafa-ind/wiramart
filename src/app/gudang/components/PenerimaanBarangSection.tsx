@@ -830,14 +830,15 @@ export default function PenerimaanBarangSection({
               borderRadius: 6,
               fontSize: '0.75rem',
               fontWeight: 700,
-              background: '#e0f2fe',
-              color: '#0284c7',
+              background: '#f1f5f9',
+              color: '#0f172a',
+              border: '1px solid #cbd5e1',
               display: 'inline-flex',
               alignItems: 'center',
               gap: 4,
             }}
           >
-            <Send size={12} /> MENUNGGU ACC
+            <Send size={12} /> MENUNGGU
           </span>
         );
       case 'APPROVED':
@@ -955,65 +956,33 @@ export default function PenerimaanBarangSection({
               gap: 8,
             }}
           >
-            <Truck size={20} color="#0284c7" /> Penerimaan Barang & Arsip Nota Supplier
+            <Truck size={20} color="#15803d" /> Penerimaan Barang &amp; Arsip Nota Supplier
           </h2>
           <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: '#64748b' }}>
-            Upload foto nota supplier, auto-match rincian barang, dan lihat Tabel Buku Nota Lengkap.
+            Upload foto nota supplier, catat rincian barang masuk, dan lihat arsip buku nota.
           </p>
         </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           {/* Toggle Mode Tampilan: Kartu vs Tabel Buku Nota */}
-          <div
-            style={{
-              display: 'inline-flex',
-              background: '#f1f5f9',
-              padding: 4,
-              borderRadius: 10,
-              gap: 4,
-            }}
-          >
+          <div className="rep-seg" role="tablist" aria-label="Mode tampilan penerimaan">
             <button
               type="button"
+              role="tab"
+              aria-selected={viewMode === 'cards'}
+              className={`rep-seg-btn${viewMode === 'cards' ? ' active' : ''}`}
               onClick={() => setViewMode('cards')}
-              style={{
-                minHeight: 44,
-                padding: '6px 12px',
-                borderRadius: 8,
-                border: 'none',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                background: viewMode === 'cards' ? '#ffffff' : 'transparent',
-                color: viewMode === 'cards' ? '#0f172a' : '#64748b',
-                boxShadow: viewMode === 'cards' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
             >
               <Layers size={14} /> Antrian Nota
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={viewMode === 'table'}
+              className={`rep-seg-btn${viewMode === 'table' ? ' active' : ''}`}
               onClick={() => setViewMode('table')}
-              style={{
-                minHeight: 44,
-                padding: '6px 12px',
-                borderRadius: 8,
-                border: 'none',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                background: viewMode === 'table' ? '#ffffff' : 'transparent',
-                color: viewMode === 'table' ? '#0284c7' : '#64748b',
-                boxShadow: viewMode === 'table' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
             >
-              <FileSpreadsheet size={14} /> Tabel Buku Nota ({tableRows.length})
+              <FileSpreadsheet size={14} /> Buku Nota ({tableRows.length})
             </button>
           </div>
 
@@ -1026,14 +995,14 @@ export default function PenerimaanBarangSection({
               gap: 8,
               minHeight: 44,
               padding: '10px 16px',
-              backgroundColor: '#0284c7',
+              backgroundColor: '#15803d',
               color: '#ffffff',
               border: 'none',
               borderRadius: 10,
               fontSize: '0.85rem',
               fontWeight: 700,
               cursor: 'pointer',
-              boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)',
+              boxShadow: '0 2px 6px rgba(21, 128, 61, 0.25)',
               transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           >
@@ -1043,56 +1012,36 @@ export default function PenerimaanBarangSection({
       </div>
 
       {/* ── FILTER STATUS TABS ── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          overflowX: 'auto',
-          WebkitOverflowScrolling: 'touch',
-          paddingBottom: 4,
-        }}
-      >
-        {[
-          { id: 'semua', label: 'Semua Status' },
-          { id: 'draft', label: 'Draft' },
-          { id: 'submitted', label: 'Menunggu ACC' },
-          { id: 'revised', label: 'Perlu Revisi' },
-          { id: 'approved', label: 'Disetujui' },
-          { id: 'rejected', label: 'Ditolak' },
-        ].map((f) => {
-          const isActive = statusFilter === f.id;
-          return (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => handleSelectFilter(f.id)}
-              style={{
-                minHeight: 44,
-                padding: '8px 14px',
-                borderRadius: 20,
-                fontSize: '0.8rem',
-                fontWeight: isActive ? 700 : 500,
-                border: isActive ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                backgroundColor: isActive ? '#e0f2fe' : '#ffffff',
-                color: isActive ? '#0369a1' : '#475569',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
-                transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
-              }}
-            >
-              {f.label}
-            </button>
-          );
-        })}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div className="rep-chip-bar" style={{ flex: '1 1 auto' }}>
+          {[
+            { id: 'semua', label: 'Semua Status' },
+            { id: 'draft', label: 'Draft' },
+            { id: 'submitted', label: 'Menunggu' },
+            { id: 'revised', label: 'Perlu Revisi' },
+            { id: 'approved', label: 'Disetujui' },
+            { id: 'rejected', label: 'Ditolak' },
+          ].map((f) => {
+            const isActive = statusFilter === f.id;
+            return (
+              <button
+                key={f.id}
+                type="button"
+                className={`rep-chip${isActive ? ' active' : ''}`}
+                onClick={() => handleSelectFilter(f.id)}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
 
         <button
           type="button"
           onClick={() => fetchDrafts(statusFilter)}
           style={{
             marginLeft: 'auto',
-            minHeight: 44,
+            minHeight: 40,
             padding: '8px 12px',
             borderRadius: 10,
             border: '1px solid #e2e8f0',
@@ -1108,7 +1057,7 @@ export default function PenerimaanBarangSection({
           }}
           title="Segarkan data"
         >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Segarkan
+          <RefreshCw size={14} className={loading ? 'spin-icon' : ''} /> Segarkan
         </button>
       </div>
 
@@ -1154,18 +1103,18 @@ export default function PenerimaanBarangSection({
             </div>
           </div>
 
-          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #e2e8f0', borderRadius: 10 }}>
+          <div className="rep-desktop-only" style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid #e2e8f0', borderRadius: 10 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: 860 }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #e2e8f0', textAlign: 'left', color: '#334155' }}>
                   <th style={{ padding: '10px 12px', fontWeight: 800 }}>Tgl Faktur</th>
-                  <th style={{ padding: '10px 12px', fontWeight: 800 }}>No. Faktur & Foto</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 800 }}>No. Faktur &amp; Foto</th>
                   <th style={{ padding: '10px 12px', fontWeight: 800 }}>Nama Supplier</th>
                   <th style={{ padding: '10px 12px', fontWeight: 800 }}>Nama Barang</th>
                   <th style={{ padding: '10px 12px', fontWeight: 800, textAlign: 'right' }}>Kuantiti</th>
                   <th style={{ padding: '10px 12px', fontWeight: 800, textAlign: 'right' }}>Harga Satuan</th>
                   <th style={{ padding: '10px 12px', fontWeight: 800, textAlign: 'right' }}>Jumlah (Total)</th>
-                  <th style={{ padding: '10px 12px', fontWeight: 800 }}>Expired Date</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 800 }}>Kedaluwarsa</th>
                   <th style={{ padding: '10px 12px', fontWeight: 800 }}>Status</th>
                 </tr>
               </thead>
@@ -1197,9 +1146,9 @@ export default function PenerimaanBarangSection({
                               marginTop: 4,
                               padding: '3px 8px',
                               borderRadius: 6,
-                              border: '1px solid #38bdf8',
-                              background: '#f0f9ff',
-                              color: '#0284c7',
+                              border: '1px solid #86efac',
+                              background: '#f0fdf4',
+                              color: '#15803d',
                               fontSize: '0.7rem',
                               fontWeight: 700,
                               cursor: 'pointer',
@@ -1223,7 +1172,7 @@ export default function PenerimaanBarangSection({
                           Batch: {row.batchCode}
                         </div>
                       </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, color: '#0284c7' }}>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 800, color: '#15803d' }}>
                         {row.qty.toLocaleString('id-ID')}
                       </td>
                       <td style={{ padding: '10px 12px', textAlign: 'right', color: '#334155', whiteSpace: 'nowrap' }}>
@@ -1252,7 +1201,7 @@ export default function PenerimaanBarangSection({
                     <td colSpan={4} style={{ padding: '10px 12px' }}>
                       TOTAL RINGKASAN TABEL NOTA ({filteredTableRows.length} baris barang)
                     </td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', color: '#0284c7' }}>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: '#15803d' }}>
                       {totalTableQty.toLocaleString('id-ID')} pcs
                     </td>
                     <td style={{ padding: '10px 12px' }} />
@@ -1264,6 +1213,107 @@ export default function PenerimaanBarangSection({
                 </tfoot>
               )}
             </table>
+          </div>
+
+          {/* Kartu Buku Nota (Mobile) */}
+          <div className="rep-mobile-only" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {filteredTableRows.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: '0.84rem', border: '1px dashed #cbd5e1', borderRadius: 10 }}>
+                Belum ada rincian item nota supplier yang sesuai filter.
+              </div>
+            ) : (
+              <>
+                {filteredTableRows.map((row) => (
+                  <div key={row.itemId} className="rep-mcard">
+                    <div className="rep-mcard__top">
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f172a' }}>
+                          {row.productName}
+                        </div>
+                        <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: 2 }}>
+                          {row.supplierName} · {row.invoiceDate}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#64748b', fontFamily: 'monospace', marginTop: 2 }}>
+                          {row.deliveryNote || row.receiveNumber} · Batch {row.batchCode}
+                        </div>
+                      </div>
+                      <div style={{ flexShrink: 0 }}>{renderStatusBadge(row.status)}</div>
+                    </div>
+
+                    <div className="rep-mcard__grid">
+                      <div>
+                        <div className="rep-mcard__k">Kuantiti</div>
+                        <div className="rep-mcard__v" style={{ color: '#15803d' }}>
+                          {row.qty.toLocaleString('id-ID')} pcs
+                        </div>
+                      </div>
+                      <div>
+                        <div className="rep-mcard__k">Harga Satuan</div>
+                        <div className="rep-mcard__v">Rp {Math.round(row.costPrice).toLocaleString('id-ID')}</div>
+                      </div>
+                      <div>
+                        <div className="rep-mcard__k">Total</div>
+                        <div className="rep-mcard__v">Rp {Math.round(row.totalPrice).toLocaleString('id-ID')}</div>
+                      </div>
+                      <div>
+                        <div className="rep-mcard__k">Kedaluwarsa</div>
+                        <div className="rep-mcard__v" style={{ color: row.expiryDate ? '#d97706' : '#94a3b8' }}>
+                          {row.expiryDate || '—'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {row.invoicePhotoUrl && (
+                      <div className="rep-mcard__actions">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewPhotoUrl(row.invoicePhotoUrl);
+                            setPreviewPhotoTitle(`${row.supplierName} — ${row.deliveryNote || row.receiveNumber}`);
+                          }}
+                          style={{
+                            minHeight: 38,
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            border: '1px solid #86efac',
+                            background: '#f0fdf4',
+                            color: '#15803d',
+                            fontSize: '0.76rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                          }}
+                        >
+                          <Camera size={13} /> Lihat Foto Nota
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                <div
+                  style={{
+                    background: '#f0fdf4',
+                    border: '1px solid #86efac',
+                    borderRadius: 10,
+                    padding: '12px 14px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                    fontSize: '0.82rem',
+                    fontWeight: 800,
+                    color: '#166534',
+                  }}
+                >
+                  <span>Total ({filteredTableRows.length} item · {totalTableQty.toLocaleString('id-ID')} pcs)</span>
+                  <span style={{ color: '#15803d' }}>Rp {Math.round(totalTableAmount).toLocaleString('id-ID')}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : loading ? (
@@ -1277,7 +1327,7 @@ export default function PenerimaanBarangSection({
             color: '#64748b',
           }}
         >
-          <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 10px' }} />
+          <RefreshCw size={24} className="spin-icon" style={{ margin: '0 auto 10px' }} />
           <p style={{ margin: 0, fontSize: '0.85rem' }}>Memuat riwayat penerimaan barang...</p>
         </div>
       ) : errorMsg ? (
@@ -1322,7 +1372,7 @@ export default function PenerimaanBarangSection({
             style={{
               minHeight: 44,
               padding: '10px 18px',
-              backgroundColor: '#0284c7',
+              backgroundColor: '#15803d',
               color: '#ffffff',
               border: 'none',
               borderRadius: 8,
@@ -1331,7 +1381,7 @@ export default function PenerimaanBarangSection({
               cursor: 'pointer',
             }}
           >
-            + Upload & Input Nota Sekarang
+            + Upload &amp; Input Nota Sekarang
           </button>
         </div>
       ) : (
@@ -1389,9 +1439,9 @@ export default function PenerimaanBarangSection({
                       style={{
                         padding: '3px 8px',
                         borderRadius: 6,
-                        border: '1px solid #38bdf8',
-                        background: '#f0f9ff',
-                        color: '#0284c7',
+                        border: '1px solid #86efac',
+                        background: '#f0fdf4',
+                        color: '#15803d',
                         fontSize: '0.72rem',
                         fontWeight: 700,
                         cursor: 'pointer',
@@ -1446,21 +1496,21 @@ export default function PenerimaanBarangSection({
                 </div>
               </div>
 
-              {/* Status Auto-Checklist Jeda 5 Menit saat SUBMITTED */}
+              {/* Status Persetujuan Otomatis 5 Menit saat SUBMITTED */}
               {d.status === 'SUBMITTED' && d.autoChecklist && (
                 <div
                   style={{
                     padding: '8px 12px',
                     borderRadius: 8,
-                    background: d.autoChecklist.passed ? '#f0f9ff' : '#fffbeb',
-                    border: d.autoChecklist.passed ? '1px solid #bae6fd' : '1px solid #fcd34d',
+                    background: d.autoChecklist.passed ? '#f0fdf4' : '#fffbeb',
+                    border: d.autoChecklist.passed ? '1px solid #bbf7d0' : '1px solid #fcd34d',
                     fontSize: '0.78rem',
-                    color: d.autoChecklist.passed ? '#0369a1' : '#b45309',
+                    color: d.autoChecklist.passed ? '#15803d' : '#b45309',
                     fontWeight: 700,
                   }}
                 >
                   {d.autoChecklist.passed
-                    ? `Lolos Auto-Checklist · Stok otomatis masuk setelah jeda 5 menit${
+                    ? `Lolos pemeriksaan otomatis · Stok otomatis masuk setelah jeda 5 menit${
                         d.autoChecklist.graceUntil
                           ? ` (pukul ${new Date(d.autoChecklist.graceUntil).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false })} WIB)`
                           : ''
@@ -1557,9 +1607,9 @@ export default function PenerimaanBarangSection({
                         minHeight: 44,
                         padding: '8px 14px',
                         borderRadius: 8,
-                        border: '1px solid #38bdf8',
-                        background: '#f0f9ff',
-                        color: '#0284c7',
+                        border: '1px solid #86efac',
+                        background: '#f0fdf4',
+                        color: '#15803d',
                         fontSize: '0.8rem',
                         fontWeight: 600,
                         cursor: 'pointer',
@@ -1579,7 +1629,7 @@ export default function PenerimaanBarangSection({
                         padding: '8px 16px',
                         borderRadius: 8,
                         border: 'none',
-                        background: '#0284c7',
+                        background: '#15803d',
                         color: '#ffffff',
                         fontSize: '0.8rem',
                         fontWeight: 700,
@@ -1587,10 +1637,10 @@ export default function PenerimaanBarangSection({
                         display: 'flex',
                         alignItems: 'center',
                         gap: 6,
-                        boxShadow: '0 1px 3px rgba(2, 132, 199, 0.3)',
+                        boxShadow: '0 1px 3px rgba(21, 128, 61, 0.3)',
                       }}
                     >
-                      <Send size={14} /> Ajukan (Auto-ACC 5m)
+                      <Send size={14} /> Ajukan Nota
                     </button>
                   </>
                 )}
@@ -1747,7 +1797,7 @@ export default function PenerimaanBarangSection({
 
             {loadingDetail || !detailData ? (
               <div style={{ textAlign: 'center', padding: '30px 0', color: '#64748b' }}>
-                <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 8px' }} />
+                <RefreshCw size={24} className="spin-icon" style={{ margin: '0 auto 8px' }} />
                 <p style={{ margin: 0, fontSize: '0.85rem' }}>Mengambil rincian produk...</p>
               </div>
             ) : (
@@ -1825,7 +1875,7 @@ export default function PenerimaanBarangSection({
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontWeight: 700 }}>
                           <span>{it.productName}</span>
-                          <span style={{ color: '#0284c7', flexShrink: 0 }}>
+                          <span style={{ color: '#15803d', flexShrink: 0 }}>
                             {it.qty} unit × Rp {Number(it.costPrice).toLocaleString('id-ID')} = Rp{' '}
                             {(it.qty * Number(it.costPrice)).toLocaleString('id-ID')}
                           </span>
@@ -1892,7 +1942,7 @@ export default function PenerimaanBarangSection({
                         padding: '10px 16px',
                         borderRadius: 8,
                         border: 'none',
-                        background: '#0284c7',
+                        background: '#15803d',
                         color: '#ffffff',
                         fontSize: '0.85rem',
                         fontWeight: 700,
@@ -2037,7 +2087,7 @@ export default function PenerimaanBarangSection({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Camera size={16} color="#0284c7" /> Foto Fisik Nota / Faktur Supplier
+                    <Camera size={16} color="#15803d" /> Foto Fisik Nota / Faktur Supplier
                   </div>
                   <div style={{ fontSize: '0.73rem', color: '#64748b' }}>
                     Otomatis dikompres ringan oleh browser agar tersimpan permanen di sistem.
@@ -2058,7 +2108,7 @@ export default function PenerimaanBarangSection({
                       minHeight: 44,
                       padding: '8px 14px',
                       borderRadius: 8,
-                      background: '#0284c7',
+                      background: '#15803d',
                       color: '#ffffff',
                       fontSize: '0.78rem',
                       fontWeight: 700,
@@ -2136,6 +2186,7 @@ export default function PenerimaanBarangSection({
 
                 {registeredSuppliers.length > 0 && (
                   <select
+                    className="form-select"
                     aria-label="Pilih Pemasok Terdaftar"
                     value={registeredSuppliers.some((s) => s.name === supplierName) ? supplierName : ''}
                     onChange={(e) => {
@@ -2232,8 +2283,8 @@ export default function PenerimaanBarangSection({
             {supplierHistoryItems.length > 0 && (
               <div
                 style={{
-                  background: '#eff6ff',
-                  border: '1px solid #bfdbfe',
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
                   borderRadius: 10,
                   padding: '10px 14px',
                   display: 'flex',
@@ -2243,7 +2294,7 @@ export default function PenerimaanBarangSection({
                   gap: 10,
                 }}
               >
-                <div style={{ fontSize: '0.78rem', color: '#1e3a8a' }}>
+                <div style={{ fontSize: '0.78rem', color: '#166534' }}>
                   <strong>Riwayat Faktur Pemasok:</strong> Tersedia{' '}
                   <strong>{supplierHistoryItems.length} item produk terdaftar</strong> beserta harga beli terakhir dari{' '}
                   <strong>{supplierName}</strong>.
@@ -2256,7 +2307,7 @@ export default function PenerimaanBarangSection({
                     padding: '8px 14px',
                     borderRadius: 8,
                     border: 'none',
-                    background: '#2563eb',
+                    background: '#15803d',
                     color: '#ffffff',
                     fontSize: '0.76rem',
                     fontWeight: 700,
@@ -2375,9 +2426,9 @@ export default function PenerimaanBarangSection({
                     minHeight: 44,
                     padding: '8px 14px',
                     borderRadius: 8,
-                    border: '1px solid #0284c7',
-                    background: '#f0f9ff',
-                    color: '#0284c7',
+                    border: '1px solid #15803d',
+                    background: '#f0fdf4',
+                    color: '#15803d',
                     fontSize: '0.8rem',
                     fontWeight: 700,
                     cursor: 'pointer',
@@ -2386,7 +2437,7 @@ export default function PenerimaanBarangSection({
                     gap: 6,
                   }}
                 >
-                  <Plus size={15} /> + Pilih Produk SKU Manual
+                  <Plus size={15} /> Pilih Produk Manual
                 </button>
               </div>
 
@@ -2452,7 +2503,7 @@ export default function PenerimaanBarangSection({
                             )}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0284c7', background: '#f0f9ff', padding: '4px 8px', borderRadius: 6 }}>
+                            <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#15803d', background: '#f0fdf4', padding: '4px 8px', borderRadius: 6 }}>
                               Subtotal: Rp {Math.round(lineTotal).toLocaleString('id-ID')}
                             </span>
                             <button
@@ -2521,8 +2572,8 @@ export default function PenerimaanBarangSection({
                                   title="Jika yang Anda ketik adalah harga 1 kardus/total, klik untuk membagi otomatis menjadi harga per pcs"
                                   style={{
                                     border: 'none',
-                                    background: '#e0f2fe',
-                                    color: '#0369a1',
+                                    background: '#dcfce7',
+                                    color: '#15803d',
                                     fontSize: '0.65rem',
                                     fontWeight: 700,
                                     padding: '1px 6px',
@@ -2712,9 +2763,9 @@ export default function PenerimaanBarangSection({
                   minHeight: 44,
                   padding: '10px 16px',
                   borderRadius: 8,
-                  border: '1px solid #0284c7',
-                  background: '#f0f9ff',
-                  color: '#0284c7',
+                  border: '1px solid #15803d',
+                  background: '#f0fdf4',
+                  color: '#15803d',
                   fontSize: '0.85rem',
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -2735,7 +2786,7 @@ export default function PenerimaanBarangSection({
                   padding: '10px 18px',
                   borderRadius: 8,
                   border: 'none',
-                  background: '#0284c7',
+                  background: '#15803d',
                   color: '#ffffff',
                   fontSize: '0.85rem',
                   fontWeight: 700,
@@ -2743,10 +2794,10 @@ export default function PenerimaanBarangSection({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)',
+                  boxShadow: '0 2px 6px rgba(21, 128, 61, 0.3)',
                 }}
               >
-                <Send size={14} /> Simpan Nota & Langsung Ajukan ACC
+                <Send size={14} /> Simpan &amp; Ajukan Nota
               </button>
             </div>
           </div>

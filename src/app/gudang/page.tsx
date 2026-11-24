@@ -954,12 +954,12 @@ export default function GudangPortalPage() {
                 height: 38,
                 flexShrink: 0,
                 borderRadius: 10,
-                backgroundColor: 'hsl(217 91% 60%)',
+                backgroundColor: '#15803d',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#fff',
-                boxShadow: '0 2px 6px -1px hsl(217 91% 60% / 0.4)',
+                boxShadow: '0 2px 6px -1px rgba(21, 128, 61, 0.35)',
               }}
             >
               <Package size={22} />
@@ -1251,9 +1251,9 @@ export default function GudangPortalPage() {
               marginBottom: 14,
               padding: '10px 14px',
               borderRadius: 10,
-              border: '1px solid hsl(217 91% 60% / 0.35)',
-              backgroundColor: 'hsl(217 91% 60% / 0.08)',
-              color: 'hsl(221 83% 35%)',
+              border: '1px solid #bbf7d0',
+              backgroundColor: '#f0fdf4',
+              color: '#166534',
               fontSize: '0.78rem',
               lineHeight: 1.45,
               display: 'flex',
@@ -1263,7 +1263,7 @@ export default function GudangPortalPage() {
           >
             <AlertCircle size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
             <div>
-              <strong>Portal Gudang & Nota Supplier (Admin Shift):</strong> Anda dapat mengunggah foto nota & melihat Tabel Buku Nota di tab <strong>Faktur Pemasok &amp; Penerimaan</strong>, serta memantau stok kritis dan batch FEFO.
+              <strong>Portal Gudang &amp; Nota Supplier (Admin Shift):</strong> Anda dapat mengunggah foto nota &amp; melihat Buku Nota di tab <strong>Faktur &amp; Penerimaan</strong>, serta memantau stok menipis dan kedaluwarsa.
             </div>
           </div>
         )}
@@ -1290,7 +1290,7 @@ export default function GudangPortalPage() {
               border: activeTab === 'habis' ? '1.5px solid #ef4444' : '1px solid #e2e8f0',
               boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
               cursor: 'pointer',
-              transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+              transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           >
             <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#ef4444', textTransform: 'uppercase' }}>
@@ -1302,7 +1302,7 @@ export default function GudangPortalPage() {
             <div style={{ fontSize: '0.62rem', color: '#64748b', marginTop: 2 }}>0 Pcs</div>
           </button>
 
-          {/* Card 2: Stok Kritis */}
+          {/* Card 2: Stok Menipis */}
           <button
             type="button"
             onClick={() => setActiveTab('kritis')}
@@ -1315,11 +1315,11 @@ export default function GudangPortalPage() {
               border: activeTab === 'kritis' ? '1.5px solid #f59e0b' : '1px solid #e2e8f0',
               boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
               cursor: 'pointer',
-              transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+              transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           >
             <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#d97706', textTransform: 'uppercase' }}>
-              Kritis
+              Menipis
             </div>
             <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#b45309', lineHeight: 1.2, marginTop: 2 }}>
               {summary ? summary.lowStockSku : '0'}
@@ -1327,7 +1327,7 @@ export default function GudangPortalPage() {
             <div style={{ fontSize: '0.62rem', color: '#64748b', marginTop: 2 }}>&le; {lowStockThreshold} Pcs</div>
           </button>
 
-          {/* Card 3: FEFO Mendekati Expired */}
+          {/* Card 3: Hampir Kedaluwarsa */}
           <button
             type="button"
             onClick={() => setActiveTab('fefo')}
@@ -1340,11 +1340,11 @@ export default function GudangPortalPage() {
               border: activeTab === 'fefo' ? '1.5px solid #f97316' : '1px solid #e2e8f0',
               boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
               cursor: 'pointer',
-              transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+              transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           >
             <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#ea580c', textTransform: 'uppercase' }}>
-              FEFO Exp
+              Hampir Exp
             </div>
             <div style={{ fontSize: '1.25rem', fontWeight: 900, color: '#c2410c', lineHeight: 1.2, marginTop: 2 }}>
               {summary ? summary.expiringSoonSku : '0'}
@@ -1365,7 +1365,7 @@ export default function GudangPortalPage() {
               border: activeTab === 'aktivitas' ? '1.5px solid #22c55e' : '1px solid #e2e8f0',
               boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
               cursor: 'pointer',
-              transition: 'all 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+              transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           >
             <div style={{ fontSize: '0.65rem', fontWeight: 700, color: '#16a34a', textTransform: 'uppercase' }}>
@@ -1450,7 +1450,7 @@ export default function GudangPortalPage() {
                 height: 44,
                 padding: '0 14px',
                 borderRadius: 10,
-                backgroundColor: 'hsl(217 91% 60%)',
+                backgroundColor: '#15803d',
                 color: '#fff',
                 border: 'none',
                 fontWeight: 700,
@@ -1458,7 +1458,7 @@ export default function GudangPortalPage() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                boxShadow: '0 2px 6px -1px hsl(217 91% 60% / 0.4)',
+                boxShadow: '0 2px 6px -1px rgba(21, 128, 61, 0.35)',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
               }}
@@ -1471,92 +1471,143 @@ export default function GudangPortalPage() {
               <button
                 type="button"
                 onClick={openNewProductModal}
-                className="btn btn-primary"
+                className="btn btn-secondary"
                 style={{
                   minHeight: 44,
                   height: 44,
                   padding: '0 14px',
                   borderRadius: 10,
-                  backgroundColor: '#059669',
-                  color: '#fff',
-                  border: 'none',
+                  backgroundColor: '#f0fdf4',
+                  color: '#15803d',
+                  border: '1.5px solid #86efac',
                   fontWeight: 700,
                   fontSize: '0.85rem',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
-                  boxShadow: '0 2px 6px -1px rgba(5, 150, 105, 0.38)',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                 }}
               >
                 <Plus size={16} />
-                <span>Tambah Produk Baru</span>
+                <span>Tambah Produk</span>
               </button>
             )}
           </div>
         </section>
 
-        {/* ── FILTER PILLS TABS ── */}
-        <section
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 6,
-            paddingBottom: 6,
-            marginBottom: 12,
-          }}
-        >
-          {[
-            { id: 'semua', label: summary ? `Seluruh Produk (${summary.totalSku})` : 'Seluruh Produk' },
-            {
-              id: 'penerimaan',
-              label:
-                approvalNotifs && (approvalNotifs.rejectedCount > 0 || approvalNotifs.revisedCount > 0)
-                  ? `Faktur Pemasok & Penerimaan (${approvalNotifs.rejectedCount + approvalNotifs.revisedCount} Info)`
-                  : approvalNotifs && approvalNotifs.pendingCount > 0
-                  ? `Faktur Pemasok & Penerimaan (${approvalNotifs.pendingCount} Menunggu)`
-                  : 'Faktur Pemasok & Penerimaan',
-            },
-            {
-              id: 'fefo',
-              label: summary
-                ? `${isReadOnlyAdminShift ? 'Pemantauan FEFO' : 'Tindakan FEFO & Diskon'} (${summary.expiringSoonSku})`
-                : isReadOnlyAdminShift
-                ? 'Pemantauan FEFO'
-                : 'Tindakan FEFO & Diskon',
-            },
-            { id: 'kritis', label: summary ? `Stok Menipis (${summary.lowStockSku})` : 'Stok Menipis' },
-            { id: 'perishable', label: summary?.perishableSku !== undefined ? `Produk Konsumsi Harian (${summary.perishableSku})` : 'Produk Konsumsi Harian' },
-            { id: 'habis', label: summary ? `Stok Habis (${summary.outOfStockSku})` : 'Stok Habis' },
-            { id: 'aktivitas', label: summary ? `Riwayat Penambahan Stok (${summary.todayRestockCount})` : 'Riwayat Penambahan Stok' },
-          ].map((tab) => {
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => handleSelectTab(tab.id as typeof activeTab)}
-                style={{
-                  minHeight: 44,
-                  padding: '8px 14px',
-                  borderRadius: 22,
-                  fontSize: '0.8rem',
-                  fontWeight: isActive ? 700 : 500,
-                  whiteSpace: 'nowrap',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  cursor: 'pointer',
-                  border: isActive ? '1px solid hsl(217 91% 60%)' : '1px solid #cbd5e1',
-                  backgroundColor: isActive ? 'hsl(217 91% 95%)' : '#ffffff',
-                  color: isActive ? 'hsl(217 91% 35%)' : '#475569',
-                  transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
-                }}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
+        {/* ── 3 TAB UTAMA + SUB-FILTER STOK ── */}
+        <section style={{ marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="rep-tabs" role="tablist" aria-label="Menu Portal Gudang">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab !== 'penerimaan' && activeTab !== 'fefo'}
+              className={`rep-tab${activeTab !== 'penerimaan' && activeTab !== 'fefo' ? ' active' : ''}`}
+              onClick={() => handleSelectTab('semua')}
+            >
+              <span>Stok &amp; Produk</span>
+              {summary && (
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b' }}>
+                  ({summary.totalSku})
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'penerimaan'}
+              className={`rep-tab${activeTab === 'penerimaan' ? ' active' : ''}`}
+              onClick={() => handleSelectTab('penerimaan')}
+            >
+              <span>Faktur &amp; Penerimaan</span>
+              {approvalNotifs && (approvalNotifs.rejectedCount > 0 || approvalNotifs.revisedCount > 0) ? (
+                <span
+                  style={{
+                    background: '#dc2626',
+                    color: '#ffffff',
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                  }}
+                >
+                  {approvalNotifs.rejectedCount + approvalNotifs.revisedCount}
+                </span>
+              ) : approvalNotifs && approvalNotifs.pendingCount > 0 ? (
+                <span
+                  style={{
+                    background: '#d97706',
+                    color: '#ffffff',
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                  }}
+                >
+                  {approvalNotifs.pendingCount}
+                </span>
+              ) : null}
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'fefo'}
+              className={`rep-tab${activeTab === 'fefo' ? ' active' : ''}`}
+              onClick={() => handleSelectTab('fefo')}
+            >
+              <span>Cek Kedaluwarsa</span>
+              {summary && summary.expiringSoonSku > 0 && (
+                <span
+                  style={{
+                    background: '#ea580c',
+                    color: '#ffffff',
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                  }}
+                >
+                  {summary.expiringSoonSku}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {activeTab !== 'penerimaan' && activeTab !== 'fefo' && (
+            <div className="rep-chip-bar" role="group" aria-label="Filter daftar stok">
+              {[
+                { id: 'semua', label: summary ? `Semua (${summary.totalSku})` : 'Semua' },
+                { id: 'kritis', label: summary ? `Menipis (${summary.lowStockSku})` : 'Menipis' },
+                { id: 'habis', label: summary ? `Habis (${summary.outOfStockSku})` : 'Habis' },
+                {
+                  id: 'perishable',
+                  label:
+                    summary?.perishableSku !== undefined
+                      ? `Makanan Harian (${summary.perishableSku})`
+                      : 'Makanan Harian',
+                },
+                {
+                  id: 'aktivitas',
+                  label: summary ? `Riwayat Restock (${summary.todayRestockCount})` : 'Riwayat Restock',
+                },
+              ].map((chip) => {
+                const isActive = activeTab === chip.id;
+                return (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    className={`rep-chip${isActive ? ' active' : ''}`}
+                    onClick={() => handleSelectTab(chip.id as typeof activeTab)}
+                  >
+                    {chip.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* ── ERROR ALERT JIKA ADA ── */}
@@ -1683,7 +1734,7 @@ export default function GudangPortalPage() {
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                          <Calendar size={13} style={{ color: '#0284c7' }} />
+                          <Calendar size={13} style={{ color: '#15803d' }} />
                           <span><strong>{dateStr}</strong></span>
                         </div>
                         <span style={{ color: '#cbd5e1' }}>•</span>
@@ -1769,7 +1820,7 @@ export default function GudangPortalPage() {
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
                     gap: 10,
                     fontSize: '0.74rem',
                     color: '#475569',
@@ -1787,10 +1838,10 @@ export default function GudangPortalPage() {
                     onClick={() => setActiveTab('fefo')}
                   >
                     <div style={{ fontWeight: 800, color: '#c2410c', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span>Tipe 1: Produk Kemasan Ber-Barcode (FEFO)</span>
+                      <span>Tipe 1: Produk Kemasan Ber-Barcode</span>
                     </div>
                     <p style={{ margin: 0, lineHeight: 1.45 }}>
-                      <strong>Sistem FEFO:</strong> Minuman botol (Ades, Sprite), susu, biskuit, snack pabrik. Tanggal expired dicatat per batch dus masuk dan dipantau 7 s/d 30 hari sebelum kedaluwarsa. Produk kedaluwarsa terdekat wajib ditempatkan paling depan rak.
+                      <strong>Produk Kemasan:</strong> Minuman botol (Ades, Sprite), susu, biskuit, snack pabrik. Tanggal kedaluwarsa dicatat per batch masuk dan dipantau 7 s/d 30 hari sebelum habis masa berlaku. Produk kedaluwarsa terdekat wajib ditempatkan paling depan rak.
                     </p>
                     <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#ea580c', fontWeight: 700 }}>
                       &bull; {summary ? `${summary.expiringSoonSku} batch mendekati expired` : 'Dipantau otomatis'}
@@ -1827,7 +1878,7 @@ export default function GudangPortalPage() {
                 {activeTab === 'perishable'
                   ? 'Daftar Makanan Harian (Wajib Habis 1 Hari / Cut-off 15:00 WIB)'
                   : activeTab === 'fefo'
-                  ? 'Radar Produk FEFO Mendekati Kedaluwarsa (Read-Only)'
+                  ? 'Daftar Produk Mendekati Kedaluwarsa (Read-Only)'
                   : activeTab === 'kritis'
                   ? `Daftar Stok Kritis (≤ ${lowStockThreshold} Pcs)`
                   : activeTab === 'habis'
@@ -1875,7 +1926,7 @@ export default function GudangPortalPage() {
                       minHeight: 44,
                       padding: '10px 16px',
                       borderRadius: 8,
-                      backgroundColor: 'hsl(217 91% 60%)',
+                      backgroundColor: '#15803d',
                       color: '#ffffff',
                       border: 'none',
                       fontWeight: 700,
@@ -2010,7 +2061,7 @@ export default function GudangPortalPage() {
                             {item.expiryUrgency === 'EXPIRED'
                               ? 'SUDAH EXPIRED'
                               : item.expiryUrgency === 'CRITICAL'
-                              ? '< 7 HARI (FEFO)'
+                              ? '< 7 HARI'
                               : item.expiryUrgency === 'WARNING'
                               ? '< 30 HARI'
                               : 'AMAN'}
@@ -2136,7 +2187,7 @@ export default function GudangPortalPage() {
                                 borderRadius: 8,
                                 fontSize: '0.8rem',
                                 fontWeight: 700,
-                                backgroundColor: 'hsl(217 91% 60%)',
+                                backgroundColor: '#15803d',
                                 color: '#fff',
                                 border: 'none',
                                 display: 'flex',
@@ -2221,7 +2272,7 @@ export default function GudangPortalPage() {
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <h3 style={{ fontSize: '0.95rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                    Pelacakan Multi-Batch &amp; FEFO
+                    Rincian Batch &amp; Kedaluwarsa
                   </h3>
                   <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0 }}>
                     {viewingBatchProduct.name} &bull; Total Stok Rak: <strong>{viewingBatchProduct.stockQty} {viewingBatchProduct.unit}</strong>
@@ -2393,7 +2444,7 @@ export default function GudangPortalPage() {
                                   borderRadius: 5,
                                   border: '1px solid #cbd5e1',
                                   backgroundColor: '#ffffff',
-                                  color: '#2563eb',
+                                  color: '#15803d',
                                   fontSize: '0.7rem',
                                   fontWeight: 700,
                                   cursor: 'pointer',
@@ -2429,13 +2480,13 @@ export default function GudangPortalPage() {
                                       cursor: 'pointer',
                                     }}
                                   >
-                                    Tarik / Musnahkan di Tab FEFO
+                                    Tindak di Tab Kedaluwarsa
                                   </button>
                                 )}
                               </div>
                             ) : isCritical ? (
                               <span style={{ color: '#d97706', fontWeight: 700 }}>
-                                Sisa {b.daysRemaining} hari (FEFO Kritis)
+                                Sisa {b.daysRemaining} hari (Kritis)
                               </span>
                             ) : b.expiryStatus === 'WARNING_30' ? (
                               <span style={{ color: '#b45309', fontWeight: 700 }}>
@@ -2521,7 +2572,7 @@ export default function GudangPortalPage() {
                                   padding: '6px 12px',
                                   borderRadius: 7,
                                   border: 'none',
-                                  backgroundColor: '#2563eb',
+                                  backgroundColor: '#15803d',
                                   color: '#ffffff',
                                   fontSize: '0.76rem',
                                   fontWeight: 700,
@@ -2554,7 +2605,7 @@ export default function GudangPortalPage() {
                             </div>
                             {inlineBatchExpiry && inlineBatchExpiry < getTodayWibStr() && (
                               <div style={{ fontSize: '0.68rem', color: '#b91c1c', fontWeight: 600 }}>
-                                Perhatian: Tanggal ini sudah lewat — batch akan otomatis ditandai EXPIRED di Radar FEFO.
+                                Perhatian: Tanggal ini sudah lewat — batch akan otomatis ditandai EXPIRED di daftar kedaluwarsa.
                               </div>
                             )}
                             {inlineBatchError && (
@@ -2643,8 +2694,8 @@ export default function GudangPortalPage() {
                     height: 32,
                     flexShrink: 0,
                     borderRadius: 8,
-                    backgroundColor: 'hsl(217 91% 95%)',
-                    color: 'hsl(217 91% 40%)',
+                    backgroundColor: '#dcfce7',
+                    color: '#15803d',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -2719,7 +2770,7 @@ export default function GudangPortalPage() {
                 lineHeight: 1.45,
               }}
             >
-              <strong>Restok Langsung Aktif:</strong> Stok langsung masuk ke Kasir & Gudang beserta jejak audit. Keputusan diskon FEFO & keuangan tetap memerlukan persetujuan Manager.
+              <strong>Restok Langsung Aktif:</strong> Stok langsung masuk ke Kasir &amp; Gudang beserta catatan riwayat. Keputusan diskon kedaluwarsa &amp; keuangan tetap memerlukan persetujuan Manager.
             </div>
 
             {/* Feedback Sukses */}
@@ -2937,10 +2988,10 @@ export default function GudangPortalPage() {
                   style={{
                     padding: '8px 12px',
                     borderRadius: 8,
-                    backgroundColor: '#eff6ff',
-                    border: '1px solid #bfdbfe',
+                    backgroundColor: '#f0fdf4',
+                    border: '1px solid #bbf7d0',
                     fontSize: '0.75rem',
-                    color: '#1e40af',
+                    color: '#166534',
                     display: 'flex',
                     justifyContent: 'space-between',
                   }}
@@ -2978,7 +3029,7 @@ export default function GudangPortalPage() {
                       flex: 2,
                       height: 44,
                       borderRadius: 10,
-                      backgroundColor: 'hsl(217 91% 60%)',
+                      backgroundColor: '#15803d',
                       color: '#fff',
                       border: 'none',
                       fontSize: '0.85rem',
@@ -3555,7 +3606,7 @@ export default function GudangPortalPage() {
                 width: '75%',
                 maxWidth: 280,
                 height: 180,
-                border: '2px solid hsl(217 91% 60%)',
+                border: '2px solid #16a34a',
                 borderRadius: 16,
                 boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.5)',
                 pointerEvents: 'none',
@@ -3633,8 +3684,8 @@ export default function GudangPortalPage() {
                     width: 36,
                     height: 36,
                     borderRadius: 10,
-                    backgroundColor: '#eff6ff',
-                    color: '#2563eb',
+                    backgroundColor: '#f0fdf4',
+                    color: '#15803d',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -3705,14 +3756,14 @@ export default function GudangPortalPage() {
                     ? '#ea580c'
                     : isApproved
                     ? '#16a34a'
-                    : '#2563eb';
+                    : '#15803d';
                   const statusLabel = isRejected
                     ? 'DITOLAK MANAGER'
                     : isRevised
                     ? 'PERLU REVISI'
                     : isApproved
-                    ? 'DISETUJUI (ACC)'
-                    : 'MENUNGGU ACC';
+                    ? 'DISETUJUI'
+                    : 'MENUNGGU';
 
                   return (
                     <div
@@ -3865,7 +3916,7 @@ export default function GudangPortalPage() {
                   padding: '8px 16px',
                   borderRadius: 8,
                   border: 'none',
-                  backgroundColor: '#2563eb',
+                  backgroundColor: '#15803d',
                   color: '#ffffff',
                   fontSize: '0.78rem',
                   fontWeight: 700,
@@ -3989,7 +4040,7 @@ export default function GudangPortalPage() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                   <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <Calendar size={14} style={{ color: '#2563eb' }} />
+                    <Calendar size={14} style={{ color: '#15803d' }} />
                     <span>
                       Tanggal Kedaluwarsa / Expired
                       {editBatches.length > 1 ? ` (${editBatches.length} Batch Aktif)` : ''}
@@ -4078,7 +4129,7 @@ export default function GudangPortalPage() {
                           />
                           {isPast && (
                             <div style={{ fontSize: '0.68rem', color: '#b91c1c', fontWeight: 600 }}>
-                              Tanggal sudah lewat — batch akan otomatis masuk Radar FEFO sebagai EXPIRED.
+                              Tanggal sudah lewat — batch akan otomatis masuk daftar kedaluwarsa sebagai EXPIRED.
                             </div>
                           )}
                         </div>
@@ -4163,7 +4214,7 @@ export default function GudangPortalPage() {
                 <button
                   type="submit"
                   disabled={submittingEdit || loadingEditBatches}
-                  style={{ minHeight: 42, padding: '8px 16px', borderRadius: 8, border: 'none', backgroundColor: '#2563eb', color: '#ffffff', fontWeight: 700, cursor: submittingEdit || loadingEditBatches ? 'not-allowed' : 'pointer', opacity: loadingEditBatches ? 0.65 : 1 }}
+                  style={{ minHeight: 42, padding: '8px 16px', borderRadius: 8, border: 'none', backgroundColor: '#15803d', color: '#ffffff', fontWeight: 700, cursor: submittingEdit || loadingEditBatches ? 'not-allowed' : 'pointer', opacity: loadingEditBatches ? 0.65 : 1 }}
                 >
                   {submittingEdit ? 'Menyimpan...' : loadingEditBatches ? 'Memuat Batch...' : 'Simpan Perubahan'}
                 </button>
