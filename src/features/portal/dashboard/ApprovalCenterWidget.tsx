@@ -137,7 +137,7 @@ export default function ApprovalCenterWidget({
         style={{
           padding: 'var(--space-5)',
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))',
           gap: 'var(--space-4)',
         }}
       >
@@ -232,7 +232,7 @@ export default function ApprovalCenterWidget({
                 }}
               >
                 <QrCode size={16} />
-                Ringkasan QRIS Bu Dyah
+                Ringkasan QRIS
               </span>
               <span
                 className={`badge ${
@@ -408,7 +408,7 @@ export default function ApprovalCenterWidget({
                 }}
               >
                 <Package size={16} />
-                Kedaluwarsa Stok (FEFO)
+                Stok Mendekati Kedaluwarsa
               </span>
               <span
                 className={`badge ${
@@ -532,7 +532,7 @@ export default function ApprovalCenterWidget({
                 }}
               >
                 <AlertTriangle size={16} aria-hidden="true" />
-                Laporan Kondisi &amp; Diskon FEFO
+                Laporan Kondisi &amp; Diskon Obral
               </span>
               <span
                 className={`badge ${
@@ -545,8 +545,8 @@ export default function ApprovalCenterWidget({
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '0 0 var(--space-3)' }}>
               {pendingConditionReportsCount > 0
-                ? 'Petugas gudang mengajukan laporan kondisi batch kritis / usulan diskon FEFO yang menunggu keputusan Manajer.'
-                : 'Tidak ada laporan kondisi stok atau usulan diskon FEFO yang menunggu keputusan.'}
+                ? 'Petugas gudang mengajukan laporan kondisi stok kritis / usulan diskon obral yang menunggu keputusan.'
+                : 'Tidak ada laporan kondisi stok atau usulan diskon obral yang menunggu keputusan.'}
             </p>
           </div>
 
@@ -562,12 +562,12 @@ export default function ApprovalCenterWidget({
               textDecoration: 'none',
             }}
           >
-            Tinjau Laporan FEFO <ChevronRight size={14} aria-hidden="true" />
+            Tinjau Laporan Kondisi <ChevronRight size={14} aria-hidden="true" />
           </Link>
         </div>
       </div>
 
-      {/* Warning Box jika ada Shift yang Ditutup Paksa oleh Cron */}
+      {/* Warning Box jika ada Shift yang Ditutup Otomatis Sistem */}
       {autoClosedShiftsCount > 0 && (
         <div
           style={{
@@ -580,10 +580,10 @@ export default function ApprovalCenterWidget({
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--color-error)', fontWeight: 600, fontSize: '0.85rem' }}>
             <AlertTriangle size={16} />
-            Perhatian: {autoClosedShiftsCount} Shift Ditutup Otomatis oleh Sistem (Auto-Closed)
+            Perhatian: {autoClosedShiftsCount} Shift Ditutup Otomatis Sistem
           </div>
           <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: '4px 0 8px' }}>
-            Kasir lupa tutup shift sehingga ditutup otomatis oleh Cron tengah malam. Fisik uang laci belum dihitung oleh kasir secara mandiri. Segera verifikasi fisik uang laci:
+            Kasir lupa menutup shift sehingga ditutup otomatis pada tengah malam. Fisik uang kotak kasir belum dihitung secara mandiri:
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {autoClosedShifts.map((s) => (
@@ -593,18 +593,20 @@ export default function ApprovalCenterWidget({
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: 6,
                   fontSize: '0.78rem',
-                  padding: '4px 8px',
+                  padding: '6px 10px',
                   backgroundColor: 'white',
                   borderRadius: 'var(--radius-sm)',
                   border: '1px solid var(--color-border)',
                 }}
               >
                 <span>
-                  <strong>{s.employeeName}</strong> &bull; Masuk: {new Date(s.clockIn).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                  <strong>{s.employeeName}</strong> · Masuk: {new Date(s.clockIn).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
                 </span>
-                <span style={{ color: 'var(--color-error)', fontSize: '0.72rem', fontStyle: 'italic' }}>
-                  Auto-closed oleh Cron
+                <span style={{ color: 'var(--color-error)', fontSize: '0.72rem', fontWeight: 600 }}>
+                  Tutup otomatis
                 </span>
               </div>
             ))}

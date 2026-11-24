@@ -177,10 +177,10 @@ export default function RiwayatKoreksiStokTab({
             }}
           >
             <History size={18} style={{ color: 'var(--color-primary)' }} />
-            <span>Audit Trail Riwayat Koreksi Stok</span>
+            <span>Riwayat Koreksi Stok</span>
           </h2>
           <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
-            Bukti historis perubahan kuantitas stok: siapa pengubah, waktu kejadian, perubahan dari berapa menjadi berapa, dan alasan opname.
+            Catatan perubahan stok, pelaku, waktu, dan alasan penyesuaian.
           </p>
         </div>
 
@@ -233,11 +233,11 @@ export default function RiwayatKoreksiStokTab({
           <input
             id={searchInputId}
             type="text"
-            placeholder="Cari produk, alasan opname, atau nama admin..."
+            placeholder="Cari produk, alasan, atau nama pengubah..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="form-input"
-            style={{ paddingLeft: 32, fontSize: 'var(--text-xs)', width: '100%' }}
+            style={{ paddingLeft: 32, fontSize: 'var(--text-base)', minHeight: 44, width: '100%' }}
           />
         </div>
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
@@ -276,13 +276,13 @@ export default function RiwayatKoreksiStokTab({
           <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: 0 }}>
             {debouncedSearch
               ? 'Coba ubah kata kunci pencarian produk, alasan, atau nama pengubah.'
-              : 'Setiap koreksi stok dari tombol "Koreksi Stok", pemusnahan/retur FEFO, atau edit master produk akan tercatat permanen.'}
+              : 'Setiap koreksi stok dari tombol "Stok", pemusnahan/retur kedaluwarsa, atau edit produk akan tercatat permanen.'}
           </p>
         </div>
       ) : (
         <>
-          {/* Tabel Riwayat */}
-          <div style={{ overflowX: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)' }}>
+          {/* Tabel Riwayat (Desktop) */}
+          <div className="rep-desktop-only" style={{ overflowX: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
               <thead>
                 <tr style={{ backgroundColor: 'var(--color-surface-alt)', borderBottom: '1px solid var(--color-border)' }}>
@@ -398,6 +398,67 @@ export default function RiwayatKoreksiStokTab({
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile Cards — Riwayat Koreksi Stok */}
+          <div className="rep-mobile-only">
+            {items.map((item) => {
+              const isPositive = item.qtyDiff > 0;
+              const isZero = item.qtyDiff === 0;
+              const roleLabel = formatRoleLabel(item.adminRole);
+              return (
+                <div key={item.id} className="rep-mcard">
+                  <div className="rep-mcard__top">
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.86rem', color: 'var(--color-text)' }}>
+                        {item.productName}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                        {fmtWaktu(item.createdAt)}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 3,
+                        padding: '2px 8px',
+                        borderRadius: 9999,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                        backgroundColor: isPositive ? 'var(--color-success-light)' : isZero ? 'var(--color-surface-muted)' : 'var(--color-error-light)',
+                        color: isPositive ? 'var(--color-success)' : isZero ? 'var(--color-text-muted)' : 'var(--color-error)',
+                      }}
+                    >
+                      {isPositive ? `+${item.qtyDiff}` : item.qtyDiff} {item.unit}
+                    </span>
+                  </div>
+                  <div className="rep-mcard__grid">
+                    <div>
+                      <div className="rep-mcard__k">Perubahan Stok</div>
+                      <div className="rep-mcard__v">
+                        {item.qtyBefore} &rarr; {item.qtyAfter} {item.unit}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="rep-mcard__k">Oleh</div>
+                      <div className="rep-mcard__v">
+                        {item.adminName || 'Admin Toko'}
+                        {roleLabel && (
+                          <span style={{ display: 'block', fontSize: '0.66rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>
+                            {roleLabel}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: 'var(--color-text-secondary)', paddingTop: 6, borderTop: '1px solid #f1f5f9', lineHeight: 1.4 }}>
+                    {item.reason}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           {/* Paginasi */}

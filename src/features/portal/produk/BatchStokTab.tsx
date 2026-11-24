@@ -188,46 +188,28 @@ export default function BatchStokTab({
 
   return (
     <div>
-      {/* 1. KPI Alert Kedaluwarsa Cards */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
-          gap: 'var(--space-3)',
-          marginBottom: 'var(--space-5)',
-        }}
-      >
+      {/* 1. KPI Alert Kedaluwarsa Cards (2x2 di HP, 4-kolom di Desktop) */}
+      <div className="rep-kpi-grid" style={{ marginBottom: 'var(--space-4)' }}>
         {/* Card 1: Expired */}
         <button
           type="button"
           aria-pressed={statusFilter === 'EXPIRED'}
           onClick={() => startFilterTransition(() => setStatusFilter(statusFilter === 'EXPIRED' ? 'ALL' : 'EXPIRED'))}
+          className="rep-kpi"
           style={{
-            display: 'block',
-            width: '100%',
             textAlign: 'left',
-            padding: 'var(--space-4)',
-            borderRadius: 'var(--radius-md)',
-            border: `1px solid ${summary.expiredCount > 0 ? 'var(--color-error)' : 'var(--color-border)'}`,
-            backgroundColor: summary.expiredCount > 0 ? 'hsl(0 84% 60% / 0.08)' : 'var(--color-surface)',
+            border: `1.5px solid ${statusFilter === 'EXPIRED' || summary.expiredCount > 0 ? 'var(--color-error)' : '#e2e8f0'}`,
+            backgroundColor: summary.expiredCount > 0 ? 'hsl(0 84% 60% / 0.06)' : '#ffffff',
             cursor: 'pointer',
-            transition: 'background-color 0.2s ease, border-color 0.2s ease',
           }}
         >
-          <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-error)' }}>
-              Sudah Kedaluwarsa
-            </span>
-            <span className="badge badge-error" style={{ fontSize: '0.7rem' }}>
-              Wajib Write-Off
-            </span>
+          <span className="rep-kpi__top">
+            <span className="rep-kpi__label" style={{ color: 'var(--color-error)' }}>Kedaluwarsa</span>
           </span>
-          <span style={{ display: 'block', fontSize: '1.6rem', fontWeight: 800, marginTop: 'var(--space-2)', color: 'var(--color-error)' }}>
-            {summary.expiredCount} <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>Batch</span>
+          <span className="rep-kpi__val" style={{ color: 'var(--color-error)' }}>
+            {summary.expiredCount} Batch
           </span>
-          <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-            Diblokir otomatis oleh POS
-          </span>
+          <span className="rep-kpi__sub">Tarik dari rak</span>
         </button>
 
         {/* Card 2: Expiring < 7 Days */}
@@ -235,32 +217,21 @@ export default function BatchStokTab({
           type="button"
           aria-pressed={statusFilter === 'EXPIRING_7'}
           onClick={() => startFilterTransition(() => setStatusFilter(statusFilter === 'EXPIRING_7' ? 'ALL' : 'EXPIRING_7'))}
+          className="rep-kpi"
           style={{
-            display: 'block',
-            width: '100%',
             textAlign: 'left',
-            padding: 'var(--space-4)',
-            borderRadius: 'var(--radius-md)',
-            border: `1px solid ${summary.expiring7Count > 0 ? 'hsl(38 92% 50%)' : 'var(--color-border)'}`,
-            backgroundColor: summary.expiring7Count > 0 ? 'hsl(38 92% 50% / 0.08)' : 'var(--color-surface)',
+            border: `1.5px solid ${statusFilter === 'EXPIRING_7' || summary.expiring7Count > 0 ? 'hsl(38 92% 50%)' : '#e2e8f0'}`,
+            backgroundColor: summary.expiring7Count > 0 ? 'hsl(38 92% 50% / 0.07)' : '#ffffff',
             cursor: 'pointer',
-            transition: 'background-color 0.2s ease, border-color 0.2s ease',
           }}
         >
-          <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'hsl(38 92% 32%)' }}>
-              Kritis (&le; 7 Hari)
-            </span>
-            <span className="badge badge-warning" style={{ fontSize: '0.7rem' }}>
-              FEFO Prioritas
-            </span>
+          <span className="rep-kpi__top">
+            <span className="rep-kpi__label" style={{ color: 'hsl(38 92% 32%)' }}>Kritis (&le; 7 Hr)</span>
           </span>
-          <span style={{ display: 'block', fontSize: '1.6rem', fontWeight: 800, marginTop: 'var(--space-2)', color: 'hsl(38 92% 32%)' }}>
-            {summary.expiring7Count} <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>Batch</span>
+          <span className="rep-kpi__val" style={{ color: 'hsl(38 92% 32%)' }}>
+            {summary.expiring7Count} Batch
           </span>
-          <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-            Segera diskon sore / bundling
-          </span>
+          <span className="rep-kpi__sub">Prioritas obral</span>
         </button>
 
         {/* Card 3: Expiring < 30 Days */}
@@ -268,32 +239,18 @@ export default function BatchStokTab({
           type="button"
           aria-pressed={statusFilter === 'EXPIRING_30'}
           onClick={() => startFilterTransition(() => setStatusFilter(statusFilter === 'EXPIRING_30' ? 'ALL' : 'EXPIRING_30'))}
+          className="rep-kpi"
           style={{
-            display: 'block',
-            width: '100%',
             textAlign: 'left',
-            padding: 'var(--space-4)',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--color-border)',
-            backgroundColor: 'var(--color-surface)',
+            border: `1.5px solid ${statusFilter === 'EXPIRING_30' ? 'var(--color-info)' : '#e2e8f0'}`,
             cursor: 'pointer',
-            transition: 'background-color 0.2s ease, border-color 0.2s ease',
           }}
         >
-          <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-info)' }}>
-              Perhatian (&le; 30 Hari)
-            </span>
-            <span className="badge badge-info" style={{ fontSize: '0.7rem' }}>
-              Pantau Stok
-            </span>
+          <span className="rep-kpi__top">
+            <span className="rep-kpi__label" style={{ color: 'var(--color-info)' }}>Pantau (&le; 30 Hr)</span>
           </span>
-          <span style={{ display: 'block', fontSize: '1.6rem', fontWeight: 800, marginTop: 'var(--space-2)', color: 'var(--color-text)' }}>
-            {summary.expiring30Count} <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>Batch</span>
-          </span>
-          <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-            Retur ke pemasok jika slow-moving
-          </span>
+          <span className="rep-kpi__val">{summary.expiring30Count} Batch</span>
+          <span className="rep-kpi__sub">Cek retur pemasok</span>
         </button>
 
         {/* Card 4: Total Active Batches */}
@@ -303,32 +260,18 @@ export default function BatchStokTab({
           onClick={() => {
             if (statusFilter !== 'ALL') startFilterTransition(() => setStatusFilter('ALL'));
           }}
+          className="rep-kpi"
           style={{
-            display: 'block',
-            width: '100%',
             textAlign: 'left',
-            padding: 'var(--space-4)',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--color-border)',
-            backgroundColor: 'var(--color-surface)',
+            border: `1.5px solid ${statusFilter === 'ALL' ? 'var(--color-primary)' : '#e2e8f0'}`,
             cursor: 'pointer',
-            transition: 'background-color 0.2s ease, border-color 0.2s ease',
           }}
         >
-          <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text)' }}>
-              Total Batch Terdata
-            </span>
-            <span className="badge badge-secondary" style={{ fontSize: '0.7rem' }}>
-              FEFO Active
-            </span>
+          <span className="rep-kpi__top">
+            <span className="rep-kpi__label">Total Batch</span>
           </span>
-          <span style={{ display: 'block', fontSize: '1.6rem', fontWeight: 800, marginTop: 'var(--space-2)', color: 'var(--color-primary)' }}>
-            {summary.totalBatches} <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>Batch</span>
-          </span>
-          <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>
-            Total {summary.totalStockInBatches.toLocaleString('id-ID')} unit terdaftar
-          </span>
+          <span className="rep-kpi__val" style={{ color: 'var(--color-primary)' }}>{summary.totalBatches} Batch</span>
+          <span className="rep-kpi__sub">{summary.totalStockInBatches.toLocaleString('id-ID')} unit terdata</span>
         </button>
       </div>
 
@@ -363,7 +306,7 @@ export default function BatchStokTab({
 
             <select
               aria-label="Filter status kedaluwarsa"
-              className="form-input"
+              className="form-input form-select"
               style={{ flex: '1 1 180px', maxWidth: '100%', minHeight: 44, fontSize: 'var(--text-base)' }}
               value={statusFilter}
               onChange={(e) => startFilterTransition(() => setStatusFilter(e.target.value as BatchStatusFilter))}
@@ -377,7 +320,7 @@ export default function BatchStokTab({
 
             <select
               aria-label="Filter kelas umur simpan"
-              className="form-input"
+              className="form-input form-select"
               style={{ flex: '1 1 180px', maxWidth: '100%', minHeight: 44, fontSize: 'var(--text-base)' }}
               value={expiryClassFilter}
               onChange={(e) => startFilterTransition(() => setExpiryClassFilter(e.target.value))}
@@ -440,17 +383,16 @@ export default function BatchStokTab({
             color: 'var(--color-text-muted)',
           }}
         >
-          Mode Pantau Batch FEFO: Untuk <strong>Stok Opname (Tambah, Edit, Koreksi Stok, dan Hapus Produk Berbarcode maupun Non-Barcode)</strong>, gunakan tab <strong>Katalog Produk</strong>. Penambahan batch gudang langsung tetap memerlukan persetujuan Manager.
+          Mode Pantau Batch: Untuk <strong>Stok Opname (Tambah, Edit, Koreksi Stok, dan Hapus Produk)</strong>, gunakan tab <strong>Katalog</strong>. Penambahan batch gudang langsung tetap memerlukan persetujuan Manager.
         </div>
       )}
 
-      {/* 3. Table of Stock Batches */}
+      {/* 3. Table & Mobile Cards of Stock Batches */}
       <div className="card" style={{ overflow: 'hidden' }}>
-        <div className="table-wrapper" style={{ margin: 0, border: 'none', borderRadius: 0, WebkitOverflowScrolling: 'touch' }}>
           {loading ? (
             <div style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
               <Loader2 size={32} className="spin-icon" style={{ margin: '0 auto var(--space-3)' }} />
-              <p>Memuat daftar batch stok FEFO...</p>
+              <p>Memuat daftar batch stok...</p>
             </div>
           ) : error ? (
             <div style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-error)' }}>
@@ -463,13 +405,15 @@ export default function BatchStokTab({
               <p>Tidak ada batch stok yang sesuai dengan filter.</p>
             </div>
           ) : (
-            <table className="table" aria-label="Daftar batch stok produk FEFO">
+            <>
+            <div className="table-wrapper rep-desktop-only" style={{ margin: 0, border: 'none', borderRadius: 0, WebkitOverflowScrolling: 'touch' }}>
+            <table className="table" aria-label="Daftar batch stok produk">
               <thead>
                 <tr>
                   <th scope="col">Produk</th>
                   <th scope="col">Kode Batch</th>
                   <th scope="col">Kelas Umur</th>
-                  <th scope="col">Kedaluwarsa (FEFO)</th>
+                  <th scope="col">Kedaluwarsa</th>
                   <th scope="col" className="text-right">HPP Masuk</th>
                   <th scope="col" className="text-center">Sisa / Awal</th>
                   <th scope="col">Tgl Diterima</th>
@@ -535,7 +479,7 @@ export default function BatchStokTab({
                                   padding: '1px 5px',
                                 }}
                               >
-                                PRIORITAS 1 (FEFO)
+                                PRIORITAS 1
                               </span>
                             ) : (
                               <span
@@ -673,8 +617,85 @@ export default function BatchStokTab({
                 })}
               </tbody>
             </table>
+            </div>
+
+            {/* Mobile Cards — Batch Stok */}
+            <div className="rep-mobile-only" style={{ padding: 'var(--space-3)' }}>
+              {batches.map((b) => {
+                const isExpired = b.expiryStatus === 'EXPIRED';
+                const isCritical = b.expiryStatus === 'CRITICAL_7';
+                const isPriority = b.currentQty > 0 && firstActiveBatchPerProduct.get(b.productId) === b.id;
+                return (
+                  <div
+                    key={b.id}
+                    className="rep-mcard"
+                    style={{
+                      background: isExpired ? 'hsl(0 84% 98%)' : isCritical ? 'hsl(38 95% 97%)' : '#ffffff',
+                    }}
+                  >
+                    <div className="rep-mcard__top">
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.86rem', color: 'var(--color-text)' }}>
+                          {b.productName}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
+                          {b.batchCode}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
+                        <span className={`badge ${b.expiryClass === 'HARIAN' ? 'badge-warning' : b.expiryClass === 'PENDEK' ? 'badge-info' : 'badge-secondary'}`} style={{ fontSize: '0.66rem' }}>
+                          {b.expiryClass}
+                        </span>
+                        {isPriority && (
+                          <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#15803d', background: '#dcfce7', padding: '1px 5px', borderRadius: 4 }}>
+                            PRIORITAS 1
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rep-mcard__grid">
+                      <div>
+                        <div className="rep-mcard__k">Kedaluwarsa</div>
+                        <div className="rep-mcard__v" style={{ color: isExpired ? 'var(--color-error)' : isCritical ? 'hsl(38 92% 32%)' : '#0f172a' }}>
+                          {b.expiryDate
+                            ? new Date(b.expiryDate + 'T00:00:00Z').toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+                            : 'Tidak ada tgl'}
+                          {b.daysRemaining !== null && (
+                            <span style={{ display: 'block', fontSize: '0.66rem', fontWeight: 600 }}>
+                              {isExpired ? `${Math.abs(b.daysRemaining)} hr lalu` : `Sisa ${b.daysRemaining} hr`}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="rep-mcard__k">Sisa / Awal</div>
+                        <div className="rep-mcard__v">
+                          {b.currentQty} / {b.initialQty} {b.productUnit}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="rep-mcard__k">HPP Masuk</div>
+                        <div className="rep-mcard__v">{formatRupiah(parseFloat(b.costPrice))}</div>
+                      </div>
+                      <div>
+                        <div className="rep-mcard__k">Tgl Diterima</div>
+                        <div className="rep-mcard__v">
+                          {new Date(b.receivedAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </div>
+                      </div>
+                    </div>
+                    {b.notes && (
+                      <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', paddingTop: 4, borderTop: '1px solid #f1f5f9' }}>
+                        Catatan: {b.notes}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            </>
           )}
-        </div>
       </div>
 
       {/* 4. Modal Penerimaan Barang Masuk (Batch Baru) */}
@@ -910,7 +931,7 @@ function PenerimaanBarangModal({
                 </label>
                 <select
                   id={`${uid}-class`}
-                  className="form-input"
+                  className="form-input form-select"
                   value={expiryClass}
                   onChange={(e) => setExpiryClass(e.target.value as typeof expiryClass)}
                   style={{ fontSize: 'var(--text-base)', minHeight: 44 }}
@@ -997,7 +1018,7 @@ function PenerimaanBarangModal({
                   id={`${uid}-supplier`}
                   type="text"
                   className="form-input"
-                  placeholder="Contoh: Bu Dyah / Koperasi / PT ABC"
+                  placeholder="Contoh: Koperasi / PT ABC"
                   value={supplierName}
                   onChange={(e) => setSupplierName(e.target.value)}
                   style={{ fontSize: 'var(--text-base)', minHeight: 44 }}

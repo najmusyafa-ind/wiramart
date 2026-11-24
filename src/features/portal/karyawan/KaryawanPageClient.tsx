@@ -61,7 +61,7 @@ type SlotOption = {
 
 const JABATAN_OPTIONS = [
   { value: 'Kasir', label: 'Kasir', desc: 'Melayani transaksi penjualan di meja POS kasir' },
-  { value: 'Gudang', label: 'Gudang', desc: 'Staf inventaris toko, penerimaan stok, dan cek expired FEFO' },
+  { value: 'Gudang', label: 'Gudang', desc: 'Staf inventaris toko, penerimaan stok, dan cek kedaluwarsa' },
   { value: 'CS Pelayan', label: 'CS Pelayan (Customer Service & Pramuniaga)', desc: 'Layanan pelanggan toko, display etalase, dan cek makanan basi' },
   { value: 'Admin Shift', label: 'Admin Shift (Ketua Shift)', desc: 'Koordinator operasional shift toko, pemegang PIN otorisasi, dan serah terima shift' },
 ];
@@ -485,7 +485,7 @@ function KaryawanModal({
               </label>
               {slotsLoading ? (
                 <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Loader2 size={13} className="animate-spin" /> Memuat slot jadwal...
+                  <Loader2 size={13} className="spin-icon" /> Memuat slot jadwal...
                 </div>
               ) : (
                 <select
@@ -729,7 +729,7 @@ function KaryawanModal({
               <button type="submit" className="btn btn-primary" style={{ minHeight: 44 }} disabled={loading} id={`${uid}-submit`}>
                 {loading ? (
                   <>
-                    <Loader2 size={14} className="animate-spin" /> Menyimpan...
+                    <Loader2 size={14} className="spin-icon" /> Menyimpan...
                   </>
                 ) : isEdit ? (
                   'Simpan Perubahan'
@@ -758,6 +758,7 @@ export default function KaryawanPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
+  const [confirmReset, setConfirmReset] = useState<Employee | null>(null);
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [resetToast, setResetToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const uid = useId();
@@ -826,6 +827,7 @@ export default function KaryawanPage() {
       setResetToast({ msg: 'Gagal mereset sesi. Periksa koneksi.', ok: false });
     } finally {
       setResettingId(null);
+      setConfirmReset(null);
       setTimeout(() => setResetToast(null), 3500);
     }
   }
@@ -933,7 +935,8 @@ export default function KaryawanPage() {
           style={{
             position: 'fixed',
             bottom: 24,
-            right: 24,
+            left: '50%',
+            transform: 'translateX(-50%)',
             zIndex: 9999,
             background: resetToast.ok ? 'hsl(142 60% 38%)' : 'hsl(0 72% 51%)',
             color: '#fff',
@@ -943,13 +946,92 @@ export default function KaryawanPage() {
             alignItems: 'center',
             gap: 8,
             boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: 600,
+            maxWidth: 'calc(100vw - 32px)',
+            width: 'max-content',
+            textAlign: 'center',
             animation: 'fade-in 0.2s ease',
           }}
         >
-          {resetToast.ok ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
-          {resetToast.msg}
+          {resetToast.ok ? <CheckCircle size={16} style={{ flexShrink: 0 }} /> : <AlertTriangle size={16} style={{ flexShrink: 0 }} />}
+          <span>{resetToast.msg}</span>
+        </div>
+      )}
+
+      {/* ── Confirm Force Logout Dialog ────────────────────── */}
+      {confirmReset && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="confirm-reset-sesi-title"
+          aria-describedby="confirm-reset-sesi-desc"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding:
+              'calc(var(--space-3) + env(safe-area-inset-top, 0px)) var(--space-3) calc(var(--space-3) + env(safe-area-inset-bottom, 0px))',
+            backgroundColor: 'var(--color-backdrop-blur)',
+            backdropFilter: 'blur(8px)',
+            animation: 'fade-in 0.15s ease',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !resettingId) setConfirmReset(null);
+          }}
+        >
+          <div className="card" style={{ maxWidth: 420, width: '100%', maxHeight: '90dvh', overflowY: 'auto', boxShadow: 'var(--shadow-xl)' }}>
+            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', padding: 'var(--space-5)' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+                <LogOut size={22} style={{ color: 'hsl(25 95% 48%)', flexShrink: 0, marginTop: 2 }} aria-hidden="true" />
+                <div>
+                  <p id="confirm-reset-sesi-title" style={{ fontWeight: 'var(--weight-semibold)', marginBottom: 'var(--space-1)' }}>
+                    Tutup Paksa Sesi Kasir?
+                  </p>
+                  <p id="confirm-reset-sesi-desc" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.5 }}>
+                    Sesi kasir aktif milik <strong>{confirmReset.fullName}</strong> akan ditutup paksa dan kasir akan logout dari terminal. Gunakan hanya saat sesi tersangkut atau kasir lupa tutup shift.
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setConfirmReset(null)}
+                  className="btn btn-secondary"
+                  style={{ minHeight: 44 }}
+                  disabled={!!resettingId}
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleResetSesi(confirmReset)}
+                  className="btn"
+                  style={{
+                    minHeight: 44,
+                    backgroundColor: 'hsl(25 90% 48%)',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                  disabled={!!resettingId}
+                >
+                  {resettingId ? (
+                    <>
+                      <Loader2 size={14} className="spin-icon" aria-hidden="true" /> Menutup...
+                    </>
+                  ) : (
+                    'Ya, Tutup Sesi'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1194,9 +1276,9 @@ export default function KaryawanPage() {
             </div>
 
             {/* Role Filter Pills */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginRight: 4 }}>
-                <Filter size={13} /> Filter:
+            <div className="rep-chip-bar" style={{ maxWidth: '100%' }}>
+              <span style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, marginRight: 2 }}>
+                <Filter size={13} />
               </span>
               {['Semua', 'Kasir', 'Gudang', 'CS Pelayan', 'Admin Shift'].map((role) => {
                 const isActive = activeRoleFilter === role;
@@ -1206,19 +1288,7 @@ export default function KaryawanPage() {
                     type="button"
                     aria-pressed={isActive}
                     onClick={() => setActiveRoleFilter(role)}
-                    style={{
-                      background: isActive ? 'var(--color-primary)' : 'var(--color-surface-muted)',
-                      color: isActive ? '#fff' : 'var(--color-text-muted)',
-                      border: `1px solid ${isActive ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                      borderRadius: '999px',
-                      padding: '8px 14px',
-                      minHeight: 44,
-                      fontSize: '0.8rem',
-                      fontWeight: isActive ? 600 : 500,
-                      cursor: 'pointer',
-                      transition:
-                        'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
-                    }}
+                    className={`rep-chip ${isActive ? 'active' : ''}`}
                   >
                     {role}
                   </button>
@@ -1232,7 +1302,7 @@ export default function KaryawanPage() {
         <div className="card">
           {loading ? (
             <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-12)', color: 'var(--color-text-muted)' }}>
-              <Loader2 size={32} style={{ margin: '0 auto', animation: 'spin 1s linear infinite' }} />
+              <Loader2 size={32} className="spin-icon" style={{ margin: '0 auto' }} />
               <p className="text-sm" style={{ marginTop: 'var(--space-3)' }}>
                 Memuat data karyawan...
               </p>
@@ -1247,7 +1317,8 @@ export default function KaryawanPage() {
               </p>
             </div>
           ) : (
-            <div className="table-wrapper" style={{ borderRadius: 0, border: 'none', boxShadow: 'none', WebkitOverflowScrolling: 'touch' }}>
+            <>
+            <div className="table-wrapper rep-desktop-only" style={{ borderRadius: 0, border: 'none', boxShadow: 'none', WebkitOverflowScrolling: 'touch' }}>
               <table className="table" aria-label="Daftar karyawan">
                 <thead>
                   <tr>
@@ -1495,14 +1566,14 @@ export default function KaryawanPage() {
                             </button>
                           )}
 
-                          {/* Force Logout — Kasir Online (Bisa untuk Manager & Admin Shift untuk reset sesi kasir yang nyangkut) */}
+                          {/* Force Logout — dengan dialog konfirmasi */}
                           {emp.activeShiftId && (
                             <button
                               type="button"
-                              onClick={() => handleResetSesi(emp)}
+                              onClick={() => setConfirmReset(emp)}
                               className="btn btn-ghost btn-sm"
-                              title="Force Logout — tutup sesi aktif kasir ini (berguna saat pergantian shift)"
-                              aria-label={`Force logout ${emp.fullName}`}
+                              title="Tutup paksa sesi aktif kasir ini"
+                              aria-label={`Tutup sesi ${emp.fullName}`}
                               disabled={resettingId === emp.id}
                               style={{
                                 color: 'hsl(25 95% 53%)',
@@ -1515,7 +1586,7 @@ export default function KaryawanPage() {
                               }}
                             >
                               {resettingId === emp.id ? (
-                                <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                                <Loader2 size={16} className="spin-icon" />
                               ) : (
                                 <LogOut size={16} />
                               )}
@@ -1542,7 +1613,7 @@ export default function KaryawanPage() {
                               }}
                             >
                               {deletingId === emp.id ? (
-                                <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                                <Loader2 size={16} className="spin-icon" />
                               ) : (
                                 <Trash2 size={16} />
                               )}
@@ -1562,6 +1633,129 @@ export default function KaryawanPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Mobile Cards — Daftar Karyawan */}
+            <div className="rep-mobile-only" style={{ padding: 'var(--space-3)' }}>
+              {filteredEmployees.map((emp) => (
+                <div key={emp.id} className="rep-mcard">
+                  <div className="rep-mcard__top">
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--color-text)' }}>
+                        {emp.fullName}
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)' }}>{emp.nim}</span> · {emp.programStudi}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+                      {renderJabatanBadge(emp.jabatan)}
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <span className={`badge ${emp.isActive ? 'badge-success' : 'badge-error'}`} style={{ fontSize: '0.66rem' }}>
+                          {emp.isActive ? 'Aktif' : 'Nonaktif'}
+                        </span>
+                        {emp.activeShiftId && (
+                          <span style={{ fontSize: '0.66rem', fontWeight: 700, padding: '2px 7px', borderRadius: 999, background: 'hsl(142 70% 45% / 0.14)', color: 'hsl(142 55% 32%)' }}>
+                            Online
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rep-mcard__grid">
+                    <div>
+                      <div className="rep-mcard__k">Jadwal Shift</div>
+                      <div className="rep-mcard__v" style={{ fontWeight: 600 }}>
+                        {emp.allShifts && emp.allShifts.length > 0
+                          ? emp.allShifts.map((s) => `${s.day} ${s.start}-${s.end}`).join(', ')
+                          : emp.shiftDay && emp.shiftStart && emp.shiftEnd
+                          ? `${emp.shiftDay} ${emp.shiftStart}-${emp.shiftEnd}`
+                          : 'Belum dijadwal'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="rep-mcard__k">PIN Shift</div>
+                      <div className="rep-mcard__v">
+                        {emp.hasPin ? (
+                          <span style={{ color: 'hsl(142 60% 32%)' }}>Aktif</span>
+                        ) : emp.jabatan.toLowerCase().includes('admin') || emp.isKetuaShift ? (
+                          <span style={{ color: 'hsl(38 90% 34%)' }}>Belum Ada</span>
+                        ) : (
+                          '—'
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {(isManager || emp.activeShiftId) && (
+                    <div className="rep-mcard__actions">
+                      {isManager && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => { setEditData(emp); setFocusPin(false); setShowModal(true); }}
+                            className="btn btn-secondary btn-sm"
+                            style={{ minHeight: 36, padding: '4px 10px', fontSize: '0.75rem', gap: 4 }}
+                          >
+                            <Edit2 size={13} /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setEditData(emp); setFocusPin(true); setShowModal(true); }}
+                            className="btn btn-secondary btn-sm"
+                            style={{ minHeight: 36, padding: '4px 10px', fontSize: '0.75rem', gap: 4 }}
+                          >
+                            <Key size={13} /> PIN
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleActive(emp)}
+                            style={{
+                              minHeight: 36, padding: '4px 10px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600,
+                              border: '1px solid var(--color-border)', background: 'var(--color-surface)',
+                              color: emp.isActive ? 'hsl(38 90% 32%)' : 'var(--color-success)',
+                              display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                            }}
+                          >
+                            {emp.isActive ? <><UserX size={13} /> Nonaktifkan</> : <><UserCheck size={13} /> Aktifkan</>}
+                          </button>
+                        </>
+                      )}
+                      {emp.activeShiftId && (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmReset(emp)}
+                          disabled={resettingId === emp.id}
+                          style={{
+                            minHeight: 36, padding: '4px 10px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600,
+                            border: '1px solid hsl(25 85% 75%)', background: 'hsl(25 95% 96%)',
+                            color: 'hsl(25 90% 38%)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                          }}
+                        >
+                          <LogOut size={13} /> Tutup Sesi
+                        </button>
+                      )}
+                      {isManager && (
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(emp.id, emp.fullName)}
+                          disabled={deletingId === emp.id}
+                          style={{
+                            minHeight: 36, padding: '4px 10px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600,
+                            border: '1px solid hsl(0 72% 82%)', background: 'hsl(0 84% 97%)',
+                            color: 'hsl(0 72% 40%)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
+                            marginLeft: 'auto',
+                          }}
+                        >
+                          <Trash2 size={13} /> Hapus
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            </>
           )}
         </div>
 

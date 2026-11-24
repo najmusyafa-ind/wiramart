@@ -18,8 +18,6 @@ import {
   RotateCcw,
   ShieldCheck,
   ShieldAlert,
-  FileText,
-  CheckCircle2,
   Percent,
 } from 'lucide-react';
 
@@ -423,7 +421,7 @@ export default function PengaturanPage() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
           gap: 'var(--space-5)',
         }}
       >
@@ -440,7 +438,7 @@ export default function PengaturanPage() {
           </div>
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
             <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
-              Nama, alamat, dan nomor telepon akan muncul di header struk kasir — gaya Indomaret/Alfamart.
+              Nama, alamat, dan nomor telepon akan tampil pada header struk kasir.
             </p>
 
             <div className="form-group">
@@ -487,9 +485,9 @@ export default function PengaturanPage() {
               onClick={saveToko}
               className="btn btn-primary"
               disabled={tokoStatus === 'loading' || !tokoNama.trim()}
-              style={{ alignSelf: 'flex-end', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-2)', marginTop: 'auto' }}
             >
-              {tokoStatus === 'loading' && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+              {tokoStatus === 'loading' && <Loader2 size={14} className="spin-icon" aria-hidden="true" />}
               {tokoStatus === 'success' && <CheckCircle size={14} aria-hidden="true" />}
               {tokoStatus === 'error' && <AlertCircle size={14} aria-hidden="true" />}
               {tokoStatus === 'loading' ? 'Menyimpan...' : tokoStatus === 'success' ? 'Tersimpan!' : tokoStatus === 'error' ? 'Gagal!' : 'Simpan Info Toko'}
@@ -585,7 +583,7 @@ export default function PengaturanPage() {
               </div>
             </div>
 
-            {/* Margin Keuntungan Global (K2) */}
+            {/* Margin Keuntungan Global */}
             <div style={{
               background: 'rgba(16, 185, 129, 0.05)',
               border: '1px solid rgba(16, 185, 129, 0.25)',
@@ -593,10 +591,10 @@ export default function PengaturanPage() {
               padding: 'var(--space-4)',
             }}>
               <label htmlFor={`${uid}-global-margin`} className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}>
-                <Percent size={16} style={{ color: '#059669' }} /> Margin Keuntungan Global Toko (%)
+                <Percent size={16} style={{ color: '#059669' }} /> Margin Keuntungan Global (%)
               </label>
               <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', margin: '4px 0 var(--space-3)', lineHeight: 1.5 }}>
-                <strong>Kebijakan Terkunci (K2):</strong> Harga Jual = <code>HPP &times; (1 + Margin%)</code>, dibulatkan ke atas ke ratusan terdekat. Nilai margin ini otomatis diterapkan pada seluruh usulan produk kasir dan kulakan baru. Kasir tidak memiliki akses melihat maupun mengubah persentase ini.
+                Harga jual otomatis dihitung dari HPP + margin dan dibulatkan ke atas ke kelipatan Rp 100. Hanya pengelola yang dapat melihat dan mengubah angka ini.
               </p>
               <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -618,7 +616,7 @@ export default function PengaturanPage() {
                   padding: '5px 12px', borderRadius: 'var(--radius-md)', fontSize: '0.75rem', fontWeight: 600,
                   background: 'rgba(16, 185, 129, 0.12)', color: '#047857',
                 }}>
-                  Simulasi: HPP Rp 10.000 &rarr; Jual Rekomendasi Rp {Math.ceil((10000 * (1 + globalMarginPercentage / 100)) / 100) * 100}
+                  Simulasi: HPP Rp 10.000 &rarr; Jual Rp {(Math.ceil((10000 * (1 + globalMarginPercentage / 100)) / 100) * 100).toLocaleString('id-ID')}
                 </div>
               </div>
             </div>
@@ -628,9 +626,9 @@ export default function PengaturanPage() {
               onClick={saveOperasional}
               className="btn btn-primary"
               disabled={operasionalStatus === 'loading'}
-              style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-2)', marginTop: 'auto' }}
             >
-              {operasionalStatus === 'loading' && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+              {operasionalStatus === 'loading' && <Loader2 size={14} className="spin-icon" aria-hidden="true" />}
               {operasionalStatus === 'success' && <CheckCircle size={14} aria-hidden="true" />}
               {operasionalStatus === 'error' && <AlertCircle size={14} aria-hidden="true" />}
               {operasionalStatus === 'loading' ? 'Menyimpan...'
@@ -933,29 +931,61 @@ export default function PengaturanPage() {
               />
             </div>
 
-            {/* Aktifkan QRIS toggle */}
+            {/* Aktifkan QRIS toggle — konsisten dengan switch Maintenance */}
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: 'var(--space-2) 0',
+                gap: 'var(--space-3)',
+                padding: 'var(--space-3)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: qrisActive ? 'var(--color-primary-light)' : 'var(--color-surface-alt)',
+                transition: 'background-color var(--duration-base) var(--ease-out-expo)',
               }}
             >
-              <label
-                htmlFor={`${uid}-qris-active`}
-                className="form-label"
-                style={{ margin: 0, cursor: 'pointer' }}
-              >
-                Aktifkan QRIS sebagai metode pembayaran
-              </label>
-              <input
+              <div>
+                <div style={{ fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-sm)' }}>
+                  {qrisActive ? 'Pembayaran QRIS Aktif' : 'Pembayaran QRIS Nonaktif'}
+                </div>
+                <div style={{ color: 'var(--color-text-muted)', marginTop: 2, fontSize: 'var(--text-xs)' }}>
+                  {qrisActive ? 'Ditampilkan sebagai pilihan bayar di POS' : 'Disembunyikan dari mesin kasir'}
+                </div>
+              </div>
+              <button
                 id={`${uid}-qris-active`}
-                type="checkbox"
-                checked={qrisActive}
-                onChange={(e) => setQrisActive(e.target.checked)}
-                style={{ width: 18, height: 18, cursor: 'pointer', accentColor: 'var(--color-primary)' }}
-              />
+                type="button"
+                role="switch"
+                aria-checked={qrisActive}
+                aria-label={`${qrisActive ? 'Nonaktifkan' : 'Aktifkan'} pembayaran QRIS`}
+                onClick={() => setQrisActive((v) => !v)}
+                style={{
+                  width: 52,
+                  height: 28,
+                  borderRadius: 14,
+                  border: 'none',
+                  cursor: 'pointer',
+                  backgroundColor: qrisActive ? 'var(--color-primary)' : 'var(--color-border)',
+                  position: 'relative',
+                  transition: 'background-color var(--duration-base) var(--ease-spring)',
+                  flexShrink: 0,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    top: 3,
+                    left: qrisActive ? 26 : 3,
+                    width: 22,
+                    height: 22,
+                    borderRadius: '50%',
+                    backgroundColor: 'white',
+                    transition: 'left var(--duration-base) var(--ease-spring)',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  }}
+                />
+              </button>
             </div>
 
             <button
@@ -1021,10 +1051,10 @@ export default function PengaturanPage() {
                 <ShieldCheck size={20} style={{ color: 'var(--color-primary)', flexShrink: 0, marginTop: 2 }} aria-hidden="true" />
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 'var(--weight-semibold)', fontSize: 'var(--text-sm)', color: 'var(--color-primary)' }}>
-                    Row-Level Security (RLS v4.0): 33 / 33 Tabel Terproteksi
+                    Perlindungan Database Aktif
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', marginTop: 2, lineHeight: 1.45 }}>
-                    Akses anonim &amp; authenticated ditolak total. Mutasi database diamankan dengan isolasi transaksi ACID &amp; Drizzle ORM.
+                    Akses data dibatasi hanya untuk pengelola terverifikasi dan setiap berkas cadangan divalidasi otomatis sebelum dipulihkan.
                   </div>
                 </div>
               </div>
@@ -1042,7 +1072,7 @@ export default function PengaturanPage() {
                   alignItems: 'center',
                 }}
               >
-                Zero-Trust Active
+                Terproteksi
               </span>
             </div>
 
@@ -1074,7 +1104,7 @@ export default function PengaturanPage() {
                   </span>
                 </div>
                 <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', lineHeight: 1.5, margin: 0 }}>
-                  Unduh seluruh snapshot 14 tabel inti database (produk, stok, transaksi, karyawan, pengaturan) ke berkas JSON dengan Checksum SHA-256.
+                  Unduh seluruh data inti (produk, stok, transaksi, karyawan, dan pengaturan) ke berkas cadangan JSON.
                 </p>
 
                 <button
@@ -1146,8 +1176,8 @@ export default function PengaturanPage() {
                     Pulihkan Data (Restore)
                   </span>
                 </div>
-                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
-                  Unggah berkas snapshot JSON resmi untuk memulihkan seluruh tabel. Integritas data akan divalidasi dengan Checksum SHA-256 sebelum eksekusi.
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                  Unggah berkas cadangan JSON resmi untuk memulihkan data toko. Keaslian berkas diperiksa otomatis sebelum diproses.
                 </p>
 
                 <input
@@ -1257,6 +1287,8 @@ export default function PengaturanPage() {
               borderRadius: 'var(--radius-lg)',
               maxWidth: 480,
               width: '100%',
+              maxHeight: '90dvh',
+              overflowY: 'auto',
               padding: 'var(--space-6)',
               boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
               border: '1px solid var(--color-border)',
@@ -1303,7 +1335,7 @@ export default function PengaturanPage() {
                 lineHeight: 1.5,
               }}
             >
-              <strong>PERINGATAN KRITIS:</strong> Seluruh 14 tabel database (transaksi saat ini, produk, shift, dll.) akan diselaraskan dan ditimpa secara atomik dengan isi berkas backup ({restoreInspect?.totalRows} baris).
+              <strong>PERINGATAN:</strong> Seluruh data transaksi, produk, shift, dan pengaturan saat ini akan diganti dengan isi berkas cadangan ({restoreInspect?.totalRows} baris).
             </div>
 
             <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>

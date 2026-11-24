@@ -31,7 +31,7 @@ import {
 import {
   Plus, Boxes, Search, Package, Edit2, Trash2, Loader2, X, Tag,
   ScanLine, Camera, CameraOff, CheckCircle, AlertCircle,
-  ClipboardList, ImageIcon, RefreshCw, AlertTriangle, History,
+  ClipboardList, ImageIcon, RefreshCw, AlertTriangle, History, MoreVertical,
 } from 'lucide-react';
 import UsulanProdukTab from './UsulanProdukTab';
 import BatchStokTab from './BatchStokTab';
@@ -1143,6 +1143,7 @@ export default function ProdukPage() {
 
   // ── Foto Upload state ──────────────────────────────────
   const [fotoProduct, setFotoProduct] = useState<Product | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // ── Low Stock Threshold & Summary (dari SSOT server /api/admin/produk) ──
   const [lowStockThreshold, setLowStockThreshold] = useState(5);
@@ -1480,34 +1481,24 @@ export default function ProdukPage() {
         </div>
 
         {/* Navigation Tabs */}
-        <div style={{
-          display: 'flex',
-          gap: 8,
-          marginBottom: 'var(--space-4)',
-          borderBottom: '1px solid var(--color-border)',
-          paddingBottom: 10,
-          overflowX: 'auto',
-          WebkitOverflowScrolling: 'touch' as const,
-          scrollbarWidth: 'none' as const,
-          msOverflowStyle: 'none' as const,
-        }}>
+        <div className="rep-tabs" role="tablist" aria-label="Menu produk">
           <button
             type="button"
-            aria-pressed={activeTab === 'katalog'}
+            role="tab"
+            aria-selected={activeTab === 'katalog'}
             onClick={() => setActiveTab('katalog')}
-            className={`btn btn-sm ${activeTab === 'katalog' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap', minHeight: 44, padding: '8px 14px' }}
+            className={`rep-tab ${activeTab === 'katalog' ? 'active' : ''}`}
           >
-            <Package size={15} /> Katalog Produk ({products.length})
+            <Package size={15} /> Katalog ({products.length})
           </button>
           <button
             type="button"
-            aria-pressed={activeTab === 'usulan'}
+            role="tab"
+            aria-selected={activeTab === 'usulan'}
             onClick={() => setActiveTab('usulan')}
-            className={`btn btn-sm ${activeTab === 'usulan' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap', minHeight: 44, padding: '8px 14px' }}
+            className={`rep-tab ${activeTab === 'usulan' ? 'active' : ''}`}
           >
-            Usulan dari Kasir
+            Usulan Kasir
             {pendingProposalCount > 0 && (
               <span style={{
                 background: 'var(--color-error)',
@@ -1523,21 +1514,21 @@ export default function ProdukPage() {
           </button>
           <button
             type="button"
-            aria-pressed={activeTab === 'riwayat_stok'}
+            role="tab"
+            aria-selected={activeTab === 'riwayat_stok'}
             onClick={() => { setFilterHistoryProductId(null); setActiveTab('riwayat_stok'); }}
-            className={`btn btn-sm ${activeTab === 'riwayat_stok' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap', minHeight: 44, padding: '8px 14px' }}
+            className={`rep-tab ${activeTab === 'riwayat_stok' ? 'active' : ''}`}
           >
-            <History size={15} /> Riwayat Koreksi Stok
+            <History size={15} /> Riwayat Koreksi
           </button>
           <button
             type="button"
-            aria-pressed={activeTab === 'batch'}
+            role="tab"
+            aria-selected={activeTab === 'batch'}
             onClick={() => setActiveTab('batch')}
-            className={`btn btn-sm ${activeTab === 'batch' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap', minHeight: 44, padding: '8px 14px' }}
+            className={`rep-tab ${activeTab === 'batch' ? 'active' : ''}`}
           >
-            Batch &amp; Kedaluwarsa (FEFO)
+            Batch &amp; Kedaluwarsa
             {criticalBatchCount > 0 && (
               <span style={{
                 background: 'var(--color-error)',
@@ -1604,13 +1595,12 @@ export default function ProdukPage() {
               </select>
             </div>
             {/* Filter cepat Berbarcode vs Non-Barcode untuk Stok Opname */}
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="rep-chip-bar">
               <button
                 type="button"
                 aria-pressed={filterBarcodeType === 'all'}
                 onClick={() => setFilterBarcodeType('all')}
-                className={`btn btn-sm ${filterBarcodeType === 'all' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ minHeight: 38, padding: '6px 12px', fontWeight: 600 }}
+                className={`rep-chip ${filterBarcodeType === 'all' ? 'active' : ''}`}
               >
                 Semua ({stockSummary?.totalActiveProducts ?? products.length})
               </button>
@@ -1618,8 +1608,7 @@ export default function ProdukPage() {
                 type="button"
                 aria-pressed={filterBarcodeType === 'barcode'}
                 onClick={() => setFilterBarcodeType('barcode')}
-                className={`btn btn-sm ${filterBarcodeType === 'barcode' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ minHeight: 38, padding: '6px 12px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                className={`rep-chip ${filterBarcodeType === 'barcode' ? 'active' : ''}`}
               >
                 <ScanLine size={13} aria-hidden="true" />
                 Berbarcode{typeof stockSummary?.withBarcodeCount === 'number' ? ` (${stockSummary.withBarcodeCount})` : ''}
@@ -1628,8 +1617,7 @@ export default function ProdukPage() {
                 type="button"
                 aria-pressed={filterBarcodeType === 'non_barcode'}
                 onClick={() => setFilterBarcodeType('non_barcode')}
-                className={`btn btn-sm ${filterBarcodeType === 'non_barcode' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ minHeight: 38, padding: '6px 12px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                className={`rep-chip ${filterBarcodeType === 'non_barcode' ? 'active' : ''}`}
               >
                 <Package size={13} aria-hidden="true" />
                 Non-Barcode{typeof stockSummary?.nonBarcodeCount === 'number' ? ` (${stockSummary.nonBarcodeCount})` : ''}
@@ -1692,7 +1680,8 @@ export default function ProdukPage() {
               </p>
             </div>
           ) : (
-            <div className="table-wrapper" style={{ borderRadius: 0, border: 'none', boxShadow: 'none', WebkitOverflowScrolling: 'touch' }}>
+            <>
+            <div className="table-wrapper rep-desktop-only" style={{ borderRadius: 0, border: 'none', boxShadow: 'none', WebkitOverflowScrolling: 'touch', overflow: 'visible' }}>
               <table className="table" aria-label="Daftar produk">
                 <thead>
                   <tr>
@@ -1831,77 +1820,109 @@ export default function ProdukPage() {
                         </span>
                       </td>
                         <td>
-                          <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center', position: 'relative' }}>
                             <button
                               type="button"
                               onClick={() => {
+                                setOpenMenuId(null);
                                 setEditData(p);
                                 setOpenedFromScanMatch(false);
                                 setScanPrefillName(undefined);
                                 setScanPrefillBarcode(undefined);
                                 setShowModal(true);
                               }}
-                              className="btn btn-ghost btn-sm"
+                              className="btn btn-secondary btn-sm"
                               title={`Edit produk ${p.name}`}
                               aria-label={`Edit produk ${p.name}`}
-                              style={{ minWidth: 44, minHeight: 44, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                              style={{ minHeight: 36, padding: '4px 10px', fontSize: '0.76rem', gap: 4 }}
                             >
-                              <Edit2 size={16} aria-hidden="true" />
+                              <Edit2 size={13} aria-hidden="true" /> Edit
                             </button>
                             <button
                               type="button"
-                              onClick={() => { setFilterBatchProductName(p.name); setActiveTab('batch'); }}
-                              className="btn btn-ghost btn-sm"
-                              title={`Lihat urutan batch & FEFO ${p.name}`}
-                              aria-label={`Lihat urutan batch & FEFO ${p.name}`}
-                              style={{ color: 'hsl(142 71% 40%)', minWidth: 44, minHeight: 44, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                            >
-                              <Boxes size={16} aria-hidden="true" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setFilterHistoryProductId(p.id); setActiveTab('riwayat_stok'); }}
-                              className="btn btn-ghost btn-sm"
-                              title={`Riwayat audit stok ${p.name}`}
-                              aria-label={`Riwayat audit stok ${p.name}`}
-                              style={{ color: 'var(--color-primary)', minWidth: 44, minHeight: 44, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                            >
-                              <History size={16} aria-hidden="true" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setAdjProduct(p)}
+                              onClick={() => { setOpenMenuId(null); setAdjProduct(p); }}
                               className="btn btn-ghost btn-sm"
                               title={`Koreksi stok ${p.name}`}
                               aria-label={`Koreksi stok ${p.name}`}
-                              style={{ color: 'var(--color-info)', minWidth: 44, minHeight: 44, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                              style={{ color: 'var(--color-info)', minHeight: 36, padding: '4px 9px', fontSize: '0.76rem', gap: 4, border: '1px solid var(--color-border)' }}
                             >
-                              <ClipboardList size={16} aria-hidden="true" />
+                              <ClipboardList size={13} aria-hidden="true" /> Stok
                             </button>
                             <button
                               type="button"
-                              onClick={() => setFotoProduct(p)}
+                              onClick={() => setOpenMenuId(openMenuId === p.id ? null : p.id)}
                               className="btn btn-ghost btn-sm"
-                              title={`Upload foto ${p.name}`}
-                              aria-label={`Upload foto ${p.name}`}
-                              style={{ minWidth: 44, minHeight: 44, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                              aria-haspopup="menu"
+                              aria-expanded={openMenuId === p.id}
+                              aria-label={`Aksi lainnya untuk ${p.name}`}
+                              title="Aksi lainnya"
+                              style={{ minWidth: 36, minHeight: 36, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                             >
-                              <ImageIcon size={16} aria-hidden="true" />
+                              <MoreVertical size={16} aria-hidden="true" />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(p.id, p.name)}
-                              className="btn btn-ghost btn-sm"
-                              disabled={deletingId === p.id}
-                              style={{ color: 'var(--color-error)', minWidth: 44, minHeight: 44, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                              title={`Hapus produk ${p.name}`}
-                              aria-label={`Hapus produk ${p.name}`}
-                            >
-                              {deletingId === p.id
-                                ? <Loader2 size={16} className="spin-icon" aria-hidden="true" />
-                                : <Trash2 size={16} aria-hidden="true" />
-                              }
-                            </button>
+                            {openMenuId === p.id && (
+                              <>
+                              <div
+                                aria-hidden="true"
+                                onClick={() => setOpenMenuId(null)}
+                                style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+                              />
+                              <div
+                                role="menu"
+                                style={{
+                                  position: 'absolute',
+                                  top: '100%',
+                                  right: 0,
+                                  marginTop: 4,
+                                  minWidth: 175,
+                                  background: 'var(--color-surface)',
+                                  border: '1px solid var(--color-border)',
+                                  borderRadius: 10,
+                                  boxShadow: '0 10px 25px rgba(15,23,42,0.14)',
+                                  padding: 4,
+                                  zIndex: 50,
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: 2,
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => { setOpenMenuId(null); setFilterBatchProductName(p.name); setActiveTab('batch'); }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 10px', border: 'none', background: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--color-text)', cursor: 'pointer', textAlign: 'left' }}
+                                >
+                                  <Boxes size={14} style={{ color: 'hsl(142 71% 38%)' }} /> Lihat Batch
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => { setOpenMenuId(null); setFilterHistoryProductId(p.id); setActiveTab('riwayat_stok'); }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 10px', border: 'none', background: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--color-text)', cursor: 'pointer', textAlign: 'left' }}
+                                >
+                                  <History size={14} style={{ color: 'var(--color-primary)' }} /> Riwayat Stok
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => { setOpenMenuId(null); setFotoProduct(p); }}
+                                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 10px', border: 'none', background: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--color-text)', cursor: 'pointer', textAlign: 'left' }}
+                                >
+                                  <ImageIcon size={14} /> Upload Foto
+                                </button>
+                                <div style={{ height: 1, background: 'var(--color-border)', margin: '2px 4px' }} />
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => { setOpenMenuId(null); handleDelete(p.id, p.name); }}
+                                  disabled={deletingId === p.id}
+                                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 10px', border: 'none', background: 'none', borderRadius: 6, fontSize: 12, fontWeight: 600, color: 'var(--color-error)', cursor: 'pointer', textAlign: 'left' }}
+                                >
+                                  <Trash2 size={14} /> Hapus Produk
+                                </button>
+                              </div>
+                              </>
+                            )}
                           </div>
                         </td>
                     </tr>
@@ -1909,6 +1930,110 @@ export default function ProdukPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Mobile Cards — Katalog Produk */}
+            <div className="rep-mobile-only" style={{ padding: 'var(--space-3)' }}>
+              {products.map((p) => {
+                const isOut = p.isActive && p.stockQty === 0;
+                const isLow = p.isActive && p.stockQty > 0 && p.stockQty <= lowStockThreshold;
+                const bundle = getBundlePriceDisplay(p.sellingPrice, p.unit);
+                return (
+                  <div key={p.id} className="rep-mcard">
+                    <div className="rep-mcard__top">
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--color-text)' }}>
+                          {p.name}
+                        </div>
+                        <div style={{ fontSize: '0.73rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                          {p.categoryName} · {p.barcode && p.barcode.trim() ? p.barcode : 'Non-Barcode'}
+                        </div>
+                      </div>
+                      <span className={`badge ${p.isActive ? 'badge-success' : 'badge-error'}`} style={{ fontSize: '0.66rem', flexShrink: 0 }}>
+                        {p.isActive ? 'Aktif' : 'Nonaktif'}
+                      </span>
+                    </div>
+
+                    <div className="rep-mcard__grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+                      <div>
+                        <div className="rep-mcard__k">HPP</div>
+                        <div className="rep-mcard__v">Rp {parseFloat(p.costPrice).toLocaleString('id-ID')}</div>
+                      </div>
+                      <div>
+                        <div className="rep-mcard__k">Harga Jual</div>
+                        <div className="rep-mcard__v" style={{ color: 'var(--color-primary)' }}>
+                          {bundle.step > 1 ? bundle.primaryLabel : `Rp ${parseFloat(p.sellingPrice).toLocaleString('id-ID')}`}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="rep-mcard__k">Stok</div>
+                        <div
+                          className="rep-mcard__v"
+                          style={{ color: isOut ? 'var(--color-error)' : isLow ? 'var(--color-accent-text)' : '#0f172a' }}
+                        >
+                          {p.stockQty} {p.unit}
+                          {isOut ? ' (Habis)' : isLow ? ' (Tipis)' : ''}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rep-mcard__actions">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditData(p);
+                          setOpenedFromScanMatch(false);
+                          setScanPrefillName(undefined);
+                          setScanPrefillBarcode(undefined);
+                          setShowModal(true);
+                        }}
+                        className="btn btn-secondary btn-sm"
+                        style={{ minHeight: 36, padding: '4px 10px', fontSize: '0.75rem', gap: 4 }}
+                      >
+                        <Edit2 size={13} /> Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAdjProduct(p)}
+                        className="btn btn-secondary btn-sm"
+                        style={{ minHeight: 36, padding: '4px 10px', fontSize: '0.75rem', gap: 4 }}
+                      >
+                        <ClipboardList size={13} /> Stok
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFotoProduct(p)}
+                        style={{ minHeight: 36, padding: '4px 10px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border)', background: '#fff', color: 'var(--color-text)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+                      >
+                        <ImageIcon size={13} /> Foto
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setFilterBatchProductName(p.name); setActiveTab('batch'); }}
+                        style={{ minHeight: 36, padding: '4px 10px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border)', background: '#fff', color: 'var(--color-text)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+                      >
+                        <Boxes size={13} /> Batch
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setFilterHistoryProductId(p.id); setActiveTab('riwayat_stok'); }}
+                        style={{ minHeight: 36, padding: '4px 10px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600, border: '1px solid var(--color-border)', background: '#fff', color: 'var(--color-text)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+                      >
+                        <History size={13} /> Riwayat
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(p.id, p.name)}
+                        disabled={deletingId === p.id}
+                        style={{ minHeight: 36, padding: '4px 10px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 600, border: '1px solid hsl(0 72% 82%)', background: 'hsl(0 84% 97%)', color: 'hsl(0 72% 40%)', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer', marginLeft: 'auto' }}
+                      >
+                        <Trash2 size={13} /> Hapus
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            </>
           )}
         </div>
         </>

@@ -335,7 +335,7 @@ function LiveMoneyWidget() {
 // ─────────────────────────────────────────────────────────────
 export default function DashboardWidgets() {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-5)', marginTop: 'var(--space-6)' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 'var(--space-5)', marginTop: 'var(--space-6)' }}>
       <JadwalWidget />
       <LiveMoneyWidget />
     </div>

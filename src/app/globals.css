@@ -2676,7 +2676,16 @@ button:not(:disabled):not(.no-tactile):active,
 
 @media (max-width: 479px) {
   .auth-card { padding: var(--space-6); }
-  .grid-stats { grid-template-columns: 1fr; }
+  .grid-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+  .grid-stats .stat-card {
+    padding: var(--space-3);
+  }
+  .grid-stats .stat-card__value {
+    font-size: 1.05rem !important;
+  }
   .toast-container { left: var(--space-4); right: var(--space-4); max-width: none; }
 
   /* POS mobile: 2 kolom compact */
@@ -4353,6 +4362,13 @@ button:not(:disabled):not(.no-tactile):active,
   font-weight: 700;
   color: #0f172a;
   font-variant-numeric: tabular-nums;
+}
+.rep-mcard__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
 }
 
 @media (max-width: 1024px) {

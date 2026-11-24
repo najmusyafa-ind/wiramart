@@ -31,7 +31,7 @@ export default async function ManagerDashboardPage() {
       id: 'stat-revenue',
       label: 'Omzet Hari Ini',
       value: formatRupiah(summary.omzet),
-      subtext: `Tunai: ${formatRupiah(summary.omzetCash)} &bull; QRIS: ${formatRupiah(summary.omzetQris)}`,
+      subtext: `Tunai: ${formatRupiah(summary.omzetCash)} · QRIS: ${formatRupiah(summary.omzetQris)}`,
       icon: <TrendingUp size={20} aria-hidden="true" />,
       iconBg: 'var(--color-primary-light)',
       iconColor: 'var(--color-primary)',
@@ -71,7 +71,7 @@ export default async function ManagerDashboardPage() {
       id: 'stat-transactions',
       label: 'Total Transaksi Selesai',
       value: `${summary.txCount} Trx`,
-      subtext: summary.voidCount > 0 ? `${summary.voidCount} transaksi di-void` : 'Zero void hari ini',
+      subtext: summary.voidCount > 0 ? `${summary.voidCount} transaksi dibatalkan` : 'Tidak ada transaksi void',
       icon: <ShoppingBag size={20} aria-hidden="true" />,
       iconBg: 'var(--color-info-light)',
       iconColor: 'var(--color-info)',
@@ -94,9 +94,9 @@ export default async function ManagerDashboardPage() {
       {/* Header Halaman Eksekutif */}
       <div className="page-header" style={{ marginBottom: 'var(--space-6)' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             <h1 className="page-title" style={{ margin: 0 }}>
-              Dashboard Manajer &amp; Dosen Pembina
+              Dashboard Manajer
             </h1>
             <span
               className="badge badge-success"
@@ -107,14 +107,14 @@ export default async function ManagerDashboardPage() {
             </span>
           </div>
           <p className="page-subtitle" style={{ marginTop: 'var(--space-1)' }}>
-            Laporan finansial terpadu, persetujuan shift, dan pengawasan operasional kasir &bull; {data.todayLabel}
+            Ringkasan keuangan, persetujuan, dan aktivitas kasir · {data.todayLabel}
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
           <Link href="/manager/export" className="btn btn-secondary btn-sm">
             <Download size={14} aria-hidden="true" />
-            Ekspor Data Excel
+            Ekspor Excel
           </Link>
           <Link href="/manager/laporan" className="btn btn-primary btn-sm">
             <Layers size={14} aria-hidden="true" />
@@ -152,20 +152,21 @@ export default async function ManagerDashboardPage() {
                 {card.icon}
               </div>
               <div className="stat-card__label">{card.label}</div>
-              <div className="stat-card__value" style={{ fontSize: '1.35rem' }}>
+              <div className="stat-card__value" style={{ fontSize: '1.35rem', fontVariantNumeric: 'tabular-nums' }}>
                 {card.value}
               </div>
             </div>
             <div
               style={{
-                fontSize: '0.75rem',
+                fontSize: '0.73rem',
                 color: 'var(--color-text-muted)',
                 marginTop: 'var(--space-2)',
                 borderTop: '1px dashed var(--color-border)',
                 paddingTop: 'var(--space-1)',
               }}
-              dangerouslySetInnerHTML={{ __html: card.subtext }}
-            />
+            >
+              {card.subtext}
+            </div>
           </article>
         ))}
       </div>
@@ -218,64 +219,96 @@ export default async function ManagerDashboardPage() {
             <p className="text-sm">Belum ada transaksi hari ini.</p>
           </div>
         ) : (
-          <div className="table-wrapper" style={{ borderRadius: 0, border: 'none', boxShadow: 'none' }}>
-            <table className="table" aria-label="Daftar transaksi hari ini">
-              <thead>
-                <tr>
-                  <th scope="col">No. Invoice</th>
-                  <th scope="col">Waktu</th>
-                  <th scope="col">Kasir</th>
-                  <th scope="col">Metode</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" className="text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.recentTransactions.map((trx) => (
-                  <tr key={trx.id}>
-                    <td>
-                      <span
-                        style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: 'var(--text-xs)',
-                          color: 'var(--color-primary)',
-                          fontWeight: 'var(--weight-semibold)',
-                        }}
-                      >
-                        {trx.invoiceNumber}
-                      </span>
-                    </td>
-                    <td>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
-                        <Clock size={12} aria-hidden="true" style={{ color: 'var(--color-text-muted)' }} />
-                        {formatDateTime(trx.createdAt)}
-                      </span>
-                    </td>
-                    <td>{trx.employee.fullName}</td>
-                    <td>
-                      <span
-                        className={`badge ${trx.paymentMethod === 'CASH' ? 'badge-success' : 'badge-info'}`}
-                      >
-                        {trx.paymentMethod}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`badge ${trx.status === 'COMPLETED' ? 'badge-success' : 'badge-error'}`}
-                      >
-                        {trx.status === 'COMPLETED' ? 'Selesai' : 'Void'}
-                      </span>
-                    </td>
-                    <td className="text-right">
-                      <strong style={{ color: 'var(--color-primary)' }}>
-                        {formatRupiah(parseFloat(trx.grossAmount))}
-                      </strong>
-                    </td>
+          <>
+            <div className="table-wrapper rep-desktop-only" style={{ borderRadius: 0, border: 'none', boxShadow: 'none' }}>
+              <table className="table" aria-label="Daftar transaksi hari ini">
+                <thead>
+                  <tr>
+                    <th scope="col">No. Invoice</th>
+                    <th scope="col">Waktu</th>
+                    <th scope="col">Kasir</th>
+                    <th scope="col">Metode</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" className="text-right">Total</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {data.recentTransactions.map((trx) => (
+                    <tr key={trx.id}>
+                      <td>
+                        <span
+                          style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: 'var(--text-xs)',
+                            color: 'var(--color-primary)',
+                            fontWeight: 'var(--weight-semibold)',
+                          }}
+                        >
+                          {trx.invoiceNumber}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)' }}>
+                          <Clock size={12} aria-hidden="true" style={{ color: 'var(--color-text-muted)' }} />
+                          {formatDateTime(trx.createdAt)}
+                        </span>
+                      </td>
+                      <td>{trx.employee.fullName}</td>
+                      <td>
+                        <span
+                          className={`badge ${trx.paymentMethod === 'CASH' ? 'badge-success' : 'badge-info'}`}
+                        >
+                          {trx.paymentMethod}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${trx.status === 'COMPLETED' ? 'badge-success' : 'badge-error'}`}
+                        >
+                          {trx.status === 'COMPLETED' ? 'Selesai' : 'Void'}
+                        </span>
+                      </td>
+                      <td className="text-right">
+                        <strong style={{ color: 'var(--color-primary)' }}>
+                          {formatRupiah(parseFloat(trx.grossAmount))}
+                        </strong>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="rep-mobile-only" style={{ padding: 'var(--space-3)' }}>
+              {data.recentTransactions.map((trx) => (
+                <div key={trx.id} className="rep-mcard">
+                  <div className="rep-mcard__top">
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', fontWeight: 700, color: 'var(--color-primary)' }}>
+                        {trx.invoiceNumber}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                        {trx.employee.fullName} · {formatDateTime(trx.createdAt)}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--color-text)', fontVariantNumeric: 'tabular-nums' }}>
+                        {formatRupiah(parseFloat(trx.grossAmount))}
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', marginTop: 3 }}>
+                        <span className={`badge ${trx.paymentMethod === 'CASH' ? 'badge-success' : 'badge-info'}`} style={{ fontSize: '0.68rem' }}>
+                          {trx.paymentMethod}
+                        </span>
+                        <span className={`badge ${trx.status === 'COMPLETED' ? 'badge-success' : 'badge-error'}`} style={{ fontSize: '0.68rem' }}>
+                          {trx.status === 'COMPLETED' ? 'Selesai' : 'Void'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 

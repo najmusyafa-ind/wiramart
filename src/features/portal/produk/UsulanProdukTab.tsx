@@ -56,8 +56,11 @@ export default function UsulanProdukTab({
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'PENDING' | 'ALL'>('PENDING');
 
-  // Modal Review State
+  // Modal Review & Tolak State
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<Proposal | null>(null);
+  const [rejectNote, setRejectNote] = useState<string>('');
+  const [rejectError, setRejectError] = useState<string>('');
   const [costPrice, setCostPrice] = useState<string>('');
   const [sellingPrice, setSellingPrice] = useState<string>('');
   const [initialStock, setInitialStock] = useState<string>('0');
@@ -180,29 +183,35 @@ export default function UsulanProdukTab({
     }
   }
 
-  async function handleReject(proposal: Proposal) {
-    const note = prompt(`Masukkan alasan penolakan usulan "${proposal.name}" (opsional):`);
-    if (note === null) return; // batal
+  function openRejectModal(proposal: Proposal) {
+    setRejectTarget(proposal);
+    setRejectNote('');
+    setRejectError('');
+  }
 
+  async function confirmReject() {
+    if (!rejectTarget) return;
     setRejecting(true);
+    setRejectError('');
     try {
       const res = await fetch('/api/admin/produk/usulan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          proposalId: proposal.id,
+          proposalId: rejectTarget.id,
           action: 'REJECT',
-          adminNote: note.trim() || 'Ditolak oleh admin/gudang',
+          adminNote: rejectNote.trim() || 'Ditolak oleh admin/gudang',
         }),
       });
       if (res.ok) {
+        setRejectTarget(null);
         fetchProposals();
         onApproved?.();
       } else {
-        alert('Gagal menolak usulan.');
+        setRejectError('Gagal menolak usulan.');
       }
     } catch {
-      alert('Terjadi kesalahan jaringan saat menolak usulan.');
+      setRejectError('Terjadi kesalahan jaringan saat menolak usulan.');
     } finally {
       setRejecting(false);
     }
@@ -218,10 +227,10 @@ export default function UsulanProdukTab({
         alignItems: 'center',
         justifyContent: 'space-between',
         flexWrap: 'wrap',
-        gap: 12,
+        gap: 10,
         marginBottom: 'var(--space-4)',
       }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="rep-chip-bar">
           <button
             type="button"
             aria-pressed={filter === 'PENDING'}
@@ -231,8 +240,7 @@ export default function UsulanProdukTab({
                 setFilter('PENDING');
               }
             }}
-            className={`btn btn-sm ${filter === 'PENDING' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ minHeight: 44, padding: '8px 14px' }}
+            className={`rep-chip ${filter === 'PENDING' ? 'active' : ''}`}
           >
             Menunggu Review ({pendingCount})
           </button>
@@ -245,10 +253,9 @@ export default function UsulanProdukTab({
                 setFilter('ALL');
               }
             }}
-            className={`btn btn-sm ${filter === 'ALL' ? 'btn-primary' : 'btn-secondary'}`}
-            style={{ minHeight: 44, padding: '8px 14px' }}
+            className={`rep-chip ${filter === 'ALL' ? 'active' : ''}`}
           >
-            Semua Riwayat Usulan
+            Semua Riwayat
           </button>
         </div>
 
@@ -256,9 +263,9 @@ export default function UsulanProdukTab({
           type="button"
           onClick={fetchProposals}
           className="btn btn-secondary btn-sm"
-          style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 44, padding: '8px 14px' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 38, padding: '6px 12px' }}
         >
-          <RefreshCw size={14} /> Refresh
+          <RefreshCw size={14} className={loading ? 'spin-icon' : ''} /> Segarkan
         </button>
       </div>
 
@@ -370,10 +377,22 @@ export default function UsulanProdukTab({
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleReject(p)}
+                    onClick={() => openRejectModal(p)}
                     disabled={rejecting}
-                    className="btn btn-secondary btn-sm"
-                    style={{ color: 'var(--color-error)', minHeight: 44, padding: '8px 14px' }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      minHeight: 44,
+                      padding: '8px 14px',
+                      borderRadius: 8,
+                      border: '1px solid hsl(0 72% 80%)',
+                      background: 'hsl(0 84% 97%)',
+                      color: 'hsl(0 72% 40%)',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: rejecting ? 'not-allowed' : 'pointer',
+                    }}
                   >
                     <XCircle size={15} /> Tolak
                   </button>
@@ -384,7 +403,63 @@ export default function UsulanProdukTab({
         </div>
       )}
 
-      {/* Modal Review & Penetapan HPP / Margin Global (K2 & K8) */}
+      {/* Modal Tolak Usulan */}
+      {rejectTarget && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={`${uid}-reject-title`}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '16px',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !rejecting) setRejectTarget(null); }}
+        >
+          <div style={{
+            background: 'var(--color-surface)',
+            width: '100%', maxWidth: 420,
+            borderRadius: 16, padding: 20,
+            boxShadow: 'var(--shadow-xl)',
+            maxHeight: '90dvh', overflowY: 'auto',
+          }}>
+            <h2 id={`${uid}-reject-title`} style={{ fontSize: 16, fontWeight: 700, margin: '0 0 6px 0' }}>
+              Tolak Usulan Produk
+            </h2>
+            <p style={{ fontSize: 13, color: 'var(--color-text-muted)', margin: '0 0 14px 0' }}>
+              Usulan <strong>{rejectTarget.name}</strong> akan ditandai ditolak.
+            </p>
+            {rejectError && (
+              <div style={{ background: 'var(--color-error-light)', color: 'var(--color-error)', padding: '8px 12px', borderRadius: 8, fontSize: 12, marginBottom: 12 }}>
+                {rejectError}
+              </div>
+            )}
+            <label htmlFor={`${uid}-reject-note`} style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+              Alasan Penolakan (opsional)
+            </label>
+            <textarea
+              id={`${uid}-reject-note`}
+              className="form-input"
+              rows={2}
+              placeholder="Contoh: Produk sudah ada di katalog dengan nama berbeda"
+              value={rejectNote}
+              onChange={(e) => setRejectNote(e.target.value)}
+              style={{ fontSize: 'var(--text-base)', resize: 'vertical' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button type="button" onClick={() => setRejectTarget(null)} className="btn btn-secondary" style={{ minHeight: 42 }} disabled={rejecting}>
+                Batal
+              </button>
+              <button type="button" onClick={() => void confirmReject()} className="btn btn-danger" style={{ minHeight: 42 }} disabled={rejecting}>
+                {rejecting ? <><Loader2 size={14} className="spin-icon" /> Menolak...</> : 'Ya, Tolak'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Review & Penetapan HPP / Margin Global */}
       {selectedProposal && (
         <div
           role="dialog"

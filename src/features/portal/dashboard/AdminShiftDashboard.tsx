@@ -532,13 +532,14 @@ export default function AdminShiftDashboard({
             Jadwal
           </Link>
           <button
+            type="button"
             onClick={handleRefresh}
             disabled={refreshing}
             title="Refresh data"
             aria-label="Refresh data halaman"
             style={{ background: 'none', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '6px 8px', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center' }}
           >
-            <RefreshCw size={14} aria-hidden="true" style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+            <RefreshCw size={14} aria-hidden="true" className={refreshing ? 'spin-icon' : ''} />
           </button>
         </div>
       </div>
@@ -580,8 +581,8 @@ export default function AdminShiftDashboard({
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))',
-          gap: 'var(--space-4)',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 155px), 1fr))',
+          gap: 'var(--space-3)',
           marginBottom: 'var(--space-6)',
         }}
         role="region"
@@ -612,7 +613,7 @@ export default function AdminShiftDashboard({
         />
         <MiniStatCard
           icon={<Package size={18} />}
-          label="Stok Kritis (FEFO)"
+          label="Stok Kritis"
           value={summary.criticalBatches > 0 ? `${summary.criticalBatches} Batch` : 'Aman'}
           sub={summary.criticalBatches > 0 ? 'Segera periksa gudang' : 'Semua batch masih aman'}
           accentColor="var(--color-error)"
@@ -634,7 +635,7 @@ export default function AdminShiftDashboard({
           icon={<Truck size={18} />}
           label="Antrean Gudang (Dosen)"
           value={totalWarehouseQueue > 0 ? `${totalWarehouseQueue} Draft` : 'Nihil'}
-          sub={`Masuk: ${pendingReceives} · Kondisi FEFO: ${pendingReports}`}
+          sub={`Masuk: ${pendingReceives} · Kondisi: ${pendingReports}`}
           accentColor="hsl(217 91% 55%)"
           alertLevel={totalWarehouseQueue > 0 ? 'warn' : 'ok'}
         />
@@ -668,7 +669,7 @@ export default function AdminShiftDashboard({
           </div>
         </div>
 
-        <div style={{ padding: 'var(--space-5)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 'var(--space-4)' }}>
+        <div style={{ padding: 'var(--space-5)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 250px), 1fr))', gap: 'var(--space-4)' }}>
 
           {/* 1. Produk & Pantau Stok */}
           <div style={{ padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', border: `1px solid ${summary.criticalBatches > 0 || outOfStockCount > 0 ? 'var(--color-error)' : 'var(--color-border)'}`, background: summary.criticalBatches > 0 || outOfStockCount > 0 ? 'hsl(0 84% 60% / 0.04)' : 'var(--color-surface)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
@@ -687,7 +688,7 @@ export default function AdminShiftDashboard({
               </div>
             </div>
             <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.5 }}>
-              Kelola katalog produk, tambah/restok/edit barang bersama Gudang (saling backup), serta pantau batch kedaluwarsa FEFO (keputusan diskon &amp; keuangan tetap khusus Manager).
+              Kelola katalog produk, tambah/restok/edit barang bersama Gudang, serta pantau batch mendekati kedaluwarsa (keputusan diskon &amp; keuangan khusus Manager).
             </p>
             {summary.criticalBatches > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--color-error)', fontWeight: 600 }}>
@@ -760,7 +761,7 @@ export default function AdminShiftDashboard({
       </div>
 
       {/* ── Row: Jadwal Hari Ini + Kas Gerak + Aktivitas Gudang ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: 'var(--space-5)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 'var(--space-5)' }}>
         <JadwalShiftWidget />
         <KasGerakWidget cashOut={summary.pettyCashOut} cashIn={summary.pettyCashIn} />
         <GudangShiftActivityWidget />

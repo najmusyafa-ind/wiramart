@@ -34,18 +34,18 @@ type FlatSlot = {
   employeeName: string | null;
 };
 
-// ─── Status Config ───────────────────────────────────────────├óΓÇ¥Γé¼
-const STATUS_CFG: Record<SwapStatus, { label: string; color: string; icon: React.ReactNode }> = {
-  PENDING:   { label: 'Menunggu',  color: 'hsl(38 90% 55%)',   icon: <Clock size={13} /> },
-  APPROVED:  { label: 'Disetujui', color: 'var(--color-success)', icon: <CheckCircle2 size={13} /> },
-  REJECTED:  { label: 'Ditolak',   color: 'var(--color-error)',   icon: <XCircle size={13} /> },
-  CANCELLED: { label: 'Dibatalkan',color: 'var(--color-text-muted)', icon: <X size={13} /> },
+// ─── Status Config ───────────────────────────────────────────
+const STATUS_CFG: Record<SwapStatus, { label: string; color: string; bg: string; border: string; icon: React.ReactNode }> = {
+  PENDING:   { label: 'Menunggu',  color: 'hsl(38 90% 34%)',  bg: 'hsl(38 92% 50% / 0.14)',  border: 'hsl(38 90% 50% / 0.35)',  icon: <Clock size={13} /> },
+  APPROVED:  { label: 'Disetujui', color: 'hsl(142 64% 30%)', bg: 'hsl(142 70% 45% / 0.14)', border: 'hsl(142 64% 40% / 0.35)', icon: <CheckCircle2 size={13} /> },
+  REJECTED:  { label: 'Ditolak',   color: 'hsl(0 72% 42%)',   bg: 'hsl(0 72% 51% / 0.12)',   border: 'hsl(0 72% 51% / 0.32)',   icon: <XCircle size={13} /> },
+  CANCELLED: { label: 'Dibatalkan',color: 'hsl(215 16% 42%)', bg: 'hsl(215 16% 50% / 0.12)', border: 'hsl(215 16% 50% / 0.28)', icon: <X size={13} /> },
 };
 
 function SwapBadge({ status }: { status: SwapStatus }) {
   const c = STATUS_CFG[status];
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 10px', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 600, background: `${c.color}22`, color: c.color, border: `1px solid ${c.color}44` }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 10px', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 600, background: c.bg, color: c.color, border: `1px solid ${c.border}` }}>
       {c.icon} {c.label}
     </span>
   );
@@ -164,9 +164,12 @@ function TambahManualModal({
           background: 'var(--color-surface)',
           borderRadius: 'var(--radius-xl)',
           border: '1px solid var(--color-border)',
-          padding: 'var(--space-6)',
+          padding: 'var(--space-5)',
           width: '100%',
           maxWidth: '520px',
+          maxHeight: '90dvh',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
           boxShadow: 'var(--shadow-xl)',
         }}
       >
@@ -447,9 +450,12 @@ function ReviewModal({
           background: 'var(--color-surface)',
           borderRadius: 'var(--radius-xl)',
           border: '1px solid var(--color-border)',
-          padding: 'var(--space-6)',
+          padding: 'var(--space-5)',
           width: '100%',
           maxWidth: '480px',
+          maxHeight: '90dvh',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
           boxShadow: 'var(--shadow-xl)',
         }}
       >
@@ -677,7 +683,7 @@ export default function SwapRequestPage() {
               </span>
             )}
           </div>
-          <p className="page-subtitle">Tukar 2 arah otomatis setelah rekan setuju · Pindah ke slot kosong otomatis setelah jeda 5 menit.</p>
+          <p className="page-subtitle">Pantau dan proses pengajuan pertukaran jadwal shift kasir.</p>
         </div>
 
         {/* Tombol Tambah Manual */}
@@ -692,30 +698,28 @@ export default function SwapRequestPage() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="card" style={{ marginBottom: 'var(--space-5)' }}>
-        <div className="card-body" style={{ padding: 'var(--space-3) var(--space-4)' }}>
-          <div
-            role="group"
-            aria-label="Pilih filter status pengajuan"
-            style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}
+      <div
+        role="group"
+        aria-label="Pilih filter status pengajuan"
+        className="rep-chip-bar"
+        style={{ marginBottom: 'var(--space-4)' }}
+      >
+        {FILTER_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => {
+              if (opt.value !== filter) {
+                setLoading(true);
+                setFilter(opt.value);
+              }
+            }}
+            className={`rep-chip ${filter === opt.value ? 'active' : ''}`}
+            aria-pressed={filter === opt.value}
           >
-            {FILTER_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => {
-                  if (opt.value !== filter) {
-                    setLoading(true);
-                    setFilter(opt.value);
-                  }
-                }}
-                className={`btn btn-sm ${filter === opt.value ? 'btn-primary' : 'btn-secondary'}`}
-                aria-pressed={filter === opt.value}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
+            {opt.label}
+          </button>
+        ))}
       </div>
 
       {/* List */}
@@ -861,7 +865,7 @@ export default function SwapRequestPage() {
                 </div>
 
                 {/* 3. Alasan */}
-                <div style={{ flex: '1 1 200px', minWidth: '160px' }}>
+                <div style={{ flex: '1 1 200px', minWidth: 0 }}>
                   <div style={{ fontSize: '0.65rem', color: 'var(--color-text-muted)', fontWeight: 'var(--weight-bold)', textTransform: 'uppercase' }}>
                     Alasan
                   </div>
@@ -869,10 +873,8 @@ export default function SwapRequestPage() {
                     style={{
                       fontSize: 'var(--text-xs)',
                       color: 'var(--color-text)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      maxWidth: '220px',
+                      lineHeight: 1.4,
+                      wordBreak: 'break-word',
                     }}
                     title={r.reason}
                   >
