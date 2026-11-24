@@ -14,7 +14,7 @@ import {
   transactions,
   transactionPayments,
 } from '@/lib/db/schema';
-import { getWibDateStr } from './activeShiftService';
+import { getWibDateStr, resolvePersistedShiftSession } from './activeShiftService';
 
 export const SHORTAGE_TOLERANCE_RP = 2_000;
 export const SHORTAGE_GRACE_MS = 5 * 60 * 1000; // 5 menit jeda koreksi mandiri
@@ -47,17 +47,24 @@ function getWibSessionOfDate(date: Date): 'Pagi' | 'Siang' {
  */
 export async function resolveSameSessionShiftContext(targetShift: {
   id: string;
+  employeeId?: string;
   clockIn: Date;
   modalAwal: string | null;
 }): Promise<{ shiftIds: string[]; effectiveModalAwal: number }> {
   const targetClockIn = new Date(targetShift.clockIn);
   const dateWib = getWibDateStr(targetClockIn);
-  const targetSession = getWibSessionOfDate(targetClockIn);
+  const targetSession = targetShift.employeeId
+    ? await resolvePersistedShiftSession({
+        employeeId: targetShift.employeeId,
+        clockIn: targetClockIn,
+      })
+    : getWibSessionOfDate(targetClockIn);
   const dayStartUtc = new Date(`${dateWib}T00:00:00+07:00`);
 
   const candidates = await db
     .select({
       id: shifts.id,
+      employeeId: shifts.employeeId,
       clockIn: shifts.clockIn,
       modalAwal: shifts.modalAwal,
       status: shifts.status,
@@ -76,13 +83,27 @@ export async function resolveSameSessionShiftContext(targetShift: {
     )
     .orderBy(asc(shifts.clockIn));
 
-  const sameSessionRows = candidates.filter(
-    (row) => row.id === targetShift.id || getWibSessionOfDate(new Date(row.clockIn)) === targetSession,
+  const candidateSessions = await Promise.all(
+    candidates.map(async (row) => ({
+      row,
+      session:
+        row.id === targetShift.id
+          ? targetSession
+          : await resolvePersistedShiftSession({
+              employeeId: row.employeeId,
+              clockIn: new Date(row.clockIn),
+            }),
+    })),
   );
+
+  const sameSessionRows = candidateSessions
+    .filter((entry) => entry.row.id === targetShift.id || entry.session === targetSession)
+    .map((entry) => entry.row);
 
   if (!sameSessionRows.some((r) => r.id === targetShift.id)) {
     sameSessionRows.push({
       id: targetShift.id,
+      employeeId: targetShift.employeeId ?? '',
       clockIn: targetClockIn,
       modalAwal: targetShift.modalAwal,
       status: 'ACTIVE',
@@ -119,6 +140,7 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
     where: eq(shifts.id, shiftId),
     columns: {
       id: true,
+      employeeId: true,
       clockIn: true,
       modalAwal: true,
       actualCash: true,
@@ -130,6 +152,7 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
   const shiftDateWib = getWibDateStr(new Date(shiftRow.clockIn));
   const sessionCtx = await resolveSameSessionShiftContext({
     id: shiftRow.id,
+    employeeId: shiftRow.employeeId,
     clockIn: new Date(shiftRow.clockIn),
     modalAwal: shiftRow.modalAwal,
   });

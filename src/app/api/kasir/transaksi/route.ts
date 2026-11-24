@@ -117,13 +117,13 @@ function hashRequest(
  */
 function deriveFailedStep(msg: string): string {
   if (msg.startsWith('INSUFFICIENT_STOCK')) return 'KURANGI_STOK';
-  if (msg.startsWith('EXPIRED_PRODUCT'))    return 'VALIDASI_EXPIRED';
-  if (msg.startsWith('DISCOUNT_DEPLETED'))  return 'KUOTA_DISKON';
-  if (msg.startsWith('PRODUCT_NOT_FOUND'))  return 'VALIDASI_PRODUK';
-  if (msg.includes('transaction_items'))     return 'INSERT_ITEM';
-  if (msg.includes('transaction_payments'))  return 'INSERT_PAYMENT';
-  if (msg.includes('stock_batches'))         return 'UPDATE_BATCH';
-  if (msg.includes('transactions'))          return 'INSERT_TX';
+  if (msg.startsWith('EXPIRED_PRODUCT')) return 'VALIDASI_EXPIRED';
+  if (msg.startsWith('DISCOUNT_DEPLETED')) return 'KUOTA_DISKON';
+  if (msg.startsWith('PRODUCT_NOT_FOUND')) return 'VALIDASI_PRODUK';
+  if (msg.includes('transaction_items')) return 'INSERT_ITEM';
+  if (msg.includes('transaction_payments')) return 'INSERT_PAYMENT';
+  if (msg.includes('stock_batches')) return 'UPDATE_BATCH';
+  if (msg.includes('transactions')) return 'INSERT_TX';
   return 'UNKNOWN';
 }
 
@@ -196,6 +196,16 @@ async function findReplay(employeeId: string, key: string, requestHash: string) 
     );
   }
 
+  const replayPayments = await db
+    .select({
+      paymentMethod: transactionPayments.paymentMethod,
+      amount: transactionPayments.amount,
+      cashReceived: transactionPayments.cashReceived,
+      changeAmount: transactionPayments.changeAmount,
+    })
+    .from(transactionPayments)
+    .where(eq(transactionPayments.transactionId, row.id));
+
   return apiOk(
     {
       transactionId: row.id,
@@ -203,6 +213,15 @@ async function findReplay(employeeId: string, key: string, requestHash: string) 
       grossAmount: Number(row.grossAmount),
       changeAmount: row.changeAmount === null ? null : Number(row.changeAmount),
       paymentMethod: row.paymentMethod,
+      payments:
+        replayPayments.length > 0
+          ? replayPayments.map((p) => ({
+              paymentMethod: p.paymentMethod,
+              amount: Number(p.amount),
+              cashReceived: p.cashReceived !== null ? Number(p.cashReceived) : undefined,
+              changeAmount: p.changeAmount !== null ? Number(p.changeAmount) : undefined,
+            }))
+          : undefined,
       replayed: true,
     },
     200,
@@ -259,11 +278,6 @@ export async function POST(req: NextRequest) {
   const requestHash = hashRequest(items, initialPayments);
 
   try {
-    if (idempotencyKey) {
-      const replay = await findReplay(employeeId, idempotencyKey, requestHash);
-      if (replay) return replay;
-    }
-
     // ── Mode Sandbox / Testing Guard (Localhost Isolation) ──────
     const host = req.headers.get('host') || '';
     const isLocalhost =
@@ -273,21 +287,66 @@ export async function POST(req: NextRequest) {
     const isTestingMode: boolean =
       isLocalhost || Boolean(payload.name && payload.name.toLowerCase().includes('testing'));
 
+    // ── Pre-fetch paralel (hemat round-trip jaringan DB): replay + shift sendiri + produk + kebijakan diskon aktif ─
+    const uniqueProductIds = [...new Set(items.map((i) => i.productId))];
+    const todayWibPre = getTodayWib();
+
+    const [replayResult, ownShiftRows, productRows, activeProductPolicies] = await Promise.all([
+      idempotencyKey ? findReplay(employeeId, idempotencyKey, requestHash) : Promise.resolve(null),
+      db
+        .select({ id: shifts.id })
+        .from(shifts)
+        .where(
+          and(
+            eq(shifts.employeeId, employeeId),
+            eq(shifts.status, 'ACTIVE'),
+            isNull(shifts.clockOut),
+          ),
+        )
+        .limit(1),
+      db
+        .select({
+          id: products.id,
+          name: products.name,
+          costPrice: products.costPrice,
+          sellingPrice: products.sellingPrice,
+          stockQty: products.stockQty,
+        })
+        .from(products)
+        .where(
+          and(
+            inArray(products.id, uniqueProductIds),
+            eq(products.isActive, true),
+            isNull(products.deletedAt),
+          ),
+        ),
+      db
+        .select({
+          id: discountPolicies.id,
+          productId: discountPolicies.productId,
+          batchId: discountPolicies.batchId,
+          discountPct: discountPolicies.discountPct,
+          discountedPrice: discountPolicies.discountedPrice,
+          isActive: discountPolicies.isActive,
+          validUntil: discountPolicies.validUntil,
+        })
+        .from(discountPolicies)
+        .where(
+          and(
+            inArray(discountPolicies.productId, uniqueProductIds),
+            eq(discountPolicies.isActive, true),
+            gte(discountPolicies.validUntil, todayWibPre),
+          ),
+        ),
+    ]);
+
+    if (replayResult) return replayResult;
+
+    const productIdsWithActiveDiscounts = new Set(activeProductPolicies.map((p) => p.productId));
+
     // ── Cek shift aktif laci kas (Single Cash Drawer per Shift — Cacat 1 Opsi A) ─
     let activeShiftId: string | null = null;
-
-    // 1. Cek shift aktif milik kasir ini sendiri
-    const [ownShift] = await db
-      .select({ id: shifts.id })
-      .from(shifts)
-      .where(
-        and(
-          eq(shifts.employeeId, employeeId),
-          eq(shifts.status, 'ACTIVE'),
-          isNull(shifts.clockOut),
-        ),
-      )
-      .limit(1);
+    const ownShift = ownShiftRows[0];
 
     if (ownShift) {
       activeShiftId = ownShift.id;
@@ -340,25 +399,6 @@ export async function POST(req: NextRequest) {
       return apiError('Tidak ada shift kasir yang aktif. Buka shift terlebih dahulu.', 403);
     }
 
-    // ── Fetch semua produk yang dibutuhkan (di luar tx — READ) ──
-    const productIds = items.map((i) => i.productId);
-    const productRows = await db
-      .select({
-        id: products.id,
-        name: products.name,
-        costPrice: products.costPrice,
-        sellingPrice: products.sellingPrice,
-        stockQty: products.stockQty,
-      })
-      .from(products)
-      .where(
-        and(
-          inArray(products.id, productIds),
-          eq(products.isActive, true),
-          isNull(products.deletedAt),
-        ),
-      );
-
     // ── Validasi produk & stok (di luar tx — fail fast sebelum masuk DB tx) ──
     for (const item of items) {
       const prod = productRows.find((p) => p.id === item.productId);
@@ -390,19 +430,24 @@ export async function POST(req: NextRequest) {
     }> = [];
 
     if (policyIds.length > 0) {
-      const todayWIB = getTodayWib();
-      activePolicies = await db
-        .select({
-          id: discountPolicies.id,
-          productId: discountPolicies.productId,
-          batchId: discountPolicies.batchId,
-          discountPct: discountPolicies.discountPct,
-          discountedPrice: discountPolicies.discountedPrice,
-          isActive: discountPolicies.isActive,
-          validUntil: discountPolicies.validUntil,
-        })
-        .from(discountPolicies)
-        .where(inArray(discountPolicies.id, policyIds));
+      const todayWIB = todayWibPre;
+      const prefetchedMap = new Map(activeProductPolicies.map((p) => [p.id, p]));
+      const missingPolicyIds = policyIds.filter((pid) => !prefetchedMap.has(pid));
+      activePolicies =
+        missingPolicyIds.length === 0
+          ? policyIds.map((pid) => prefetchedMap.get(pid)!)
+          : await db
+              .select({
+                id: discountPolicies.id,
+                productId: discountPolicies.productId,
+                batchId: discountPolicies.batchId,
+                discountPct: discountPolicies.discountPct,
+                discountedPrice: discountPolicies.discountedPrice,
+                isActive: discountPolicies.isActive,
+                validUntil: discountPolicies.validUntil,
+              })
+              .from(discountPolicies)
+              .where(inArray(discountPolicies.id, policyIds));
 
       for (const item of items) {
         if (item.discountPolicyId) {
@@ -772,21 +817,25 @@ export async function POST(req: NextRequest) {
           if (validBatches.length > 0) {
             const validBatchIds = validBatches.map((b) => b.id);
             const discountedBatchIds = new Set<string>();
-            const activeBatchPolicies = await tx
-              .select({
-                id: discountPolicies.id,
-                batchId: discountPolicies.batchId,
-                allowedQty: discountPolicies.allowedQty,
-                soldQty: discountPolicies.soldQty,
-              })
-              .from(discountPolicies)
-              .where(
-                and(
-                  inArray(discountPolicies.batchId, validBatchIds),
-                  eq(discountPolicies.isActive, true),
-                  gte(discountPolicies.validUntil, todayWib),
-                ),
-              );
+            const hasPossibleDiscount =
+              Boolean(itemPolicy) || productIdsWithActiveDiscounts.has(item.productId);
+            const activeBatchPolicies = hasPossibleDiscount
+              ? await tx
+                  .select({
+                    id: discountPolicies.id,
+                    batchId: discountPolicies.batchId,
+                    allowedQty: discountPolicies.allowedQty,
+                    soldQty: discountPolicies.soldQty,
+                  })
+                  .from(discountPolicies)
+                  .where(
+                    and(
+                      inArray(discountPolicies.batchId, validBatchIds),
+                      eq(discountPolicies.isActive, true),
+                      gte(discountPolicies.validUntil, todayWib),
+                    ),
+                  )
+              : [];
 
             for (const row of activeBatchPolicies) {
               if (row.soldQty < row.allowedQty) {

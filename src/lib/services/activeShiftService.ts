@@ -5,12 +5,22 @@
 // menggunakan aturan kepemilikan & masa adopsi rekan (<= 4.5 jam) yang identik.
 // =============================================================
 
-import { eq, and, isNull, desc } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, desc, gte, lt } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { shifts, employees } from '@/lib/db/schema';
+import { shifts, employees, shiftSchedules } from '@/lib/db/schema';
 
 export const SHARED_SHIFT_MAX_AGE_MS = 4.5 * 60 * 60 * 1000; // 4 jam 30 menit
 export const STALE_SHIFT_AUTO_CLOSE_MS = 12 * 60 * 60 * 1000; // 12 jam
+
+const HARI_WIB_ENUM: Record<number, 'MINGGU' | 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU'> = {
+  0: 'MINGGU',
+  1: 'SENIN',
+  2: 'SELASA',
+  3: 'RABU',
+  4: 'KAMIS',
+  5: 'JUMAT',
+  6: 'SABTU',
+};
 
 /** Tanggal bisnis WIB 'YYYY-MM-DD' */
 export function getWibDateStr(d: Date): string {
@@ -35,10 +45,113 @@ export function getWibSessionLabel(d: Date): 'Pagi' | 'Siang' {
   return getWibMinutes(d) >= 11 * 60 + 15 ? 'Siang' : 'Pagi';
 }
 
-/** True jika shift toko dibuka pada hari/sesi berbeda dari waktu sekarang */
+/**
+ * Resolusi sesi deterministik (pure) yang menangani Shift Siang buka awal (< 11:15 WIB)
+ * akibat Shift Pagi tutup awal kuliah/izin dosen:
+ * - >= 11:15 WIB -> pasti 'Siang'
+ * - < 09:45 WIB -> pasti 'Pagi'
+ * - 09:45..11:14 WIB:
+ *     1. Ikuti jadwal resmi pemilik shift hari tersebut jika ada (slotStart >= 11:00 -> 'Siang', else 'Pagi')
+ *     2. Jika pemilik shift tidak punya jadwal hari tsb (mis. pengganti/badal), cek apakah sudah ada
+ *        Shift Pagi yang ditutup dengan hitung fisik lebih awal hari ini -> 'Siang'
+ */
+export function resolveShiftSessionWithContext(params: {
+  clockIn: Date;
+  ownerScheduledSlotStart?: string | null;
+  hasClosedMorningShiftEarlier?: boolean;
+}): 'Pagi' | 'Siang' {
+  const mins = getWibMinutes(params.clockIn);
+  if (mins >= 11 * 60 + 15) return 'Siang';
+  if (mins < 9 * 60 + 45) return 'Pagi';
+
+  if (params.ownerScheduledSlotStart) {
+    const schedHour = parseInt(params.ownerScheduledSlotStart.split(':')[0] ?? '8', 10);
+    if (Number.isFinite(schedHour)) {
+      return schedHour >= 11 ? 'Siang' : 'Pagi';
+    }
+  }
+
+  return params.hasClosedMorningShiftEarlier ? 'Siang' : 'Pagi';
+}
+
+/**
+ * Resolusi sesi shift tersimpan dari database.
+ * Zero query tambahan di luar jam transisi 09:45–11:14 WIB.
+ */
+export async function resolvePersistedShiftSession(shift: {
+  employeeId: string;
+  clockIn: Date;
+}): Promise<'Pagi' | 'Siang'> {
+  const clockIn = new Date(shift.clockIn);
+  const mins = getWibMinutes(clockIn);
+  if (mins >= 11 * 60 + 15) return 'Siang';
+  if (mins < 9 * 60 + 45) return 'Pagi';
+
+  const dateWib = getWibDateStr(clockIn);
+  const dow = new Date(`${dateWib}T12:00:00+07:00`).getDay();
+  const dayEnum = HARI_WIB_ENUM[dow] ?? 'SENIN';
+  const dayStartUtc = new Date(`${dateWib}T00:00:00+07:00`);
+
+  const [schedRows, earlierClosed] = await Promise.all([
+    db
+      .select({ slotStart: shiftSchedules.slotStart })
+      .from(shiftSchedules)
+      .where(
+        and(
+          eq(shiftSchedules.employeeId, shift.employeeId),
+          eq(shiftSchedules.dayOfWeek, dayEnum),
+        ),
+      )
+      .limit(2),
+    db
+      .select({ id: shifts.id })
+      .from(shifts)
+      .where(
+        and(
+          eq(shifts.status, 'CLOSED'),
+          isNotNull(shifts.actualCash),
+          gte(shifts.clockIn, dayStartUtc),
+          lt(shifts.clockIn, clockIn),
+        ),
+      )
+      .limit(1),
+  ]);
+
+  const ownerSlotStart =
+    schedRows.find((s) => parseInt(s.slotStart.split(':')[0] ?? '8', 10) >= 11)?.slotStart ??
+    schedRows[0]?.slotStart ??
+    null;
+
+  return resolveShiftSessionWithContext({
+    clockIn,
+    ownerScheduledSlotStart: ownerSlotStart,
+    hasClosedMorningShiftEarlier: earlierClosed.length > 0,
+  });
+}
+
+/** True jika shift toko dibuka pada hari/sesi berbeda dari waktu sekarang (versi pure timestamp) */
 export function isCrossSessionStoreShift(shiftClockIn: Date, now: Date): boolean {
   if (getWibDateStr(shiftClockIn) !== getWibDateStr(now)) return true;
   return getWibSessionLabel(shiftClockIn) !== getWibSessionLabel(now);
+}
+
+/**
+ * True jika shift toko tersimpan berasal dari hari atau sesi berbeda dengan waktu sekarang,
+ * dengan menyadari Shift Siang yang dibuka lebih awal (09:45–11:14 WIB) agar tidak tertutup paksa
+ * saat rekan siang lain login setelah 11:15 WIB.
+ */
+export async function isCrossSessionPersistedShift(
+  storeShift: { employeeId: string; clockIn: Date },
+  now: Date,
+): Promise<boolean> {
+  const shiftClockIn = new Date(storeShift.clockIn);
+  if (getWibDateStr(shiftClockIn) !== getWibDateStr(now)) return true;
+  const shiftSession = await resolvePersistedShiftSession({
+    employeeId: storeShift.employeeId,
+    clockIn: shiftClockIn,
+  });
+  const nowSession = getWibSessionLabel(now);
+  return shiftSession !== nowSession;
 }
 
 export interface ResolvedActiveShift {
@@ -192,7 +305,11 @@ export async function resolveActiveDrawerShift(
   }
 
   const crossSession =
-    storeShift.employeeId !== employeeId && isCrossSessionStoreShift(new Date(storeShift.clockIn), now);
+    storeShift.employeeId !== employeeId &&
+    (await isCrossSessionPersistedShift(
+      { employeeId: storeShift.employeeId, clockIn: new Date(storeShift.clockIn) },
+      now,
+    ));
 
   if (storeAgeMs <= SHARED_SHIFT_MAX_AGE_MS && !crossSession) {
     return {

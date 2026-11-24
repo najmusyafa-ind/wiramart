@@ -20,7 +20,7 @@ import { db } from '@/lib/db/client';
 import { shifts, employees } from '@/lib/db/schema';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
-import { isCrossSessionStoreShift } from '@/lib/services/activeShiftService';
+import { isCrossSessionPersistedShift } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -122,7 +122,13 @@ export async function PATCH(req: NextRequest): Promise<Response> {
       const shiftAge = now.getTime() - new Date(existingStoreShift.clockIn).getTime();
       const isCrossSession =
         existingStoreShift.employeeId !== employeeId &&
-        isCrossSessionStoreShift(new Date(existingStoreShift.clockIn), now);
+        (await isCrossSessionPersistedShift(
+          {
+            employeeId: existingStoreShift.employeeId,
+            clockIn: new Date(existingStoreShift.clockIn),
+          },
+          now,
+        ));
 
       if (shiftAge > TWELVE_HOURS) {
         // Auto-close shift lama yang sudah basi (>12 jam)

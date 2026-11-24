@@ -97,6 +97,13 @@ function getEpochMs(): number {
   return Date.now();
 }
 
+function createCheckoutIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `pos_${crypto.randomUUID().replace(/-/g, '')}`;
+  }
+  return `pos_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}`;
+}
+
 async function requestSessionData(signal?: AbortSignal) {
   const res = await fetch(`/api/kasir/sesi?_t=${Date.now()}`, {
     cache: 'no-store',
@@ -659,7 +666,7 @@ function BukaShiftOverlay({
 // ── Payment Modal ─────────────────────────────────────────────
 
 function PaymentModal({
-  total, method: initialMethod, qrisInfo, onClose, onConfirm, loading,
+  total, method: initialMethod, qrisInfo, onClose, onConfirm, loading, errorMessage, onClearError,
 }: {
   total: number;
   method: PaymentMethod;
@@ -667,6 +674,8 @@ function PaymentModal({
   onClose: () => void;
   onConfirm: (cashReceived?: number, payments?: SplitPaymentDetail[]) => void;
   loading: boolean;
+  errorMessage?: string | null;
+  onClearError?: () => void;
 }) {
   const uid = useId();
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(initialMethod);
@@ -704,6 +713,7 @@ function PaymentModal({
   ].filter((a, i, arr) => arr.indexOf(a) === i && a >= splitCashNeeded).slice(0, 4);
 
   function handleTriggerConfirm() {
+    if (loading) return;
     if (selectedMethod === 'CASH') {
       const payments: SplitPaymentDetail[] = [{
         paymentMethod: 'CASH',
@@ -781,7 +791,10 @@ function PaymentModal({
             <button
               key={m}
               type="button"
-              onClick={() => setSelectedMethod(m)}
+              onClick={() => {
+                setSelectedMethod(m);
+                onClearError?.();
+              }}
               className={`pos-method-btn${selectedMethod === m ? ' active' : ''}`}
               style={{
                 flex: 1,
@@ -1043,6 +1056,27 @@ function PaymentModal({
               }}>
                 <strong>Catatan Laci:</strong> Uang fisik masuk laci kasir bertambah <strong>{rp(splitCashNeeded)}</strong>. Nominal QRIS <strong>{rp(splitQrisAmount)}</strong> langsung masuk rekening bank toko.
               </div>
+            </div>
+          )}
+
+          {errorMessage && (
+            <div
+              role="alert"
+              style={{
+                padding: '10px 12px',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--color-error-light)',
+                border: '1px solid var(--color-error)',
+                color: 'var(--color-error)',
+                fontSize: '0.78rem',
+                lineHeight: 1.45,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+              }}
+            >
+              <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{errorMessage}</span>
             </div>
           )}
 
@@ -1648,6 +1682,12 @@ export default function PosPage() {
   const [showPayment, setShowPayment] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [processingTx, setProcessingTx] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
+  const txInFlightRef = useRef(false);
+  const checkoutIdemRef = useRef<{ signature: string; key: string } | null>(null);
+  const productsRef = useRef<Product[]>([]);
+  const catalogCacheRef = useRef<Product[]>([]);
+  const scanningBarcodeRef = useRef<string | null>(null);
   const [showCart, setShowCart] = useState(false); // mobile cart toggle
   const [showKasirMenu, setShowKasirMenu] = useState(false); // Option A mobile drawer menu toggle
   const [tutupLoading, setTutupLoading] = useState(false);
@@ -1923,7 +1963,12 @@ export default function PosPage() {
       }
       const json = await res.json();
       if (json.success) {
-        setProducts(json.data?.products ?? []);
+        const nextProducts: Product[] = json.data?.products ?? [];
+        productsRef.current = nextProducts;
+        if (!q && !catId) {
+          catalogCacheRef.current = nextProducts;
+        }
+        setProducts(nextProducts);
         setCategories(json.data?.categories ?? []);
         if (
           typeof json.data?.lowStockThreshold === 'number' &&
@@ -2024,15 +2069,41 @@ export default function PosPage() {
     const cleanCode = barcode.trim();
     if (!cleanCode) return;
 
+    // Cegah scan berulang saat barcode yang sama sedang menunggu respons jaringan
+    if (scanningBarcodeRef.current === cleanCode) {
+      return;
+    }
+
     const now = getEpochMs();
     if (lastScanRef.current.code === cleanCode && now - lastScanRef.current.time < 400) {
       return; // abaikan duplicate event
     }
     lastScanRef.current = { code: cleanCode, time: now };
 
-    // 1. Cari di DB lokal dulu (produk yang sudah diinput admin)
+    // 0. Lookup katalog lokal instan (0 ms, anti-lag & tahan internet lambat) untuk barcode reguler
+    if (!cleanCode.toUpperCase().startsWith('DISC-')) {
+      const localMatch =
+        productsRef.current.find((p) => (p.barcode ?? '').trim() === cleanCode) ??
+        catalogCacheRef.current.find((p) => (p.barcode ?? '').trim() === cleanCode);
+      if (localMatch) {
+        if (addToCart(localMatch)) {
+          playScanBeep();
+          setScanToast(`Ditambahkan: ${localMatch.name}`);
+          setTimeout(() => setScanToast(null), 2000);
+        }
+        return;
+      }
+    }
+
+    // 1. Cari di DB lokal via API (untuk barcode diskon darurat DISC- atau produk di luar halaman lokal)
+    scanningBarcodeRef.current = cleanCode;
+    setScanToast(`Mencari barcode ${cleanCode}...`);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 8000);
     try {
-      const res = await fetch(`/api/kasir/produk/barcode?code=${encodeURIComponent(cleanCode)}`);
+      const res = await fetch(`/api/kasir/produk/barcode?code=${encodeURIComponent(cleanCode)}`, {
+        signal: controller.signal,
+      });
       const json = await res.json() as {
         success: boolean;
         data?: { found: boolean; isDiscounted?: boolean; product?: Product };
@@ -2053,11 +2124,19 @@ export default function PosPage() {
         setTimeout(() => setScanToast(null), 3500);
         return;
       }
-    } catch { /* jaringan error */ }
-    // 2. Tidak ada di DB
-    setScanToast(`Barcode ${cleanCode} belum terdaftar di sistem.`);
-    setUnknownBarcodePrompt(cleanCode);
-    setTimeout(() => setScanToast(null), 3000);
+      // 2. Tidak ada di DB
+      setScanToast(`Barcode ${cleanCode} belum terdaftar di sistem.`);
+      setUnknownBarcodePrompt(cleanCode);
+      setTimeout(() => setScanToast(null), 3000);
+    } catch {
+      setScanToast('Koneksi lambat saat mencari barcode. Coba scan ulang atau pilih produk manual.');
+      setTimeout(() => setScanToast(null), 3500);
+    } finally {
+      window.clearTimeout(timer);
+      if (scanningBarcodeRef.current === cleanCode) {
+        scanningBarcodeRef.current = null;
+      }
+    }
   }
 
   const handleBarcodeScannedRef = useRef(handleBarcodeScanned);
@@ -2218,52 +2297,131 @@ export default function PosPage() {
     );
   };
 
-  const clearCart = () => applyCart(() => []);
+  const clearCart = () => {
+    checkoutIdemRef.current = null;
+    setTxError(null);
+    applyCart(() => []);
+  };
   const total = cart.reduce((sum, i) => sum + parseFloat(i.sellingPrice) * (i.qty || 0), 0);
   const totalItems = cart.reduce((sum, i) => sum + (i.qty || 0), 0);
   const hasInvalidQty = cart.some((i) => !i.qty || i.qty <= 0);
 
-  // Submit transaksi
+  // Submit transaksi (anti-dobel dengan Idempotency-Key stabil + lock sinkron + auto-retry aman)
   async function handleConfirmPayment(cashReceived?: number, payments?: SplitPaymentDetail[]) {
+    if (txInFlightRef.current) return;
+    const currentCart = cartRef.current;
+    if (currentCart.length === 0) return;
+
+    txInFlightRef.current = true;
     setProcessingTx(true);
+    setTxError(null);
+
+    const requestBody = {
+      items: currentCart.map((i) => ({
+        productId: i.id,
+        qty: i.qty,
+        discountPolicyId: i.discountPolicyId || undefined,
+        discountBarcode: i.discountBarcode || undefined,
+      })),
+      paymentMethod:
+        payments && payments.length > 1
+          ? undefined
+          : paymentMethod === 'SPLIT'
+            ? 'CASH'
+            : paymentMethod,
+      cashReceived,
+      payments,
+    };
+
+    const payloadSignature = JSON.stringify(requestBody);
+    if (!checkoutIdemRef.current || checkoutIdemRef.current.signature !== payloadSignature) {
+      checkoutIdemRef.current = {
+        signature: payloadSignature,
+        key: createCheckoutIdempotencyKey(),
+      };
+    }
+    const idempotencyKey = checkoutIdemRef.current.key;
+
+    const sendOnce = async () => {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
+      try {
+        return await fetch('/api/kasir/transaksi', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': idempotencyKey,
+          },
+          body: payloadSignature,
+          signal: controller.signal,
+        });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    };
+
     try {
-      const res = await fetch('/api/kasir/transaksi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: cart.map((i) => ({
-            productId: i.id,
-            qty: i.qty,
-            discountPolicyId: i.discountPolicyId || undefined,
-            discountBarcode: i.discountBarcode || undefined,
-          })),
-          paymentMethod: payments && payments.length > 1 ? undefined : (paymentMethod === 'SPLIT' ? 'CASH' : paymentMethod),
-          cashReceived,
-          payments,
-        }),
-      });
+      let res: Response | null = null;
+      let lastNetworkError: unknown = null;
+
+      // Maksimal 2 percobaan dengan Idempotency-Key IDENTIK:
+      // Jika percobaan pertama sempat COMMIT sebelum koneksi putus, percobaan ke-2 mendapat replay 200 OK (anti-dobel).
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const candidate = await sendOnce();
+          if (candidate.status >= 502 && candidate.status <= 504 && attempt === 1) {
+            await new Promise((r) => window.setTimeout(r, 1200));
+            continue;
+          }
+          res = candidate;
+          break;
+        } catch (err) {
+          lastNetworkError = err;
+          if (attempt === 1) {
+            await new Promise((r) => window.setTimeout(r, 1200));
+            continue;
+          }
+        }
+      }
+
+      if (!res) {
+        console.warn('[POS] Gangguan jaringan saat checkout (idempotency-key dipertahankan):', lastNetworkError);
+        setTxError(
+          'Koneksi internet terganggu saat mengirim transaksi. Tekan Konfirmasi lagi untuk mengecek/melanjutkan dengan kunci anti-dobel (transaksi tidak akan tercatat 2 kali).',
+        );
+        return;
+      }
+
       const json = await res.json();
       if (!res.ok) {
+        if (res.status === 409) {
+          checkoutIdemRef.current = null;
+        }
         if (res.status === 403 && (json.error?.toLowerCase().includes('shift') || json.error?.toLowerCase().includes('laci'))) {
-          alert(`${json.error}\n\nSistem akan membuka menu Buka Shift / Modal Laci (Rp 100.000).`);
+          checkoutIdemRef.current = null;
           setShowPayment(false);
           setForceShowBukaShift(true);
+          setScanToast('Shift belum aktif. Silakan buka shift terlebih dahulu.');
+          setTimeout(() => setScanToast(null), 4000);
           await fetchSession();
           return;
         }
         const msg = typeof json.error === 'string'
           ? json.error
           : 'Transaksi gagal. Silakan coba lagi.';
-        alert(msg);
+        setTxError(msg);
         return;
       }
+
+      checkoutIdemRef.current = null;
+      setTxError(null);
       setLastTx({
         invoiceNumber: json.data.invoiceNumber,
         total: json.data.grossAmount,
         change: json.data.changeAmount,
         method: payments && payments.length > 1 ? 'SPLIT' : paymentMethod,
         payments: json.data.payments ?? payments,
-        items: cart.map((i) => ({ name: i.name, qty: i.qty, price: parseFloat(i.sellingPrice) })),
+        items: currentCart.map((i) => ({ name: i.name, qty: i.qty, price: parseFloat(i.sellingPrice) })),
         kasirName:    session?.employee?.fullName ?? 'Kasir',
         storeName:    session?.store?.name    ?? 'WIRAMART UNPERBA',
         storeAddress: session?.store?.address ?? '',
@@ -2276,8 +2434,11 @@ export default function PosPage() {
       fetchProducts(search, activeCategory);
       void refreshPerishableCount();
     } catch {
-      alert('Koneksi internet terputus (Network Error). Transaksi otomatis dibatalkan dan stok tidak berkurang. Silakan periksa jaringan Wi-Fi Anda.');
+      setTxError(
+        'Koneksi internet terganggu saat memproses respons transaksi. Tekan Konfirmasi lagi dengan kunci anti-dobel (transaksi tidak akan tercatat 2 kali).',
+      );
     } finally {
+      txInFlightRef.current = false;
       setProcessingTx(false);
     }
   }
@@ -2727,6 +2888,42 @@ export default function PosPage() {
                   />
                 </div>
               )}
+
+              {/* Guard anti lupa memasukkan Modal Awal ke nominal fisik laci */}
+              {(() => {
+                const modalAwalNum = Math.round(Number(session?.shift?.modalAwal ?? 100_000));
+                const cashOutNum = Math.round(tutupKasSummary?.totalCashOut ?? 0);
+                const minBaseCash = Math.max(0, modalAwalNum - cashOutNum);
+                const parsedActual = tutupActualCash
+                  ? parseInt(tutupActualCash.replace(/\D/g, ''), 10)
+                  : NaN;
+                if (!Number.isFinite(parsedActual) || parsedActual <= 0 || parsedActual >= minBaseCash) {
+                  return null;
+                }
+                return (
+                  <div
+                    role="alert"
+                    style={{
+                      padding: '9px 11px',
+                      borderRadius: 'var(--radius-md)',
+                      background: 'hsl(38 95% 95%)',
+                      border: '1.5px solid hsl(38 88% 55%)',
+                      color: 'hsl(32 88% 22%)',
+                      fontSize: '0.74rem',
+                      lineHeight: 1.45,
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 8,
+                    }}
+                  >
+                    <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1, color: 'hsl(35 92% 40%)' }} />
+                    <div>
+                      <strong>Cek ulang! Nominal fisik ({rp(parsedActual)}) lebih kecil dari Modal Awal ({rp(modalAwalNum)}{cashOutNum > 0 ? ` − kas keluar ${rp(cashOutNum)}` : ''}).</strong>{' '}
+                      Jangan kurangi modal awal — masukkan <strong>total semua uang di laci</strong> (mis. jika penjualan tunai {rp(parsedActual)}, maka total isi laci = <strong>{rp(parsedActual + minBaseCash)}</strong>).
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Catatan Handover */}
               <div>
@@ -3933,9 +4130,14 @@ export default function PosPage() {
           total={total}
           method={paymentMethod}
           qrisInfo={session?.qris ?? null}
-          onClose={() => setShowPayment(false)}
+          onClose={() => {
+            setShowPayment(false);
+            setTxError(null);
+          }}
           onConfirm={handleConfirmPayment}
           loading={processingTx}
+          errorMessage={txError}
+          onClearError={() => setTxError(null)}
         />
       )}
       {showSuccess && lastTx && (

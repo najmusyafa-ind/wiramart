@@ -71,14 +71,14 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   // 3. Cari shift aktif (milik kasir ini atau shift aktif toko bersama)
   let activeShift = await db.query.shifts.findFirst({
     where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
-    columns: { id: true, clockIn: true, modalAwal: true, auditFlags: true },
+    columns: { id: true, employeeId: true, clockIn: true, modalAwal: true, auditFlags: true },
   });
 
   if (!activeShift) {
     activeShift = await db.query.shifts.findFirst({
       where: and(eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut)),
       orderBy: [desc(shifts.clockIn)],
-      columns: { id: true, clockIn: true, modalAwal: true, auditFlags: true },
+      columns: { id: true, employeeId: true, clockIn: true, modalAwal: true, auditFlags: true },
     });
   }
 
@@ -94,6 +94,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   // agar angka Tutup Shift Kasir selalu 100% sinkron dengan laporan Admin (/api/admin/laporan/per-shift).
   const sessionCtx = await resolveSameSessionShiftContext({
     id: activeShift.id,
+    employeeId: activeShift.employeeId,
     clockIn: new Date(activeShift.clockIn),
     modalAwal: activeShift.modalAwal,
   });

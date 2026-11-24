@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import { db } from '@/lib/db/client';
 import { sql } from 'drizzle-orm';
 import { evaluateShiftCashState } from '@/lib/services/shiftShortageService';
+import { resolveShiftSessionWithContext } from '@/lib/services/activeShiftService';
 import { computeAttendanceLateness } from '@/lib/services/attendanceLatenessService';
 import { getLateDisciplineFactor } from '@/lib/finance/report';
 
@@ -140,6 +141,46 @@ describe('1. Unit Tests — Idempotensi & Klasifikasi TCL', () => {
     // Kompatibilitas historis Era 2 (Oktober < 2026-11-01) tetap floor(m/5) * 3%
     const era2 = getLateDisciplineFactor('2026-10-30', 16);
     assert.equal(era2.penaltyPercent, 9);
+  });
+
+  it('resolusi sesi Shift Siang buka awal (09:45–11:14 WIB) tidak bentrok dengan Shift Pagi', () => {
+    // 07:44 WIB -> pasti Pagi
+    assert.equal(
+      resolveShiftSessionWithContext({ clockIn: new Date('2026-11-24T07:44:00+07:00') }),
+      'Pagi',
+    );
+    // 10:56 WIB milik kasir jadwal Siang (11:30) -> Siang (kasus Tisya 24 Nov)
+    assert.equal(
+      resolveShiftSessionWithContext({
+        clockIn: new Date('2026-11-24T10:56:25+07:00'),
+        ownerScheduledSlotStart: '11:30',
+        hasClosedMorningShiftEarlier: true,
+      }),
+      'Siang',
+    );
+    // 10:47 WIB milik kasir jadwal Pagi (07:30) -> tetap Pagi meski Shift Pagi utama sudah tutup
+    assert.equal(
+      resolveShiftSessionWithContext({
+        clockIn: new Date('2026-11-24T10:47:40+07:00'),
+        ownerScheduledSlotStart: '07:30',
+        hasClosedMorningShiftEarlier: true,
+      }),
+      'Pagi',
+    );
+    // 10:56 WIB kasir badal tanpa jadwal hari itu setelah Shift Pagi tutup -> Siang
+    assert.equal(
+      resolveShiftSessionWithContext({
+        clockIn: new Date('2026-11-24T10:56:25+07:00'),
+        ownerScheduledSlotStart: null,
+        hasClosedMorningShiftEarlier: true,
+      }),
+      'Siang',
+    );
+    // 11:20 WIB -> pasti Siang
+    assert.equal(
+      resolveShiftSessionWithContext({ clockIn: new Date('2026-11-24T11:20:00+07:00') }),
+      'Siang',
+    );
   });
 });
 
