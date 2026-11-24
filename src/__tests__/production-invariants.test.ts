@@ -229,8 +229,8 @@ describe('2. Invarian & Normalisasi Database Production (Read-Only)', () => {
   });
 });
 
-describe('3. Public Schema v4.3, RLS Security, Index & Delivery Buckets (Read-Only)', () => {
-  it('seluruh 34 tabel berada di schema public dan 0 tabel tersisa di schema domain lama', async () => {
+describe('3. Public Schema v4.4, RLS Security, Index & Delivery Buckets (Read-Only)', () => {
+  it('seluruh 35 tabel berada di schema public dan 0 tabel tersisa di schema domain lama', async () => {
     const counts = await db.execute<{ schemaname: string; table_count: number }>(sql`
       SELECT schemaname, count(*)::int AS table_count
       FROM pg_tables
@@ -239,13 +239,13 @@ describe('3. Public Schema v4.3, RLS Security, Index & Delivery Buckets (Read-On
       ORDER BY schemaname
     `);
     const map = new Map(counts.map((r) => [r.schemaname, r.table_count]));
-    assert.equal(map.get('public') ?? 0, 34, 'Seluruh 34 tabel aplikasi wajib berada di schema public');
+    assert.equal(map.get('public') ?? 0, 35, 'Seluruh 35 tabel aplikasi wajib berada di schema public');
     for (const oldSchema of ['core', 'hr', 'gudang', 'pos', 'finance', 'delivery']) {
       assert.equal(map.get(oldSchema) ?? 0, 0, `Schema lama ${oldSchema} harus kosong`);
     }
   });
 
-  it('ke-34 tabel mengaktifkan RLS serta memiliki policy deny anon & authenticated', async () => {
+  it('ke-35 tabel mengaktifkan RLS serta memiliki policy deny anon & authenticated', async () => {
     const weakTables = await db.execute<{ schemaname: string; tablename: string }>(sql`
       SELECT t.schemaname, t.tablename
       FROM pg_tables t
@@ -305,11 +305,11 @@ describe('3. Public Schema v4.3, RLS Security, Index & Delivery Buckets (Read-On
     assert.equal(idx.length, 1, 'Index idx_shifts_one_active_per_employee wajib ada di public.shifts');
 
     const buckets = await db.execute<{ id: string }>(sql`
-      SELECT id FROM storage.buckets WHERE id IN ('qris', 'product-images', 'payment-proofs')
+      SELECT id FROM storage.buckets WHERE id IN ('qris', 'product-images', 'payment-proofs', 'purchase-receipts')
     `);
     assert.equal(
       buckets.length,
-      3,
+      4,
       `Bucket storage kurang: ditemukan ${JSON.stringify(buckets.map((b) => b.id))}`,
     );
   });

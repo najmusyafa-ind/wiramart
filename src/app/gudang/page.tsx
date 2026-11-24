@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import PenerimaanBarangSection from './components/PenerimaanBarangSection';
 import FEFOActionSection from './components/FEFOActionSection';
+import NotaBelanjaPanel from '@/features/portal/nota-belanja/NotaBelanjaPanel';
 
 // ── Tipe Data Frontend ─────────────────────────────────────────
 
@@ -147,7 +148,9 @@ const warehouseDataMemCache = new Map<string, WarehousePayloadData>();
 
 function makeWarehouseCacheKey(targetFilter: string, targetSearch: string): string {
   const filterParam =
-    targetFilter === 'aktivitas' || targetFilter === 'penerimaan' ? 'semua' : targetFilter;
+    targetFilter === 'aktivitas' || targetFilter === 'penerimaan' || targetFilter === 'nota_belanja'
+      ? 'semua'
+      : targetFilter;
   return `${filterParam}::${targetSearch.trim().toLowerCase()}`;
 }
 
@@ -212,9 +215,9 @@ export default function GudangPortalPage() {
 
   // State Filter & Pencarian
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'semua' | 'kritis' | 'fefo' | 'perishable' | 'habis' | 'aktivitas' | 'penerimaan'>('semua');
+  const [activeTab, setActiveTab] = useState<'semua' | 'kritis' | 'fefo' | 'perishable' | 'habis' | 'aktivitas' | 'penerimaan' | 'nota_belanja'>('semua');
 
-  function handleSelectTab(nextTab: 'semua' | 'kritis' | 'fefo' | 'perishable' | 'habis' | 'aktivitas' | 'penerimaan') {
+  function handleSelectTab(nextTab: 'semua' | 'kritis' | 'fefo' | 'perishable' | 'habis' | 'aktivitas' | 'penerimaan' | 'nota_belanja') {
     setActiveTab(nextTab);
     const cached = warehouseDataMemCache.get(makeWarehouseCacheKey(nextTab, search));
     if (cached) {
@@ -369,7 +372,9 @@ export default function GudangPortalPage() {
   const fetchWarehouseData = useCallback(
     async (targetFilter: string, targetSearch: string, signal?: AbortSignal) => {
       const filterParam =
-        targetFilter === 'aktivitas' || targetFilter === 'penerimaan' ? 'semua' : targetFilter;
+        targetFilter === 'aktivitas' || targetFilter === 'penerimaan' || targetFilter === 'nota_belanja'
+          ? 'semua'
+          : targetFilter;
       const res = await fetch(
         `/api/kasir/gudang?filter=${filterParam}&search=${encodeURIComponent(targetSearch)}`,
         { signal },
@@ -1502,8 +1507,8 @@ export default function GudangPortalPage() {
             <button
               type="button"
               role="tab"
-              aria-selected={activeTab !== 'penerimaan' && activeTab !== 'fefo'}
-              className={`rep-tab${activeTab !== 'penerimaan' && activeTab !== 'fefo' ? ' active' : ''}`}
+              aria-selected={activeTab !== 'penerimaan' && activeTab !== 'fefo' && activeTab !== 'nota_belanja'}
+              className={`rep-tab${activeTab !== 'penerimaan' && activeTab !== 'fefo' && activeTab !== 'nota_belanja' ? ' active' : ''}`}
               onClick={() => handleSelectTab('semua')}
             >
               <span>Stok &amp; Produk</span>
@@ -1574,9 +1579,19 @@ export default function GudangPortalPage() {
                 </span>
               )}
             </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'nota_belanja'}
+              className={`rep-tab${activeTab === 'nota_belanja' ? ' active' : ''}`}
+              onClick={() => handleSelectTab('nota_belanja')}
+            >
+              <span>Nota Belanja</span>
+            </button>
           </div>
 
-          {activeTab !== 'penerimaan' && activeTab !== 'fefo' && (
+          {activeTab !== 'penerimaan' && activeTab !== 'fefo' && activeTab !== 'nota_belanja' && (
             <div className="rep-chip-bar" role="group" aria-label="Filter daftar stok">
               {[
                 { id: 'semua', label: summary ? `Semua (${summary.totalSku})` : 'Semua' },
@@ -1795,6 +1810,8 @@ export default function GudangPortalPage() {
           />
         ) : activeTab === 'fefo' && !isReadOnlyAdminShift ? (
           <FEFOActionSection onBadgeUpdate={() => loadData(activeTab, search)} />
+        ) : activeTab === 'nota_belanja' ? (
+          <NotaBelanjaPanel portalRole="GUDANG" />
         ) : (
           /* ── TAB KONTEN 2: LIST PRODUK GUDANG & RADAR FEFO ── */
           <section>

@@ -45,6 +45,7 @@ import {
   UserCheck,
   Sparkles,
   ShoppingBag,
+  Receipt,
 } from 'lucide-react';
 
 async function requestModStatusData(signal?: AbortSignal) {
@@ -100,6 +101,12 @@ function buildPortalNavItems(adminRole: 'MANAGER' | 'ADMIN_SHIFT'): NavItem[] {
       label: 'Persetujuan Barang Masuk',
       href: `${basePath}/gudang-approval`,
       icon: <ShieldCheck size={18} aria-hidden="true" />,
+      section: 'Produk & Gudang',
+    },
+    {
+      label: 'Nota Belanja',
+      href: `${basePath}/nota-belanja`,
+      icon: <Receipt size={18} aria-hidden="true" />,
       section: 'Produk & Gudang',
     },
     {

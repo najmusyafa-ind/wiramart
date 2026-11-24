@@ -1765,3 +1765,108 @@ export const consignmentEntriesRelations = relations(consignmentEntries, ({ one 
   createdByEmployee: one(employees, { fields: [consignmentEntries.createdByEmployeeId], references: [employees.id] }),
   settledByEmployee: one(employees, { fields: [consignmentEntries.settledByEmployeeId], references: [employees.id] }),
 }));
+
+// =============================================================
+// 35. PURCHASE_RECEIPT_ARCHIVES (Arsip Nota Belanja, Reseller, Operasional & Buku)
+// Akses 3 Role: Manager (All), Admin Shift & Gudang (Upload + Galeri Keterangan)
+// Soft-delete only (deleted_at) + RLS deny anon/authenticated
+// =============================================================
+
+export const PURCHASE_RECEIPT_CATEGORIES = [
+  'BELANJA_STOK',
+  'RESELLER_LUNAS',
+  'OPERASIONAL',
+  'TITIPAN_MITRA',
+  'CAMPURAN',
+  'PENJUALAN_BUKU',
+  'ABSENSI_JAGA',
+  'LAINNYA',
+] as const;
+export type PurchaseReceiptCategory = (typeof PURCHASE_RECEIPT_CATEGORIES)[number];
+
+export const PURCHASE_RECEIPT_UPLOADER_ROLES = [
+  'MANAGER',
+  'ADMIN_SHIFT',
+  'GUDANG',
+  'SYSTEM_IMPORT',
+] as const;
+export type PurchaseReceiptUploaderRole = (typeof PURCHASE_RECEIPT_UPLOADER_ROLES)[number];
+
+export const purchaseReceiptArchives = pgTable(
+  'purchase_receipt_archives',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    receiptDate: date('receipt_date', { mode: 'string' }),
+    category: varchar('category', { length: 32 })
+      .$type<PurchaseReceiptCategory>()
+      .notNull()
+      .default('BELANJA_STOK'),
+    merchantName: varchar('merchant_name', { length: 180 }).notNull(),
+    invoiceNumber: varchar('invoice_number', { length: 80 }),
+    paymentStatus: varchar('payment_status', { length: 24 }),
+    totalAmount: integer('total_amount').notNull().default(0),
+    stockAmount: integer('stock_amount').notNull().default(0),
+    operationalAmount: integer('operational_amount').notNull().default(0),
+    consignmentAmount: integer('consignment_amount').notNull().default(0),
+    operationalItems: text('operational_items'),
+    description: text('description'),
+    sourceFolder: varchar('source_folder', { length: 180 }),
+    sourceFilename: varchar('source_filename', { length: 180 }),
+    imageUrl: text('image_url'),
+    uploadedByRole: varchar('uploaded_by_role', { length: 20 })
+      .$type<PurchaseReceiptUploaderRole>()
+      .notNull()
+      .default('MANAGER'),
+    uploadedByName: varchar('uploaded_by_name', { length: 120 }).notNull().default('Manager'),
+    uploadedByAdminId: uuid('uploaded_by_admin_id').references(() => admins.id, { onDelete: 'set null' }),
+    uploadedByEmployeeId: uuid('uploaded_by_employee_id').references(() => employees.id, { onDelete: 'set null' }),
+    linkedExpenseId: uuid('linked_expense_id').references(() => operatingExpenses.id, { onDelete: 'set null' }),
+    isVerified: boolean('is_verified').notNull().default(false),
+    verifiedByAdminId: uuid('verified_by_admin_id').references(() => admins.id, { onDelete: 'set null' }),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedByAdminId: uuid('deleted_by_admin_id').references(() => admins.id, { onDelete: 'set null' }),
+    deleteReason: varchar('delete_reason', { length: 200 }),
+  },
+  (table) => [
+    index('idx_pra_date_active')
+      .on(table.receiptDate, table.createdAt)
+      .where(sql`${table.deletedAt} IS NULL`),
+    index('idx_pra_category_active')
+      .on(table.category)
+      .where(sql`${table.deletedAt} IS NULL`),
+    uniqueIndex('idx_pra_source_unique')
+      .on(table.sourceFolder, table.sourceFilename)
+      .where(
+        sql`${table.sourceFolder} IS NOT NULL AND ${table.sourceFilename} IS NOT NULL AND ${table.deletedAt} IS NULL`,
+      ),
+  ],
+);
+
+export type PurchaseReceiptArchive = typeof purchaseReceiptArchives.$inferSelect;
+export type NewPurchaseReceiptArchive = typeof purchaseReceiptArchives.$inferInsert;
+
+export const purchaseReceiptArchivesRelations = relations(purchaseReceiptArchives, ({ one }) => ({
+  uploadedByAdmin: one(admins, {
+    fields: [purchaseReceiptArchives.uploadedByAdminId],
+    references: [admins.id],
+  }),
+  uploadedByEmployee: one(employees, {
+    fields: [purchaseReceiptArchives.uploadedByEmployeeId],
+    references: [employees.id],
+  }),
+  linkedExpense: one(operatingExpenses, {
+    fields: [purchaseReceiptArchives.linkedExpenseId],
+    references: [operatingExpenses.id],
+  }),
+  verifiedByAdmin: one(admins, {
+    fields: [purchaseReceiptArchives.verifiedByAdminId],
+    references: [admins.id],
+  }),
+  deletedByAdmin: one(admins, {
+    fields: [purchaseReceiptArchives.deletedByAdminId],
+    references: [admins.id],
+  }),
+}));

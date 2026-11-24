@@ -36,6 +36,7 @@ import {
   stockBatches,
 } from '@/lib/db/schema';
 import { eq, and, isNull, desc, gt } from 'drizzle-orm';
+import { expireDueOrders } from '@/features/order/pesanan.service';
 
 // Tipe literal enum hari dari skema DB
 type DayOfWeek = 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU';
@@ -369,13 +370,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // PASS 3 gagal — tidak menghentikan respon cron
     }
 
+    // =========================================================================
+    // PASS 4: AUTO-EXPIRE ONLINE ORDERS (Jaring pengaman tengah malam gratis di Vercel Hobby)
+    // Melengkapi lazy expiration pada route buyer/admin tanpa butuh slot cron terpisah.
+    // =========================================================================
+    let expiredOrdersCount = 0;
+    try {
+      expiredOrdersCount = await expireDueOrders({ limit: 100 });
+    } catch {
+      // PASS 4 gagal — tidak menghentikan respon cron
+    }
+
     return NextResponse.json({
       success: true,
-      message: `Cron selesai. Ditutup: ${closedCount}, Dilewati: ${skippedCount}, Auto-Absen: ${absenCount}, Sapu Makanan Harian: ${sweptPerishableCount}.`,
+      message: `Cron selesai. Ditutup: ${closedCount}, Dilewati: ${skippedCount}, Auto-Absen: ${absenCount}, Sapu Makanan Harian: ${sweptPerishableCount}, Order Expired: ${expiredOrdersCount}.`,
       closedCount,
       skippedCount,
       absenCount,
       sweptPerishableCount,
+      expiredOrdersCount,
       errors: errors.length > 0 ? errors : undefined,
       timestamp: nowWib.toISOString(),
     });

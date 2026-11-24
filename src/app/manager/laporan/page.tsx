@@ -17,6 +17,7 @@ import {
   Users2,
   Lock,
   Boxes,
+  Receipt,
 } from 'lucide-react';
 import type { PeriodKey, MonthlyBreakdownRow } from '@/lib/finance/report';
 import { todayWibSlug } from '@/lib/utils/exportSelectedExcel';
@@ -28,6 +29,7 @@ import RekapKasir from './RekapKasir';
 import RekapShift from '@/features/portal/laporan/RekapShift';
 import TransaksiQrisPanel from '@/features/portal/laporan/TransaksiQrisPanel';
 import JejakTransaksiPanel from './JejakTransaksiPanel';
+import NotaBelanjaPanel from '@/features/portal/nota-belanja/NotaBelanjaPanel';
 import {
   formatRupiah,
   noticeStyle,
@@ -319,7 +321,7 @@ function VoidModal({ transaction, onClose, onSuccess }: VoidModalProps) {
 // ─────────────────────────────────────────────────────────────
 export default function LaporanPage() {
   const uid = useId();
-  const [mainTab, setMainTab] = useState<'keuangan' | 'shift_gaji' | 'transaksi_qris' | 'stok_log'>('keuangan');
+  const [mainTab, setMainTab] = useState<'keuangan' | 'shift_gaji' | 'transaksi_qris' | 'stok_log' | 'nota_belanja'>('keuangan');
   const [shiftSubTab, setShiftSubTab] = useState<'slip_shift' | 'harian_shift' | 'rekap_kasir'>('slip_shift');
   const [stokLogSubTab, setStokLogSubTab] = useState<'mutasi_stok' | 'log_sistem'>('mutasi_stok');
   const [period, setPeriod] = useState<PeriodKey>('daily');
@@ -368,6 +370,8 @@ export default function LaporanPage() {
           } else if (tabParam === 'jejak_transaksi' || tabParam === 'log_sistem') {
             setMainTab('stok_log');
             setStokLogSubTab('log_sistem');
+          } else if (tabParam === 'nota_belanja' || tabParam === 'nota') {
+            setMainTab('nota_belanja');
           }
         });
       }
@@ -745,13 +749,14 @@ export default function LaporanPage() {
           </div>
         )}
 
-        {/* ─── 4 TAB UTAMA (UNDERLINE MODERN) ─── */}
+        {/* ─── 5 TAB UTAMA (UNDERLINE MODERN) ─── */}
         <div role="tablist" aria-label="Pilih Jenis Laporan" className="rep-tabs">
           {([
             { id: 'keuangan', icon: <BarChart3 size={15} />, label: 'Keuangan' },
             { id: 'shift_gaji', icon: <TrendingUp size={15} />, label: 'Shift & Gaji' },
             { id: 'transaksi_qris', icon: <QrCode size={15} />, label: 'Transaksi & QRIS' },
             { id: 'stok_log', icon: <Boxes size={15} />, label: 'Stok & Log' },
+            { id: 'nota_belanja', icon: <Receipt size={15} />, label: 'Nota Belanja' },
           ] as const).map((tab) => {
             const isActive = mainTab === tab.id;
             return (
@@ -840,6 +845,8 @@ export default function LaporanPage() {
             </div>
             {stokLogSubTab === 'mutasi_stok' ? <LaporanMutasiStokSection /> : <JejakTransaksiPanel />}
           </div>
+        ) : mainTab === 'nota_belanja' ? (
+          <NotaBelanjaPanel portalRole="MANAGER" onOpexSynced={reloadData} />
         ) : (
           <>
             {/* Filter periode modern netral */}
