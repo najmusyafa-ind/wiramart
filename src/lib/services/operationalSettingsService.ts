@@ -11,7 +11,7 @@ import { qrisSettings } from '@/lib/db/schema';
 export const OPERATIONAL_SETTINGS_ID = '00000000-0000-0000-0000-000000000002';
 
 export const DEFAULT_OPERATIONAL_SETTINGS = {
-  attendanceTolerance: 15,
+  attendanceTolerance: 30,
   lowStockThreshold: 5,
   globalMarginPercentage: 20,
 } as const;

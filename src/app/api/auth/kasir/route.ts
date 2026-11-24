@@ -10,11 +10,12 @@ import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { employees, shifts, shiftSchedules, attendances, qrisSettings } from '@/lib/db/schema';
+import { employees, shifts, shiftSchedules, attendances } from '@/lib/db/schema';
 import { NextResponse } from 'next/server';
 import { signAccessToken, signRefreshToken } from '@/lib/utils/auth';
 import { apiError } from '@/lib/utils/helpers';
 import { kasirAuthLimiter } from '@/lib/utils/rate-limit';
+import { resolveAttendanceLateness } from '@/lib/services/attendanceLatenessService';
 
 export const runtime = 'nodejs';
 
@@ -348,18 +349,12 @@ export async function POST(request: Request): Promise<Response> {
         }
       }
 
-      const settingsRow = await db.query.qrisSettings.findFirst({
-        where: eq(qrisSettings.id, '00000000-0000-0000-0000-000000000002'),
-        columns: { attendanceTolerance: true },
+      const { status: attStatus, lateMinutes } = await resolveAttendanceLateness({
+        nowWib,
+        attendanceDate: tanggalHari,
+        slotStart: jadwalHariIni.slotStart,
+        isSubstitute: false,
       });
-      const TOLERANSI_MENIT = settingsRow?.attendanceTolerance ?? 15;
-
-      const [jamJadwal, menitJadwal] = jadwalHariIni.slotStart.split(':').map(Number);
-      const menitJadwalTotal = (jamJadwal ?? 0) * 60 + (menitJadwal ?? 0);
-      const selisihMenit     = loginMenit - menitJadwalTotal; // positif = telat
-
-      const isTelat     = selisihMenit > TOLERANSI_MENIT;
-      const lateMinutes = isTelat ? selisihMenit : 0;
 
       await db
         .insert(attendances)
@@ -367,7 +362,7 @@ export async function POST(request: Request): Promise<Response> {
           employeeId:         employee.id,
           scheduleId:         jadwalHariIni.id,
           attendanceDate:     tanggalHari,
-          status:             isTelat ? 'TELAT' : 'HADIR',
+          status:             attStatus,
           shiftId:            shiftToUseId,
           clockInActual:      nowWib,
           lateMinutes,

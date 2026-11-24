@@ -663,9 +663,13 @@ export default function KasirLoginPage() {
                   <Calendar size={14} style={{ flexShrink: 0 }} />
                   <span>{presensiData.hari}, {presensiData.tanggal}</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Clock size={13} style={{ flexShrink: 0 }} />
-                  <span>Pukul <strong>{presensiData.jamSekarang} WIB</strong></span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <Clock size={13} style={{ flexShrink: 0 }} />
+                    <span>Pukul <strong>{presensiData.jamSekarang} WIB</strong></span>
+                  </span>
+                  <span style={{ opacity: 0.75 }}>·</span>
+                  <span>Toleransi <strong>+{presensiData.toleransiMenit} mnt</strong></span>
                 </div>
               </div>
             )}

@@ -583,47 +583,48 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
     for (const [gKey, g] of groupMap.entries()) {
       g.sessions.sort((a, b) => (a.tanggal < b.tanggal ? -1 : a.tanggal > b.tanggal ? 1 : 0));
 
-      // Anggota Shift: utamakan dari Master Jadwal Shift resmi (4 orang per slot),
-      // jika tidak ada di jadwal (misal shift Sabtu), ambil gabungan personel yang hadir di sesi tersebut.
+      // Anggota Shift: utamakan personel yang BENAR-BENAR hadir pada sesi periode ini
+      // agar tabel ringkasan dan isi Slip Gaji 100% sinkron (tidak keliru menampilkan
+      // nama jadwal baru pada shift historis / shift badal seperti Kamis Pagi 19 Nov).
+      // Fallback ke Master Jadwal hanya jika sesi tidak memiliki catatan personel sama sekali.
       const scheduled = scheduleTeams[gKey] ?? [];
       const memberMap = new Map<string, { employeeId: string; fullName: string; nim: string; jabatan: string }>();
 
-      for (const m of scheduled) {
-        memberMap.set(m.employeeId, {
-          employeeId: m.employeeId,
-          fullName: m.fullName,
-          nim: m.nim,
-          jabatan: m.jabatan,
-        });
+      for (const sess of g.sessions) {
+        for (const p of sess.personnel) {
+          const pName = (p.fullName || '').toLowerCase();
+          const pNim = (p.nim || '').trim();
+          if (
+            pName.includes('testing') ||
+            pName.includes('dede') ||
+            pNim === '02405013' ||
+            pNim === '02405021' ||
+            pNim === '02405015' ||
+            pNim === '02405016' ||
+            pNim === '02405050' ||
+            pNim === '00000000'
+          ) {
+            continue;
+          }
+          if (!memberMap.has(p.employeeId)) {
+            memberMap.set(p.employeeId, {
+              employeeId: p.employeeId,
+              fullName: p.fullName,
+              nim: p.nim,
+              jabatan: p.jabatan,
+            });
+          }
+        }
       }
 
       if (memberMap.size === 0) {
-        for (const sess of g.sessions) {
-          for (const p of sess.personnel) {
-            const pName = (p.fullName || '').toLowerCase();
-            const pNim = (p.nim || '').trim();
-            // Blacklist akun testing & dede waryanto
-            if (
-              pName.includes('testing') ||
-              pName.includes('dede') ||
-              pNim === '02405013' ||
-              pNim === '02405021' ||
-              pNim === '02405015' ||
-              pNim === '02405016' ||
-              pNim === '02405050' ||
-              pNim === '00000000'
-            ) {
-              continue;
-            }
-            if (!memberMap.has(p.employeeId)) {
-              memberMap.set(p.employeeId, {
-                employeeId: p.employeeId,
-                fullName: p.fullName,
-                nim: p.nim,
-                jabatan: p.jabatan,
-              });
-            }
-          }
+        for (const m of scheduled) {
+          memberMap.set(m.employeeId, {
+            employeeId: m.employeeId,
+            fullName: m.fullName,
+            nim: m.nim,
+            jabatan: m.jabatan,
+          });
         }
       }
 
@@ -898,7 +899,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
   function computeGroupTeamAttendance(g: ShiftTeamGroup) {
     const map = new Map<
       string,
-      { fullName: string; nim: string; jabatan: string; hadir: number; telatMenit: number }
+      { fullName: string; nim: string; jabatan: string; hadir: number; telatCount: number; telatMenit: number }
     >();
     for (const sess of g.sessions) {
       for (const p of sess.personnel) {
@@ -907,41 +908,49 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
           nim: p.nim,
           jabatan: p.jabatan,
           hadir: 0,
+          telatCount: 0,
           telatMenit: 0,
         };
         cur.hadir += 1;
-        cur.telatMenit += p.lateMinutes || 0;
+        const mins = p.lateMinutes || 0;
+        if (mins > 0) {
+          cur.telatCount += 1;
+          cur.telatMenit += mins;
+        }
         map.set(p.employeeId, cur);
       }
     }
     return Array.from(map.values()).sort((a, b) => b.hadir - a.hadir || a.fullName.localeCompare(b.fullName));
   }
 
+  function formatDisiplinText(telatCount: number, telatMenit: number): string {
+    if (telatCount <= 0 || telatMenit <= 0) return 'Tepat Waktu';
+    return `${telatCount}x Telat (${telatMenit} mnt)`;
+  }
+
   function buildGroupSlipWaText(g: ShiftTeamGroup): string {
     const periodLabel = data?.range.label ?? '-';
     const members = computeGroupTeamAttendance(g);
     const lines = [
-      `SLIP GAJI PER SHIFT - WIRAMART UNPERBA`,
-      `Periode: ${periodLabel}`,
-      `Skema: Pembagian Utuh Per Shift (50% Kehadiran Tim · 50% Laba Shift)`,
-      `Kelompok Shift: ${g.hari} ${g.sesi} (${g.waktuLabel} WIB)`,
-      `Tanggal Shift: ${g.shiftTglSummary || '-'} (${g.totalShiftCount}x pertemuan)`,
-      `Transaksi: ${g.totalTx} tx (${g.totalUnitsSold} pcs) | Omzet: ${formatRupiah(g.totalOmzet)} | Laba Kotor: ${formatRupiah(g.totalLabaKotor)}`,
+      `SLIP GAJI SHIFT — WIRAMART UNPERBA`,
+      `Shift ${g.hari} ${g.sesi} (${g.waktuLabel} WIB)`,
+      `Periode: ${periodLabel} (${g.totalShiftCount}x pertemuan)`,
+      `Omzet: ${formatRupiah(g.totalOmzet)} · Laba: ${formatRupiah(g.totalLabaKotor)}`,
       ...(g.totalShortageDeduction > 0
-        ? [`Potongan Tekor Terkunci: -${formatRupiah(g.totalShortageDeduction)}`]
+        ? [`Potong Tekor: -${formatRupiah(g.totalShortageDeduction)}`]
         : []),
-      `TOTAL UPAH SHIFT (50%): ${formatRupiah(g.upahBersih)}`,
+      `TOTAL GAJI SHIFT: ${formatRupiah(g.upahBersih)} (utuh untuk kelompok)`,
       ``,
-      `Daftar Kehadiran Tim Shift (tanpa pemecahan nominal per nama):`,
+      `Absensi Tim:`,
       ...members.map(
         (m, idx) =>
-          `${idx + 1}. ${m.fullName} (${m.hadir}x hadir${m.telatMenit > 0 ? `, telat ${m.telatMenit} mnt` : ', tepat waktu'})`,
+          `${idx + 1}. ${m.fullName} — ${m.hadir}x hadir (${formatDisiplinText(m.telatCount, m.telatMenit)})`,
       ),
       ``,
-      `Rincian Upah Per Pertemuan:`,
+      `Rincian Per Tanggal:`,
       ...g.sessions.map(
-        (s, idx) =>
-          `${idx + 1}. ${s.tanggal} (${s.txCount} tx · ${s.unitsSold} pcs | Omzet ${formatRupiah(s.omzet)}) -> ${formatRupiah(s.upahBersih)}${s.shortageDeduction > 0 ? ` [potong -${formatRupiah(s.shortageDeduction)}]` : ''}`,
+        (s) =>
+          `• ${formatShortDate(s.tanggal)}: Omzet ${formatRupiah(s.omzet)} -> Upah ${formatRupiah(s.upahBersih)}${s.shortageDeduction > 0 ? ` (tekor -${formatRupiah(s.shortageDeduction)})` : ''}`,
       ),
     ];
     return lines.join('\n');
@@ -987,7 +996,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
     const rowsHtml = members
       .map(
         (m, i) =>
-          `<tr><td>${i + 1}</td><td>${esc(m.fullName)}</td><td>${esc(m.nim)}</td><td style="text-align:center">${m.hadir}x</td><td style="text-align:center">${m.telatMenit > 0 ? `Telat ${m.telatMenit} mnt` : 'Tepat Waktu'}</td></tr>`,
+          `<tr><td>${i + 1}</td><td>${esc(m.fullName)}</td><td>${esc(m.nim)}</td><td style="text-align:center">${m.hadir}x</td><td style="text-align:center">${esc(formatDisiplinText(m.telatCount, m.telatMenit))}</td></tr>`,
       )
       .join('');
     const sessHtml = g.sessions
@@ -1163,7 +1172,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
       const notesList = [
         { no: '1.', rule: 'Rasio Utama 50% : 50% (Closed-Loop)', detail: 'Laba Operasional Bersih dibagi 50% untuk Kas Toko dan 50% untuk Pool Upah Shift Mahasiswa.' },
         { no: '2.', rule: 'Komposisi Antar-Shift 50% / 50%', detail: '50% dibagi berdasarkan kehadiran dan ketepatan waktu tim shift; 50% dibagi proporsional berdasarkan laba kotor shift.' },
-        { no: '3.', rule: 'Disiplin Waktu & Toleransi 15 Menit', detail: 'Shift Pagi 07:30, Siang 11:30. Toleransi 15 menit; keterlambatan di atas itu dipotong 3% per 5 menit (maks 50%).' },
+        { no: '3.', rule: 'Disiplin Waktu & Toleransi 30 Menit', detail: 'Shift Pagi 07:30 (batas 08:00), Siang 11:30 (batas 12:00). Keterlambatan dihitung setelah batas toleransi: -3% per blok 5 menit (maks 50%).' },
         { no: '4.', rule: 'Pembagian Utuh Per Shift & Audit Selisih Kas', detail: 'Gaji diserahkan utuh kepada masing-masing kelompok shift tanpa pemecahan nominal per nama. Selisih kurang > Rp 2.000 menjadi peringatan audit untuk dicek Admin Shift/Pengelola (tidak otomatis memotong gaji sebelum dikonfirmasi).' },
         { no: '5.', rule: 'Pembulatan Bulat (Hamilton)', detail: 'Distribusi rupiah antar-shift dibulatkan dengan metode Largest Remainder (Hamilton) sehingga sisa pembulatan selalu Rp 0.' },
       ];
@@ -3985,7 +3994,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
         </div>
       )}
 
-      {/* Modal Pratinjau Slip Gaji Per Shift (Siap Screenshot / Cetak PDF / Salin WA) */}
+      {/* Modal Pratinjau Slip Gaji Per Shift (Clean & To The Point) */}
       {slipPreviewGroup && (() => {
         const g = slipPreviewGroup;
         const members = computeGroupTeamAttendance(g);
@@ -4002,8 +4011,8 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '16px',
-              backgroundColor: 'rgba(15, 23, 42, 0.6)',
+              padding: '14px',
+              backgroundColor: 'rgba(15, 23, 42, 0.55)',
               backdropFilter: 'blur(4px)',
             }}
             onClick={(e) => e.target === e.currentTarget && setSlipPreviewGroup(null)}
@@ -4012,49 +4021,47 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
               style={{
                 backgroundColor: '#ffffff',
                 borderRadius: '14px',
-                border: '1px solid #cbd5e1',
+                border: '1px solid #e2e8f0',
                 width: '100%',
-                maxWidth: '660px',
-                maxHeight: '90vh',
+                maxWidth: '560px',
+                maxHeight: '92dvh',
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
-                boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+                boxShadow: '0 20px 40px -12px rgba(15, 23, 42, 0.25)',
               }}
             >
-              {/* Header Slip */}
+              {/* Header Ringkas */}
               <div
                 style={{
-                  padding: '16px 20px',
-                  backgroundColor: '#f8fafc',
-                  borderBottom: '2px solid #e2e8f0',
+                  padding: '14px 18px',
+                  borderBottom: '1px solid #e2e8f0',
                   display: 'flex',
                   justifyContent: 'space-between',
-                  alignItems: 'flex-start',
-                  gap: '12px',
+                  alignItems: 'center',
+                  gap: '10px',
                 }}
               >
-                <div>
-                  <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#166534', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                    SLIP GAJI PER SHIFT — WIRAMART UNPERBA
-                  </div>
-                  <h3 style={{ margin: '3px 0 2px', fontSize: '1.1rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span>Shift {g.hari} {g.sesi}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800, color: '#0f172a' }}>
+                      Slip Shift {g.hari} {g.sesi}
+                    </h3>
                     <span
                       style={{
-                        fontSize: '0.72rem',
-                        fontWeight: 800,
-                        padding: '2px 9px',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        padding: '2px 8px',
                         borderRadius: '99px',
-                        backgroundColor: isPagi ? '#fef3c7' : '#e0e7ff',
-                        color: isPagi ? '#b45309' : '#4338ca',
+                        backgroundColor: isPagi ? '#fef3c7' : '#dcfce7',
+                        color: isPagi ? '#b45309' : '#15803d',
                       }}
                     >
                       {g.waktuLabel} WIB
                     </span>
-                  </h3>
-                  <div style={{ fontSize: '0.75rem', color: '#475569' }}>
-                    Periode: <strong>{data?.range.label ?? '-'}</strong> · Tanggal: {g.shiftTglSummary} ({g.totalShiftCount}x pertemuan)
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: 2 }}>
+                    {data?.range.label ?? '-'} · {g.totalShiftCount}x pertemuan
                   </div>
                 </div>
                 <button
@@ -4062,11 +4069,12 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
                   onClick={() => setSlipPreviewGroup(null)}
                   aria-label="Tutup slip gaji"
                   style={{
-                    width: 32,
-                    height: 32,
+                    width: 34,
+                    height: 34,
                     borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
+                    border: '1px solid #e2e8f0',
                     backgroundColor: '#ffffff',
+                    color: '#475569',
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -4078,87 +4086,72 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
                 </button>
               </div>
 
-              {/* Isi Slip (Scrollable) */}
-              <div style={{ padding: '16px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {/* Banner Total Upah Shift */}
+              {/* Isi Slip (Clean & Padat — Muat 1 Layar) */}
+              <div style={{ padding: '14px 18px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {/* Ringkasan Utama: Gaji + Omzet + Laba dalam 1 kartu */}
                 <div
                   style={{
-                    padding: '14px 16px',
+                    padding: '12px 14px',
                     borderRadius: '10px',
                     backgroundColor: '#f0fdf4',
-                    border: '1.5px solid #86efac',
+                    border: '1px solid #bbf7d0',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     flexWrap: 'wrap',
-                    gap: '10px',
+                    gap: '8px',
                   }}
                 >
                   <div>
-                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#166534', textTransform: 'uppercase' }}>
-                      Total Gaji Shift
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#166534' }}>
+                      Total Gaji Kelompok (Utuh Per Shift)
                     </div>
-                    <div style={{ fontSize: '0.72rem', color: '#15803d', marginTop: 2 }}>
-                      Diterima utuh per shift
+                    <div style={{ fontSize: '0.74rem', color: '#475569', marginTop: 3 }}>
+                      Omzet <strong style={{ color: '#0f172a' }}>{formatRupiah(g.totalOmzet)}</strong> · Laba{' '}
+                      <strong style={{ color: '#0f172a' }}>{formatRupiah(g.totalLabaKotor)}</strong>
+                      {g.totalShortageDeduction > 0 && (
+                        <>
+                          {' '}· Tekor <strong style={{ color: '#dc2626' }}>-{formatRupiah(g.totalShortageDeduction)}</strong>
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div style={{ fontSize: '1.45rem', fontWeight: 900, color: '#15803d' }}>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 900, color: '#15803d', whiteSpace: 'nowrap' }}>
                     {formatRupiah(g.upahBersih)}
                   </div>
                 </div>
 
-                {/* Ringkasan Angka Operasional */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px' }}>
-                  {[
-                    { label: 'Total Omzet Shift', val: formatRupiah(g.totalOmzet), color: '#0369a1' },
-                    { label: 'Laba Kotor Shift', val: formatRupiah(g.totalLabaKotor), color: '#0f172a' },
-                    { label: 'Transaksi & Unit', val: `${g.totalTx} tx · ${g.totalUnitsSold} pcs`, color: '#4338ca' },
-                    {
-                      label: 'Potongan Tekor',
-                      val: g.totalShortageDeduction > 0 ? `-${formatRupiah(g.totalShortageDeduction)}` : 'Rp 0',
-                      color: g.totalShortageDeduction > 0 ? '#dc2626' : '#64748b',
-                    },
-                  ].map((m) => (
-                    <div key={m.label} style={{ padding: '9px 11px', borderRadius: '8px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                      <div style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 600 }}>{m.label}</div>
-                      <div style={{ fontSize: '0.88rem', fontWeight: 800, color: m.color, marginTop: 2 }}>{m.val}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Daftar Absensi Tim Shift */}
+                {/* Absensi Tim (3 Kolom Ringkas) */}
                 <div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: '6px' }}>
-                    Daftar Absensi Tim Shift ({members.length} Personel Tercatat)
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#334155', marginBottom: '5px' }}>
+                    Absensi Tim ({members.length} Orang)
                   </div>
                   <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
                       <thead>
-                        <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
-                          <th style={{ padding: '7px 10px', textAlign: 'center', width: 32 }}>No</th>
-                          <th style={{ padding: '7px 10px', textAlign: 'left' }}>Nama</th>
-                          <th style={{ padding: '7px 10px', textAlign: 'left' }}>NIM</th>
-                          <th style={{ padding: '7px 10px', textAlign: 'center' }}>Hadir</th>
-                          <th style={{ padding: '7px 10px', textAlign: 'center' }}>Disiplin</th>
+                        <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>
+                          <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 700 }}>Nama</th>
+                          <th style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 700, width: 64 }}>Hadir</th>
+                          <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700 }}>Disiplin</th>
                         </tr>
                       </thead>
                       <tbody>
                         {members.length === 0 ? (
                           <tr>
-                            <td colSpan={5} style={{ padding: '10px', textAlign: 'center', color: '#64748b' }}>
+                            <td colSpan={3} style={{ padding: '10px', textAlign: 'center', color: '#64748b' }}>
                               Belum ada catatan absensi pada periode ini.
                             </td>
                           </tr>
                         ) : (
-                          members.map((m, idx) => (
+                          members.map((m) => (
                             <tr key={m.nim || m.fullName} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                              <td style={{ padding: '7px 10px', textAlign: 'center', color: '#64748b' }}>{idx + 1}</td>
-                              <td style={{ padding: '7px 10px', fontWeight: 700, color: '#0f172a' }}>{m.fullName}</td>
-                              <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: '#475569' }}>{m.nim}</td>
+                              <td style={{ padding: '7px 10px', fontWeight: 600, color: '#0f172a' }}>{m.fullName}</td>
                               <td style={{ padding: '7px 10px', textAlign: 'center', fontWeight: 700, color: '#166534' }}>{m.hadir}x</td>
-                              <td style={{ padding: '7px 10px', textAlign: 'center' }}>
-                                {m.telatMenit > 0 ? (
-                                  <span style={{ color: '#b45309', fontWeight: 700 }}>Telat {m.telatMenit} mnt</span>
+                              <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                {m.telatCount > 0 ? (
+                                  <span style={{ color: '#b45309', fontWeight: 700 }}>
+                                    {formatDisiplinText(m.telatCount, m.telatMenit)}
+                                  </span>
                                 ) : (
                                   <span style={{ color: '#15803d', fontWeight: 600 }}>Tepat Waktu</span>
                                 )}
@@ -4171,29 +4164,27 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
                   </div>
                 </div>
 
-                {/* Rincian Pertemuan Per Tanggal */}
+                {/* Rincian Per Tanggal (4 Kolom Ringkas) */}
                 <div>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: '#0f172a', marginBottom: '6px' }}>
-                    Rincian Pertemuan &amp; Upah Per Tanggal
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#334155', marginBottom: '5px' }}>
+                    Rincian Per Tanggal ({g.totalShiftCount}x)
                   </div>
                   <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
                       <thead>
-                        <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
-                          <th style={{ padding: '7px 10px', textAlign: 'left' }}>Tanggal</th>
-                          <th style={{ padding: '7px 10px', textAlign: 'center' }}>Trx / Unit</th>
-                          <th style={{ padding: '7px 10px', textAlign: 'right' }}>Omzet</th>
-                          <th style={{ padding: '7px 10px', textAlign: 'right' }}>Laba Kotor</th>
-                          <th style={{ padding: '7px 10px', textAlign: 'right' }}>Upah Shift</th>
+                        <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>
+                          <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 700 }}>Tanggal</th>
+                          <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700 }}>Omzet</th>
+                          <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700 }}>Laba</th>
+                          <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700 }}>Upah</th>
                         </tr>
                       </thead>
                       <tbody>
                         {g.sessions.map((s) => (
                           <tr key={s.sessionKey} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                            <td style={{ padding: '7px 10px', fontWeight: 600, whiteSpace: 'nowrap' }}>{formatShortDate(s.tanggal)}</td>
-                            <td style={{ padding: '7px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>{s.txCount} tx · {s.unitsSold} pcs</td>
-                            <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>{formatRupiah(s.omzet)}</td>
-                            <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>{formatRupiah(s.labaKotor)}</td>
+                            <td style={{ padding: '7px 10px', fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap' }}>{formatShortDate(s.tanggal)}</td>
+                            <td style={{ padding: '7px 10px', textAlign: 'right', color: '#334155', whiteSpace: 'nowrap' }}>{formatRupiah(s.omzet)}</td>
+                            <td style={{ padding: '7px 10px', textAlign: 'right', color: '#334155', whiteSpace: 'nowrap' }}>{formatRupiah(s.labaKotor)}</td>
                             <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 800, color: '#15803d', whiteSpace: 'nowrap' }}>{formatRupiah(s.upahBersih)}</td>
                           </tr>
                         ))}
@@ -4201,24 +4192,12 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
                     </table>
                   </div>
                 </div>
-
-                {/* Kolom Pengesahan Preview */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', paddingTop: '8px', borderTop: '1px dashed #cbd5e1', fontSize: '0.73rem', color: '#475569', textAlign: 'center' }}>
-                  <div>
-                    <div>Diserahkan oleh,</div>
-                    <div style={{ fontWeight: 700, color: '#0f172a' }}>Pengelola Wiramart UNPERBA</div>
-                  </div>
-                  <div>
-                    <div>Diterima utuh untuk kelompok,</div>
-                    <div style={{ fontWeight: 700, color: '#0f172a' }}>Perwakilan Shift {g.hari} {g.sesi}</div>
-                  </div>
-                </div>
               </div>
 
               {/* Footer Tombol Aksi */}
               <div
                 style={{
-                  padding: '12px 20px',
+                  padding: '10px 18px',
                   backgroundColor: '#f8fafc',
                   borderTop: '1px solid #e2e8f0',
                   display: 'flex',
@@ -4245,7 +4224,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
                   }}
                 >
                   {copiedSlipKey === `modal-${g.groupKey}` ? <Check size={14} /> : <Copy size={14} />}
-                  <span>{copiedSlipKey === `modal-${g.groupKey}` ? 'Teks WA Tersalin' : 'Salin Teks WA'}</span>
+                  <span>{copiedSlipKey === `modal-${g.groupKey}` ? 'Tersalin' : 'Salin WA'}</span>
                 </button>
                 <button
                   type="button"
@@ -4262,7 +4241,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
                   }}
                 >
                   <Printer size={14} />
-                  <span>Cetak / Simpan PDF</span>
+                  <span>Cetak / PDF</span>
                 </button>
               </div>
             </div>

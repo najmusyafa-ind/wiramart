@@ -379,7 +379,8 @@ export const KETUA_UMKM_CANONICAL_ID  = 'bcc2db7b-aee5-4e21-bc0f-312fff73f49e';
 export const KETUA_UMKM_DUPLICATE_ID  = '0ce4873b-0792-446e-b83d-f8b8d13dfff5';
 export const PERSEN_TUNJANGAN_KETUA   = 0; // Sama rata sesuai keputusan operasional
 export const ERA2_PRESENSI_START_DATE = '2026-10-05'; // Awal absensi kiosk digital
-export const LATE_PENALTY_PER_5MIN    = 3; // Potongan 3% per 5 menit keterlambatan
+export const ERA3_OPSI_A_START_DATE   = '2026-11-01'; // Awal Opsi A (berlaku mulai November 2026; Okt tetap historis Era 2)
+export const LATE_PENALTY_PER_5MIN    = 3; // Potongan 3% per blok 5 menit keterlambatan
 export const MAX_LATE_PENALTY_PERCENT = 50; // Maksimal potongan 50% agar hak hadir tidak Rp 0
 
 export function extractRoleFromNotes(
@@ -412,11 +413,12 @@ export function getSessionDurationWeight(sesi: 'Pagi' | 'Siang'): number {
 }
 
 /**
- * Faktor kedisiplinan presensi (Opsi 2A):
+ * Faktor kedisiplinan presensi:
  * - Era 1 (< 2026-10-05, absen kertas): dianggap tepat waktu (faktor 1.0, potongan 0%).
- * - Era 2 (>= 2026-10-05, absen kiosk): potong 3% setiap kelipatan 5 menit telat,
- *   maksimal potongan 50% (faktor minimal 0.50). Selisih potongan otomatis terdistribusi
- *   ke rekan shift yang hadir tepat waktu melalui alokasi proporsional.
+ * - Era 2 (2026-10-05 .. 2026-10-31, historis Oktober): `lateMinutes` dari jam mulai, floor(m/5) × 3%.
+ * - Era 3 (>= 2026-11-01, Opsi A): `lateMinutes` dihitung SETELAH batas toleransi (mis. 08:00),
+ *   potong 3% per blok 5 menit (ceil(m/5) × 3%: 1–5 mnt = 3%, 6–10 mnt = 6%, ..., 30 mnt = 18%,
+ *   60 mnt = 36%, maks 50%). Selisih potongan otomatis terdistribusi ke rekan shift tepat waktu.
  */
 export function getLateDisciplineFactor(
   attendanceDate: string,
@@ -429,7 +431,8 @@ export function getLateDisciplineFactor(
   if (mins <= 0) {
     return { effectiveLateMinutes: 0, penaltyPercent: 0, factor: 1.0 };
   }
-  const blocks5Min = Math.floor(mins / 5);
+  const blocks5Min =
+    attendanceDate >= ERA3_OPSI_A_START_DATE ? Math.ceil(mins / 5) : Math.floor(mins / 5);
   const penaltyPercent = Math.min(MAX_LATE_PENALTY_PERCENT, blocks5Min * LATE_PENALTY_PER_5MIN);
   const factor = (100 - penaltyPercent) / 100;
   return { effectiveLateMinutes: mins, penaltyPercent, factor };

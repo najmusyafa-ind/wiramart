@@ -33,7 +33,7 @@ export async function GET(): Promise<Response> {
     });
 
     return apiOk({
-      attendanceTolerance:    row?.attendanceTolerance ?? 15,
+      attendanceTolerance:    row?.attendanceTolerance ?? 30,
       lowStockThreshold:      row?.lowStockThreshold   ?? 5,
       globalMarginPercentage: row?.globalMarginPercentage ? Number(row.globalMarginPercentage) : 20.00,
     });
@@ -68,7 +68,7 @@ export async function PATCH(req: Request): Promise<Response> {
       .insert(qrisSettings)
       .values({
         id:                     SETTINGS_SINGLETON_ID,
-        attendanceTolerance:    attendanceTolerance ?? 15,
+        attendanceTolerance:    attendanceTolerance ?? 30,
         lowStockThreshold:      lowStockThreshold   ?? 5,
         globalMarginPercentage: globalMarginPercentage !== undefined ? String(globalMarginPercentage) : '20.00',
         updatedAt:              new Date(),

@@ -467,7 +467,7 @@ export const qrisSettings = pgTable('qris_settings', {
   storeAddress: text('store_address'),                      // Jl. Letjend. Suprapto No. 73...
   storePhone:   varchar('store_phone',   { length: 30 }),   // 0281-XXXXXX
   // ── Pengaturan Operasional ───────────────────────────────────
-  attendanceTolerance: integer('attendance_tolerance').notNull().default(15), // menit toleransi clock-in
+  attendanceTolerance: integer('attendance_tolerance').notNull().default(30), // menit toleransi clock-in (Opsi A: default 30 mnt)
   lowStockThreshold:   integer('low_stock_threshold').notNull().default(5),   // batas stok rendah
   globalMarginPercentage: decimal('global_margin_percentage', { precision: 5, scale: 2 }).notNull().default('20.00'), // default 20%
   // ────────────────────────────────────────────────────────────

@@ -517,8 +517,10 @@ export async function GET(req: NextRequest): Promise<Response> {
 
       // Penentuan Sesi Shift (mendukung jadwal Pagi & Siang penuh Senin-Jumat termasuk Kamis Pagi):
       // 1. Jam buka >= 11:00 WIB -> Siang
-      // 2. Jam buka 10:30-10:59 WIB -> ikuti jadwal resmi kasir pada hari tsb jika ada
-      // 3. Selain itu -> Pagi (07:30-11:30)
+      // 2. Jam buka 10:30-10:59 WIB, sudah ada shift lebih pagi di hari yang sama, dan tutup >= 14:00 WIB -> Siang
+      //    (menangani oper sesi siang yang dibuka < 11:00 oleh akun kasir pagi, mis. 2 Nov 10:47-15:04)
+      // 3. Jam buka 09:45-10:59 WIB -> ikuti jadwal resmi kasir pada hari tsb jika ada
+      // 4. Selain itu -> Pagi (07:30-11:30)
       const inParts = new Intl.DateTimeFormat('en-US', {
         timeZone: 'Asia/Jakarta',
         hour: 'numeric',
@@ -528,9 +530,22 @@ export async function GET(req: NextRequest): Promise<Response> {
       const inHour = parseInt(inParts.find((p) => p.type === 'hour')?.value ?? '8', 10);
       const inMinute = parseInt(inParts.find((p) => p.type === 'minute')?.value ?? '0', 10);
       const clockMinutes = inHour * 60 + inMinute;
+      const hasEarlierShiftSameDay = list.length > 1;
+      const closedAfternoonLate = s.clockOut
+        ? parseInt(
+            new Intl.DateTimeFormat('en-US', {
+              timeZone: 'Asia/Jakarta',
+              hour: 'numeric',
+              hour12: false,
+            }).format(s.clockOut),
+            10,
+          ) >= 14
+        : false;
 
       let sesi: 'Pagi' | 'Siang';
       if (clockMinutes >= 11 * 60) {
+        sesi = 'Siang';
+      } else if (clockMinutes >= 10 * 60 + 30 && hasEarlierShiftSameDay && closedAfternoonLate) {
         sesi = 'Siang';
       } else if (clockMinutes >= 9 * 60 + 45) {
         const empScheds = empScheduleMap.get(s.employeeId) ?? [];
@@ -822,8 +837,12 @@ export async function GET(req: NextRequest): Promise<Response> {
       const ownerAttendedOpposite = attendedSessionsByEmpDate.get(`${s.employeeId}__${dt}`)?.has(oppositeSesi) ?? false;
 
       // 1. Jika ada pelaku transaksi aktual di POS shift ini yang belum masuk daftar hadir -> masukkan
+      //    (kecuali jika sudah ada tim hadir sah di sesi ini DAN kasir tsb sebenarnya hadir di sesi lawan,
+      //     misal akun kasir pagi lupa logout saat oper ke tim siang seperti 2 Nov)
       for (const tc of actualTxCashiers) {
         if (isExcludedAccount(tc.fullName, tc.nim) || seenEmp.has(tc.employeeId)) continue;
+        const tcAttendedOpposite = attendedSessionsByEmpDate.get(`${tc.employeeId}__${dt}`)?.has(oppositeSesi) ?? false;
+        if (tcAttendedOpposite && seenEmp.size > 0) continue;
         seenEmp.add(tc.employeeId);
         deduped.push({
           id: `shift-tx-kasir-${s.id}-${tc.employeeId}`,

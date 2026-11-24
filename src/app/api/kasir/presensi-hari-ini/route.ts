@@ -41,7 +41,7 @@ export async function GET(): Promise<Response> {
       where: eq(qrisSettings.id, '00000000-0000-0000-0000-000000000002'),
       columns: { attendanceTolerance: true },
     });
-    const toleransiMenit = settingsRow?.attendanceTolerance ?? 15;
+    const toleransiMenit = settingsRow?.attendanceTolerance ?? 30;
 
     // Ambil semua jadwal slot aktif hari ini beserta info karyawan
     const slots = await db

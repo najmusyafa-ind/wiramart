@@ -5,11 +5,11 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, ne, inArray, sql, gte, lt, isNotNull } from 'drizzle-orm';
+import { eq, and, ne, inArray, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { shiftSchedules, employees, attendances, qrisSettings, shifts } from '@/lib/db/schema';
+import { shiftSchedules, employees, attendances } from '@/lib/db/schema';
 import { apiOk, apiError } from '@/lib/utils/helpers';
-import { getWibMinutes } from '@/lib/services/activeShiftService';
+import { resolveAttendanceLateness } from '@/lib/services/attendanceLatenessService';
 
 export const runtime = 'nodejs';
 
@@ -149,49 +149,13 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    // Hitung keterlambatan berdasarkan toleransi + perlindungan serah terima shift pagi
-    const settingsRow = await db.query.qrisSettings.findFirst({
-      where: eq(qrisSettings.id, '00000000-0000-0000-0000-000000000002'),
-      columns: { attendanceTolerance: true },
+    // Hitung keterlambatan Opsi A (setelah batas toleransi + pelindung serah terima Shift Siang)
+    const { status, lateMinutes } = await resolveAttendanceLateness({
+      nowWib,
+      attendanceDate: tanggalHari,
+      slotStart: schedule.slotStart,
+      isSubstitute,
     });
-    const toleransiMenit = settingsRow?.attendanceTolerance ?? 15;
-
-    const [jamAktual, menitAktual] = jamMenitSekarang.split(':').map(Number);
-    const [jamJadwal, menitJadwal] = schedule.slotStart.split(':').map(Number);
-
-    const loginMenitTotal  = (jamAktual ?? 0) * 60 + (menitAktual ?? 0);
-    const jadwalMenitTotal = (jamJadwal ?? 0) * 60 + (menitJadwal ?? 0);
-
-    // Jika Shift Siang (>= 11:00) dan Shift Pagi baru selesai melewati jam mulai siang,
-    // gunakan jam selesai Shift Pagi (maks +60 mnt) sebagai patokan agar tim siang tidak dihukum menunggu laci.
-    let patokanMenitTotal = jadwalMenitTotal;
-    if (!isSubstitute && jadwalMenitTotal >= 11 * 60) {
-      const startOfDayWib = new Date(`${tanggalHari}T00:00:00+07:00`);
-      const noonWib = new Date(`${tanggalHari}T11:15:00+07:00`);
-      const morningShifts = await db
-        .select({ clockOut: shifts.clockOut })
-        .from(shifts)
-        .where(
-          and(
-            gte(shifts.clockIn, startOfDayWib),
-            lt(shifts.clockIn, noonWib),
-            isNotNull(shifts.clockOut),
-          ),
-        );
-
-      for (const ms of morningShifts) {
-        if (!ms.clockOut) continue;
-        const outMin = getWibMinutes(new Date(ms.clockOut));
-        if (outMin > patokanMenitTotal) {
-          patokanMenitTotal = Math.min(jadwalMenitTotal + 60, outMin);
-        }
-      }
-    }
-
-    const selisihMenit = loginMenitTotal - patokanMenitTotal; // positif = telat
-    const isTelat      = isSubstitute ? false : selisihMenit > toleransiMenit;
-    const lateMinutes  = isSubstitute ? 0 : (isTelat ? selisihMenit : 0);
-    const status       = isSubstitute ? 'PENGGANTI' : (isTelat ? 'TELAT' : 'HADIR');
 
     // ── ATURAN KUOTA PERAN SHIFT ──
     // Admin Shift & Kasir: Maksimal 1 orang per shift (laci & otorisasi tunggal).

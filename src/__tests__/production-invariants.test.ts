@@ -14,6 +14,8 @@ import { createHash } from 'node:crypto';
 import { db } from '@/lib/db/client';
 import { sql } from 'drizzle-orm';
 import { evaluateShiftCashState } from '@/lib/services/shiftShortageService';
+import { computeAttendanceLateness } from '@/lib/services/attendanceLatenessService';
+import { getLateDisciplineFactor } from '@/lib/finance/report';
 
 const dbUrl = process.env.DATABASE_URL || '';
 if (!dbUrl) {
@@ -87,6 +89,57 @@ describe('1. Unit Tests — Idempotensi & Klasifikasi TCL', () => {
     assert.equal(deriveFailedStep('PRODUCT_NOT_FOUND:123'), 'VALIDASI_PRODUK');
     assert.equal(deriveFailedStep('insert into "transaction_items" failed'), 'INSERT_ITEM');
     assert.equal(deriveFailedStep('something else'), 'UNKNOWN');
+  });
+
+  it('Opsi A presensi: toleransi 30 mnt (07:30 -> batas 08:00), telat dihitung setelah batas & -3% per blok 5 mnt (maks 50%)', () => {
+    const cases = [
+      { hhmm: 7 * 60 + 30, status: 'HADIR', late: 0, penalty: 0 },
+      { hhmm: 8 * 60 + 0, status: 'HADIR', late: 0, penalty: 0 },
+      { hhmm: 8 * 60 + 1, status: 'TELAT', late: 1, penalty: 3 },
+      { hhmm: 8 * 60 + 5, status: 'TELAT', late: 5, penalty: 3 },
+      { hhmm: 8 * 60 + 6, status: 'TELAT', late: 6, penalty: 6 },
+      { hhmm: 8 * 60 + 10, status: 'TELAT', late: 10, penalty: 6 },
+      { hhmm: 8 * 60 + 15, status: 'TELAT', late: 15, penalty: 9 },
+      { hhmm: 8 * 60 + 30, status: 'TELAT', late: 30, penalty: 18 },
+      { hhmm: 9 * 60 + 0, status: 'TELAT', late: 60, penalty: 36 },
+      { hhmm: 9 * 60 + 25, status: 'TELAT', late: 85, penalty: 50 },
+    ] as const;
+
+    for (const tc of cases) {
+      const att = computeAttendanceLateness({
+        clockInMinutesWib: tc.hhmm,
+        slotStart: '07:30',
+        toleranceMinutes: 30,
+      });
+      assert.equal(att.status, tc.status);
+      assert.equal(att.lateMinutes, tc.late);
+      const disc = getLateDisciplineFactor('2026-11-24', att.lateMinutes);
+      assert.equal(disc.penaltyPercent, tc.penalty);
+    }
+
+    // Pelindung serah terima Shift Siang: Shift Pagi tutup 11:45 -> batas Siang bergeser 11:45 + 30 = 12:15
+    const siangOnTime = computeAttendanceLateness({
+      clockInMinutesWib: 12 * 60 + 15,
+      slotStart: '11:30',
+      toleranceMinutes: 30,
+      morningShiftClockOutMinutes: [11 * 60 + 45],
+    });
+    assert.equal(siangOnTime.status, 'HADIR');
+    assert.equal(siangOnTime.lateMinutes, 0);
+
+    // Pengganti (Badal) tidak pernah dihitung telat
+    const badal = computeAttendanceLateness({
+      clockInMinutesWib: 9 * 60 + 0,
+      slotStart: '07:30',
+      toleranceMinutes: 30,
+      isSubstitute: true,
+    });
+    assert.equal(badal.status, 'PENGGANTI');
+    assert.equal(badal.lateMinutes, 0);
+
+    // Kompatibilitas historis Era 2 (Oktober < 2026-11-01) tetap floor(m/5) * 3%
+    const era2 = getLateDisciplineFactor('2026-10-30', 16);
+    assert.equal(era2.penaltyPercent, 9);
   });
 });
 

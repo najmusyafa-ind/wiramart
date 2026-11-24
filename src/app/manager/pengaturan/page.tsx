@@ -55,7 +55,7 @@ export default function PengaturanPage() {
   const [qrisError, setQrisError] = useState<string>('');
 
   // ── Pengaturan Operasional state ────────────────────────────
-  const [attendanceTolerance, setAttendanceTolerance] = useState(15);
+  const [attendanceTolerance, setAttendanceTolerance] = useState(30);
   const [lowStockThreshold, setLowStockThreshold] = useState(5);
   const [globalMarginPercentage, setGlobalMarginPercentage] = useState(20);
   const [operasionalStatus, setOperasionalStatus] = useState<FeedbackStatus>('idle');
@@ -131,7 +131,7 @@ export default function PengaturanPage() {
       .then((r) => r.json())
       .then((json: { success?: boolean; data?: { attendanceTolerance?: number; lowStockThreshold?: number; globalMarginPercentage?: number } }) => {
         if (json.success && json.data) {
-          setAttendanceTolerance(json.data.attendanceTolerance ?? 15);
+          setAttendanceTolerance(json.data.attendanceTolerance ?? 30);
           setLowStockThreshold(json.data.lowStockThreshold ?? 5);
           if (json.data.globalMarginPercentage !== undefined) {
             setGlobalMarginPercentage(json.data.globalMarginPercentage);
@@ -517,7 +517,7 @@ export default function PengaturanPage() {
                 Toleransi Clock-In Absensi
               </label>
               <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '0 0 var(--space-2)' }}>
-                Kasir masih dianggap tepat waktu jika clock-in dalam &plusmn;{attendanceTolerance} menit dari jam shift.
+                Batas tepat waktu: jam mulai shift + {attendanceTolerance} menit (contoh Pagi 07:30 batas s/d 08:00 jika 30 mnt). Lewat batas tersebut, telat dihitung dari menit pertama (-3% per blok 5 menit, maks 50%).
               </p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
                 <input

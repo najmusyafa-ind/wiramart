@@ -1695,7 +1695,7 @@ export default function AbsensiPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <ShieldCheck size={20} color="#166534" style={{ flexShrink: 0 }} />
               <div style={{ fontSize: '0.8rem', color: '#166534', lineHeight: 1.45 }}>
-                <strong>Rumus Bagi Hasil 50:50 (Per Shift):</strong> 50% Kehadiran Tim · 50% Laba Shift · Pembagian utuh per kelompok shift (tidak dipecah per nama) · Shift Pagi 07:30, Siang 11:30 · Toleransi telat 15 menit (di atas itu -3% per 5 menit, maks 50%).
+                <strong>Rumus Bagi Hasil 50:50 (Per Shift):</strong> 50% Kehadiran Tim · 50% Laba Shift · Pembagian utuh per kelompok shift (tidak dipecah per nama) · Shift Pagi 07:30 (batas 08:00), Siang 11:30 (batas 12:00) · Toleransi 30 menit; lewat batas -3% per blok 5 menit, maks 50%.
               </div>
             </div>
             <button

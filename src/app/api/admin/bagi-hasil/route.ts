@@ -150,14 +150,28 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     const wibDateOf = (d: Date): string =>
       new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
-    const sesiOfShift = (clockIn: Date): 'Pagi' | 'Siang' => {
-      const wibHour = parseInt(
-        new Intl.DateTimeFormat('en-US', {
-          timeZone: 'Asia/Jakarta', hour: 'numeric', hour12: false,
-        }).format(clockIn),
-        10
-      );
-      return wibHour >= 11 ? 'Siang' : 'Pagi';
+    const wibMinutesOf = (d: Date): number => {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Jakarta',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false,
+      }).formatToParts(d);
+      const h = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10) % 24;
+      const m = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
+      return h * 60 + m;
+    };
+    const sesiOfShift = (
+      clockIn: Date,
+      clockOut: Date | null,
+      hasEarlierSameDay: boolean,
+    ): 'Pagi' | 'Siang' => {
+      const inMin = wibMinutesOf(clockIn);
+      if (inMin >= 11 * 60) return 'Siang';
+      if (inMin >= 10 * 60 + 30 && hasEarlierSameDay && clockOut && wibMinutesOf(clockOut) >= 14 * 60) {
+        return 'Siang';
+      }
+      return 'Pagi';
     };
 
     // 2. Ambil absensi yang hadir (HADIR, TELAT, PENGGANTI) pada rentang ini
@@ -257,14 +271,14 @@ export async function GET(req: NextRequest): Promise<Response> {
         attendees: typeof rawAttendees;
       }>();
 
-      for (const s of shiftsOnDate) {
+      shiftsOnDate.forEach((s, idx) => {
         shiftPoolMap.set(s.id, {
           shift: s,
-          sesi: sesiOfShift(s.clockIn),
+          sesi: sesiOfShift(s.clockIn, s.clockOut, idx > 0),
           pool: 0,
           attendees: [],
         });
-      }
+      });
 
       // Petakan absensi ke shift pada tanggal tersebut (STRICT SESSION BOUNDARY — anti 7-orang bug & aman dobel shift)
       const unmatchedAttendees: typeof rawAttendees = [];
@@ -286,7 +300,7 @@ export async function GET(req: NextRequest): Promise<Response> {
               : 'Pagi';
 
           const sameSessionShifts = attSesi
-            ? shiftsOnDate.filter((s) => sesiOfShift(s.clockIn) === attSesi)
+            ? shiftsOnDate.filter((s) => shiftPoolMap.get(s.id)?.sesi === attSesi)
             : shiftsOnDate;
 
           if (sameSessionShifts.length > 0) {
