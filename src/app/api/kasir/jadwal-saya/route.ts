@@ -7,7 +7,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import { shiftSchedules, employees } from '@/lib/db/schema';
-import { eq, and, ne } from 'drizzle-orm';
+import { eq, and, ne, or, isNull } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export const runtime = 'nodejs';
@@ -32,9 +32,10 @@ export async function GET(req: NextRequest) {
     .where(and(
       eq(shiftSchedules.employeeId, employeeId),
       eq(shiftSchedules.isActive, true),
+      ne(shiftSchedules.orderInSlot, 99),
     ));
 
-  // Semua slot aktif dari karyawan LAIN (untuk pilihan swap tujuan)
+  // Semua slot aktif dari karyawan LAIN maupun slot KOSONG (terkecuali slot Koordinator orderInSlot=99)
   const slotTersedia = await db
     .select({
       id:          shiftSchedules.id,
@@ -46,10 +47,18 @@ export async function GET(req: NextRequest) {
       employeeNim:  employees.nim,
     })
     .from(shiftSchedules)
-    .innerJoin(employees, eq(shiftSchedules.employeeId, employees.id))
+    .leftJoin(employees, eq(shiftSchedules.employeeId, employees.id))
     .where(and(
-      ne(shiftSchedules.employeeId, employeeId),
       eq(shiftSchedules.isActive, true),
+      ne(shiftSchedules.orderInSlot, 99),
+      or(
+        isNull(shiftSchedules.employeeId),
+        and(
+          ne(shiftSchedules.employeeId, employeeId),
+          eq(employees.isActive, true),
+          isNull(employees.deletedAt),
+        ),
+      ),
     ))
     .orderBy(shiftSchedules.dayOfWeek, shiftSchedules.slotStart);
 

@@ -7,16 +7,23 @@ import { type NextRequest } from 'next/server';
 import { apiOk, apiError } from '@/lib/utils/helpers';
 import { CreateOrderSchema } from '@/features/order/order.types';
 import { createOnlineOrder, getOrdersByBuyerId } from '@/features/order/order.service';
+import { assertActiveBuyer } from '@/features/order/buyer.repository';
 import { getBuyerSessionFromRequest } from '@/lib/utils/auth';
 import { buyerOrderLimiter } from '@/lib/utils/rate-limit';
 
 // ── POST: Buat pesanan ─────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  // Guard: harus login sebagai buyer
+  // Guard: harus login sebagai buyer aktif (cek live DB isActive & isFlagged)
   const session = await getBuyerSessionFromRequest(req);
   if (!session) {
     return apiError('Silakan login terlebih dahulu', 'UNAUTHORIZED', 401);
+  }
+  try {
+    await assertActiveBuyer(session.sub);
+  } catch (err: unknown) {
+    const e = err as { code?: string; message?: string; statusCode?: number };
+    return apiError(e.message ?? 'Akun pembeli dibatasi', e.code, e.statusCode ?? 403);
   }
 
   // Rate limit per buyer (5 order / 24 jam)
@@ -53,10 +60,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    await assertActiveBuyer(session.sub);
     const orders = await getOrdersByBuyerId(session.sub);
     return apiOk({ orders });
   } catch (err: unknown) {
-    const e = err as { message?: string };
-    return apiError(e.message ?? 'Gagal mengambil riwayat pesanan', 'INTERNAL_ERROR', 500);
+    const e = err as { code?: string; message?: string; statusCode?: number };
+    return apiError(e.message ?? 'Gagal mengambil riwayat pesanan', e.code ?? 'INTERNAL_ERROR', e.statusCode ?? 500);
   }
 }

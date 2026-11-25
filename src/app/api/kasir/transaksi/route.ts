@@ -27,10 +27,11 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { products, transactions, transactionItems, transactionPayments, shifts, stockBatches, transactionLogs, discountPolicies, discountBarcodes } from '@/lib/db/schema';
+import { products, transactions, transactionItems, transactionPayments, shifts, stockBatches, transactionLogs, discountPolicies, discountBarcodes, employees } from '@/lib/db/schema';
 import { eq, and, isNull, inArray, gte, gt, asc, desc, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import { getTodayWib } from '@/lib/utils/helpers';
+import { isCrossSessionPersistedShift } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -291,7 +292,7 @@ export async function POST(req: NextRequest) {
     const uniqueProductIds = [...new Set(items.map((i) => i.productId))];
     const todayWibPre = getTodayWib();
 
-    const [replayResult, ownShiftRows, productRows, activeProductPolicies] = await Promise.all([
+    const [replayResult, ownShiftRows, productRows, activeProductPolicies, activeEmpRows] = await Promise.all([
       idempotencyKey ? findReplay(employeeId, idempotencyKey, requestHash) : Promise.resolve(null),
       db
         .select({ id: shifts.id })
@@ -338,7 +339,16 @@ export async function POST(req: NextRequest) {
             gte(discountPolicies.validUntil, todayWibPre),
           ),
         ),
+      db
+        .select({ id: employees.id })
+        .from(employees)
+        .where(and(eq(employees.id, employeeId), eq(employees.isActive, true), isNull(employees.deletedAt)))
+        .limit(1),
     ]);
+
+    if (activeEmpRows.length === 0) {
+      return apiError('Akun kasir tidak aktif atau telah dinonaktifkan.', 403);
+    }
 
     if (replayResult) return replayResult;
 
@@ -367,7 +377,7 @@ export async function POST(req: NextRequest) {
     } else {
       // 2. Cek shift aktif toko yang dibuka oleh rekan shift (<12 jam)
       const [teamShift] = await db
-        .select({ id: shifts.id, clockIn: shifts.clockIn })
+        .select({ id: shifts.id, employeeId: shifts.employeeId, clockIn: shifts.clockIn })
         .from(shifts)
         .where(
           and(
@@ -379,11 +389,16 @@ export async function POST(req: NextRequest) {
         .limit(1);
 
       if (teamShift) {
-        const shiftAge = Date.now() - new Date(teamShift.clockIn).getTime();
-        // Ambang batas adopsi shift rekan: maks 4.5 jam (1 sesi roster UNPERBA)
-        // Mencegah kasir shift baru mewarisi shift shift sebelumnya yang belum ditutup
+        const shiftClockIn = new Date(teamShift.clockIn);
+        const now = new Date();
+        const shiftAge = now.getTime() - shiftClockIn.getTime();
+        // Ambang batas adopsi shift rekan: maks 4.5 jam DAN tidak boleh lintas sesi Pagi->Siang
         const FOUR_AND_HALF_HOURS = 4.5 * 60 * 60 * 1000;
-        if (shiftAge <= FOUR_AND_HALF_HOURS) {
+        const isCrossSession = await isCrossSessionPersistedShift(
+          { employeeId: teamShift.employeeId, clockIn: shiftClockIn },
+          now,
+        );
+        if (shiftAge <= FOUR_AND_HALF_HOURS && !isCrossSession) {
           activeShiftId = teamShift.id;
         }
       }
@@ -518,9 +533,8 @@ export async function POST(req: NextRequest) {
       // Discount Policy resmi yang sudah disetujui Manager/Dosen via Approval Center.
       if (!hasOfficialDiscount && costPrice > 0 && sellingPrice < costPrice) {
         return apiError(
-          `❌ Harga jual "${prod.name}" (Rp ${Math.round(sellingPrice).toLocaleString('id-ID')}) ` +
-          `di bawah HPP (Rp ${Math.round(costPrice).toLocaleString('id-ID')}). ` +
-          `Transaksi tidak bisa dilanjutkan. Hubungi Manager untuk membuat kebijakan diskon resmi.`,
+          `Harga jual "${prod.name}" (Rp ${Math.round(sellingPrice).toLocaleString('id-ID')}) ` +
+          `tidak memenuhi batas minimum toko. Hubungi Admin Shift atau Manager untuk penyesuaian harga / diskon resmi.`,
           400,
         );
       }

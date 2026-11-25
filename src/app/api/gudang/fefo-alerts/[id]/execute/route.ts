@@ -16,8 +16,8 @@ type Context = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, context: Context) {
   const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'employee') {
-    return apiError('Forbidden: Eksekusi tindakan hanya untuk petugas gudang', 403);
+  if (!payload || (payload.role !== 'employee' && payload.role !== 'admin')) {
+    return apiError('Forbidden: Eksekusi tindakan hanya untuk petugas gudang / pengelola', 403);
   }
 
   const { id } = await context.params;
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, context: Context) {
 
   try {
     const body = await req.json();
-    const result = await executeConditionReport(id, payload.sub, body);
+    const result = await executeConditionReport(id, payload.sub, body, payload.role);
     return apiOk({
       message: 'Eksekusi tindakan di lapangan berhasil dicatat.',
       data: result,

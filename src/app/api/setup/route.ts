@@ -69,6 +69,7 @@ export async function POST(request: Request): Promise<Response> {
       nidn,
       fullName,
       passwordHash,
+      role:        'MANAGER',
       isActivated: true,  // langsung aktif (setup wizard)
       isActive:    true,
     })

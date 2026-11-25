@@ -48,6 +48,8 @@ type ClosingPreview = {
   omzetQris: number;
   hppTerjual: number;
   labaKotor: number;
+  alokasiGajiKaryawan?: number;
+  persenBagiHasil?: number;
   biayaOperasional: number;
   labaBersih: number;
   totalCashDiscrepancy: number;
@@ -684,12 +686,24 @@ export default function TutupBukuModal({
                   </div>
 
                   <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: 10 }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                      Alokasi Gaji ({preview.persenBagiHasil ?? 50}%)
+                    </div>
+                    <div style={{ fontSize: '1rem', fontWeight: 800, color: 'hsl(217, 75%, 45%)', marginTop: 2 }}>
+                      {fmtRp(preview.alokasiGajiKaryawan ?? 0)}
+                    </div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                      Hak bagi hasil tim shift
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: 10 }}>
                     <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Laba Bersih Final</div>
                     <div style={{ fontSize: '1.05rem', fontWeight: 900, color: 'var(--color-success)', marginTop: 2 }}>
                       {fmtRp(preview.labaBersih)}
                     </div>
                     <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
-                      Laba Kotor − Biaya
+                      Laba Kotor − Gaji {preview.persenBagiHasil ?? 50}% − Biaya
                     </div>
                   </div>
                 </div>

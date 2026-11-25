@@ -40,7 +40,7 @@ export interface ValidationResult {
 
 export class DatabaseBackupService {
   /**
-   * Menghasilkan file backup utuh (snapshot 14 tabel) siap unduh.
+   * Menghasilkan file backup utuh (snapshot 35 tabel) siap unduh.
    */
   public async createBackup(actor: AdminActor): Promise<BackupPackageResult> {
     const snapshot = await databaseBackupRepository.extractFullDatabaseSnapshot();
@@ -51,8 +51,8 @@ export class DatabaseBackupService {
     const payload: BackupPayload = {
       metadata: {
         app: 'smartkasir-perwira',
-        version: '1.2.0',
-        schemaVersion: '1.1',
+        version: '2.0.0',
+        schemaVersion: '2.0',
         timestamp,
         checksum: snapshot.checksum,
         tablesCount: Object.keys(snapshot.data).length,

@@ -295,7 +295,9 @@ export default function GudangPortalPage() {
     setInlineBatchExpiry('');
     setInlineBatchError(null);
     try {
-      const res = await fetch(`/api/admin/gudang/batch?productId=${prod.id}`);
+      const res = await fetch(`/api/admin/gudang/batch?productId=${prod.id}`, {
+        headers: { 'x-portal-scope': 'gudang' },
+      });
       const j = await res.json();
       if (j.success && j.data?.batches) {
         setProductBatches(j.data.batches);
@@ -517,7 +519,9 @@ export default function GudangPortalPage() {
     setLoadingEditBatches(true);
 
     const seq = ++editFetchSeqRef.current;
-    fetch(`/api/admin/gudang/batch?productId=${prod.id}&status=ACTIVE`)
+    fetch(`/api/admin/gudang/batch?productId=${prod.id}&status=ACTIVE`, {
+      headers: { 'x-portal-scope': 'gudang' },
+    })
       .then((res) => res.json())
       .then((j: {
         success?: boolean;
@@ -869,18 +873,26 @@ export default function GudangPortalPage() {
 
   // ── Logout Handler ───────────────────────────────────────────
   async function handleLogout() {
-    if (!window.confirm('Keluar dari Portal Petugas Gudang?')) return;
     const isAdminActor =
       employee?.actorRole === 'MANAGER' || employee?.actorRole === 'ADMIN_SHIFT';
-    clearIdleStorage(isAdminActor ? 'admin' : 'gudang');
+    if (isAdminActor) {
+      // Jangan hapus cookie sk_admin saat Admin Shift / Manager keluar dari monitor /gudang
+      if (!window.confirm('Kembali ke Dashboard Pengelola? (Sesi Admin/Manager tetap aktif)')) return;
+      warehouseDataMemCache.clear();
+      router.push(getDashboardPathForRole(employee?.actorRole));
+      return;
+    }
+    if (!window.confirm('Keluar dari Portal Petugas Gudang?')) return;
+    warehouseDataMemCache.clear();
+    clearIdleStorage('gudang');
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: isAdminActor ? 'admin' : 'gudang' }),
+        body: JSON.stringify({ role: 'gudang' }),
       });
     } finally {
-      router.push(isAdminActor ? '/login' : '/gudang/login');
+      router.push('/gudang/login');
     }
   }
 
@@ -993,10 +1005,7 @@ export default function GudangPortalPage() {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {employee &&
-              (employee.actorRole === 'MANAGER' ||
-                employee.actorRole === 'ADMIN_SHIFT' ||
-                employee.jabatan?.toLowerCase().includes('admin') ||
-                employee.jabatan?.toLowerCase().includes('manager')) && (
+              (employee.actorRole === 'MANAGER' || employee.actorRole === 'ADMIN_SHIFT') && (
               <button
                 type="button"
                 onClick={() => router.push(getDashboardPathForRole(employee.actorRole))}

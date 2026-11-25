@@ -17,11 +17,11 @@ type Context = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, context: Context) {
   const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'employee') {
-    return apiError('Forbidden: Pelaporan kondisi hanya untuk petugas gudang', 403);
+  if (!payload || (payload.role !== 'employee' && payload.role !== 'admin')) {
+    return apiError('Forbidden: Pelaporan kondisi hanya untuk petugas gudang / pengelola', 403);
   }
 
-  // Rate Limiter: Maksimal 50 laporan per 24 jam per employee
+  // Rate Limiter: Maksimal 50 laporan per 24 jam per aktor
   const rateLimit = conditionReportLimiter.check(payload.sub, true);
   if (!rateLimit.allowed) {
     return apiError(
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, context: Context) {
 
   try {
     const body = await req.json();
-    const result = await submitConditionReport(id, payload.sub, body);
+    const result = await submitConditionReport(id, payload.sub, body, payload.role);
     return apiOk({
       message: 'Laporan kondisi fisik barang berhasil dikirim ke Manager.',
       data: result,

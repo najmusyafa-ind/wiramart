@@ -73,6 +73,7 @@ export async function POST(request: Request): Promise<Response> {
     employee.jabatan.toLowerCase().includes('kepala');
 
   if (!isEligibleAdmin) {
+    adminAuthLimiter.check(rateKey, true);
     return apiError(
       'Hanya Admin Shift / Kepala Admin yang dapat membuat PIN Pengelola.',
       'FORBIDDEN',
@@ -80,12 +81,41 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  // 2b. Zero-Trust Anti-Takeover: Tolak jika PIN/Password sudah pernah disetel sebelumnya
+  const existingAdmin = await db.query.admins.findFirst({
+    where: eq(admins.nidn, employee.nim),
+    columns: { id: true, role: true, passwordHash: true, isActive: true, deletedAt: true },
+  });
+
+  if (existingAdmin?.role === 'MANAGER') {
+    adminAuthLimiter.check(rateKey, true);
+    return apiError(
+      'Akun Manager tidak dapat diubah melalui setup PIN Admin Shift.',
+      'FORBIDDEN',
+      403,
+    );
+  }
+
+  if (existingAdmin && (!existingAdmin.isActive || existingAdmin.deletedAt)) {
+    adminAuthLimiter.check(rateKey, true);
+    return apiError('Akun pengelola ini telah dinonaktifkan oleh Manager.', 'FORBIDDEN', 403);
+  }
+
+  if (employee.pinHash || existingAdmin?.passwordHash) {
+    adminAuthLimiter.check(rateKey, true);
+    return apiError(
+      'PIN keamanan sudah pernah disetel untuk akun ini. Silakan login dengan PIN Anda, atau minta Manager mereset PIN jika lupa.',
+      'PIN_ALREADY_SET',
+      409,
+    );
+  }
+
   // 3. Hash PIN dengan bcrypt (rounds 12)
   const hashedPin = await bcrypt.hash(pin, 12);
   const now = new Date();
 
-  // 4. Update data PIN di tabel employees
-  await db
+  // 4. Update data PIN secara atomik (hanya jika pinHash masih NULL — anti race condition)
+  const [boundEmployee] = await db
     .update(employees)
     .set({
       pinHash: hashedPin,
@@ -94,7 +124,16 @@ export async function POST(request: Request): Promise<Response> {
       pinLockedUntil: null,
       updatedAt: now,
     })
-    .where(eq(employees.id, employee.id));
+    .where(and(eq(employees.id, employee.id), isNull(employees.pinHash)))
+    .returning({ id: employees.id });
+
+  if (!boundEmployee) {
+    return apiError(
+      'PIN baru saja disetel pada sesi lain. Silakan login menggunakan NIM dan PIN Anda.',
+      'PIN_ALREADY_SET',
+      409,
+    );
+  }
 
   // 5. Upsert ke tabel admins sebagai role ADMIN_SHIFT
   const [adminRow] = await db

@@ -6,24 +6,45 @@
 import { z } from 'zod';
 
 /**
- * Urutan topologis 14 tabel database untuk import/insert data (Parent -> Child).
+ * Urutan topologis seluruh 35 tabel database untuk import/insert data (Parent -> Child).
  * Mencegah error Foreign Key constraint violation saat proses restore.
  */
 export const BACKUP_TABLES_INSERT_ORDER = [
   'admins',
+  'audit_logs',
   'employees',
   'categories',
+  'suppliers',
+  'buyers',
+  'qris_settings',
+  'maintenance_settings',
+  'operating_expenses',
+  'qris_reconciliations',
+  'daily_closings',
+  'manager_duty_log',
   'products',
   'shifts',
   'shift_schedules',
   'shift_swap_requests',
   'attendances',
+  'shift_cash_movements',
+  'product_proposals',
+  'stock_receive_drafts',
+  'stock_receive_items',
+  'stock_batches',
+  'stock_adjustments',
+  'product_condition_reports',
+  'discount_policies',
+  'discount_barcodes',
   'transactions',
   'transaction_items',
-  'stock_adjustments',
-  'qris_settings',
-  'maintenance_settings',
-  'audit_logs',
+  'transaction_payments',
+  'transaction_logs',
+  'online_orders',
+  'online_order_items',
+  'notification_logs',
+  'consignment_entries',
+  'purchase_receipt_archives',
 ] as const;
 
 export type BackupTableName = (typeof BACKUP_TABLES_INSERT_ORDER)[number];
@@ -32,22 +53,9 @@ export type BackupTableName = (typeof BACKUP_TABLES_INSERT_ORDER)[number];
  * Urutan terbalik (Child -> Parent) untuk membersihkan tabel saat mode REPLACE_ALL.
  * Menghindari penolakan delete akibat keterikatan Foreign Key.
  */
-export const RESTORE_CLEANUP_ORDER = [
-  'audit_logs',
-  'stock_adjustments',
-  'transaction_items',
-  'transactions',
-  'attendances',
-  'shift_swap_requests',
-  'shift_schedules',
-  'shifts',
-  'products',
-  'categories',
-  'employees',
-  'qris_settings',
-  'maintenance_settings',
-  'admins',
-] as const;
+export const RESTORE_CLEANUP_ORDER: readonly BackupTableName[] = [
+  ...BACKUP_TABLES_INSERT_ORDER,
+].reverse();
 
 // ── Zod Schema: Metadata Snapshot Backup ─────────────────────
 export const backupMetadataSchema = z.object({

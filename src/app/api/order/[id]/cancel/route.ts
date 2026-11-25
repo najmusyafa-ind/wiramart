@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { getBuyerSessionFromRequest } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 import { cancelByBuyer } from '@/features/order/pesanan.service';
+import { assertActiveBuyer } from '@/features/order/buyer.repository';
 
 export const runtime = 'nodejs';
 
@@ -18,6 +19,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!z.string().uuid().safeParse(id).success) return apiError('ID pesanan tidak valid', 'BAD_REQUEST', 400);
 
   try {
+    await assertActiveBuyer(session.sub);
     return apiOk({ order: await cancelByBuyer(id, session.sub) });
   } catch (err) {
     if (err instanceof AppError) return apiError(err.message, err.code, err.statusCode);

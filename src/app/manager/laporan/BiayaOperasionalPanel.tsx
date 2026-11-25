@@ -514,6 +514,22 @@ export default function BiayaOperasionalPanel({ period, dateFrom, dateTo, onChan
             Menampilkan 1.000 biaya terbaru.
           </p>
         )}
+
+        <div
+          style={{
+            padding: '10px 12px',
+            borderRadius: 'var(--radius-md)',
+            backgroundColor: 'var(--color-surface-alt)',
+            border: '1px solid var(--color-border)',
+            fontSize: 'var(--text-xs)',
+            color: 'var(--color-text-secondary)',
+            lineHeight: 1.55,
+          }}
+        >
+          <strong>Catatan Biaya Paten Operasional:</strong> Selain biaya yang tercatat di tabel di atas, laporan laba/rugi dan
+          kartu KPI <em>Biaya Operasional</em> otomatis menyertakan alokasi paten <strong>Rp 50.000 / bulan operasional</strong>{' '}
+          (Bensin/Transport Rp 30.000 + ATK Rp 20.000) yang dibagi rata ke hari operasional aktif pada bulan tersebut.
+        </div>
       </div>
     </section>
   );

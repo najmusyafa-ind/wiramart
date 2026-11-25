@@ -11,7 +11,7 @@ import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { shiftSwapRequests, shiftSchedules, attendances, auditLogs } from '@/lib/db/schema';
+import { shiftSwapRequests, shiftSchedules, auditLogs } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 
 export const runtime = 'nodejs';
@@ -22,33 +22,6 @@ const ActionSchema = z.object({
   action: z.enum(['APPROVE', 'REJECT']),
   note: z.string().max(300).optional(),
 });
-
-const DAY_MAP: Record<string, number> = {
-  MINGGU: 0,
-  SENIN: 1,
-  SELASA: 2,
-  RABU: 3,
-  KAMIS: 4,
-  JUMAT: 5,
-  SABTU: 6,
-};
-
-function getNextDateForDay(dayOfWeek: string, baseDate: Date): string {
-  const dateStrWib = baseDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // 'YYYY-MM-DD'
-  const [y, m, d] = dateStrWib.split('-').map(Number);
-  const dt = new Date(Date.UTC(y ?? 2026, (m ?? 1) - 1, d ?? 1));
-
-  const targetDay = DAY_MAP[dayOfWeek] ?? 1;
-  const currentDay = dt.getUTCDay();
-
-  let diff = targetDay - currentDay;
-  if (diff < 0) {
-    diff += 7;
-  }
-
-  dt.setUTCDate(dt.getUTCDate() + diff);
-  return dt.toISOString().slice(0, 10);
-}
 
 export async function POST(req: NextRequest, ctx: Context): Promise<Response> {
   const session = await verifyJwt(req);
@@ -107,102 +80,108 @@ export async function POST(req: NextRequest, ctx: Context): Promise<Response> {
   }
 
   // action === 'APPROVE'
-  // K4: Cukup 2 karyawan setuju -> jadwal bertukar di DB & absensi PENGGANTI tercatat
-  await db.transaction(async (tx) => {
-    // 1. Tukar employee_id di kedua jadwal template
-    await tx
-      .update(shiftSchedules)
-      .set({
-        employeeId: swap.peerEmployeeId,
-        updatedAt: now,
-      })
-      .where(eq(shiftSchedules.id, swap.fromScheduleId));
+  // K4: Cukup 2 karyawan setuju -> jadwal bertukar atomik di DB (FOR UPDATE anti double-approve).
+  // TIDAK melakukan pre-insert attendances di masa depan agar pengganti tidak kena 409 ALREADY_ATTENDED saat absen hari H.
+  try {
+    await db.transaction(async (tx) => {
+      const [lockedSwap] = await tx
+        .select({
+          id: shiftSwapRequests.id,
+          status: shiftSwapRequests.status,
+          requesterId: shiftSwapRequests.requesterId,
+          peerEmployeeId: shiftSwapRequests.peerEmployeeId,
+          fromScheduleId: shiftSwapRequests.fromScheduleId,
+          toScheduleId: shiftSwapRequests.toScheduleId,
+        })
+        .from(shiftSwapRequests)
+        .where(eq(shiftSwapRequests.id, id))
+        .for('update')
+        .limit(1);
 
-    await tx
-      .update(shiftSchedules)
-      .set({
-        employeeId: swap.requesterId,
-        updatedAt: now,
-      })
-      .where(eq(shiftSchedules.id, swap.toScheduleId));
+      if (!lockedSwap || lockedSwap.status !== 'PENDING') {
+        throw new Error('SWAP_ALREADY_PROCESSED');
+      }
 
-    // 2. Hitung tanggal slot tujuan dan slot asal spesifik
-    const targetToDate = getNextDateForDay(swap.toSchedule.dayOfWeek, now);
-    const targetFromDate = getNextDateForDay(swap.fromSchedule.dayOfWeek, now);
+      const [lockedFrom] = await tx
+        .select({ id: shiftSchedules.id, employeeId: shiftSchedules.employeeId, orderInSlot: shiftSchedules.orderInSlot })
+        .from(shiftSchedules)
+        .where(eq(shiftSchedules.id, lockedSwap.fromScheduleId))
+        .for('update')
+        .limit(1);
 
-    // 3. Catat status kehadiran PENGGANTI untuk pemohon di slot tujuan
-    await tx
-      .insert(attendances)
-      .values({
-        employeeId: swap.requesterId,
-        scheduleId: swap.toScheduleId,
-        attendanceDate: targetToDate,
-        status: 'PENGGANTI',
-        notes: `Swap disetujui rekan kerja: Pengganti slot ${swap.toSchedule.dayOfWeek} ${swap.toSchedule.slotStart}–${swap.toSchedule.slotEnd}`,
-        fromSwapRequestId: id,
-      })
-      .onConflictDoUpdate({
-        target: [attendances.employeeId, attendances.scheduleId, attendances.attendanceDate],
-        set: {
-          status: 'PENGGANTI',
-          notes: `Swap disetujui rekan kerja: Pengganti slot ${swap.toSchedule.dayOfWeek} ${swap.toSchedule.slotStart}–${swap.toSchedule.slotEnd}`,
-          fromSwapRequestId: id,
+      const [lockedTo] = await tx
+        .select({ id: shiftSchedules.id, employeeId: shiftSchedules.employeeId, orderInSlot: shiftSchedules.orderInSlot })
+        .from(shiftSchedules)
+        .where(eq(shiftSchedules.id, lockedSwap.toScheduleId))
+        .for('update')
+        .limit(1);
+
+      if (
+        !lockedFrom ||
+        !lockedTo ||
+        lockedTo.orderInSlot === 99 ||
+        lockedFrom.employeeId !== lockedSwap.requesterId ||
+        lockedTo.employeeId !== peerEmployeeId
+      ) {
+        throw new Error('SWAP_SLOT_CHANGED');
+      }
+
+      // 1. Tukar employee_id di kedua jadwal template
+      await tx
+        .update(shiftSchedules)
+        .set({
+          employeeId: lockedSwap.peerEmployeeId,
           updatedAt: now,
-        },
-      });
+        })
+        .where(eq(shiftSchedules.id, lockedSwap.fromScheduleId));
 
-    // 4. Catat status kehadiran PENGGANTI untuk rekan di slot asal
-    await tx
-      .insert(attendances)
-      .values({
-        employeeId: peerEmployeeId,
-        scheduleId: swap.fromScheduleId,
-        attendanceDate: targetFromDate,
-        status: 'PENGGANTI',
-        notes: `Swap disetujui rekan kerja: Pengganti slot ${swap.fromSchedule.dayOfWeek} ${swap.fromSchedule.slotStart}–${swap.fromSchedule.slotEnd}`,
-        fromSwapRequestId: id,
-      })
-      .onConflictDoUpdate({
-        target: [attendances.employeeId, attendances.scheduleId, attendances.attendanceDate],
-        set: {
-          status: 'PENGGANTI',
-          notes: `Swap disetujui rekan kerja: Pengganti slot ${swap.fromSchedule.dayOfWeek} ${swap.fromSchedule.slotStart}–${swap.fromSchedule.slotEnd}`,
-          fromSwapRequestId: id,
+      await tx
+        .update(shiftSchedules)
+        .set({
+          employeeId: lockedSwap.requesterId,
           updatedAt: now,
-        },
+        })
+        .where(eq(shiftSchedules.id, lockedSwap.toScheduleId));
+
+      // 2. Update status swap request menjadi APPROVED
+      await tx
+        .update(shiftSwapRequests)
+        .set({
+          status: 'APPROVED',
+          peerApprovedAt: now,
+          reviewedAt: now,
+          adminNote: note ? `Disetujui rekan: ${note} (K4 Auto-Swap 2-Arah)` : 'Disetujui rekan (K4 Auto-Swap 2-Arah)',
+          updatedAt: now,
+        })
+        .where(eq(shiftSwapRequests.id, id));
+
+      // 3. Audit log
+      await tx.insert(auditLogs).values({
+        action: 'UPDATE',
+        tableName: 'shift_swap_requests',
+        recordId: id,
+        actorType: 'EMPLOYEE',
+        actorId: session.sub,
+        oldValues: JSON.stringify({ status: lockedSwap.status }),
+        newValues: JSON.stringify({
+          status: 'APPROVED',
+          peerApprovedBy: session.sub,
+          fromScheduleId: lockedSwap.fromScheduleId,
+          toScheduleId: lockedSwap.toScheduleId,
+        }),
       });
-
-    // 5. Update status swap request menjadi APPROVED
-    await tx
-      .update(shiftSwapRequests)
-      .set({
-        status: 'APPROVED',
-        peerApprovedAt: now,
-        reviewedAt: now,
-        adminNote: note ? `Disetujui rekan: ${note} (K4 Auto-Swap 2-Arah)` : 'Disetujui rekan (K4 Auto-Swap 2-Arah)',
-        updatedAt: now,
-      })
-      .where(eq(shiftSwapRequests.id, id));
-
-    // 6. Audit log
-    await tx.insert(auditLogs).values({
-      action: 'UPDATE',
-      tableName: 'shift_swap_requests',
-      recordId: id,
-      actorType: 'EMPLOYEE',
-      actorId: session.sub,
-      oldValues: JSON.stringify({ status: swap.status }),
-      newValues: JSON.stringify({
-        status: 'APPROVED',
-        peerApprovedAt: now,
-        note,
-        targetToDate,
-        targetFromDate,
-      }),
     });
-  });
+  } catch (err) {
+    if (err instanceof Error && err.message === 'SWAP_ALREADY_PROCESSED') {
+      return apiError('Permintaan tukar shift ini sudah diproses sebelumnya.', 409);
+    }
+    if (err instanceof Error && err.message === 'SWAP_SLOT_CHANGED') {
+      return apiError('Kepemilikan slot jadwal sudah berubah atau slot tidak valid untuk ditukar.', 409);
+    }
+    throw err;
+  }
 
   return apiOk({
-    message: 'Tukar shift berhasil disetujui! Jadwal dan catatan kehadiran pengganti telah diperbarui.',
+    message: 'Tukar shift berhasil disetujui! Jadwal shift telah diperbarui.',
   });
 }

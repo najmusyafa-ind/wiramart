@@ -23,15 +23,34 @@ const PIN_REGEX = /^\d{6,8}$/;
 const MAX_PIN_ATTEMPTS = 5;
 const PIN_LOCK_MINUTES = 15;
 
-function normalizeIdentityText(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+function normalizeWordTokens(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
-function isIdentityMatch(inputValue: string, dbValue: string): boolean {
-  const cleanIn = normalizeIdentityText(inputValue);
-  const cleanDb = normalizeIdentityText(dbValue);
+function isStrictNameMatch(inputValue: string, dbValue: string): boolean {
+  const cleanIn = inputValue.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanDb = dbValue.toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!cleanIn || !cleanDb) return false;
-  return cleanDb.includes(cleanIn) || cleanIn.includes(cleanDb);
+  if (cleanIn === cleanDb) return true;
+  if (cleanIn.length < Math.max(5, Math.floor(cleanDb.length * 0.55))) return false;
+  const inTokens = normalizeWordTokens(inputValue);
+  const dbTokens = normalizeWordTokens(dbValue);
+  return inTokens.length > 0 && inTokens.every((t) => dbTokens.includes(t));
+}
+
+function isStrictProdiMatch(inputValue: string, dbValue: string): boolean {
+  const stripDegree = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/^(s1|d3|d4|s2|prodi|program\s+studi)\s+/g, '')
+      .replace(/[^a-z0-9]/g, '');
+  const cleanIn = stripDegree(inputValue);
+  const cleanDb = stripDegree(dbValue);
+  return cleanIn.length >= 4 && cleanIn === cleanDb;
 }
 
 const kasirLoginSchema = z
@@ -210,7 +229,7 @@ export async function POST(request: Request): Promise<Response> {
         .where(eq(employees.id, employee.id));
     }
   } else {
-    // Belum memiliki PIN (Masa Transisi Lunak Opsi B1)
+    // Belum memiliki PIN (Masa Transisi Lunak Opsi B1 — WAJIB verifikasi Nama Lengkap + Prodi)
     if (pin && !newPin) {
       return apiError(
         'Akun Anda belum memiliki PIN. Silakan masuk dengan mode transisi (Nama + NIM + Prodi) atau buat PIN baru.',
@@ -219,7 +238,16 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    if (fullName && !isIdentityMatch(fullName, employee.fullName)) {
+    if (!fullName || !programStudi) {
+      kasirAuthLimiter.check(rateKey, true);
+      return apiError(
+        'Verifikasi identitas wajib diisi lengkap: NIM, Nama Lengkap, dan Program Studi.',
+        'IDENTITY_VERIFICATION_REQUIRED',
+        422,
+      );
+    }
+
+    if (!isStrictNameMatch(fullName, employee.fullName)) {
       kasirAuthLimiter.check(rateKey, true);
       return apiError(
         'Nama Lengkap tidak cocok dengan NIM yang terdaftar. Periksa kembali ejaan nama Anda.',
@@ -228,7 +256,7 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    if (programStudi && !isIdentityMatch(programStudi, employee.programStudi)) {
+    if (!isStrictProdiMatch(programStudi, employee.programStudi)) {
       kasirAuthLimiter.check(rateKey, true);
       return apiError(
         'Program Studi tidak cocok dengan data pendaftaran NIM ini.',

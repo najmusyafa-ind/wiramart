@@ -11,8 +11,39 @@ import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { employees } from '@/lib/db/schema';
 import { signAccessToken, signRefreshToken, apiOk, apiError } from '@/lib/utils/auth';
+import { kasirAuthLimiter } from '@/lib/utils/rate-limit';
 
 export const runtime = 'nodejs';
+
+function normalizeWordTokens(value: string): string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function isStrictNameMatch(inputName: string, dbName: string): boolean {
+  const cleanIn = inputName.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanDb = dbName.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!cleanIn || !cleanDb) return false;
+  if (cleanIn === cleanDb) return true;
+  if (cleanIn.length < Math.max(5, Math.floor(cleanDb.length * 0.55))) return false;
+  const inTokens = normalizeWordTokens(inputName);
+  const dbTokens = normalizeWordTokens(dbName);
+  return inTokens.length > 0 && inTokens.every((t) => dbTokens.includes(t));
+}
+
+function isStrictProdiMatch(inputProdi: string, dbProdi: string): boolean {
+  const stripDegree = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/^(s1|d3|d4|s2|prodi|program\s+studi)\s+/g, '')
+      .replace(/[^a-z0-9]/g, '');
+  const cleanIn = stripDegree(inputProdi);
+  const cleanDb = stripDegree(dbProdi);
+  return cleanIn.length >= 4 && cleanIn === cleanDb;
+}
 
 const setupPinSchema = z
   .object({
@@ -41,6 +72,14 @@ export async function POST(req: NextRequest) {
   }
 
   const { fullName, nim, programStudi, pin } = parsed.data;
+  const rateKey = `gudang-setup-pin:${nim}`;
+  const rateCheck = kasirAuthLimiter.check(rateKey, false);
+  if (!rateCheck.allowed) {
+    return apiError(
+      `Terlalu banyak percobaan. Tunggu ${Math.ceil(rateCheck.retryAfterSeconds / 60)} menit lagi.`,
+      429,
+    );
+  }
 
   // 1. Cari karyawan aktif berdasarkan NIM
   const employee = await db.query.employees.findFirst({
@@ -52,25 +91,31 @@ export async function POST(req: NextRequest) {
   });
 
   if (!employee) {
+    kasirAuthLimiter.check(rateKey, true);
     return apiError('Karyawan dengan NIM ini tidak ditemukan di sistem universitas.', 404);
   }
 
-  // 2. Verifikasi Nama Asli (Fuzzy case-insensitive comparison)
-  const cleanInputName = fullName.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const cleanDbName = employee.fullName.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-  if (!cleanDbName.includes(cleanInputName) && !cleanInputName.includes(cleanDbName)) {
+  // 1b. Zero-Trust Anti-Takeover: Tolak jika PIN sudah disetel (reset hanya oleh Manager)
+  if (employee.pinHash) {
+    kasirAuthLimiter.check(rateKey, true);
     return apiError(
-      'Nama Lengkap tidak cocok dengan data pendaftaran NIM ini. Harap gunakan nama asli resmi.',
+      'Akun ini sudah memiliki PIN aktif. Silakan login dengan PIN Anda, atau minta Manager mereset PIN jika lupa.',
+      409,
+    );
+  }
+
+  // 2. Verifikasi Nama Asli (strict full/token match, anti substring 2 huruf)
+  if (!isStrictNameMatch(fullName, employee.fullName)) {
+    kasirAuthLimiter.check(rateKey, true);
+    return apiError(
+      'Nama Lengkap tidak cocok dengan data pendaftaran NIM ini. Harap masukkan nama lengkap resmi Anda.',
       400,
     );
   }
 
-  // 3. Verifikasi Program Studi (case-insensitive substring)
-  const cleanInputProdi = programStudi.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const cleanDbProdi = employee.programStudi.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-  if (!cleanDbProdi.includes(cleanInputProdi) && !cleanInputProdi.includes(cleanDbProdi)) {
+  // 3. Verifikasi Program Studi (exact normalized match)
+  if (!isStrictProdiMatch(programStudi, employee.programStudi)) {
+    kasirAuthLimiter.check(rateKey, true);
     return apiError(
       'Program Studi tidak cocok dengan data pendaftaran universitas.',
       400,
@@ -81,8 +126,8 @@ export async function POST(req: NextRequest) {
   const hashedPin = await bcrypt.hash(pin, 12);
   const now = new Date();
 
-  // 5. Simpan PIN ke database & reset counter kegagalan
-  await db
+  // 5. Simpan PIN secara atomik hanya jika pinHash masih NULL
+  const [bound] = await db
     .update(employees)
     .set({
       pinHash: hashedPin,
@@ -90,7 +135,14 @@ export async function POST(req: NextRequest) {
       pinLockedUntil: null,
       updatedAt: now,
     })
-    .where(eq(employees.id, employee.id));
+    .where(and(eq(employees.id, employee.id), isNull(employees.pinHash)))
+    .returning({ id: employees.id });
+
+  if (!bound) {
+    return apiError('PIN baru saja disetel pada sesi lain. Silakan login menggunakan PIN tersebut.', 409);
+  }
+
+  kasirAuthLimiter.reset(rateKey);
 
   // 6. Terbitkan Sesi Login Otomatis
   const accessToken = await signAccessToken({

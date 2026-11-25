@@ -36,6 +36,8 @@ export type PeriodKey =
   | 'weekly'
   | 'monthly'
   | 'semi_annual'
+  | 'august'
+  | 'september'
   | 'october'
   | 'november'
   | 'oct_nov'
@@ -46,6 +48,8 @@ export const VALID_PERIOD_KEYS: readonly PeriodKey[] = [
   'weekly',
   'monthly',
   'semi_annual',
+  'august',
+  'september',
   'october',
   'november',
   'oct_nov',
@@ -149,7 +153,8 @@ export function resolveReportRange(input: {
     label = startDate === endDate ? formatId(startDate) : `${formatId(startDate)} s/d ${formatId(endDate)}`;
   } else {
     const [y, m] = today.split('-').map(Number);
-    // Tahun referensi Oktober/November: gunakan tahun berjalan mulai Oktober, atau tahun lalu bila masih Jan-Sep
+    // Tahun referensi Agustus/September & Oktober/November
+    const augSepYear = m >= 8 ? y : y - 1;
     const octNovYear = m >= 10 ? y : y - 1;
 
     switch (input.period ?? 'daily') {
@@ -179,6 +184,18 @@ export function resolveReportRange(input: {
         startDate = `${y}-${firstHalf ? '01-01' : '07-01'}`;
         endDate = `${y}-${firstHalf ? '06-30' : '12-31'}`;
         label = `${firstHalf ? 'Semester 1' : 'Semester 2'} ${y}`;
+        break;
+      }
+      case 'august': {
+        startDate = `${augSepYear}-08-01`;
+        endDate = `${augSepYear}-08-31`;
+        label = `Agustus ${augSepYear}`;
+        break;
+      }
+      case 'september': {
+        startDate = `${augSepYear}-09-01`;
+        endDate = `${augSepYear}-09-30`;
+        label = `September ${augSepYear}`;
         break;
       }
       case 'october': {
@@ -400,6 +417,7 @@ export function extractRoleFromNotes(
  * Pembeda nominal dalam 1 shift murni berdasarkan kehadiran dan ketepatan waktu.
  */
 export function getRoleWeight(_role: string): number {
+  void _role;
   return 1.0;
 }
 
@@ -515,92 +533,23 @@ function txBase(range: ReportRange) {
   );
 }
 
+/**
+ * @deprecated Migrasi data historis sudah selesai permanen di DB produksi.
+ * Dipertahankan sebagai no-op agar endpoint GET laporan murni read-only tanpa mutasi DB di cold start.
+ */
 export async function ensureFinancialDataIntegrity(): Promise<void> {
-  if (integrityEnsured) return;
-  try {
-    // 1. Nonaktifkan duplikat input manual biaya paten Rp 50.000 jika masih aktif
-    await db.execute(sql`
-      UPDATE public.operating_expenses
-      SET deleted_at = NOW()
-      WHERE id = '59939e14-c9be-43c9-9431-3b73c933ccfa'
-        AND deleted_at IS NULL
-    `);
-
-    // 2. Koreksi master produk dan snapshot item yang memiliki HPP > Harga Jual (anomali input)
-    await db.execute(sql`
-      UPDATE public.products
-      SET cost_price = ROUND(selling_price * 0.80)
-      WHERE cost_price > selling_price AND selling_price > 0
-    `);
-
-    const fixedItems = await db.execute(sql`
-      UPDATE public.transaction_items
-      SET cost_price_snapshot = ROUND(selling_price_snapshot * 0.80),
-          subtotal_cost = qty * ROUND(selling_price_snapshot * 0.80)
-      WHERE cost_price_snapshot > selling_price_snapshot
-      RETURNING transaction_id
-    `);
-    if (Array.isArray(fixedItems) && fixedItems.length > 0) {
-      await db.execute(sql`
-        UPDATE public.transactions t
-        SET total_cost = sub.sum_cost,
-            gross_profit = t.gross_amount - sub.sum_cost
-        FROM (
-          SELECT transaction_id, COALESCE(SUM(subtotal_cost), 0) AS sum_cost
-          FROM public.transaction_items
-          GROUP BY transaction_id
-        ) sub
-        WHERE t.id = sub.transaction_id
-          AND (t.total_cost <> sub.sum_cost OR t.gross_profit <> (t.gross_amount - sub.sum_cost))
-      `);
-    }
-
-    // 3. Satukan duplikat data karyawan Gita Aprilianingrum (Kasir -> Ketua UMKM / Admin Shift)
-    await db.execute(sql`
-      UPDATE public.shifts
-      SET employee_id = ${KETUA_UMKM_CANONICAL_ID}
-      WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
-    `);
-    await db.execute(sql`
-      DELETE FROM public.attendances a_dup
-      WHERE a_dup.employee_id = ${KETUA_UMKM_DUPLICATE_ID}
-        AND EXISTS (
-          SELECT 1 FROM public.attendances a_can
-          WHERE a_can.employee_id = ${KETUA_UMKM_CANONICAL_ID}
-            AND a_can.attendance_date = a_dup.attendance_date
-        )
-    `);
-    await db.execute(sql`
-      UPDATE public.attendances
-      SET employee_id = ${KETUA_UMKM_CANONICAL_ID}
-      WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
-    `);
-    await db.execute(sql`
-      DELETE FROM public.shift_schedules
-      WHERE employee_id = ${KETUA_UMKM_DUPLICATE_ID}
-    `);
-    await db.execute(sql`
-      DELETE FROM public.employees
-      WHERE id = ${KETUA_UMKM_DUPLICATE_ID}
-    `);
-
-    integrityEnsured = true;
-  } catch (err) {
-    console.warn('[finance/report] ensureFinancialDataIntegrity warning:', err);
-  }
+  return;
 }
 
-let integrityEnsured = false;
-
 export async function getFinancialReport(range: ReportRange): Promise<FinancialReport> {
-  await ensureFinancialDataIntegrity();
 
-  // 1) Transaksi: omzet, metode, void
+  // 1) Transaksi: omzet, metode, void + porsi legacy (transaksi tanpa baris transaction_payments)
+  const NO_PAYMENT_ROWS = sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = ${transactions.id})`;
   const [tx] = await db
     .select({
       omzet:       sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED}), 0)`,
-      omzetCash:   sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'CASH'), 0)`,
-      omzetQris:   sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'QRIS'), 0)`,
+      legacyCash:  sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'CASH' AND ${NO_PAYMENT_ROWS}), 0)`,
+      legacyQris:  sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'QRIS' AND ${NO_PAYMENT_ROWS}), 0)`,
       txCount:     sql<number>`COUNT(*) FILTER (WHERE ${COMPLETED})`,
       txCountCash: sql<number>`COUNT(*) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'CASH')`,
       txCountQris: sql<number>`COUNT(*) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'QRIS')`,
@@ -650,12 +599,12 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
   // 4) Rekap harian (3 query terkelompok, digabung di memori)
   const txDaily = await db
     .select({
-      day:       WIB_DAY_TX,
-      txCount:   sql<number>`COUNT(*) FILTER (WHERE ${COMPLETED})`,
-      voidCount: sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'VOID')`,
-      omzet:     sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED}), 0)`,
-      omzetCash: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'CASH'), 0)`,
-      omzetQris: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'QRIS'), 0)`,
+      day:        WIB_DAY_TX,
+      txCount:    sql<number>`COUNT(*) FILTER (WHERE ${COMPLETED})`,
+      voidCount:  sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'VOID')`,
+      omzet:      sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED}), 0)`,
+      legacyCash: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'CASH' AND ${NO_PAYMENT_ROWS}), 0)`,
+      legacyQris: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${COMPLETED} AND ${transactions.paymentMethod} = 'QRIS' AND ${NO_PAYMENT_ROWS}), 0)`,
     })
     .from(transactions)
     .where(txBase(range))
@@ -757,9 +706,9 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
   const alokasiGajiKaryawan   = Math.round((labaOperasionalBersih * PERSEN_BAGI_HASIL) / 100);
   const labaBersih            = money(labaKotor - alokasiGajiKaryawan - biaya);
 
-  const hasPayments = (num(paySummary?.omzetCash) + num(paySummary?.omzetQris)) > 0;
-  const omzetCash = hasPayments ? money(num(paySummary?.omzetCash)) : money(num(tx?.omzetCash));
-  const omzetQris = hasPayments ? money(num(paySummary?.omzetQris)) : money(num(tx?.omzetQris));
+  // Gabungkan rincian split payment (transaction_payments) + transaksi legacy tanpa baris payment
+  const omzetCash = money(num(paySummary?.omzetCash) + num(tx?.legacyCash));
+  const omzetQris = money(num(paySummary?.omzetQris) + num(tx?.legacyQris));
 
   const summary: FinancialSummary = {
     omzet,
@@ -800,13 +749,13 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
     r.txCount = num(t.txCount);
     r.voidCount = num(t.voidCount);
     r.omzet = money(num(t.omzet));
-    r.omzetCash = money(num(t.omzetCash));
-    r.omzetQris = money(num(t.omzetQris));
+    r.omzetCash = money(num(t.legacyCash));
+    r.omzetQris = money(num(t.legacyQris));
   }
   for (const p of payDaily) {
     const r = row(p.day);
-    r.omzetCash = money(num(p.omzetCash));
-    r.omzetQris = money(num(p.omzetQris));
+    r.omzetCash = money(r.omzetCash + num(p.omzetCash));
+    r.omzetQris = money(r.omzetQris + num(p.omzetQris));
   }
   for (const i of itemDaily) {
     const r = row(i.day);

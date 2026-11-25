@@ -493,24 +493,26 @@ export default function CashierRecapPage() {
                   </div>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--color-text)' }}>
-                      Estimasi Uang Fisik di Kotak
+                      {activeShift?.status === 'ACTIVE' ? 'Target Uang Fisik di Kotak (Blind Count)' : 'Estimasi Uang Fisik di Kotak'}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                      Modal Awal + Tunai − Kas Keluar + Kas Masuk
+                      {activeShift?.status === 'ACTIVE'
+                        ? 'Nominal target disembunyikan selama shift aktif — hitung uang fisik di kotak saat Tutup Shift'
+                        : 'Modal Awal + Tunai − Kas Keluar + Kas Masuk'}
                     </div>
                   </div>
                 </div>
                 <div style={{
-                  background: 'hsl(150 65% 88%)',
-                  border: '1px solid hsl(150 60% 62%)',
+                  background: activeShift?.status === 'ACTIVE' ? 'hsl(38 92% 92%)' : 'hsl(150 65% 88%)',
+                  border: activeShift?.status === 'ACTIVE' ? '1px solid hsl(38 78% 72%)' : '1px solid hsl(150 60% 62%)',
                   padding: '6px 14px',
                   borderRadius: 10,
-                  fontSize: 18,
+                  fontSize: activeShift?.status === 'ACTIVE' ? 13 : 18,
                   fontWeight: 900,
-                  color: 'hsl(150 85% 18%)',
+                  color: activeShift?.status === 'ACTIVE' ? 'hsl(28 84% 28%)' : 'hsl(150 85% 18%)',
                   fontVariantNumeric: 'tabular-nums',
                 }}>
-                  {rp(s.totalFisikLaci)}
+                  {activeShift?.status === 'ACTIVE' ? 'Terkunci (Shift Aktif)' : rp(s.totalFisikLaci)}
                 </div>
               </div>
 

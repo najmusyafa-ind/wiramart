@@ -12,7 +12,7 @@ import {
   stockReceiveDrafts,
   productConditionReports,
 } from '@/lib/db/schema';
-import { eq, and, gte, lte, sql, count, isNull } from 'drizzle-orm';
+import { eq, and, gte, lt, lte, sql, count, isNull } from 'drizzle-orm';
 import { getOffsetDateWib } from '@/lib/utils/helpers';
 import { resolveReportRange, getFinancialReport, wibToday } from '@/lib/finance/report';
 import { getLowStockThreshold } from '@/lib/services/operationalSettingsService';
@@ -133,6 +133,7 @@ export async function getManagerDashboardData() {
     .where(sql`${qrisReconciliations.reconDate} >= ${currentMonthStr + '-01'}`);
 
   const hasQrisIssue =
+    (qrisReconResult?.totalDays ?? 0) === 0 ||
     (qrisReconResult?.selisihCount ?? 0) > 0 ||
     (qrisReconResult?.pendingCount ?? 0) > 0;
 
@@ -141,6 +142,8 @@ export async function getManagerDashboardData() {
     qrisStatusText = `${qrisReconResult.selisihCount} Hari Selisih`;
   } else if ((qrisReconResult?.pendingCount ?? 0) > 0) {
     qrisStatusText = `${qrisReconResult.pendingCount} Belum Rekonsiliasi`;
+  } else if ((qrisReconResult?.totalDays ?? 0) === 0) {
+    qrisStatusText = 'Belum Rekonsiliasi';
   }
 
   const [pendingProposalsResult] = await db
@@ -150,8 +153,9 @@ export async function getManagerDashboardData() {
 
   const recentTransactions = await db.query.transactions.findMany({
     where: and(
+      eq(transactions.isTest, false),
       gte(transactions.createdAt, range.start),
-      lte(transactions.createdAt, range.endExclusive),
+      lt(transactions.createdAt, range.endExclusive),
     ),
     with: { employee: { columns: { fullName: true } } },
     orderBy: (t, { desc }) => [desc(t.createdAt)],
@@ -189,8 +193,9 @@ export async function getShiftDashboardData() {
       .from(transactions)
       .where(
         and(
+          eq(transactions.isTest, false),
           gte(transactions.createdAt, range.start),
-          lte(transactions.createdAt, range.endExclusive),
+          lt(transactions.createdAt, range.endExclusive),
           eq(transactions.status, 'COMPLETED'),
         ),
       ),

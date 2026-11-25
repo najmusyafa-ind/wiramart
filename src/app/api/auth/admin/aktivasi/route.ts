@@ -6,11 +6,12 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, or, isNull } from 'drizzle-orm';
+import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { admins } from '@/lib/db/schema';
-import { hashPassword } from '@/lib/utils/auth';
+import { getAdminSession, hashPassword } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
+import { adminAuthLimiter } from '@/lib/utils/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +32,35 @@ const registerSchema = z.object({
 );
 
 export async function POST(request: Request): Promise<Response> {
+  // Zero-Trust Guard: registrasi admin hanya boleh saat DB kosong (bootstrap) ATAU oleh MANAGER aktif
+  const [{ count: existingAdminCount }] = await db
+    .select({ count: sql<number>`COUNT(*)::int` })
+    .from(admins)
+    .where(isNull(admins.deletedAt));
+
+  if (existingAdminCount > 0) {
+    const session = await getAdminSession();
+    if (!session || session.adminRole !== 'MANAGER') {
+      return apiError(
+        'Pendaftaran akun pengelola baru terkunci. Hanya Manager (Dosen) aktif yang dapat menambahkan akun.',
+        'FORBIDDEN',
+        403,
+      );
+    }
+    const activeMgr = await db.query.admins.findFirst({
+      where: and(
+        eq(admins.id, session.sub),
+        eq(admins.role, 'MANAGER'),
+        eq(admins.isActive, true),
+        isNull(admins.deletedAt),
+      ),
+      columns: { id: true },
+    });
+    if (!activeMgr) {
+      return apiError('Sesi Manager tidak aktif.', 'FORBIDDEN', 403);
+    }
+  }
+
   let body: unknown;
   try { body = await request.json(); }
   catch { return apiError('Format tidak valid', 'INVALID_JSON', 400); }
@@ -41,6 +71,16 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const { nidn, fullName, password } = parsed.data;
+  const rateKey = `admin-aktivasi:${nidn}`;
+  const rateCheck = adminAuthLimiter.check(rateKey, false);
+  if (!rateCheck.allowed) {
+    return apiError(
+      `Terlalu banyak percobaan. Coba lagi dalam ${rateCheck.retryAfterSeconds} detik.`,
+      'RATE_LIMITED',
+      429,
+    );
+  }
+  adminAuthLimiter.check(rateKey, true);
 
   // Cek NIDN belum terdaftar
   const existing = await db.query.admins.findFirst({

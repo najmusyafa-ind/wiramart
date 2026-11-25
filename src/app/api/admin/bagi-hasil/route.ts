@@ -37,11 +37,8 @@ const BagiHasilQuerySchema = z.object({
 
 export async function GET(req: NextRequest): Promise<Response> {
   const session = await verifyJwt(req);
-  if (!session || session.role !== 'admin') {
-    return apiError('Akses ditolak. Khusus Admin/Manager.', 403);
-  }
-  if (session.adminRole !== 'MANAGER' && session.adminRole !== 'ADMIN_SHIFT') {
-    return apiError('Akses ditolak. Khusus Admin Shift atau Manager.', 403);
+  if (!session || session.role !== 'admin' || session.adminRole !== 'MANAGER') {
+    return apiError('Akses ditolak. Pembagian bagi hasil 50:50 khusus Manager (Dosen).', 403);
   }
 
   const { searchParams } = new URL(req.url);

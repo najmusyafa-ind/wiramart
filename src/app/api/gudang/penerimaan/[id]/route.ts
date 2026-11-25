@@ -45,8 +45,8 @@ export async function GET(req: NextRequest, context: Context) {
 // ── PATCH: Update Konten Draft Penerimaan Barang ───────────────
 export async function PATCH(req: NextRequest, context: Context) {
   const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'employee') {
-    return apiError('Forbidden: Hanya petugas toko / gudang yang dapat mengubah draft', 403);
+  if (!payload || (payload.role !== 'employee' && payload.role !== 'admin')) {
+    return apiError('Forbidden: Hanya petugas gudang / Admin Shift / Manager yang dapat mengubah draft', 403);
   }
 
   const { id } = await context.params;
@@ -56,7 +56,7 @@ export async function PATCH(req: NextRequest, context: Context) {
 
   try {
     const body = await req.json();
-    const updated = await updateStockReceiveDraft(id, payload.sub, body);
+    const updated = await updateStockReceiveDraft(id, payload.sub, body, payload.role);
     return apiOk(updated);
   } catch (error) {
     if (error instanceof ZodError) {

@@ -10,6 +10,8 @@ import { getBuyerSessionFromRequest } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 import { buyerUploadLimiter } from '@/lib/utils/rate-limit';
 import { expireDueOrders } from '@/features/order/pesanan.service';
+import { assertActiveBuyer } from '@/features/order/buyer.repository';
+import { toDurableProofRef } from '@/features/order/payment-proof';
 import { db } from '@/lib/db/client';
 import { onlineOrders } from '@/lib/db/schema';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -59,7 +61,9 @@ export async function POST(
   if (!UUID_RE.test(orderId)) return apiError('ID pesanan tidak valid', 'BAD_REQUEST', 400);
 
   try {
-    const rl = buyerUploadLimiter.check(`upload:${session.sub}`);
+    await assertActiveBuyer(session.sub);
+
+    const rl = buyerUploadLimiter.check(`upload:${session.sub}`, false);
     if (!rl.allowed) {
       throw new AppError('RATE_LIMITED', 'Batas upload 3x per jam sudah tercapai.', 429);
     }
@@ -112,16 +116,14 @@ export async function POST(
 
     if (uploadErr) throw new AppError('UPLOAD_FAILED', 'Gagal mengunggah file. Coba lagi.', 500);
 
-    // Buat signed URL 1 jam agar admin bisa preview
-    const { data: signed } = await supabase.storage
-      .from('payment-proofs')
-      .createSignedUrl(path, 3600);
-
-    // Simpan URL ke DB (hanya bila status masih WAITING_PAYMENT_VERIFICATION)
+    // Simpan path permanen (sign-on-read 2 jam setiap dibuka agar tidak hangus dalam 1 jam)
     await db
       .update(onlineOrders)
-      .set({ paymentProofUrl: signed?.signedUrl ?? path, updatedAt: new Date() })
+      .set({ paymentProofUrl: toDurableProofRef(path), updatedAt: new Date() })
       .where(and(eq(onlineOrders.id, orderId), eq(onlineOrders.status, 'WAITING_PAYMENT_VERIFICATION')));
+
+    // Kurangi kuota upload HANYA setelah upload berhasil (aman saat Wi-Fi kampus putus)
+    buyerUploadLimiter.check(`upload:${session.sub}`, true);
 
     return apiOk({ message: 'Bukti transfer berhasil diunggah.' });
   } catch (err) {

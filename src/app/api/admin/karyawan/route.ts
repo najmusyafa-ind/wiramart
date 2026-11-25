@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { employees, admins, shiftSchedules, shifts } from '@/lib/db/schema';
+import { employees, shiftSchedules, shifts } from '@/lib/db/schema';
 import { eq, and, isNull, or, ilike, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError, requireManager } from '@/lib/utils/auth';
 import { AppError } from '@/lib/utils/helpers';
@@ -63,7 +63,8 @@ export async function GET(req: NextRequest) {
           : undefined,
       ),
     )
-    .orderBy(employees.fullName);
+    .orderBy(employees.fullName)
+    .limit(500);
 
   // Kelompokkan shift per karyawan agar tidak ada baris duplikat di tabel admin
   type ShiftSlotInfo = { day: string; start: string; end: string; slotId: string };

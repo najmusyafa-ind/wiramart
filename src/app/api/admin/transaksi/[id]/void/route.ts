@@ -24,9 +24,10 @@
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq, and, sql, desc, inArray } from 'drizzle-orm';
+import { eq, and, sql, desc, inArray, gte, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
+  admins,
   transactions,
   transactionItems,
   products,
@@ -35,12 +36,15 @@ import {
   dailyClosings,
 } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/utils/auth';
-import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
+import { apiOk, apiError, AppError, getTodayWib } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
 
-// 24 jam dalam milidetik
-const VOID_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Manager: 24 jam | Admin Shift: 10 menit & maks 3x VOID per hari (anti-fraud retail)
+const VOID_WINDOW_MANAGER_MS = 24 * 60 * 60 * 1000;
+const VOID_WINDOW_ADMIN_SHIFT_MS = 10 * 60 * 1000;
+const ADMIN_SHIFT_MAX_VOIDS_PER_DAY = 3;
+const ADMIN_SHIFT_MIN_REASON_LEN = 10;
 
 const voidSchema = z.object({
   alasan: z
@@ -57,6 +61,20 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
   try {
     const session = await requireAdmin();
     const { id: transactionId } = await params;
+
+    // Verifikasi status aktif & role aktual admin di database (Zero-Trust)
+    const activeAdmin = await db.query.admins.findFirst({
+      where: and(
+        eq(admins.id, session.sub),
+        eq(admins.isActive, true),
+        isNull(admins.deletedAt),
+      ),
+      columns: { id: true, fullName: true, role: true },
+    });
+    if (!activeAdmin) {
+      return apiError('Akun pengelola tidak aktif atau telah dinonaktifkan.', 'FORBIDDEN', 403);
+    }
+    const isManager = activeAdmin.role === 'MANAGER';
 
     // Validasi UUID format
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -82,6 +100,13 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
     }
 
     const { alasan } = parsed.data;
+    if (!isManager && alasan.length < ADMIN_SHIFT_MIN_REASON_LEN) {
+      return apiError(
+        `Alasan void oleh Admin Shift wajib jelas (minimal ${ADMIN_SHIFT_MIN_REASON_LEN} karakter).`,
+        'VALIDATION_ERROR',
+        422,
+      );
+    }
 
     // ── Fetch transaksi + items (READ di luar tx) ────────────
     const trx = await db.query.transactions.findFirst({
@@ -115,15 +140,46 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
       );
     }
 
-    // ── Cek batas waktu 24 jam ───────────────────────────────
+    // ── Cek batas waktu (Manager: 24 jam | Admin Shift: 10 menit + kuota 3x/hari) ──
     const ageMs = Date.now() - new Date(trx.createdAt).getTime();
-    if (ageMs > VOID_WINDOW_MS) {
-      const hours = Math.floor(ageMs / 3600000);
-      return apiError(
-        `Transaksi sudah berumur ${hours} jam. Void hanya diizinkan dalam 24 jam pertama.`,
-        'VOID_WINDOW_EXPIRED',
-        422,
-      );
+    if (isManager) {
+      if (ageMs > VOID_WINDOW_MANAGER_MS) {
+        const hours = Math.floor(ageMs / 3600000);
+        return apiError(
+          `Transaksi sudah berumur ${hours} jam. Void hanya diizinkan dalam 24 jam pertama.`,
+          'VOID_WINDOW_EXPIRED',
+          422,
+        );
+      }
+    } else {
+      if (ageMs > VOID_WINDOW_ADMIN_SHIFT_MS) {
+        const mins = Math.floor(ageMs / 60000);
+        return apiError(
+          `Transaksi sudah berumur ${mins} menit. Batas VOID mandiri Admin Shift maksimal 10 menit (lewat 10 menit wajib oleh Manager).`,
+          'VOID_WINDOW_EXPIRED',
+          403,
+        );
+      }
+
+      const todayStartWib = new Date(`${getTodayWib()}T00:00:00+07:00`);
+      const [{ count: todayVoidCount }] = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(transactions)
+        .where(
+          and(
+            eq(transactions.status, 'VOID'),
+            eq(transactions.voidedByAdminId, activeAdmin.id),
+            gte(transactions.voidedAt, todayStartWib),
+          ),
+        );
+
+      if (todayVoidCount >= ADMIN_SHIFT_MAX_VOIDS_PER_DAY) {
+        return apiError(
+          `Kuota VOID mandiri Admin Shift hari ini sudah mencapai batas (${ADMIN_SHIFT_MAX_VOIDS_PER_DAY}x/hari). Hubungi Manager untuk pembatalan tambahan.`,
+          'VOID_DAILY_LIMIT',
+          429,
+        );
+      }
     }
 
     // ── Guard Tutup Buku (Fase 3 & Bagian 13 I2): Cek apakah tanggal transaksi sudah terkunci ──
@@ -178,6 +234,34 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
     );
 
     await db.transaction(async (tx) => {
+      // Step 0 (Admin Shift anti-TOCTOU): Lock baris admin & verifikasi ulang kuota 3x/hari secara atomik
+      if (!isManager) {
+        await tx
+          .select({ id: admins.id })
+          .from(admins)
+          .where(eq(admins.id, activeAdmin.id))
+          .for('update');
+
+        const todayStartWibTx = new Date(`${getTodayWib(now)}T00:00:00+07:00`);
+        const [{ count: lockedVoidCount }] = await tx
+          .select({ count: sql<number>`COUNT(*)::int` })
+          .from(transactions)
+          .where(
+            and(
+              eq(transactions.status, 'VOID'),
+              eq(transactions.voidedByAdminId, activeAdmin.id),
+              gte(transactions.voidedAt, todayStartWibTx),
+            ),
+          );
+        if (lockedVoidCount >= ADMIN_SHIFT_MAX_VOIDS_PER_DAY) {
+          throw new AppError(
+            'VOID_DAILY_LIMIT',
+            `Kuota VOID mandiri Admin Shift hari ini sudah mencapai batas (${ADMIN_SHIFT_MAX_VOIDS_PER_DAY}x/hari). Hubungi Manager untuk pembatalan tambahan.`,
+            429,
+          );
+        }
+      }
+
       // Step 1: Update status transaksi → VOID dengan guard WHERE status='COMPLETED'
       // Guard ini penting: jika dua admin menekan void bersamaan, hanya satu yang sukses.
       const updated = await tx
@@ -222,7 +306,8 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
           })
           .from(stockBatches)
           .where(eq(stockBatches.productId, item.productId))
-          .orderBy(desc(stockBatches.expiryDate), desc(stockBatches.createdAt));
+          .orderBy(desc(stockBatches.expiryDate), desc(stockBatches.createdAt))
+          .for('update');
 
         if (candidateBatches.length > 0) {
           let qtyToRestore = item.qty;
@@ -267,7 +352,9 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
         newValues:  JSON.stringify({
           status:          'VOID',
           voidReason:      alasan,
-          voidedByAdminId: session.sub,
+          voidedByAdminId: activeAdmin.id,
+          voidedByRole:    activeAdmin.role,
+          voidedByName:    activeAdmin.fullName,
           voidedAt:        now.toISOString(),
         }),
         actorType:  'ADMIN',

@@ -10,33 +10,10 @@ import { db } from '@/lib/db/client';
 import {
   shiftSwapRequests,
   shiftSchedules,
-  attendances,
   auditLogs,
 } from '@/lib/db/schema';
 
 export const SWAP_AUTO_APPROVE_GRACE_MS = 5 * 60 * 1000;
-
-const DAY_MAP: Record<string, number> = {
-  MINGGU: 0,
-  SENIN: 1,
-  SELASA: 2,
-  RABU: 3,
-  KAMIS: 4,
-  JUMAT: 5,
-  SABTU: 6,
-};
-
-function getNextDateForDay(dayOfWeek: string, baseDate: Date): string {
-  const dateStrWib = baseDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-  const [y, m, d] = dateStrWib.split('-').map(Number);
-  const dt = new Date(Date.UTC(y ?? 2026, (m ?? 1) - 1, d ?? 1));
-  const targetDay = DAY_MAP[dayOfWeek] ?? 1;
-  const currentDay = dt.getUTCDay();
-  let diff = targetDay - currentDay;
-  if (diff < 0) diff += 7;
-  dt.setUTCDate(dt.getUTCDate() + diff);
-  return dt.toISOString().slice(0, 10);
-}
 
 /**
  * Menyelesaikan pengajuan pindah shift ke SLOT KOSONG (peerEmployeeId IS NULL)
@@ -95,6 +72,8 @@ export async function finalizeExpiredEmptySlotSwaps(): Promise<number> {
           rejectReason = 'Auto-Checklist gagal: Slot asal sudah tidak aktif atau berubah kepemilikan.';
         } else if (!toSlot || !toSlot.isActive) {
           rejectReason = 'Auto-Checklist gagal: Slot tujuan sudah tidak aktif.';
+        } else if (toSlot.orderInSlot === 99) {
+          rejectReason = 'Auto-Checklist gagal: Slot Koordinator Dosen tidak dapat diambil untuk tukar shift.';
         } else if (toSlot.employeeId !== null) {
           rejectReason = 'Auto-Checklist gagal: Slot tujuan sudah terisi mahasiswa lain.';
         } else {
@@ -145,7 +124,7 @@ export async function finalizeExpiredEmptySlotSwaps(): Promise<number> {
           return;
         }
 
-        // LOLOS AUTO-CHECKLIST -> Pindahkan slot atomik + catat attendance PENGGANTI
+        // LOLOS AUTO-CHECKLIST -> Pindahkan slot atomik (tanpa pre-insert attendances masa depan agar tidak 409 saat absen hari H)
         await tx
           .update(shiftSchedules)
           .set({ employeeId: null, updatedAt: now })
@@ -155,32 +134,6 @@ export async function finalizeExpiredEmptySlotSwaps(): Promise<number> {
           .update(shiftSchedules)
           .set({ employeeId: swap.requesterId, updatedAt: now })
           .where(eq(shiftSchedules.id, swap.toScheduleId));
-
-        const targetToDate = getNextDateForDay(toSlot!.dayOfWeek, now);
-
-        await tx
-          .insert(attendances)
-          .values({
-            employeeId: swap.requesterId,
-            scheduleId: swap.toScheduleId,
-            attendanceDate: targetToDate,
-            status: 'PENGGANTI',
-            verificationSource: 'SWAP_APPROVED',
-            isSubstitute: true,
-            notes: `Pindah ke slot kosong ${toSlot!.dayOfWeek} ${toSlot!.slotStart}-${toSlot!.slotEnd} (Auto-ACC 5 menit)`,
-            fromSwapRequestId: swap.id,
-          })
-          .onConflictDoUpdate({
-            target: [attendances.employeeId, attendances.scheduleId, attendances.attendanceDate],
-            set: {
-              status: 'PENGGANTI',
-              verificationSource: 'SWAP_APPROVED',
-              isSubstitute: true,
-              notes: `Pindah ke slot kosong ${toSlot!.dayOfWeek} ${toSlot!.slotStart}-${toSlot!.slotEnd} (Auto-ACC 5 menit)`,
-              fromSwapRequestId: swap.id,
-              updatedAt: now,
-            },
-          });
 
         await tx
           .update(shiftSwapRequests)
@@ -202,7 +155,6 @@ export async function finalizeExpiredEmptySlotSwaps(): Promise<number> {
             tag: 'AUTO_APPROVED_5M',
             fromSchedule: swap.fromScheduleId,
             toSchedule: swap.toScheduleId,
-            targetToDate,
           }),
           actorType: 'SYSTEM',
           actorId: swap.requesterId,

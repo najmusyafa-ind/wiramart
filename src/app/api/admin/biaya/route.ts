@@ -38,6 +38,9 @@ const CreateSchema = z.object({
 export async function GET(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
+  if (payload.adminRole !== 'MANAGER') {
+    return apiError('Akses ditolak. Biaya operasional hanya untuk Manager (Dosen).', 403);
+  }
 
   const sp = new URL(req.url).searchParams;
   const rawPeriod = sp.get('period');
@@ -95,6 +98,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
+  if (payload.adminRole !== 'MANAGER') {
+    return apiError('Akses ditolak. Hanya Manager (Dosen) yang dapat mencatat biaya operasional.', 403);
+  }
   const adminId = payload.sub as string;
 
   let body: unknown;

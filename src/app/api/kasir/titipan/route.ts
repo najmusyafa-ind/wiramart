@@ -13,7 +13,7 @@
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
 import { NextRequest } from 'next/server';
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, ilike, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   admins,
@@ -283,11 +283,9 @@ export async function GET(req: NextRequest): Promise<Response> {
       ]);
 
       catalogProducts = prodRows.map((p) => {
-        const isConsignmentLike =
-          p.isPerishable ||
-          p.perishableType === 'KONSINYASI' ||
-          (p.categoryName ?? '').toLowerCase().includes('makanan') ||
-          (p.categoryName ?? '').toLowerCase().includes('basah');
+        // Zero-Trust HPP Guard: HANYA produk perishable (makanan harian/titipan) yang boleh menerima suggestedHargaSetor
+        // Kolom perishable_type ber-default 'KONSINYASI' di schema sehingga tidak boleh jadi syarat tunggal (cegah bocor HPP 300 SKU reguler)
+        const isConsignmentLike = p.isPerishable === true;
         return {
           id: p.id,
           name: p.name,
@@ -400,12 +398,11 @@ export async function POST(req: NextRequest): Promise<Response> {
       const shouldFillCost = Number(prod.costPrice) <= 0 && hargaSetor > 0;
 
       // 1. Tambah stok produk agar siap dijual di POS
+      // JANGAN menimpa isPerishable=true pada produk reguler (mencegah cron tengah malam mereset stok reguler jadi 0)
       await tx
         .update(products)
         .set({
           stockQty: qtyAfter,
-          isPerishable: true,
-          perishableType: 'KONSINYASI',
           ...(shouldFillCost ? { costPrice: hargaSetor.toString() } : {}),
           updatedAt: now,
         })
@@ -587,26 +584,45 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         throw new Error('Produk terkait tidak ditemukan.');
       }
 
-      // Hitung qty laku di POS pada tanggal titipan
+      // Hitung qty laku di POS pada tanggal titipan dikurangi qty yang sudah diklaim entri settled lain pada produk & hari sama (anti double-count)
       const startUtc = new Date(`${entry.entryDate}T00:00:00+07:00`);
       const endUtc = new Date(`${entry.entryDate}T23:59:59.999+07:00`);
-      const [soldRow] = await tx
-        .select({
-          qtySold: sql<number>`COALESCE(SUM(${transactionItems.qty}), 0)::int`,
-        })
-        .from(transactionItems)
-        .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
-        .where(
-          and(
-            eq(transactions.status, 'COMPLETED'),
-            eq(transactions.isTest, false),
-            eq(transactionItems.productId, entry.productId),
-            gte(transactions.createdAt, startUtc),
-            lte(transactions.createdAt, endUtc),
+      const [[soldRow], [alreadyClaimedRow]] = await Promise.all([
+        tx
+          .select({
+            qtySold: sql<number>`COALESCE(SUM(${transactionItems.qty}), 0)::int`,
+          })
+          .from(transactionItems)
+          .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
+          .where(
+            and(
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.isTest, false),
+              eq(transactionItems.productId, entry.productId),
+              gte(transactions.createdAt, startUtc),
+              lte(transactions.createdAt, endUtc),
+            ),
           ),
-        );
+        tx
+          .select({
+            claimed: sql<number>`COALESCE(SUM(${consignmentEntries.qtySoldPos}), 0)::int`,
+          })
+          .from(consignmentEntries)
+          .where(
+            and(
+              eq(consignmentEntries.entryDate, entry.entryDate),
+              eq(consignmentEntries.productId, entry.productId),
+              eq(consignmentEntries.status, 'SETTLED'),
+              sql`${consignmentEntries.id} <> ${entry.id}`,
+            ),
+          ),
+      ]);
 
-      const qtySoldPos = Number(soldRow?.qtySold ?? 0);
+      const remainingPosSold = Math.max(
+        0,
+        Number(soldRow?.qtySold ?? 0) - Number(alreadyClaimedRow?.claimed ?? 0),
+      );
+      const qtySoldPos = Math.min(entry.qtyInitial, remainingPosSold);
       const qtySoldPhysical = entry.qtyInitial - qtyRemaining;
       const qtyDiscrepancy = qtySoldPhysical - qtySoldPos;
       const hargaSetorNum = Number(entry.hargaSetor ?? 0);

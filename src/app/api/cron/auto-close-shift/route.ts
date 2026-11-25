@@ -316,7 +316,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             isNull(products.deletedAt),
             gt(products.stockQty, 0),
           ),
-        );
+        )
+        .limit(500);
 
       if (perishableList.length > 0) {
         // Cari admin aktif untuk audit record
@@ -381,14 +382,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       // PASS 4 gagal — tidak menghentikan respon cron
     }
 
+    // =========================================================================
+    // PASS 5: FINALISASI DRAFT PENERIMAAN GUDANG > 5 MENIT (Anti-stall jika tab ditutup)
+    // =========================================================================
+    let autoApprovedDrafts = 0;
+    try {
+      const { finalizeExpiredGudangDrafts } = await import('@/lib/services/stockReceiveService');
+      const resDrafts = await finalizeExpiredGudangDrafts();
+      autoApprovedDrafts = typeof resDrafts === 'number' ? resDrafts : 0;
+    } catch {
+      // PASS 5 gagal — tidak menghentikan respon cron
+    }
+
     return NextResponse.json({
       success: true,
-      message: `Cron selesai. Ditutup: ${closedCount}, Dilewati: ${skippedCount}, Auto-Absen: ${absenCount}, Sapu Makanan Harian: ${sweptPerishableCount}, Order Expired: ${expiredOrdersCount}.`,
+      message: `Cron selesai. Ditutup: ${closedCount}, Dilewati: ${skippedCount}, Auto-Absen: ${absenCount}, Sapu Makanan Harian: ${sweptPerishableCount}, Order Expired: ${expiredOrdersCount}, Auto-ACC Gudang: ${autoApprovedDrafts}.`,
       closedCount,
       skippedCount,
       absenCount,
       sweptPerishableCount,
       expiredOrdersCount,
+      autoApprovedDrafts,
       errors: errors.length > 0 ? errors : undefined,
       timestamp: nowWib.toISOString(),
     });

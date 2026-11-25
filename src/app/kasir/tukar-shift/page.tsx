@@ -163,12 +163,18 @@ export default function TukarShiftPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       });
-      const json = await res.json() as { success?: boolean; data?: { message?: string }; error?: string };
+      const json = await res.json() as { success?: boolean; data?: { message?: string }; error?: string | Record<string, string[]> };
       if (res.ok && json.success) {
         setToast({ msg: json.data?.message ?? 'Aksi berhasil disimpan.', ok: true });
         fetchAll();
       } else {
-        setToast({ msg: json.error ?? 'Gagal memproses aksi.', ok: false });
+        const errMsg =
+          typeof json.error === 'string'
+            ? json.error
+            : json.error && typeof json.error === 'object'
+              ? Object.values(json.error).flat().find(Boolean) ?? 'Gagal memproses aksi.'
+              : 'Gagal memproses aksi.';
+        setToast({ msg: errMsg, ok: false });
       }
     } catch {
       setToast({ msg: 'Kesalahan jaringan.', ok: false });
@@ -209,14 +215,20 @@ export default function TukarShiftPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fromScheduleId: fromId, toScheduleId: toId, reason: reason.trim() }),
       });
-      const json = await res.json() as { data?: { message: string }; error?: string };
+      const json = await res.json() as { data?: { message: string }; error?: string | Record<string, string[]> };
       if (res.ok) {
         setToast({ msg: json.data?.message ?? 'Pengajuan berhasil dikirim!', ok: true });
         setReason('');
         setToId('');
         void fetchAll();
       } else {
-        setToast({ msg: json.error ?? 'Gagal mengirim pengajuan.', ok: false });
+        const errMsg =
+          typeof json.error === 'string'
+            ? json.error
+            : json.error && typeof json.error === 'object'
+              ? Object.values(json.error).flat().find(Boolean) ?? 'Gagal mengirim pengajuan.'
+              : 'Gagal mengirim pengajuan.';
+        setToast({ msg: errMsg, ok: false });
       }
     } catch {
       setToast({ msg: 'Gagal terhubung ke server.', ok: false });

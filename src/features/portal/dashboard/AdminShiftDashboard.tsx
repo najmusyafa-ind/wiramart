@@ -24,6 +24,7 @@ import {
   Truck,
 } from 'lucide-react';
 import { getTodayWib } from '@/lib/utils/helpers';
+import ShiftMonitorWidget from './ShiftMonitorWidget';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -566,8 +567,8 @@ export default function AdminShiftDashboard({
             Anda Login sebagai Admin Shift (Koordinator Operasional)
           </div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2, lineHeight: 1.5 }}>
-            Akses terbatas pada: Produk, Pantau Gudang &amp; Stok, Karyawan, Jadwal, Absensi, dan Tukar Shift.
-            Persetujuan stok, restock barcode, &amp; data finansial hanya dapat diakses oleh Manajer / Dosen Pembina.
+            Akses operasional harian: Produk &amp; HPP, Persetujuan Barang Masuk, Nota Belanja, Jadwal, Absensi, Tukar Shift, Pantau Shift Pagi/Siang, serta VOID salah input (&le; 10 menit).
+            Pembagian bagi hasil 50:50, laba bersih, biaya operasional, &amp; pengaturan sistem dikunci khusus Manager (Dosen).
           </div>
         </div>
         {lastRefresh && (
@@ -607,7 +608,7 @@ export default function AdminShiftDashboard({
           icon={<ArrowLeftRight size={18} />}
           label="Tukar Shift Pending"
           value={summary.pendingSwaps > 0 ? `${summary.pendingSwaps} Menunggu` : 'Nihil'}
-          sub={summary.pendingSwaps > 0 ? 'Butuh persetujuan Dosen' : 'Tidak ada pengajuan'}
+          sub={summary.pendingSwaps > 0 ? 'Siap ditinjau Admin Shift' : 'Tidak ada pengajuan'}
           accentColor="hsl(38 92% 48%)"
           alertLevel={summary.pendingSwaps > 0 ? 'warn' : 'ok'}
         />
@@ -633,7 +634,7 @@ export default function AdminShiftDashboard({
         />
         <MiniStatCard
           icon={<Truck size={18} />}
-          label="Antrean Gudang (Dosen)"
+          label="Antrean Gudang"
           value={totalWarehouseQueue > 0 ? `${totalWarehouseQueue} Draft` : 'Nihil'}
           sub={`Masuk: ${pendingReceives} · Kondisi: ${pendingReports}`}
           accentColor="hsl(217 91% 55%)"
@@ -647,6 +648,9 @@ export default function AdminShiftDashboard({
           accentColor="hsl(270 80% 55%)"
         />
       </div>
+
+      {/* ── Pantauan Shift Pagi/Siang & Riwayat Transaksi (Model 2 + VOID 10 mnt) ── */}
+      <ShiftMonitorWidget />
 
       {/* ── Zona Aksi Cepat ── */}
       <div className="card" style={{ marginBottom: 'var(--space-6)' }}>

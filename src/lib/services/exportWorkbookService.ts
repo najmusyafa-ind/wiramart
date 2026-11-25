@@ -639,6 +639,8 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     lt(transactions.createdAt, range.endExclusive),
   );
 
+  const NO_PAYMENT_ROWS = sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = ${transactions.id})`;
+
   const cashierTxRows = await db
     .select({
       employeeId: transactions.employeeId,
@@ -647,8 +649,8 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
       txCount: sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'COMPLETED')`,
       voidCount: sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'VOID')`,
       omzet: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED'), 0)`,
-      omzetCashFallback: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.paymentMethod} = 'CASH'), 0)`,
-      omzetQrisFallback: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.paymentMethod} = 'QRIS'), 0)`,
+      legacyCash: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.paymentMethod} = 'CASH' AND ${NO_PAYMENT_ROWS}), 0)`,
+      legacyQris: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.paymentMethod} = 'QRIS' AND ${NO_PAYMENT_ROWS}), 0)`,
     })
     .from(transactions)
     .innerJoin(employees, eq(transactions.employeeId, employees.id))
@@ -685,8 +687,8 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     .map((c) => {
       const p = payByEmp.get(c.employeeId);
       const h = hppByEmp.get(c.employeeId);
-      const cash = p ? toNum(p.omzetCash) : toNum(c.omzetCashFallback);
-      const qris = p ? toNum(p.omzetQris) : toNum(c.omzetQrisFallback);
+      const cash = toNum(p?.omzetCash) + toNum(c.legacyCash);
+      const qris = toNum(p?.omzetQris) + toNum(c.legacyQris);
       const omzet = toNum(c.omzet);
       const hpp = toNum(h?.hppVerified);
       const laba = toNum(h?.salesVerified) - hpp;
@@ -711,8 +713,8 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
       txCount: sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'COMPLETED')`,
       voidCount: sql<number>`COUNT(*) FILTER (WHERE ${transactions.status} = 'VOID')`,
       omzet: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED'), 0)`,
-      cashFallback: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.paymentMethod} = 'CASH'), 0)`,
-      qrisFallback: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.paymentMethod} = 'QRIS'), 0)`,
+      legacyCash: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.paymentMethod} = 'CASH' AND ${NO_PAYMENT_ROWS}), 0)`,
+      legacyQris: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.status} = 'COMPLETED' AND ${transactions.paymentMethod} = 'QRIS' AND ${NO_PAYMENT_ROWS}), 0)`,
     })
     .from(transactions)
     .where(baseTxCond)
@@ -746,8 +748,8 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     .map((h) => {
       const p = hPayMap.get(h.hour);
       const hp = hHppMap.get(h.hour);
-      const cash = p ? toNum(p.omzetCash) : toNum(h.cashFallback);
-      const qris = p ? toNum(p.omzetQris) : toNum(h.qrisFallback);
+      const cash = toNum(p?.omzetCash) + toNum(h.legacyCash);
+      const qris = toNum(p?.omzetQris) + toNum(h.legacyQris);
       const omzet = toNum(h.omzet);
       const hpp = toNum(hp?.hppVerified);
       const laba = toNum(hp?.salesVerified) - hpp;
@@ -943,50 +945,53 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
   const shiftCashMoveMap = new Map<string, { cashIn: number; cashOut: number }>();
 
   if (shiftIds.length > 0) {
-    const sTxRows = await db
-      .select({
-        shiftId: transactions.shiftId,
-        txCount: sql<number>`COUNT(*)`,
-        cashFallback: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'CASH'), 0)`,
-        qrisFallback: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'QRIS'), 0)`,
-      })
-      .from(transactions)
-      .where(and(inArray(transactions.shiftId, shiftIds), eq(transactions.isTest, false), eq(transactions.status, 'COMPLETED')))
-      .groupBy(transactions.shiftId);
+    // Chunk per 500 ID agar aman dari batas parameter bind PostgreSQL pada periode panjang
+    for (const chunk of chunkArray(shiftIds, 500)) {
+      const [sTxRows, sPayRows, mvRows] = await Promise.all([
+        db
+          .select({
+            shiftId: transactions.shiftId,
+            txCount: sql<number>`COUNT(*)`,
+            legacyCash: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'CASH' AND ${NO_PAYMENT_ROWS}), 0)`,
+            legacyQris: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'QRIS' AND ${NO_PAYMENT_ROWS}), 0)`,
+          })
+          .from(transactions)
+          .where(and(inArray(transactions.shiftId, chunk), eq(transactions.isTest, false), eq(transactions.status, 'COMPLETED')))
+          .groupBy(transactions.shiftId),
+        db
+          .select({
+            shiftId: transactions.shiftId,
+            cash: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${transactionPayments.paymentMethod} = 'CASH'), 0)`,
+            qris: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${transactionPayments.paymentMethod} = 'QRIS'), 0)`,
+          })
+          .from(transactionPayments)
+          .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
+          .where(and(inArray(transactions.shiftId, chunk), eq(transactions.isTest, false), eq(transactions.status, 'COMPLETED')))
+          .groupBy(transactions.shiftId),
+        db
+          .select({
+            shiftId: shiftCashMovements.shiftId,
+            cashIn: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_IN'), 0)`,
+            cashOut: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_OUT'), 0)`,
+          })
+          .from(shiftCashMovements)
+          .where(inArray(shiftCashMovements.shiftId, chunk))
+          .groupBy(shiftCashMovements.shiftId),
+      ]);
 
-    const sPayRows = await db
-      .select({
-        shiftId: transactions.shiftId,
-        cash: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${transactionPayments.paymentMethod} = 'CASH'), 0)`,
-        qris: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${transactionPayments.paymentMethod} = 'QRIS'), 0)`,
-      })
-      .from(transactionPayments)
-      .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
-      .where(and(inArray(transactions.shiftId, shiftIds), eq(transactions.isTest, false), eq(transactions.status, 'COMPLETED')))
-      .groupBy(transactions.shiftId);
+      const sPayMap = new Map(sPayRows.map((r) => [r.shiftId, r]));
+      for (const st of sTxRows) {
+        const sp = sPayMap.get(st.shiftId);
+        shiftSalesMap.set(st.shiftId, {
+          cash: toNum(sp?.cash) + toNum(st.legacyCash),
+          qris: toNum(sp?.qris) + toNum(st.legacyQris),
+          txCount: toNum(st.txCount),
+        });
+      }
 
-    const sPayMap = new Map(sPayRows.map((r) => [r.shiftId, r]));
-    for (const st of sTxRows) {
-      const sp = sPayMap.get(st.shiftId);
-      shiftSalesMap.set(st.shiftId, {
-        cash: sp ? toNum(sp.cash) : toNum(st.cashFallback),
-        qris: sp ? toNum(sp.qris) : toNum(st.qrisFallback),
-        txCount: toNum(st.txCount),
-      });
-    }
-
-    const mvRows = await db
-      .select({
-        shiftId: shiftCashMovements.shiftId,
-        cashIn: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_IN'), 0)`,
-        cashOut: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_OUT'), 0)`,
-      })
-      .from(shiftCashMovements)
-      .where(inArray(shiftCashMovements.shiftId, shiftIds))
-      .groupBy(shiftCashMovements.shiftId);
-
-    for (const mv of mvRows) {
-      shiftCashMoveMap.set(mv.shiftId, { cashIn: toNum(mv.cashIn), cashOut: toNum(mv.cashOut) });
+      for (const mv of mvRows) {
+        shiftCashMoveMap.set(mv.shiftId, { cashIn: toNum(mv.cashIn), cashOut: toNum(mv.cashOut) });
+      }
     }
   }
 
@@ -1014,7 +1019,7 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
     for (const s of cleanShifts) {
       const sales = shiftSalesMap.get(s.id) ?? { cash: 0, qris: 0, txCount: 0 };
       const mv = shiftCashMoveMap.get(s.id) ?? { cashIn: 0, cashOut: 0 };
-      const modal = toNum(s.modalAwal);
+      const modal = s.modalAwal !== null && s.modalAwal !== undefined ? toNum(s.modalAwal) : 100_000;
       const actual = s.actualCash !== null ? toNum(s.actualCash) : 0;
       const expectedCash = modal + sales.cash + mv.cashIn - mv.cashOut;
       const diff = s.actualCash !== null ? actual - expectedCash : 0;
@@ -1598,7 +1603,7 @@ export async function buildBackupWorkbook(params: {
           fmtWibDateTime(s.clockIn),
           s.clockOut ? fmtWibDateTime(s.clockOut) : 'Masih Aktif',
           s.status,
-          toNum(s.modalAwal),
+          s.modalAwal !== null && s.modalAwal !== undefined ? toNum(s.modalAwal) : 100_000,
           s.actualCash !== null ? toNum(s.actualCash) : 0,
           s.serahTerimaDiff !== null ? toNum(s.serahTerimaDiff) : 0,
           [s.auditFlags, s.notes].filter(Boolean).join(' | '),

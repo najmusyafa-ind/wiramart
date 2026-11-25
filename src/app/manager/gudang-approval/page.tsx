@@ -24,7 +24,6 @@ import {
   Flame,
   Zap,
   Barcode,
-  Sparkles,
   Plus,
   Phone,
   MapPin,
@@ -35,6 +34,7 @@ import {
 
 import { formatRupiah, computeFefoDiscountedPrice } from '@/lib/utils/helpers';
 import LaporanMutasiStokSection from '@/features/portal/laporan/LaporanMutasiStokSection';
+import { useAdmin } from '@/features/portal/PortalLayoutClient';
 import {
   EXCEL_BORDER,
   EXCEL_FILL,
@@ -216,6 +216,7 @@ async function requestFefoReports(status: string, searchQuery: string, signal?: 
 }
 
 export default function GudangApprovalPage() {
+  const { isManager } = useAdmin();
   // Top Level Section Switch
   const [mainSection, setMainSection] = useState<'PENERIMAAN' | 'FEFO' | 'SUPPLIERS' | 'MUTASI'>('PENERIMAAN');
 
@@ -598,6 +599,7 @@ export default function GudangApprovalPage() {
   }
 
   useEffect(() => {
+    if (!isManager) return;
     const controller = new AbortController();
     requestModStatus(controller.signal)
       .then((today) => {
@@ -607,7 +609,7 @@ export default function GudangApprovalPage() {
       })
       .catch(() => { /* silent */ });
     return () => controller.abort();
-  }, []);
+  }, [isManager]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1117,16 +1119,18 @@ export default function GudangApprovalPage() {
           )}
         </button>
 
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mainSection === 'MUTASI'}
-          className={`rep-tab${mainSection === 'MUTASI' ? ' active' : ''}`}
-          onClick={() => setMainSection('MUTASI')}
-        >
-          <FileSpreadsheet size={16} />
-          <span>Mutasi Stok</span>
-        </button>
+        {isManager && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mainSection === 'MUTASI'}
+            className={`rep-tab${mainSection === 'MUTASI' ? ' active' : ''}`}
+            onClick={() => setMainSection('MUTASI')}
+          >
+            <FileSpreadsheet size={16} />
+            <span>Mutasi Stok</span>
+          </button>
+        )}
       </div>
 
 
@@ -2231,10 +2235,10 @@ export default function GudangApprovalPage() {
             </div>
           )}
         </div>
-      ) : (
+      ) : isManager ? (
         /* ── KONTEN LAPORAN MUTASI STOK (EXCEL SPREADSHEET HITAM PUTIH CLEAN) ── */
         <LaporanMutasiStokSection />
-      )}
+      ) : null}
 
       {/* ── MODAL KONFIRMASI AKSI MANAGER ── */}
       {actionType && selectedSub && (

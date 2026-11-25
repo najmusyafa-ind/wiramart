@@ -48,9 +48,14 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const { fullName, programStudi } = parsed.data;
-  const rlKey = `${fullName.toLowerCase()}:${programStudi.toLowerCase()}`;
+  const ip =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip')?.trim() ||
+    'unknown';
+  const rlKey = `ip:${ip}`;
+  const nameKey = `${fullName.toLowerCase()}:${programStudi.toLowerCase()}`;
 
-  if (!rl(rlKey)) {
+  if (!rl(rlKey) || !rl(nameKey)) {
     return apiError(
       'Terlalu banyak percobaan. Tunggu 10 menit sebelum mencoba lagi.',
       'RATE_LIMITED',
@@ -59,6 +64,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   recordAttempt(rlKey);
+  recordAttempt(nameKey);
 
   const employee = await db.query.employees.findFirst({
     where: and(

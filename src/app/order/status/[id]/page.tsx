@@ -55,6 +55,11 @@ interface ItemView {
   quantity: number;
   subtotal: number;
 }
+interface PaymentInfoView {
+  qrImageUrl: string | null;
+  merchantName: string;
+  storePhone: string | null;
+}
 
 const STATUS_UI: Record<Status, { label: string; hint: string; tone: '' | 'ok' | 'bad'; final: boolean }> = {
   WAITING_PAYMENT_VERIFICATION: { label: 'Menunggu Verifikasi Pembayaran', hint: 'Pengelola akan memverifikasi bukti pembayaran Anda.', tone: '', final: false },
@@ -77,6 +82,7 @@ export default function OrderStatusPage() {
   const router = useRouter();
   const [order, setOrder] = useState<OrderView | null>(null);
   const [items, setItems] = useState<ItemView[]>([]);
+  const [paymentInfo, setPaymentInfo] = useState<PaymentInfoView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -124,9 +130,16 @@ export default function OrderStatusPage() {
       }
       setOrder(json.data.order as OrderView);
       setItems(json.data.items as ItemView[]);
+      if (json.data.paymentInfo) {
+        setPaymentInfo(json.data.paymentInfo as PaymentInfoView);
+      }
       setError(null);
     } catch {
-      // gagal jaringan sesaat: pertahankan data terakhir, polling berikutnya mencoba lagi
+      // Jika load pertama gagal karena Wi-Fi putus, tampilkan error + tombol coba lagi (jangan spinner permanen)
+      setOrder((prev) => {
+        if (!prev) setError('Koneksi Wi-Fi terganggu saat memuat status pesanan. Coba muat ulang halaman.');
+        return prev;
+      });
     }
   }, [id, router]);
 
@@ -152,6 +165,8 @@ export default function OrderStatusPage() {
       }
       setConfirmCancel(false);
       await load(); // status terbaru (bisa jadi sudah dikonfirmasi admin)
+    } catch {
+      setActionError('Koneksi internet terganggu saat membatalkan pesanan. Coba lagi.');
     } finally {
       setCancelling(false);
     }
@@ -282,11 +297,28 @@ export default function OrderStatusPage() {
         )}
 
         {waitingPay && (
-          <div className="pwa-alert pwa-alert-info">
-            {order.paymentMethod === 'QRIS'
-              ? 'Bayar dengan scan QRIS di Wiramart (Lantai 1) sejumlah total pesanan. Pesanan kedaluwarsa dalam 2 jam.'
-              : `Transfer sejumlah ${rp(order.totalAmount)} dan cantumkan referensi ${order.paymentReference ?? order.orderNumber}. Pesanan kedaluwarsa dalam 2 jam.`}
-          </div>
+          <section className="pwa-section" aria-label="Instruksi pembayaran">
+            <div className="pwa-alert pwa-alert-info" style={{ margin: 0 }}>
+              {order.paymentMethod === 'QRIS'
+                ? `Bayar sejumlah ${rp(order.totalAmount)} dengan scan QRIS ${paymentInfo?.merchantName ?? 'Wiramart UNPERBA'} di bawah ini (atau di kasir Lantai 1). Pesanan kedaluwarsa dalam 2 jam.`
+                : `Transfer sejumlah ${rp(order.totalAmount)} ke rekening/QRIS resmi ${paymentInfo?.merchantName ?? 'Wiramart UNPERBA'} dengan berita/referensi ${order.paymentReference ?? order.orderNumber}, lalu unggah bukti di bawah.${paymentInfo?.storePhone ? ` Konfirmasi WA toko: ${paymentInfo.storePhone}.` : ''} Pesanan kedaluwarsa dalam 2 jam.`}
+            </div>
+            {paymentInfo?.qrImageUrl && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, marginTop: 10 }}>
+                <Image
+                  src={paymentInfo.qrImageUrl}
+                  alt={`QRIS ${paymentInfo.merchantName}`}
+                  width={220}
+                  height={220}
+                  unoptimized
+                  style={{ width: 200, height: 'auto', borderRadius: 10, border: '1px solid var(--pwa-border)', background: '#ffffff', padding: 6 }}
+                />
+                <span style={{ fontSize: 12, color: 'var(--pwa-text-muted)', fontWeight: 600 }}>
+                  {paymentInfo.merchantName}
+                </span>
+              </div>
+            )}
+          </section>
         )}
 
         {/* Upload Bukti Transfer untuk Metode TRANSFER */}

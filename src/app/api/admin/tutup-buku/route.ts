@@ -11,7 +11,7 @@
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq, and, gte, lt, sql, asc } from 'drizzle-orm';
+import { eq, and, gte, lt, sql, asc, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   dailyClosings,
@@ -96,60 +96,86 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     const activeShiftsCount = dayShifts.filter((sh) => sh.status === 'ACTIVE').length;
 
-    // 4. Hitung rincian per-shift dan total selisih kas fisik
+    // 4. Hitung rincian per-shift dan total selisih kas fisik (batch inArray — bebas N+1)
+    const shiftIds = dayShifts.map((sh) => sh.id);
+    const payByShift = new Map<string, { cash: number; qris: number; txCount: number }>();
+    const legacyByShift = new Map<string, { cash: number; qris: number; txCount: number }>();
+    const moveByShift = new Map<string, { cashIn: number; cashOut: number }>();
+
+    if (shiftIds.length > 0) {
+      const [payRows, legacyRows, moveRows] = await Promise.all([
+        db
+          .select({
+            shiftId: transactions.shiftId,
+            cash: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${transactionPayments.paymentMethod} = 'CASH'), 0)`,
+            qris: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${transactionPayments.paymentMethod} = 'QRIS'), 0)`,
+            txCount: sql<number>`COUNT(DISTINCT ${transactions.id})`,
+          })
+          .from(transactionPayments)
+          .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
+          .where(
+            and(
+              inArray(transactions.shiftId, shiftIds),
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.isTest, false),
+            ),
+          )
+          .groupBy(transactions.shiftId),
+        db
+          .select({
+            shiftId: transactions.shiftId,
+            cash: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'CASH'), 0)`,
+            qris: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'QRIS'), 0)`,
+            txCount: sql<number>`COUNT(*)`,
+          })
+          .from(transactions)
+          .where(
+            and(
+              inArray(transactions.shiftId, shiftIds),
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.isTest, false),
+              sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = ${transactions.id})`,
+            ),
+          )
+          .groupBy(transactions.shiftId),
+        db
+          .select({
+            shiftId: shiftCashMovements.shiftId,
+            cashIn: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_IN'), 0)`,
+            cashOut: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_OUT'), 0)`,
+          })
+          .from(shiftCashMovements)
+          .where(inArray(shiftCashMovements.shiftId, shiftIds))
+          .groupBy(shiftCashMovements.shiftId),
+      ]);
+
+      for (const r of payRows) {
+        payByShift.set(r.shiftId, { cash: Number(r.cash ?? 0), qris: Number(r.qris ?? 0), txCount: Number(r.txCount ?? 0) });
+      }
+      for (const r of legacyRows) {
+        legacyByShift.set(r.shiftId, { cash: Number(r.cash ?? 0), qris: Number(r.qris ?? 0), txCount: Number(r.txCount ?? 0) });
+      }
+      for (const r of moveRows) {
+        moveByShift.set(r.shiftId, { cashIn: Number(r.cashIn ?? 0), cashOut: Number(r.cashOut ?? 0) });
+      }
+    }
+
     const shiftDetailsList: ShiftDetailReport[] = [];
     let totalCashDiscrepancy = 0;
 
     for (const sh of dayShifts) {
-      // Penjualan per shift (Cash vs QRIS)
-      const [payRow] = await db
-        .select({
-          cash: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${transactionPayments.paymentMethod} = 'CASH'), 0)`,
-          qris: sql<string>`COALESCE(SUM(${transactionPayments.amount}) FILTER (WHERE ${transactionPayments.paymentMethod} = 'QRIS'), 0)`,
-          txCount: sql<number>`COUNT(DISTINCT ${transactions.id})`,
-        })
-        .from(transactionPayments)
-        .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
-        .where(
-          and(
-            eq(transactions.shiftId, sh.id),
-            eq(transactions.status, 'COMPLETED'),
-            eq(transactions.isTest, false),
-          ),
-        );
-
-      // Gerakan Kas / Petty Cash (CASH_IN vs CASH_OUT)
-      const [movements] = await db
-        .select({
-          cashIn: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_IN'), 0)`,
-          cashOut: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_OUT'), 0)`,
-        })
-        .from(shiftCashMovements)
-        .where(eq(shiftCashMovements.shiftId, sh.id));
-
-      // Direct cash sales legacy (jika baris transaksi belum masuk transaction_payments)
-      const [directPayRow] = await db
-        .select({
-          cash: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'CASH'), 0)`,
-        })
-        .from(transactions)
-        .where(
-          and(
-            eq(transactions.shiftId, sh.id),
-            eq(transactions.status, 'COMPLETED'),
-            eq(transactions.isTest, false),
-            sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = transactions.id)`,
-          ),
-        );
+      const payRow = payByShift.get(sh.id);
+      const directPayRow = legacyByShift.get(sh.id);
+      const movements = moveByShift.get(sh.id);
 
       // Modal Awal Fleksibel (Opsi A): mengikuti uang fisik awal di laci saat buka shift
       const rawModal = sh.modalAwal !== null && sh.modalAwal !== undefined ? Number(sh.modalAwal) : 100_000;
       const modal = Number.isFinite(rawModal) && rawModal >= 0 ? rawModal : 100_000;
-      const cashSales = Number(payRow?.cash ?? 0) + Number(directPayRow?.cash ?? 0);
-      const qrisSales = Number(payRow?.qris ?? 0);
-      const txCount = Number(payRow?.txCount ?? 0);
-      const cashIn = Number(movements?.cashIn ?? 0);
-      const cashOut = Number(movements?.cashOut ?? 0);
+      const cashSales = (payRow?.cash ?? 0) + (directPayRow?.cash ?? 0);
+      const qrisSales = (payRow?.qris ?? 0) + (directPayRow?.qris ?? 0);
+      const txCount = (payRow?.txCount ?? 0) + (directPayRow?.txCount ?? 0);
+      const cashIn = movements?.cashIn ?? 0;
+      const cashOut = movements?.cashOut ?? 0;
 
       // Expected Cash di laci = Modal Paten (100k) + Cash Sales + Kas Masuk - Kas Keluar (Titipan/Beli Lepas)
       const expectedCash = modal + cashSales + cashIn - cashOut;
@@ -217,6 +243,8 @@ export async function GET(req: NextRequest): Promise<Response> {
         omzetQris: s.omzetQris,
         hppTerjual: s.hppTerjual,
         labaKotor: s.labaKotor,
+        alokasiGajiKaryawan: s.alokasiGajiKaryawan,
+        persenBagiHasil: s.persenBagiHasil,
         biayaOperasional: s.biayaOperasional,
         labaBersih: s.labaBersih,
         totalCashDiscrepancy,
@@ -294,53 +322,65 @@ export async function POST(req: NextRequest): Promise<Response> {
       .where(and(gte(shifts.clockIn, range.start), lt(shifts.clockIn, range.endExclusive)));
 
     let totalCashDiscrepancy = 0;
-    for (const sh of dayShifts) {
-      if (sh.actualCash !== null) {
-        const [sales] = await db
+    const closedWithCash = dayShifts.filter((sh) => sh.actualCash !== null);
+    if (closedWithCash.length > 0) {
+      const closedIds = closedWithCash.map((sh) => sh.id);
+      const [payRows, legacyRows, moveRows] = await Promise.all([
+        db
           .select({
+            shiftId: transactions.shiftId,
             total: sql<string>`COALESCE(SUM(${transactionPayments.amount}), 0)`,
           })
           .from(transactionPayments)
           .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
           .where(
             and(
-              eq(transactions.shiftId, sh.id),
+              inArray(transactions.shiftId, closedIds),
               eq(transactions.status, 'COMPLETED'),
               eq(transactionPayments.paymentMethod, 'CASH'),
               eq(transactions.isTest, false),
             ),
-          );
-
-        const [movements] = await db
+          )
+          .groupBy(transactions.shiftId),
+        db
           .select({
-            cashIn: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_IN'), 0)`,
-            cashOut: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_OUT'), 0)`,
-          })
-          .from(shiftCashMovements)
-          .where(eq(shiftCashMovements.shiftId, sh.id));
-
-        const [directSales] = await db
-          .select({
+            shiftId: transactions.shiftId,
             total: sql<string>`COALESCE(SUM(${transactions.grossAmount}) FILTER (WHERE ${transactions.paymentMethod} = 'CASH'), 0)`,
           })
           .from(transactions)
           .where(
             and(
-              eq(transactions.shiftId, sh.id),
+              inArray(transactions.shiftId, closedIds),
               eq(transactions.status, 'COMPLETED'),
               eq(transactions.isTest, false),
-              sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = transactions.id)`,
+              sql`NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = ${transactions.id})`,
             ),
-          );
+          )
+          .groupBy(transactions.shiftId),
+        db
+          .select({
+            shiftId: shiftCashMovements.shiftId,
+            cashIn: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_IN'), 0)`,
+            cashOut: sql<string>`COALESCE(SUM(${shiftCashMovements.amount}) FILTER (WHERE ${shiftCashMovements.movementType} = 'CASH_OUT'), 0)`,
+          })
+          .from(shiftCashMovements)
+          .where(inArray(shiftCashMovements.shiftId, closedIds))
+          .groupBy(shiftCashMovements.shiftId),
+      ]);
 
+      const payMap = new Map(payRows.map((r) => [r.shiftId, Number(r.total ?? 0)]));
+      const legacyMap = new Map(legacyRows.map((r) => [r.shiftId, Number(r.total ?? 0)]));
+      const moveMap = new Map(
+        moveRows.map((r) => [r.shiftId, { cashIn: Number(r.cashIn ?? 0), cashOut: Number(r.cashOut ?? 0) }]),
+      );
+
+      for (const sh of closedWithCash) {
         const rawModal = sh.modalAwal !== null && sh.modalAwal !== undefined ? Number(sh.modalAwal) : 100_000;
         const modal = Number.isFinite(rawModal) && rawModal >= 0 ? rawModal : 100_000;
         const actual = Number(sh.actualCash);
-        const cashSales = Number(sales?.total ?? 0) + Number(directSales?.total ?? 0);
-        const cashIn = Number(movements?.cashIn ?? 0);
-        const cashOut = Number(movements?.cashOut ?? 0);
-        const expected = modal + cashSales + cashIn - cashOut;
-
+        const cashSales = (payMap.get(sh.id) ?? 0) + (legacyMap.get(sh.id) ?? 0);
+        const mv = moveMap.get(sh.id);
+        const expected = modal + cashSales + (mv?.cashIn ?? 0) - (mv?.cashOut ?? 0);
         totalCashDiscrepancy += actual - expected;
       }
     }

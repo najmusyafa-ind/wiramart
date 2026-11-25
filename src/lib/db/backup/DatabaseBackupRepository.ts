@@ -4,7 +4,7 @@
 // =============================================================
 
 import { createHash } from 'node:crypto';
-import type { Table } from 'drizzle-orm';
+import { getTableColumns, type Table } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import * as schema from '@/lib/db/schema';
 import {
@@ -15,22 +15,43 @@ import {
   type RestoreResultSummary,
 } from './backup.types';
 
-// Pemetaan nama string tabel ke Drizzle Schema Table Object
+// Pemetaan nama string tabel ke Drizzle Schema Table Object (35 tabel lengkap)
 const TABLE_SCHEMA_MAP: Record<BackupTableName, Table> = {
   admins: schema.admins,
+  audit_logs: schema.auditLogs,
   employees: schema.employees,
   categories: schema.categories,
+  suppliers: schema.suppliers,
+  buyers: schema.buyers,
+  qris_settings: schema.qrisSettings,
+  maintenance_settings: schema.maintenanceSettings,
+  operating_expenses: schema.operatingExpenses,
+  qris_reconciliations: schema.qrisReconciliations,
+  daily_closings: schema.dailyClosings,
+  manager_duty_log: schema.managerDutyLog,
   products: schema.products,
   shifts: schema.shifts,
   shift_schedules: schema.shiftSchedules,
   shift_swap_requests: schema.shiftSwapRequests,
   attendances: schema.attendances,
+  shift_cash_movements: schema.shiftCashMovements,
+  product_proposals: schema.productProposals,
+  stock_receive_drafts: schema.stockReceiveDrafts,
+  stock_receive_items: schema.stockReceiveItems,
+  stock_batches: schema.stockBatches,
+  stock_adjustments: schema.stockAdjustments,
+  product_condition_reports: schema.productConditionReports,
+  discount_policies: schema.discountPolicies,
+  discount_barcodes: schema.discountBarcodes,
   transactions: schema.transactions,
   transaction_items: schema.transactionItems,
-  stock_adjustments: schema.stockAdjustments,
-  qris_settings: schema.qrisSettings,
-  maintenance_settings: schema.maintenanceSettings,
-  audit_logs: schema.auditLogs,
+  transaction_payments: schema.transactionPayments,
+  transaction_logs: schema.transactionLogs,
+  online_orders: schema.onlineOrders,
+  online_order_items: schema.onlineOrderItems,
+  notification_logs: schema.notificationLogs,
+  consignment_entries: schema.consignmentEntries,
+  purchase_receipt_archives: schema.purchaseReceiptArchives,
 };
 
 /**
@@ -61,7 +82,7 @@ export function calculateDataChecksum(data: Record<string, unknown>): string {
 
 export class DatabaseBackupRepository {
   /**
-   * Mengambil snapshot seluruh data dari 14 tabel database dalam urutan topologis.
+   * Mengambil snapshot seluruh data dari 35 tabel database dalam urutan topologis.
    */
   public async extractFullDatabaseSnapshot(): Promise<{
     data: Record<string, Record<string, unknown>[]>;
@@ -130,10 +151,32 @@ export class DatabaseBackupRepository {
         }
 
         const tableObj = TABLE_SCHEMA_MAP[tableName];
-        const batches = chunkArray(rows, 150);
+        const tableCols = getTableColumns(tableObj);
+        const dateColKeys = Object.entries(tableCols)
+          .filter(([, col]) => col.dataType === 'date')
+          .map(([key]) => key);
+
+        const hydratedRows =
+          dateColKeys.length === 0
+            ? rows
+            : rows.map((row) => {
+                const copy: Record<string, unknown> = { ...row };
+                for (const key of dateColKeys) {
+                  const val = copy[key];
+                  if (typeof val === 'string' && val.length > 0) {
+                    const parsedDate = new Date(val);
+                    if (!Number.isNaN(parsedDate.getTime())) {
+                      copy[key] = parsedDate;
+                    }
+                  }
+                }
+                return copy;
+              });
+
+        const batches = chunkArray(hydratedRows, 150);
 
         for (const batch of batches) {
-          // Type casting safe: batch data sudah diverifikasi oleh Zod schema sebelumnya
+          // Type casting safe: batch data sudah diverifikasi oleh Zod schema & timestamp sudah dihidrasi ke Date
           await tx.insert(tableObj).values(batch as never);
         }
 

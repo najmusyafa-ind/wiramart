@@ -15,8 +15,9 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import { transactionLogs, employees } from '@/lib/db/schema';
-import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { addDays, wibToday } from '@/lib/finance/report';
 import { z } from 'zod';
 
 const QuerySchema = z.object({
@@ -51,17 +52,18 @@ export async function GET(req: NextRequest) {
   const { dateFrom, dateTo, outcome, employeeId, page, limit } = parsed.data;
 
   // Default range: 30 hari terakhir (WIB)
-  const now = new Date();
-  const defaultTo   = now.toISOString().slice(0, 10);
-  const defaultFrom = new Date(now.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
+  const defaultTo   = wibToday();
+  const defaultFrom = addDays(defaultTo, -30);
 
-  const fromTs = new Date(`${dateFrom ?? defaultFrom}T00:00:00+07:00`);
-  const toTs   = new Date(`${dateTo   ?? defaultTo  }T23:59:59+07:00`);
+  const effectiveFrom = dateFrom ?? defaultFrom;
+  const effectiveTo   = dateTo ?? defaultTo;
+  const fromTs        = new Date(`${effectiveFrom}T00:00:00+07:00`);
+  const toExclusiveTs = new Date(`${addDays(effectiveTo, 1)}T00:00:00+07:00`);
 
   // Build WHERE clauses
   const rangeWheres = [
     gte(transactionLogs.createdAt, fromTs),
-    lte(transactionLogs.createdAt, toTs),
+    lt(transactionLogs.createdAt, toExclusiveTs),
   ];
   if (employeeId) rangeWheres.push(eq(transactionLogs.employeeId, employeeId));
 

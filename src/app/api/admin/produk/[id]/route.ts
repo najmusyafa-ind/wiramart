@@ -12,8 +12,10 @@ import {
   stockBatches,
   stockAdjustments,
   admins,
+  auditLogs,
   discountPolicies,
   discountBarcodes,
+  productConditionReports,
 } from '@/lib/db/schema';
 import { eq, and, isNull, ne, gt, gte, asc, inArray, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
@@ -345,8 +347,40 @@ export async function DELETE(req: NextRequest, ctx: Context) {
     const now = new Date();
     await tx
       .update(products)
-      .set({ deletedAt: now, isActive: false, updatedAt: now })
+      .set({ deletedAt: now, isActive: false, stockQty: 0, updatedAt: now })
       .where(eq(products.id, id));
+
+    // Nolkan seluruh batch aktif & tutup alert FEFO yang masih terbuka agar tidak jadi orphan
+    const affectedBatches = await tx
+      .update(stockBatches)
+      .set({ currentQty: 0, updatedAt: now })
+      .where(and(eq(stockBatches.productId, id), gt(stockBatches.currentQty, 0)))
+      .returning({ id: stockBatches.id });
+
+    const allProductBatches =
+      affectedBatches.length > 0
+        ? affectedBatches
+        : await tx.select({ id: stockBatches.id }).from(stockBatches).where(eq(stockBatches.productId, id));
+
+    if (allProductBatches.length > 0) {
+      await tx
+        .update(productConditionReports)
+        .set({
+          status: 'EXECUTED',
+          executionNote: 'Ditutup otomatis karena produk dihapus (soft-delete) oleh admin.',
+          executedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            inArray(
+              productConditionReports.batchId,
+              allProductBatches.map((b) => b.id),
+            ),
+            inArray(productConditionReports.status, ['ALERT_ONLY', 'SUBMITTED', 'APPROVED']),
+          ),
+        );
+    }
 
     const productPolicies = await tx
       .select({ id: discountPolicies.id })
@@ -365,6 +399,15 @@ export async function DELETE(req: NextRequest, ctx: Context) {
         .set({ isActive: false, remainingQty: 0 })
         .where(and(inArray(discountBarcodes.policyId, policyIds), eq(discountBarcodes.isActive, true)));
     }
+
+    await tx.insert(auditLogs).values({
+      tableName: 'products',
+      recordId: id,
+      action: 'SOFT_DELETE',
+      newValues: JSON.stringify({ deletedByAdminId: activeAdmin.id, deletedAt: now.toISOString() }),
+      actorType: 'ADMIN',
+      actorId: activeAdmin.id,
+    });
 
     return true;
   });

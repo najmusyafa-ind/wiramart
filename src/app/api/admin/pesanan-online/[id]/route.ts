@@ -18,8 +18,10 @@ import {
   verifyPayment,
   assignCs,
   prosesOrder,
+  completePickupOrder,
+  cancelConfirmedOrder,
 } from '@/features/order/pesanan.service';
-import { OrderActionSchema, AssignCsSchema } from '@/features/order/order.types';
+import { OrderActionSchema, AssignCsSchema, PinVerifySchema } from '@/features/order/order.types';
 
 export const runtime = 'nodejs';
 
@@ -29,6 +31,8 @@ const BodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('reject') }).extend(OrderActionSchema.shape),
   z.object({ action: z.literal('assign-cs') }).extend(AssignCsSchema.shape),
   z.object({ action: z.literal('proses') }),
+  z.object({ action: z.literal('complete-pickup') }).extend(PinVerifySchema.shape),
+  z.object({ action: z.literal('cancel-confirmed'), flagBuyer: z.boolean().optional() }).extend(OrderActionSchema.shape),
 ]);
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -44,11 +48,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const body = parsed.data;
 
     switch (body.action) {
-      case 'verify':     return apiOk({ order: await verifyPayment(id, admin.sub) });
-      case 'confirm':    return apiOk({ order: await confirmOrder(id, admin.sub) });
-      case 'reject':     return apiOk({ order: await rejectOrder(id, admin.sub, body.reason) });
-      case 'assign-cs':  return apiOk({ order: await assignCs(id, body.csEmployeeId, admin.sub) });
-      case 'proses':     return apiOk({ order: await prosesOrder(id) });
+      case 'verify':           return apiOk({ order: await verifyPayment(id, admin.sub) });
+      case 'confirm':          return apiOk({ order: await confirmOrder(id, admin.sub) });
+      case 'reject':           return apiOk({ order: await rejectOrder(id, admin.sub, body.reason) });
+      case 'assign-cs':        return apiOk({ order: await assignCs(id, body.csEmployeeId, admin.sub) });
+      case 'proses':           return apiOk({ order: await prosesOrder(id) });
+      case 'complete-pickup':  return apiOk({ order: await completePickupOrder(id, body.pin) });
+      case 'cancel-confirmed': return apiOk({ order: await cancelConfirmedOrder(id, admin.sub, body.reason, Boolean(body.flagBuyer)) });
     }
   } catch (err) {
     if (err instanceof AppError) return apiError(err.message, err.code, err.statusCode);

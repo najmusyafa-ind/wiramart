@@ -37,6 +37,26 @@ export async function findBuyerById(id: string): Promise<Buyer | null> {
   return buyer ?? null;
 }
 
+/**
+ * Verifikasi Zero-Trust status buyer langsung ke DB (mencegah bypass cookie JWT 7 hari oleh akun diblokir/flagged).
+ */
+export async function assertActiveBuyer(id: string): Promise<Buyer> {
+  const buyer = await findBuyerById(id);
+  if (!buyer) {
+    throw new AppError('UNAUTHORIZED', 'Akun pembeli tidak ditemukan. Silakan login kembali.', 401);
+  }
+  if (!buyer.isActive || buyer.isFlagged) {
+    throw new AppError(
+      'BUYER_BLOCKED',
+      buyer.flaggedReason
+        ? `Akun Anda dibatasi sementara: ${buyer.flaggedReason}`
+        : 'Akun pembeli Anda sedang dibatasi sementara. Hubungi pengelola Wiramart.',
+      403,
+    );
+  }
+  return buyer;
+}
+
 // ── Write ─────────────────────────────────────────────────────
 
 /**

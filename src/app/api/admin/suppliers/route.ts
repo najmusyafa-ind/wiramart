@@ -62,7 +62,8 @@ export async function GET(req: NextRequest) {
       .from(suppliers)
       .leftJoin(admins, eq(suppliers.createdByAdminId, admins.id))
       .where(and(...conditions))
-      .orderBy(desc(suppliers.createdAt));
+      .orderBy(desc(suppliers.createdAt))
+      .limit(500);
 
     return apiOk(items);
   } catch (error) {

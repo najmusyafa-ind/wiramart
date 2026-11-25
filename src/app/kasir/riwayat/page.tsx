@@ -253,7 +253,13 @@ async function requestRiwayat(tgl: string, signal?: AbortSignal) {
   if (json.success) {
     return { status: 'ok' as const, data: json.data as RiwayatData };
   }
-  return { status: 'error' as const, error: (json.message as string | undefined) ?? 'Gagal memuat data.' };
+  const errText =
+    typeof json.error === 'string'
+      ? json.error
+      : typeof json.message === 'string'
+        ? json.message
+        : 'Gagal memuat data.';
+  return { status: 'error' as const, error: errText };
 }
 
 // ── Halaman Utama ────────────────────────────────────────────

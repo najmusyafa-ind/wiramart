@@ -10,7 +10,6 @@ import { db } from '@/lib/db/client';
 import {
   shiftSwapRequests,
   shiftSchedules,
-  attendances,
   auditLogs,
 } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
@@ -21,33 +20,6 @@ const reviewSchema = z.object({
   action:    z.enum(['APPROVE', 'REJECT'], { message: 'Action harus APPROVE atau REJECT' }),
   adminNote: z.string().max(500).trim().optional(),
 });
-
-const DAY_MAP: Record<string, number> = {
-  MINGGU: 0,
-  SENIN: 1,
-  SELASA: 2,
-  RABU: 3,
-  KAMIS: 4,
-  JUMAT: 5,
-  SABTU: 6,
-};
-
-function getNextDateForDay(dayOfWeek: string, baseDate: Date): string {
-  const dateStrWib = baseDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }); // 'YYYY-MM-DD'
-  const [y, m, d] = dateStrWib.split('-').map(Number);
-  const dt = new Date(Date.UTC(y ?? 2026, (m ?? 1) - 1, d ?? 1));
-
-  const targetDay = DAY_MAP[dayOfWeek] ?? 1;
-  const currentDay = dt.getUTCDay();
-
-  let diff = targetDay - currentDay;
-  if (diff < 0) {
-    diff += 7;
-  }
-
-  dt.setUTCDate(dt.getUTCDate() + diff);
-  return dt.toISOString().slice(0, 10);
-}
 
 export async function PATCH(
   req: NextRequest,
@@ -110,113 +82,93 @@ export async function PATCH(
     });
   }
 
-  // ── APPROVE: Atomik dalam 1 transaksi ────────────────────
-  // Langkah:
-  //   A. Update status swap request → APPROVED
-  //   B. Swap employeeId di kedua shiftSchedules
-  //   C. Upsert attendance PENGGANTI untuk requester & rekan di slot terkait per tanggal spesifik
-  //   D. Insert audit log
-  await db.transaction(async (tx) => {
-    // A. Update swap request
-    await tx
-      .update(shiftSwapRequests)
-      .set({
-        status:            'APPROVED',
-        reviewedByAdminId: session.sub,
-        reviewedAt:        now,
-        adminNote:         adminNote ?? null,
-        updatedAt:         now,
-      })
-      .where(eq(shiftSwapRequests.id, swapId));
-
-    // B1. fromSchedule: clear employeeId (atau assign ke pengganti jika ada)
-    // Jika toSchedule punya employeeId lain → pertukarkan
-    const toScheduleCurrentEmployeeId = swapReq.toSchedule.employeeId;
-
-    await tx
-      .update(shiftSchedules)
-      .set({
-        employeeId: toScheduleCurrentEmployeeId ?? null, // pindahkan pemilik lama ke slot lama
-        updatedAt:  now,
-      })
-      .where(eq(shiftSchedules.id, swapReq.fromScheduleId));
-
-    // B2. toSchedule: assign ke requester
-    await tx
-      .update(shiftSchedules)
-      .set({
-        employeeId: swapReq.requesterId,
-        updatedAt:  now,
-      })
-      .where(eq(shiftSchedules.id, swapReq.toScheduleId));
-
-    // Kalkulasi tanggal target aktual untuk masing-masing slot
-    const targetToDate = getNextDateForDay(swapReq.toSchedule.dayOfWeek, now);
-    const targetFromDate = getNextDateForDay(swapReq.fromSchedule.dayOfWeek, now);
-
-    // C1. Upsert attendance PENGGANTI untuk requester di slot baru
-    await tx
-      .insert(attendances)
-      .values({
-        employeeId:          swapReq.requesterId,
-        scheduleId:          swapReq.toScheduleId,
-        attendanceDate:      targetToDate,
-        status:              'PENGGANTI',
-        notes:               `Swap dari ${swapReq.fromSchedule.dayOfWeek} ${swapReq.fromSchedule.slotStart} — disetujui Admin`,
-        recordedByAdminId:   session.sub,
-        fromSwapRequestId:   swapId,
-      })
-      .onConflictDoUpdate({
-        target: [attendances.employeeId, attendances.scheduleId, attendances.attendanceDate],
-        set: {
-          status:            'PENGGANTI',
-          notes:             `Swap disetujui Admin ${now.toISOString()}`,
-          fromSwapRequestId: swapId,
-          updatedAt:         now,
-        },
-      });
-
-    // C2. Jika ada rekan (peer) yang ditukar ke slot asal, catat juga attendance PENGGANTI untuk rekan
-    if (toScheduleCurrentEmployeeId) {
-      await tx
-        .insert(attendances)
-        .values({
-          employeeId:          toScheduleCurrentEmployeeId,
-          scheduleId:          swapReq.fromScheduleId,
-          attendanceDate:      targetFromDate,
-          status:              'PENGGANTI',
-          notes:               `Swap ke ${swapReq.fromSchedule.dayOfWeek} ${swapReq.fromSchedule.slotStart} — disetujui Admin`,
-          recordedByAdminId:   session.sub,
-          fromSwapRequestId:   swapId,
+  // ── APPROVE: Atomik dalam 1 transaksi (FOR UPDATE anti double-approve, tanpa pre-insert attendances masa depan) ─
+  try {
+    await db.transaction(async (tx) => {
+      const [lockedSwap] = await tx
+        .select({
+          id: shiftSwapRequests.id,
+          status: shiftSwapRequests.status,
+          requesterId: shiftSwapRequests.requesterId,
+          fromScheduleId: shiftSwapRequests.fromScheduleId,
+          toScheduleId: shiftSwapRequests.toScheduleId,
         })
-        .onConflictDoUpdate({
-          target: [attendances.employeeId, attendances.scheduleId, attendances.attendanceDate],
-          set: {
-            status:            'PENGGANTI',
-            notes:             `Swap disetujui Admin ${now.toISOString()}`,
-            fromSwapRequestId: swapId,
-            updatedAt:         now,
-          },
-        });
-    }
+        .from(shiftSwapRequests)
+        .where(eq(shiftSwapRequests.id, swapId))
+        .for('update')
+        .limit(1);
 
-    // D. Audit log
-    await tx.insert(auditLogs).values({
-      tableName:  'shift_swap_requests',
-      recordId:   swapId,
-      action:     'UPDATE',
-      oldValues:  JSON.stringify({ status: 'PENDING' }),
-      newValues:  JSON.stringify({
-        status: 'APPROVED',
-        fromSchedule: swapReq.fromScheduleId,
-        toSchedule: swapReq.toScheduleId,
-        targetToDate,
-        targetFromDate,
-      }),
-      actorType:  'ADMIN',
-      actorId:    session.sub,
+      if (!lockedSwap || lockedSwap.status !== 'PENDING') {
+        throw new Error('SWAP_ALREADY_PROCESSED');
+      }
+
+      const [lockedTo] = await tx
+        .select({ id: shiftSchedules.id, employeeId: shiftSchedules.employeeId, orderInSlot: shiftSchedules.orderInSlot })
+        .from(shiftSchedules)
+        .where(eq(shiftSchedules.id, lockedSwap.toScheduleId))
+        .for('update')
+        .limit(1);
+
+      if (!lockedTo || lockedTo.orderInSlot === 99) {
+        throw new Error('SWAP_INVALID_SLOT');
+      }
+
+      // A. Update swap request secara atomik dengan guard PENDING
+      await tx
+        .update(shiftSwapRequests)
+        .set({
+          status:            'APPROVED',
+          reviewedByAdminId: session.sub,
+          reviewedAt:        now,
+          adminNote:         adminNote ?? null,
+          updatedAt:         now,
+        })
+        .where(and(eq(shiftSwapRequests.id, swapId), eq(shiftSwapRequests.status, 'PENDING')));
+
+      // B. Tukar employeeId di kedua shiftSchedules (gunakan nilai terkunci terbaru)
+      const toScheduleCurrentEmployeeId = lockedTo.employeeId;
+
+      await tx
+        .update(shiftSchedules)
+        .set({
+          employeeId: toScheduleCurrentEmployeeId ?? null,
+          updatedAt:  now,
+        })
+        .where(eq(shiftSchedules.id, lockedSwap.fromScheduleId));
+
+      await tx
+        .update(shiftSchedules)
+        .set({
+          employeeId: lockedSwap.requesterId,
+          updatedAt:  now,
+        })
+        .where(eq(shiftSchedules.id, lockedSwap.toScheduleId));
+
+      // C. Audit log (tidak melakukan pre-insert attendances agar pengganti tetap absen normal di hari H tanpa 409)
+      await tx.insert(auditLogs).values({
+        tableName:  'shift_swap_requests',
+        recordId:   swapId,
+        action:     'UPDATE',
+        oldValues:  JSON.stringify({ status: 'PENDING' }),
+        newValues:  JSON.stringify({
+          status: 'APPROVED',
+          fromSchedule: lockedSwap.fromScheduleId,
+          toSchedule: lockedSwap.toScheduleId,
+          swappedWithEmployeeId: toScheduleCurrentEmployeeId,
+        }),
+        actorType:  'ADMIN',
+        actorId:    session.sub,
+      });
     });
-  });
+  } catch (err) {
+    if (err instanceof Error && err.message === 'SWAP_ALREADY_PROCESSED') {
+      return apiError('Permintaan swap ini sudah diproses pada sesi lain.', 409);
+    }
+    if (err instanceof Error && err.message === 'SWAP_INVALID_SLOT') {
+      return apiError('Slot tujuan tidak valid atau merupakan slot Koordinator Dosen.', 422);
+    }
+    throw err;
+  }
 
   return apiOk({
     message: `Swap shift ${swapReq.requester.fullName} dari ${swapReq.fromSchedule.dayOfWeek} ke ${swapReq.toSchedule.dayOfWeek} berhasil disetujui dan jadwal telah dipertukarkan.`,

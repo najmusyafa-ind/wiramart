@@ -25,6 +25,7 @@ import {
   Users,
 } from 'lucide-react';
 import BagiHasilTab from './BagiHasilTab';
+import { useAdmin } from '@/features/portal/PortalLayoutClient';
 import {
   EXCEL_BORDER,
   EXCEL_FILL,
@@ -1183,7 +1184,8 @@ async function requestAttendanceData(
 
 // ─── Main Absensi Page Component ──────────────────────────────
 export default function AbsensiPage() {
-  // Navigation tab: 'absensi' vs 'bagi_hasil' (terbuka untuk Manager & Admin Shift)
+  const { isManager } = useAdmin();
+  // Navigation tab: 'absensi' (Admin Shift & Manager) vs 'bagi_hasil' (eksklusif Manager)
   const [activeTab, setActiveTab] = useState<'absensi' | 'bagi_hasil'>('absensi');
 
   // Sub-view in Absensi: 'summary' (Rekap Disiplin) vs 'logs' (Log Presensi)
@@ -1650,30 +1652,32 @@ export default function AbsensiPage() {
           <span>Absensi & Disiplin</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('bagi_hasil')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '8px 14px',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontWeight: 700,
-            fontSize: '0.84rem',
-            backgroundColor: activeTab === 'bagi_hasil' ? '#166534' : 'transparent',
-            color: activeTab === 'bagi_hasil' ? '#ffffff' : 'var(--color-text-secondary)',
-            transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
-          }}
-        >
-          <Award size={15} />
-          <span>Bagi Hasil 50:50</span>
-        </button>
+        {isManager && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('bagi_hasil')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '8px 14px',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: 700,
+              fontSize: '0.84rem',
+              backgroundColor: activeTab === 'bagi_hasil' ? '#166534' : 'transparent',
+              color: activeTab === 'bagi_hasil' ? '#ffffff' : 'var(--color-text-secondary)',
+              transition: 'background-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), color 0.15s cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+          >
+            <Award size={15} />
+            <span>Bagi Hasil 50:50</span>
+          </button>
+        )}
       </div>
 
-      {activeTab === 'bagi_hasil' ? (
+      {isManager && activeTab === 'bagi_hasil' ? (
         <BagiHasilTab />
       ) : (
         <>

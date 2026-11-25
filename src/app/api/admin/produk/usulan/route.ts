@@ -5,12 +5,22 @@
 // K2 & K8: HPP ditentukan Gudang/Admin, Harga Jual otomatis = HPP * (1 + margin%)
 // =============================================================
 
+import { randomInt } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/client';
-import { productProposals, products, categories, employees, qrisSettings } from '@/lib/db/schema';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import {
+  productProposals,
+  products,
+  categories,
+  employees,
+  qrisSettings,
+  stockBatches,
+  stockAdjustments,
+} from '@/lib/db/schema';
+import { eq, and, desc } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { getTodayWib } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
 
@@ -145,37 +155,82 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Dibulatkan ke atas kelipatan Rp 100 agar kasir mudah memberi kembalian
   const calculatedSelling = sellingPrice ?? Math.ceil((costPrice * (1 + globalMargin / 100)) / 100) * 100;
 
-  // Masukkan ke katalog produk resmi
-  const [newProduct] = await db
-    .insert(products)
-    .values({
-      name: proposal.name,
-      categoryId: proposal.categoryId,
-      barcode: proposal.barcode,
-      unit: proposal.unit,
-      photoUrl: proposal.photoUrl,
-      costPrice: String(costPrice),
-      sellingPrice: String(calculatedSelling),
-      stockQty: stockQty,
-      isActive: true,
-      createdByAdminId: adminId,
-    })
-    .returning({ id: products.id, name: products.name });
+  // Masukkan ke katalog produk resmi + batch awal + mutasi dalam 1 transaksi ACID (anti double-approve & jaga 3NF batch)
+  const compactDate = getTodayWib().replace(/-/g, '');
+  const now = new Date();
+  const txOutcome = await db.transaction(async (tx) => {
+    const [lockedProposal] = await tx
+      .select({ id: productProposals.id, status: productProposals.status })
+      .from(productProposals)
+      .where(and(eq(productProposals.id, proposalId), eq(productProposals.status, 'PENDING')))
+      .for('update')
+      .limit(1);
 
-  // Update proposal jadi APPROVED
-  await db
-    .update(productProposals)
-    .set({
-      status: 'APPROVED',
-      approvedProductId: newProduct.id,
-      adminNote: adminNote ?? `Disetujui. HPP: Rp ${costPrice.toLocaleString('id-ID')}, Harga Jual: Rp ${calculatedSelling.toLocaleString('id-ID')}`,
-      reviewedByAdminId: adminId,
-      updatedAt: new Date(),
-    })
-    .where(eq(productProposals.id, proposalId));
+    if (!lockedProposal) return null;
+
+    const [createdProduct] = await tx
+      .insert(products)
+      .values({
+        name: proposal.name,
+        categoryId: proposal.categoryId,
+        barcode: proposal.barcode,
+        unit: proposal.unit,
+        photoUrl: proposal.photoUrl,
+        costPrice: String(costPrice),
+        sellingPrice: String(calculatedSelling),
+        stockQty,
+        isActive: true,
+        createdByAdminId: adminId,
+      })
+      .returning({ id: products.id, name: products.name });
+
+    if (stockQty > 0) {
+      const [initialBatch] = await tx
+        .insert(stockBatches)
+        .values({
+          productId: createdProduct.id,
+          batchCode: `USUL-${compactDate}-${randomInt(1000, 9999)}`,
+          costPrice: String(costPrice),
+          initialQty: stockQty,
+          currentQty: stockQty,
+          expiryDate: null,
+          expiryClass: 'PANJANG',
+          notes: `Stok awal dari persetujuan usulan produk kasir`,
+        })
+        .returning({ id: stockBatches.id });
+
+      await tx.insert(stockAdjustments).values({
+        productId: createdProduct.id,
+        batchId: initialBatch?.id ?? null,
+        qtyBefore: 0,
+        qtyAfter: stockQty,
+        qtyDiff: stockQty,
+        reason: `Stok awal usulan produk "${createdProduct.name}" disetujui`,
+        adjustedByAdminId: adminId,
+        createdAt: now,
+      });
+    }
+
+    await tx
+      .update(productProposals)
+      .set({
+        status: 'APPROVED',
+        approvedProductId: createdProduct.id,
+        adminNote: adminNote ?? `Disetujui. HPP: Rp ${costPrice.toLocaleString('id-ID')}, Harga Jual: Rp ${calculatedSelling.toLocaleString('id-ID')}`,
+        reviewedByAdminId: adminId,
+        updatedAt: now,
+      })
+      .where(eq(productProposals.id, proposalId));
+
+    return createdProduct;
+  });
+
+  if (!txOutcome) {
+    return apiError('Usulan produk ini sudah diproses pada permintaan lain.', 409);
+  }
 
   return apiOk({
-    message: `Produk "${newProduct.name}" berhasil disetujui dan dirilis ke katalog kasir!`,
-    product: newProduct,
+    message: `Produk "${txOutcome.name}" berhasil disetujui dan dirilis ke katalog kasir!`,
+    product: txOutcome,
   });
 }

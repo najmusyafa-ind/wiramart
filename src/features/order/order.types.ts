@@ -29,10 +29,13 @@ export const BuyerRegisterSchema = z.object({
     .string()
     .trim()
     .regex(/^\d{8,15}$/, 'NIM harus 8-15 digit angka'),
-  whatsapp: z
-    .string()
-    .trim()
-    .regex(/^(08|628)\d{8,12}$/, 'Format WA tidak valid (contoh: 08123456789 atau 628123456789)'),
+  whatsapp: z.preprocess(
+    (v) => (typeof v === 'string' ? normalizeWhatsapp(v) : v),
+    z
+      .string()
+      .trim()
+      .regex(/^(08|628)\d{8,12}$/, 'Format WA tidak valid (contoh: 08123456789 atau +62 812-3456-789)'),
+  ),
 });
 
 export const BuyerLoginSchema = z.object({
@@ -162,12 +165,10 @@ export function calculateDeliveryFee(
  * Jika collision: DB UNIQUE constraint akan catch dan caller harus retry.
  */
 export function generateOrderNumber(): string {
-  const now = new Date();
-  const date = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, '0'),
-    String(now.getDate()).padStart(2, '0'),
-  ].join('');
+  // Gunakan tanggal WIB (Asia/Jakarta) agar pukul 00:00–06:59 WIB tidak tercatat tanggal kemarin
+  const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' })
+    .format(new Date())
+    .replace(/-/g, '');
   const random = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digit
   return `WM-${date}-${random}`;
 }

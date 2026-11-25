@@ -10,7 +10,10 @@
 
 import { db } from '@/lib/db/client';
 import {
+  admins,
+  auditLogs,
   products,
+  shifts,
   stockBatches,
   discountPolicies,
   discountBarcodes,
@@ -18,12 +21,16 @@ import {
   onlineOrders,
   onlineOrderItems,
   employees,
+  transactions,
+  transactionItems,
+  transactionPayments,
   type OnlineOrder,
   type OnlineOrderItem,
 } from '@/lib/db/schema';
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { AppError, getTodayWib } from '@/lib/utils/helpers';
 import { generateHandoverPin } from './order.types';
+import { resolvePaymentProofUrl } from './payment-proof';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type OrderStatus = OnlineOrder['status'];
@@ -35,8 +42,8 @@ const WAITING_STATUSES = ['WAITING_PAYMENT_VERIFICATION', 'WAITING_CONFIRMATION'
 const ALLOWED: Record<OrderStatus, readonly OrderStatus[]> = {
   WAITING_PAYMENT_VERIFICATION: ['WAITING_CONFIRMATION', 'REJECTED', 'EXPIRED', 'CANCELLED'],
   WAITING_CONFIRMATION: ['CONFIRMED', 'REJECTED', 'EXPIRED', 'CANCELLED'],
-  CONFIRMED: ['PREPARING', 'CANCELLED'],
-  PREPARING: ['OUT_FOR_DELIVERY'],
+  CONFIRMED: ['PREPARING', 'COMPLETED', 'CANCELLED'],
+  PREPARING: ['OUT_FOR_DELIVERY', 'COMPLETED', 'CANCELLED'],
   OUT_FOR_DELIVERY: ['COMPLETED', 'CANCELLED'],
   COMPLETED: [],
   CANCELLED: [],
@@ -312,6 +319,7 @@ export async function confirmOrder(orderId: string, adminId: string): Promise<On
       .select({
         id: products.id,
         name: products.name,
+        costPrice: products.costPrice,
         stockQty: products.stockQty,
         isActive: products.isActive,
         deletedAt: products.deletedAt,
@@ -344,6 +352,105 @@ export async function confirmOrder(orderId: string, adminId: string): Promise<On
         .returning({ id: products.id });
       if (!updatedProd) {
         throw new AppError('INSUFFICIENT_STOCK', `Stok "${p.name}" tidak cukup.`, 422);
+      }
+    }
+
+    // ── Opsi A Single Source of Truth: Catat ke buku besar `transactions` (ACID) ──
+    // Memastikan omzet, HPP, laba, bagi hasil 50:50, Rekonsiliasi QRIS, & Tutup Buku 100% sinkron dengan stok terpotong.
+    const existingLedgerTx = await tx
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(eq(transactions.invoiceNumber, order.orderNumber))
+      .limit(1);
+
+    if (existingLedgerTx.length === 0) {
+      // Tentukan shift aktif hari ini (jika ada) & employeeId yang valid
+      const todayStartWib = new Date(`${getTodayWib()}T00:00:00+07:00`);
+      const [activeShift] = await tx
+        .select({ id: shifts.id, employeeId: shifts.employeeId })
+        .from(shifts)
+        .where(and(eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut), gte(shifts.clockIn, todayStartWib)))
+        .orderBy(desc(shifts.clockIn))
+        .limit(1);
+
+      let txEmployeeId = activeShift?.employeeId ?? null;
+      if (!txEmployeeId) {
+        const [adm] = await tx
+          .select({ nidn: admins.nidn })
+          .from(admins)
+          .where(eq(admins.id, adminId))
+          .limit(1);
+        if (adm) {
+          const [matchedEmp] = await tx
+            .select({ id: employees.id })
+            .from(employees)
+            .where(and(eq(employees.nim, adm.nidn), isNull(employees.deletedAt)))
+            .limit(1);
+          txEmployeeId = matchedEmp?.id ?? null;
+        }
+      }
+      if (!txEmployeeId) {
+        const [fallbackEmp] = await tx
+          .select({ id: employees.id })
+          .from(employees)
+          .where(and(eq(employees.isActive, true), isNull(employees.deletedAt)))
+          .limit(1);
+        txEmployeeId = fallbackEmp?.id ?? null;
+      }
+
+      if (txEmployeeId) {
+        // 3NF invariant: gross_amount header == SUM(transaction_items.subtotal_sell)
+        let merchandiseGross = 0;
+        let merchandiseHpp = 0;
+        const ledgerItems = items.map((it) => {
+          const prod = byId.get(it.productId);
+          const costPerUnit = Math.max(0, Number(prod?.costPrice ?? 0));
+          const subSell = it.subtotal;
+          const subCost = Math.round(costPerUnit * it.quantity);
+          merchandiseGross += subSell;
+          merchandiseHpp += subCost;
+          return {
+            productId: it.productId,
+            productNameSnapshot: it.productName,
+            costPriceSnapshot: costPerUnit.toFixed(2),
+            sellingPriceSnapshot: it.sellingPrice.toFixed(2),
+            qty: it.quantity,
+            subtotalCost: subCost.toFixed(2),
+            subtotalSell: subSell.toFixed(2),
+          };
+        });
+
+        const [createdTx] = await tx
+          .insert(transactions)
+          .values({
+            invoiceNumber: order.orderNumber,
+            shiftId: activeShift?.id ?? null,
+            employeeId: txEmployeeId,
+            paymentMethod: 'QRIS',
+            grossAmount: merchandiseGross.toFixed(2),
+            totalHpp: merchandiseHpp.toFixed(2),
+            grossProfit: (merchandiseGross - merchandiseHpp).toFixed(2),
+            status: 'COMPLETED',
+            isTest: false,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({ id: transactions.id });
+
+        if (createdTx) {
+          await tx.insert(transactionItems).values(
+            ledgerItems.map((li) => ({
+              transactionId: createdTx.id,
+              ...li,
+            })),
+          );
+          await tx.insert(transactionPayments).values({
+            transactionId: createdTx.id,
+            paymentMethod: 'QRIS',
+            amount: merchandiseGross.toFixed(2),
+            createdAt: now,
+          });
+        }
       }
     }
 
@@ -464,8 +571,13 @@ export async function listOrdersForAdmin(statuses: OrderStatus[] | null, limit =
     grouped.set(it.orderId, list);
   }
 
-  return rows.map((r) => ({
+  const resolvedProofs = await Promise.all(
+    rows.map((r) => resolvePaymentProofUrl(r.order.paymentProofUrl)),
+  );
+
+  return rows.map((r, idx) => ({
     ...r.order,
+    paymentProofUrl: resolvedProofs[idx] ?? null,
     buyerName: r.buyerName,
     buyerNim: r.buyerNim,
     buyerWhatsapp: r.buyerWhatsapp,
@@ -528,6 +640,166 @@ export async function prosesOrder(orderId: string): Promise<OnlineOrder> {
       .set({ status: 'PREPARING', updatedAt: now })
       .where(eq(onlineOrders.id, orderId))
       .returning();
+    return updated!;
+  });
+}
+
+/**
+ * Admin menyelesaikan pesanan PICKUP (ambil sendiri di toko) dengan verifikasi PIN 6-digit pembeli.
+ * Menutup dead-end PICKUP pada status CONFIRMED / PREPARING → COMPLETED.
+ */
+export async function completePickupOrder(
+  orderId: string,
+  pin: string,
+): Promise<OnlineOrder> {
+  const cleanPin = pin.trim();
+  if (!/^\d{6}$/.test(cleanPin)) {
+    throw new AppError('VALIDATION_ERROR', 'PIN serah terima harus tepat 6 digit angka.', 422);
+  }
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    const order = await lockOrder(tx, orderId);
+    if (order.deliveryType !== 'PICKUP') {
+      throw new AppError('INVALID_TYPE', 'Verifikasi ini khusus untuk pesanan Ambil Sendiri (PICKUP).', 400);
+    }
+    assertTransition(order.status, 'COMPLETED');
+    if (order.handoverPin !== cleanPin) {
+      throw new AppError('INVALID_PIN', 'PIN serah terima tidak cocok. Minta pembeli menunjukkan PIN 6-digit di HP.', 422);
+    }
+    const [updated] = await tx
+      .update(onlineOrders)
+      .set({
+        status: 'COMPLETED',
+        handoverConfirmedAt: now,
+        completedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(onlineOrders.id, orderId))
+      .returning();
+    return updated!;
+  });
+}
+
+/**
+ * Admin membatalkan pesanan pasca-CONFIRMED (termasuk kasus 2x No-Show):
+ * - Memulihkan products.stockQty + stock_batches (Reverse FEFO) secara atomik
+ * - Mem-VOID transaksi buku besar terkait (invoiceNumber = order.orderNumber)
+ * - Opsional mem-flag/memblokir buyer (otomatis jika noShowCount >= 2 atau shouldFlagBuyer = true)
+ */
+export async function cancelConfirmedOrder(
+  orderId: string,
+  adminId: string,
+  reason: string,
+  shouldFlagBuyer = false,
+): Promise<OnlineOrder> {
+  const now = new Date();
+  return db.transaction(async (tx) => {
+    const order = await lockOrder(tx, orderId);
+    if (!['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY'].includes(order.status)) {
+      throw new AppError(
+        'INVALID_TRANSITION',
+        `Pembatalan pasca-konfirmasi hanya untuk status CONFIRMED/PREPARING/OUT_FOR_DELIVERY (saat ini: ${order.status}).`,
+        409,
+      );
+    }
+
+    const items = await tx
+      .select({ productId: onlineOrderItems.productId, quantity: onlineOrderItems.quantity })
+      .from(onlineOrderItems)
+      .where(eq(onlineOrderItems.orderId, orderId));
+
+    const restoreByProd = new Map<string, number>();
+    for (const it of items) {
+      restoreByProd.set(it.productId, (restoreByProd.get(it.productId) ?? 0) + it.quantity);
+    }
+    const sortedProdIds = [...restoreByProd.keys()].sort();
+
+    // 1. Kembalikan stok produk & stock_batches (Reverse FEFO, lock terurut ID)
+    for (const prodId of sortedProdIds) {
+      const qty = restoreByProd.get(prodId)!;
+      await tx
+        .update(products)
+        .set({ stockQty: sql`${products.stockQty} + ${qty}`, updatedAt: now })
+        .where(eq(products.id, prodId));
+
+      const candidateBatches = await tx
+        .select({ id: stockBatches.id, initialQty: stockBatches.initialQty, currentQty: stockBatches.currentQty })
+        .from(stockBatches)
+        .where(eq(stockBatches.productId, prodId))
+        .orderBy(desc(stockBatches.expiryDate), desc(stockBatches.createdAt))
+        .for('update');
+
+      let left = qty;
+      for (const b of candidateBatches) {
+        if (left <= 0) break;
+        const space = Math.max(0, b.initialQty - b.currentQty);
+        if (space > 0) {
+          const add = Math.min(space, left);
+          await tx
+            .update(stockBatches)
+            .set({ currentQty: sql`${stockBatches.currentQty} + ${add}`, updatedAt: now })
+            .where(eq(stockBatches.id, b.id));
+          left -= add;
+        }
+      }
+      if (left > 0 && candidateBatches[0]) {
+        await tx
+          .update(stockBatches)
+          .set({ currentQty: sql`${stockBatches.currentQty} + ${left}`, updatedAt: now })
+          .where(eq(stockBatches.id, candidateBatches[0].id));
+      }
+    }
+
+    // 2. VOID record transaksi buku besar terkait (jika ada) agar laporan & QRIS tetap 100% sinkron
+    await tx
+      .update(transactions)
+      .set({
+        status: 'VOID',
+        voidReason: `Order Online #${order.orderNumber} dibatalkan: ${reason}`.slice(0, 300),
+        voidedByAdminId: adminId,
+        voidedAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(transactions.invoiceNumber, order.orderNumber), eq(transactions.status, 'COMPLETED')));
+
+    // 3. Flag buyer jika 2x No-Show atau diminta eksplisit
+    const doFlag = shouldFlagBuyer || (order.noShowCount ?? 0) >= 2;
+    if (doFlag) {
+      await tx
+        .update(buyers)
+        .set({
+          isFlagged: true,
+          isActive: false,
+          flaggedReason: `Dibatalkan pasca-konfirmasi (${order.noShowCount ?? 0}x no-show): ${reason}`.slice(0, 250),
+          flaggedBy: adminId,
+          flaggedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(buyers.id, order.buyerId));
+    }
+
+    // 4. Update status order -> CANCELLED + audit log
+    const [updated] = await tx
+      .update(onlineOrders)
+      .set({
+        status: 'CANCELLED',
+        cancelledReason: reason,
+        cancelledBy: adminId,
+        updatedAt: now,
+      })
+      .where(eq(onlineOrders.id, orderId))
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      tableName: 'online_orders',
+      recordId: orderId,
+      action: 'UPDATE',
+      oldValues: JSON.stringify({ status: order.status, noShowCount: order.noShowCount }),
+      newValues: JSON.stringify({ status: 'CANCELLED', reason, buyerFlagged: doFlag }),
+      actorType: 'ADMIN',
+      actorId: adminId,
+    });
+
     return updated!;
   });
 }

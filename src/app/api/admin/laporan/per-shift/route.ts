@@ -88,9 +88,8 @@ function wibDayOfWeek(wibDateStr: string): number {
 export async function GET(req: NextRequest): Promise<Response> {
   const payload = await verifyJwt(req);
   if (!payload || payload.role !== 'admin') return apiError('Unauthorized', 401);
-  // Baik Manager maupun Admin Shift dapat mengakses audit shift & pembagian bagi hasil
-  if (payload.adminRole !== 'MANAGER' && payload.adminRole !== 'ADMIN_SHIFT') {
-    return apiError('Akses ditolak. Khusus Admin Shift atau Manager.', 403);
+  if (payload.adminRole !== 'MANAGER') {
+    return apiError('Akses ditolak. Laporan bagi hasil & laba shift khusus Manager (Dosen).', 403);
   }
 
   const sp = new URL(req.url).searchParams;
@@ -533,13 +532,13 @@ export async function GET(req: NextRequest): Promise<Response> {
       const hasEarlierShiftSameDay = list.length > 1;
       const closedAfternoonLate = s.clockOut
         ? parseInt(
-            new Intl.DateTimeFormat('en-US', {
-              timeZone: 'Asia/Jakarta',
-              hour: 'numeric',
-              hour12: false,
-            }).format(s.clockOut),
-            10,
-          ) >= 14
+          new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Asia/Jakarta',
+            hour: 'numeric',
+            hour12: false,
+          }).format(s.clockOut),
+          10,
+        ) >= 14
         : false;
 
       let sesi: 'Pagi' | 'Siang';

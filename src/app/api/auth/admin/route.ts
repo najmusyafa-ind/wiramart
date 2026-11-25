@@ -48,13 +48,9 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  // 2. Cari di tabel admins (berdasarkan NIDN, NIDK, atau NIM)
-  const admin = await db.query.admins.findFirst({
-    where: and(
-      or(eq(admins.nidn, nidn), eq(admins.nidk, nidn)),
-      eq(admins.isActive, true),
-      isNull(admins.deletedAt),
-    ),
+  // 2. Cari di tabel admins (berdasarkan NIDN, NIDK, atau NIM — termasuk cek nonaktif agar tidak bisa di-reaktivasi lewat Kasus C)
+  const adminRecord = await db.query.admins.findFirst({
+    where: or(eq(admins.nidn, nidn), eq(admins.nidk, nidn)),
     columns: {
       id: true,
       nidn: true,
@@ -63,8 +59,23 @@ export async function POST(request: Request): Promise<Response> {
       role: true,
       isActive: true,
       isActivated: true,
+      deletedAt: true,
     },
   });
+
+  if (adminRecord && (!adminRecord.isActive || adminRecord.deletedAt !== null)) {
+    if (checkOnly) {
+      return apiOk({ exists: false });
+    }
+    adminAuthLimiter.check(rateKey, true);
+    return apiError(
+      'Akun pengelola ini sedang dinonaktifkan. Hubungi Manager (Dosen) untuk mengaktifkan kembali.',
+      'ACCOUNT_INACTIVE',
+      403,
+    );
+  }
+
+  const admin = adminRecord;
 
   // 3. Cari juga di tabel employees (untuk mencocokkan Admin Kasir / Kepala Admin)
   const employee = await db.query.employees.findFirst({
@@ -89,7 +100,6 @@ export async function POST(request: Request): Promise<Response> {
       (employee.isKetuaShift ||
         employee.jabatan.toLowerCase().includes('admin') ||
         employee.jabatan.toLowerCase().includes('kepala') ||
-        employee.jabatan.toLowerCase().includes('gudang') ||
         employee.jabatan.toLowerCase().includes('manager')),
   );
 

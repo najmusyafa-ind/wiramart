@@ -11,21 +11,21 @@ import { registerBuyer } from '@/features/order/buyer.service';
 import { buyerRegisterLimiter } from '@/lib/utils/rate-limit';
 
 export async function POST(req: NextRequest) {
-  // Rate limit per IP
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
-  const limited = await buyerRegisterLimiter.check(ip);
-  if (!limited.allowed) {
-    return apiError(
-      `Terlalu banyak percobaan daftar. Coba lagi dalam ${Math.ceil((limited.resetAt - Date.now()) / 60000)} menit.`,
-      'RATE_LIMITED',
-      429,
-    );
-  }
-
   const body = await req.json().catch(() => null);
   const parsed = BuyerRegisterSchema.safeParse(body);
   if (!parsed.success) {
     return apiError(parsed.error.issues[0]?.message ?? 'Input tidak valid', 'VALIDATION_ERROR', 422);
+  }
+
+  // Rate limit per IP+NIM (aman untuk jaringan Wi-Fi NAT kampus UNPERBA bersama)
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+  const limited = await buyerRegisterLimiter.check(`${ip}:${parsed.data.nim}`);
+  if (!limited.allowed) {
+    return apiError(
+      `Terlalu banyak percobaan daftar untuk NIM ini. Coba lagi dalam ${Math.ceil((limited.resetAt - Date.now()) / 60000)} menit.`,
+      'RATE_LIMITED',
+      429,
+    );
   }
 
   try {

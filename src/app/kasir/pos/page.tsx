@@ -2394,6 +2394,11 @@ export default function PosPage() {
 
       const json = await res.json();
       if (!res.ok) {
+        if (res.status === 401) {
+          checkoutIdemRef.current = null;
+          router.push('/kasir/login');
+          return;
+        }
         if (res.status === 409) {
           checkoutIdemRef.current = null;
         }
@@ -2415,11 +2420,16 @@ export default function PosPage() {
 
       checkoutIdemRef.current = null;
       setTxError(null);
+      const resolvedMethod: PaymentMethod =
+        payments && payments.length > 1
+          ? 'SPLIT'
+          : (payments?.[0]?.paymentMethod ?? paymentMethod);
+      setPaymentMethod(resolvedMethod);
       setLastTx({
         invoiceNumber: json.data.invoiceNumber,
         total: json.data.grossAmount,
         change: json.data.changeAmount,
-        method: payments && payments.length > 1 ? 'SPLIT' : paymentMethod,
+        method: resolvedMethod,
         payments: json.data.payments ?? payments,
         items: currentCart.map((i) => ({ name: i.name, qty: i.qty, price: parseFloat(i.sellingPrice) })),
         kasirName:    session?.employee?.fullName ?? 'Kasir',
@@ -2602,14 +2612,23 @@ export default function PosPage() {
   }
 
   async function handleTutupShift() {
+    const cleanedCash = tutupActualCash.replace(/\D/g, '');
+    if (!cleanedCash) {
+      alert('Nominal uang fisik di laci wajib diisi sebelum menutup shift (Blind Count).');
+      return;
+    }
+    const nominalFisik = parseInt(cleanedCash, 10);
+    if (!Number.isFinite(nominalFisik) || nominalFisik < 0) {
+      alert('Nominal uang fisik tidak valid.');
+      return;
+    }
     setTutupLoading(true);
     try {
-      const nominalFisik = tutupActualCash ? parseFloat(tutupActualCash.replace(/\D/g, '')) : undefined;
       const res = await fetch('/api/kasir/shift/tutup', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          actualCash: nominalFisik !== undefined && !isNaN(nominalFisik) ? nominalFisik : undefined,
+          actualCash: nominalFisik,
           breakdown: Object.keys(tutupBreakdown).length > 0 ? tutupBreakdown : undefined,
           notes: tutupNotes.trim() ? tutupNotes.trim() : undefined,
           earlyCloseReason: tutupEarlyReason,
@@ -3104,8 +3123,14 @@ export default function PosPage() {
                   type="button"
                   onClick={handleTutupShift}
                   className="btn btn-primary"
-                  disabled={tutupLoading}
-                  style={{ flex: 2, background: 'hsl(0 70% 50%)', minHeight: 46, fontWeight: 700 }}
+                  disabled={tutupLoading || tutupActualCash.replace(/\D/g, '') === ''}
+                  style={{
+                    flex: 2,
+                    background: 'hsl(0 70% 50%)',
+                    minHeight: 46,
+                    fontWeight: 700,
+                    opacity: tutupLoading || tutupActualCash.replace(/\D/g, '') === '' ? 0.55 : 1,
+                  }}
                 >
                   {tutupLoading
                     ? <><Loader2 size={16} className="spin-icon" /> Menutup Shift...</>

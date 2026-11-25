@@ -16,11 +16,11 @@ type Context = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, context: Context) {
   const payload = await verifyJwt(req);
-  if (!payload || payload.role !== 'employee') {
-    return apiError('Forbidden: Hanya petugas toko / gudang yang dapat mengajukan draft', 403);
+  if (!payload || (payload.role !== 'employee' && payload.role !== 'admin')) {
+    return apiError('Forbidden: Hanya petugas gudang / Admin Shift / Manager yang dapat mengajukan draft', 403);
   }
 
-  // Rate Limiter: Maksimal 10 submit per 24 jam per employee
+  // Rate Limiter: Maksimal 10 submit per 24 jam per aktor
   const rateLimit = stockSubmitLimiter.check(payload.sub, true);
   if (!rateLimit.allowed) {
     return apiError(
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest, context: Context) {
   }
 
   try {
-    const updated = await submitStockReceiveDraft(id, payload.sub);
+    const updated = await submitStockReceiveDraft(id, payload.sub, payload.role);
     return apiOk(updated);
   } catch (error) {
     if (error instanceof AppError) {

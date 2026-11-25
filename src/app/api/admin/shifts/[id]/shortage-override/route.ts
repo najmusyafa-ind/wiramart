@@ -25,8 +25,8 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const session = await verifyJwt(req);
-  if (!session || session.role !== 'admin') {
-    return apiError('Akses ditolak. Khusus Admin Shift atau Manager.', 403);
+  if (!session || session.role !== 'admin' || session.adminRole !== 'MANAGER') {
+    return apiError('Akses ditolak. Override potongan tekor shift hanya untuk Manager (Dosen).', 403);
   }
 
   const { id } = await context.params;

@@ -58,6 +58,7 @@ interface Row {
   expiredAt: string | null;
   rejectedReason: string | null;
   cancelledReason: string | null;
+  noShowCount?: number;
   buyerName: string;
   buyerNim: string;
   buyerWhatsapp: string;
@@ -76,7 +77,9 @@ type AdminActionBody =
   | { action: 'confirm' }
   | { action: 'proses' }
   | { action: 'reject'; reason: string }
-  | { action: 'assign-cs'; csEmployeeId: string };
+  | { action: 'assign-cs'; csEmployeeId: string }
+  | { action: 'complete-pickup'; pin: string }
+  | { action: 'cancel-confirmed'; reason: string; flagBuyer?: boolean };
 
 const TABS = [
   { key: 'todo', label: 'Perlu Tindakan', statuses: ['WAITING_PAYMENT_VERIFICATION', 'WAITING_CONFIRMATION'] },
@@ -147,6 +150,11 @@ export default function PesananOnlinePage() {
   const [assignId, setAssignId] = useState<string | null>(null);
   const [selectedCsId, setSelectedCsId] = useState<string>('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [pickupId, setPickupId] = useState<string | null>(null);
+  const [pickupPin, setPickupPin] = useState('');
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [flagBuyerOnCancel, setFlagBuyerOnCancel] = useState(false);
 
   // Load daftar karyawan aktif sekali saat mount untuk opsi assignment runner
   useEffect(() => {
@@ -232,6 +240,11 @@ export default function PesananOnlinePage() {
         setReason('');
         setAssignId(null);
         setSelectedCsId('');
+        setPickupId(null);
+        setPickupPin('');
+        setCancelId(null);
+        setCancelReason('');
+        setFlagBuyerOnCancel(false);
       }
       await load(); // selalu sinkron: status bisa berubah oleh admin/runner lain
     } finally {
@@ -376,6 +389,14 @@ export default function PesananOnlinePage() {
                     >
                       {r.deliveryType === 'DELIVERY' ? 'Delivery' : 'Pickup'}
                     </span>
+                    {(r.noShowCount ?? 0) > 0 && (
+                      <span
+                        className={`badge ${(r.noShowCount ?? 0) >= 2 ? 'badge-error' : 'badge-warning'}`}
+                        style={{ fontSize: 'var(--text-xs)' }}
+                      >
+                        No-Show {r.noShowCount}×
+                      </span>
+                    )}
                     {waiting && left !== null && (
                       <span
                         style={{
@@ -623,6 +644,52 @@ export default function PesananOnlinePage() {
                       </span>
                     )}
 
+                  {/* PICKUP (CONFIRMED / PREPARING): Selesaikan dengan verifikasi PIN 6-digit */}
+                  {r.deliveryType === 'PICKUP' && (r.status === 'CONFIRMED' || r.status === 'PREPARING') && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setPickupId(pickupId === r.id ? null : r.id);
+                        setPickupPin('');
+                        setCancelId(null);
+                      }}
+                      className="btn btn-sm"
+                      style={{
+                        background: 'var(--color-success)',
+                        color: '#fff',
+                        border: 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        minHeight: 44,
+                      }}
+                    >
+                      <ShieldCheck size={14} />
+                      <span>Selesaikan Pickup (PIN)</span>
+                    </button>
+                  )}
+
+                  {/* CONFIRMED / PREPARING / OUT_FOR_DELIVERY: Batalkan & Kembalikan Stok (termasuk kasus 2x No-Show) */}
+                  {(r.status === 'CONFIRMED' || r.status === 'PREPARING' || r.status === 'OUT_FOR_DELIVERY') && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        const nextId = cancelId === r.id ? null : r.id;
+                        setCancelId(nextId);
+                        setCancelReason((r.noShowCount ?? 0) >= 2 ? 'Pembeli tidak ditemui 2x (No-Show) — pesanan dibatalkan & stok dikembalikan.' : '');
+                        setFlagBuyerOnCancel((r.noShowCount ?? 0) >= 2);
+                        setPickupId(null);
+                      }}
+                      className="btn btn-danger btn-sm"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 44 }}
+                    >
+                      <XCircle size={14} />
+                      <span>{(r.noShowCount ?? 0) >= 2 ? 'Batalkan (2× No-Show)' : 'Batalkan & Restok'}</span>
+                    </button>
+                  )}
+
                   {/* Tombol Tolak untuk status menunggu */}
                   {waiting && (
                     <button
@@ -702,6 +769,147 @@ export default function PesananOnlinePage() {
                       >
                         {busy ? <Loader2 size={14} className="spin-icon" /> : <UserCheck size={14} />}
                         <span>Simpan Penugasan</span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Inline Form Selesaikan Pickup dengan PIN 6-Digit */}
+                {pickupId === r.id && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!/^\d{6}$/.test(pickupPin.trim())) return;
+                      act(r.id, { action: 'complete-pickup', pin: pickupPin.trim() });
+                    }}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--space-2)',
+                      marginTop: 'var(--space-2)',
+                      padding: 'var(--space-3)',
+                      background: 'var(--color-surface-muted)',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--color-success)',
+                    }}
+                  >
+                    <label
+                      htmlFor={`pin-${r.id}`}
+                      className="form-label"
+                      style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', margin: 0 }}
+                    >
+                      Masukkan PIN Serah Terima 6-Digit dari HP Pembeli <span style={{ color: 'var(--color-error)' }}>*</span>
+                    </label>
+                    <input
+                      id={`pin-${r.id}`}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      className="form-input"
+                      value={pickupPin}
+                      onChange={(e) => setPickupPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="Contoh: 482910"
+                      required
+                      style={{ fontSize: 'var(--text-base)', fontWeight: 700, letterSpacing: '0.2em', minHeight: 44 }}
+                    />
+                    <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPickupId(null);
+                          setPickupPin('');
+                        }}
+                        className="btn btn-secondary btn-sm"
+                        style={{ minHeight: 44 }}
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={busy || !/^\d{6}$/.test(pickupPin.trim())}
+                        className="btn btn-primary btn-sm"
+                        style={{ background: 'var(--color-success)', border: 'none', minHeight: 44 }}
+                      >
+                        {busy ? <Loader2 size={14} className="spin-icon" /> : null}
+                        <span>Verifikasi PIN &amp; Selesai</span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {/* Inline Form Batalkan Pesanan Pasca-Konfirmasi (Kembalikan Stok + Void Transaksi) */}
+                {cancelId === r.id && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      act(r.id, {
+                        action: 'cancel-confirmed',
+                        reason: cancelReason.trim(),
+                        flagBuyer: flagBuyerOnCancel,
+                      });
+                    }}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'var(--space-2)',
+                      marginTop: 'var(--space-2)',
+                      padding: 'var(--space-3)',
+                      background: 'var(--color-surface-muted)',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--color-error)',
+                    }}
+                  >
+                    <label
+                      htmlFor={`cn-${r.id}`}
+                      className="form-label"
+                      style={{ fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-semibold)', margin: 0 }}
+                    >
+                      Alasan pembatalan pasca-konfirmasi (stok akan dikembalikan &amp; transaksi di-VOID) <span style={{ color: 'var(--color-error)' }}>*</span>
+                    </label>
+                    <textarea
+                      id={`cn-${r.id}`}
+                      className="form-input"
+                      value={cancelReason}
+                      onChange={(e) => setCancelReason(e.target.value)}
+                      minLength={10}
+                      maxLength={500}
+                      required
+                      rows={2}
+                      placeholder="min. 10 karakter, mis. pembeli batal / tidak ditemui 2x di ruangan"
+                      style={{ fontSize: 'var(--text-base)', resize: 'vertical' }}
+                    />
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={flagBuyerOnCancel || (r.noShowCount ?? 0) >= 2}
+                        disabled={(r.noShowCount ?? 0) >= 2}
+                        onChange={(e) => setFlagBuyerOnCancel(e.target.checked)}
+                      />
+                      <span>
+                        Nonaktifkan &amp; tandai akun pembeli {(r.noShowCount ?? 0) >= 2 ? '(otomatis karena 2× No-Show)' : '(opsional)'}
+                      </span>
+                    </label>
+                    <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCancelId(null);
+                          setCancelReason('');
+                          setFlagBuyerOnCancel(false);
+                        }}
+                        className="btn btn-secondary btn-sm"
+                        style={{ minHeight: 44 }}
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={busy || cancelReason.trim().length < 10}
+                        className="btn btn-danger btn-sm"
+                        style={{ minHeight: 44 }}
+                      >
+                        {busy ? <Loader2 size={14} className="spin-icon" /> : null}
+                        <span>Konfirmasi Batalkan &amp; Restok</span>
                       </button>
                     </div>
                   </form>

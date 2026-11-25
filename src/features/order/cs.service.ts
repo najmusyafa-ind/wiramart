@@ -14,7 +14,7 @@ import {
   buyers,
   type OnlineOrder,
 } from '@/lib/db/schema';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { AppError } from '@/lib/utils/helpers';
 
 export type CsDeliveryRow = {
@@ -140,9 +140,17 @@ export async function berangkatDelivery(
       .where(eq(onlineOrders.id, orderId))
       .returning();
 
-    return updated!;
+    // Zero-Trust: jangan pernah mengembalikan handoverPin ke runner CS
+    const { handoverPin: _strippedPin, ...safeOrder } = updated!;
+    void _strippedPin;
+    return safeOrder as unknown as OnlineOrder;
   });
 }
+
+// In-memory rate-limit percobaan salah PIN serah terima (maks 5x per 15 menit per order)
+const handoverPinAttempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_HANDOVER_PIN_ATTEMPTS = 5;
+const HANDOVER_PIN_WINDOW_MS = 15 * 60 * 1000;
 
 /**
  * Verifikasi PIN serah terima saat runner tiba di lokasi pembeli.
@@ -157,6 +165,17 @@ export async function verifyHandoverPin(
   const cleanPin = pin.trim();
   if (!cleanPin || cleanPin.length !== 6) {
     throw new AppError('VALIDATION_ERROR', 'PIN serah terima harus terdiri dari 6 digit.', 422);
+  }
+
+  const nowMs = Date.now();
+  const attemptRec = handoverPinAttempts.get(orderId);
+  if (attemptRec && nowMs < attemptRec.resetAt && attemptRec.count >= MAX_HANDOVER_PIN_ATTEMPTS) {
+    const minsLeft = Math.max(1, Math.ceil((attemptRec.resetAt - nowMs) / 60000));
+    throw new AppError(
+      'RATE_LIMITED',
+      `Terlalu banyak percobaan PIN salah. Tunggu ${minsLeft} menit atau hubungi Admin Shift.`,
+      429,
+    );
   }
 
   const now = new Date();
@@ -184,12 +203,20 @@ export async function verifyHandoverPin(
 
     // Bandingkan PIN
     if (order.handoverPin !== cleanPin) {
+      const cur = handoverPinAttempts.get(orderId);
+      if (!cur || nowMs >= cur.resetAt) {
+        handoverPinAttempts.set(orderId, { count: 1, resetAt: nowMs + HANDOVER_PIN_WINDOW_MS });
+      } else {
+        cur.count += 1;
+      }
       throw new AppError(
         'INVALID_PIN',
         'PIN serah terima salah. Minta pembeli menunjukkan PIN 6-digit di halaman status pesanan.',
         422,
       );
     }
+
+    handoverPinAttempts.delete(orderId);
 
     const [updated] = await tx
       .update(onlineOrders)
@@ -202,7 +229,9 @@ export async function verifyHandoverPin(
       .where(eq(onlineOrders.id, orderId))
       .returning();
 
-    return updated!;
+    const { handoverPin: _strippedPin, ...safeOrder } = updated!;
+    void _strippedPin;
+    return safeOrder as unknown as OnlineOrder;
   });
 }
 
@@ -248,8 +277,12 @@ export async function recordNoShow(
       .where(eq(onlineOrders.id, orderId))
       .returning();
 
+    // Zero-Trust: jangan pernah mengembalikan handoverPin ke runner CS
+    const { handoverPin: _strippedPin, ...safeOrder } = updated!;
+    void _strippedPin;
+
     return {
-      order: updated!,
+      order: safeOrder as unknown as OnlineOrder,
       noShowCount: nextCount,
       isMaxReached: nextCount >= 2,
     };

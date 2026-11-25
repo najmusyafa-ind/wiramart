@@ -20,6 +20,7 @@ import { db } from '@/lib/db/client';
 import {
   admins,
   auditLogs,
+  dailyClosings,
   employees,
   EXPENSE_CATEGORIES,
   operatingExpenses,
@@ -568,6 +569,18 @@ export async function createPurchaseReceipt(
     let linkedExpenseId: string | null = null;
 
     if (isManager && actor.adminId && meta.syncToOpex && effectiveOpexAmount > 0) {
+      const closedDay = await tx.query.dailyClosings.findFirst({
+        where: eq(dailyClosings.closingDate, receiptDate),
+        columns: { status: true },
+      });
+      if (closedDay && (closedDay.status === 'LOCKED' || closedDay.status === 'AUDITED')) {
+        throw new AppError(
+          'PERIOD_LOCKED',
+          `Tanggal ${receiptDate} sudah dikunci oleh Tutup Buku Harian (${closedDay.status}). Tidak dapat mencatat biaya operasional baru pada tanggal ini.`,
+          409,
+        );
+      }
+
       const expDesc = (
         meta.operationalItems?.trim() ||
         meta.description?.trim() ||
@@ -668,12 +681,24 @@ export async function updatePurchaseReceipt(
       if (amountToSync <= 0) {
         throw new AppError('INVALID_AMOUNT', 'Nominal operasional wajib lebih dari Rp 0 untuk disinkronkan ke Biaya Operasional.', 400);
       }
+      const targetExpDate = nextReceiptDate ?? getTodayWib();
+      const closedDay = await tx.query.dailyClosings.findFirst({
+        where: eq(dailyClosings.closingDate, targetExpDate),
+        columns: { status: true },
+      });
+      if (closedDay && (closedDay.status === 'LOCKED' || closedDay.status === 'AUDITED')) {
+        throw new AppError(
+          'PERIOD_LOCKED',
+          `Tanggal ${targetExpDate} sudah dikunci oleh Tutup Buku Harian (${closedDay.status}).`,
+          409,
+        );
+      }
       const expCat: ExpenseCategory = patch.expenseCategory ?? 'LAINNYA';
       const expDesc = (nextOpexItems?.trim() || nextDesc?.trim() || `Nota ${nextMerchant}`).slice(0, 200);
       const [exp] = await tx
         .insert(operatingExpenses)
         .values({
-          expenseDate: nextReceiptDate ?? getTodayWib(),
+          expenseDate: targetExpDate,
           category: expCat,
           description: expDesc,
           amount: amountToSync,
@@ -756,16 +781,29 @@ export async function softDeletePurchaseReceipt(
       throw new AppError('NOT_FOUND', 'Arsip nota tidak ditemukan atau sudah dihapus.', 404);
     }
 
+    const now = new Date();
     const [deleted] = await tx
       .update(purchaseReceiptArchives)
       .set({
-        deletedAt: new Date(),
+        deletedAt: now,
         deletedByAdminId: manager.adminId,
         deleteReason: reason,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(purchaseReceiptArchives.id, id))
       .returning({ id: purchaseReceiptArchives.id, merchantName: purchaseReceiptArchives.merchantName });
+
+    // Ikut soft-delete operating_expenses tertaut agar tidak meninggalkan biaya orphan
+    if (existing.linkedExpenseId) {
+      await tx
+        .update(operatingExpenses)
+        .set({
+          deletedAt: now,
+          deletedByAdminId: manager.adminId,
+          deleteReason: `Arsip nota terkait dihapus: ${reason}`.slice(0, 200),
+        })
+        .where(and(eq(operatingExpenses.id, existing.linkedExpenseId), isNull(operatingExpenses.deletedAt)));
+    }
 
     await tx.insert(auditLogs).values({
       tableName: 'purchase_receipt_archives',

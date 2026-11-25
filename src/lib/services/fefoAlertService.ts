@@ -142,7 +142,8 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
         lte(stockBatches.currentQty, 0),
         inArray(productConditionReports.status, ['ALERT_ONLY', 'SUBMITTED', 'MANAGER_REVIEW', 'APPROVED']),
       ),
-    );
+    )
+    .limit(500);
 
   if (zeroQtyReports.length > 0) {
     await db
@@ -166,7 +167,8 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
         eq(productConditionReports.status, 'ALERT_ONLY'),
         or(isNull(stockBatches.expiryDate), gt(stockBatches.expiryDate, in7Days)),
       ),
-    );
+    )
+    .limit(500);
 
   if (outOfWindowReports.length > 0) {
     await db
@@ -199,7 +201,8 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
         eq(products.isActive, true),
       ),
     )
-    .orderBy(asc(stockBatches.expiryDate));
+    .orderBy(asc(stockBatches.expiryDate))
+    .limit(500);
 
   let newAlerts = 0;
   let updatedAlerts = 0;
@@ -393,6 +396,7 @@ export async function getConditionReports(options: {
           .select({
             conditionReportId: discountPolicies.conditionReportId,
             barcode: discountBarcodes.barcode,
+            discountedPrice: discountPolicies.discountedPrice,
           })
           .from(discountPolicies)
           .innerJoin(discountBarcodes, eq(discountBarcodes.policyId, discountPolicies.id))
@@ -400,10 +404,13 @@ export async function getConditionReports(options: {
           .orderBy(desc(discountBarcodes.createdAt))
       : [];
 
-  const barcodeByReportId = new Map<string, string>();
+  const barcodeByReportId = new Map<string, { barcode: string; discountedPrice: number | null }>();
   for (const b of barcodeRows) {
     if (!barcodeByReportId.has(b.conditionReportId)) {
-      barcodeByReportId.set(b.conditionReportId, b.barcode);
+      barcodeByReportId.set(b.conditionReportId, {
+        barcode: b.barcode,
+        discountedPrice: b.discountedPrice,
+      });
     }
   }
 
@@ -413,12 +420,14 @@ export async function getConditionReports(options: {
       : r.daysRemainingAtAlert;
     const isExpired = Boolean(r.expiryDate && r.expiryDate < todayStr);
     const effectiveLevel = isExpired ? 'H1' : mapToClientAlertLevel(r.alertLevel);
+    const discInfo = barcodeByReportId.get(r.id);
     return {
       ...r,
       alertLevel: effectiveLevel,
       daysRemainingAtAlert: liveDaysRemaining,
       isExpired,
-      discountBarcode: barcodeByReportId.get(r.id) ?? null,
+      discountBarcode: discInfo?.barcode ?? null,
+      discountedPrice: discInfo?.discountedPrice ?? null,
     };
   });
 
@@ -435,22 +444,57 @@ export async function getConditionReports(options: {
 // 3. GUDANG: Submit Laporan Kondisi Fisik & Usulan Tindakan
 // =============================================================
 
-export async function submitConditionReport(
-  reportId: string,
-  employeeId: string,
-  rawInput: SubmitConditionReportInput,
-) {
-  const input = SubmitConditionReportSchema.parse(rawInput);
+async function resolveFefoFieldActor(
+  actorId: string,
+  actorRole: 'employee' | 'admin' = 'employee',
+): Promise<{ id: string; fullName: string }> {
+  if (actorRole === 'employee') {
+    const [emp] = await db
+      .select({ id: employees.id, fullName: employees.fullName })
+      .from(employees)
+      .where(and(eq(employees.id, actorId), eq(employees.isActive, true), isNull(employees.deletedAt)))
+      .limit(1);
+    if (!emp) {
+      throw new AppError('FORBIDDEN', 'Akun petugas gudang tidak aktif.', 403);
+    }
+    return emp;
+  }
 
-  const [emp] = await db
+  // Admin Shift / Manager yang bertugas di Portal Gudang
+  const [adm] = await db
+    .select({ id: admins.id, nidn: admins.nidn, fullName: admins.fullName })
+    .from(admins)
+    .where(and(eq(admins.id, actorId), eq(admins.isActive, true), isNull(admins.deletedAt)))
+    .limit(1);
+  if (!adm) {
+    throw new AppError('FORBIDDEN', 'Akun pengelola tidak aktif.', 403);
+  }
+  const [matchedEmp] = await db
     .select({ id: employees.id, fullName: employees.fullName })
     .from(employees)
-    .where(and(eq(employees.id, employeeId), eq(employees.isActive, true), isNull(employees.deletedAt)))
+    .where(and(eq(employees.nim, adm.nidn), isNull(employees.deletedAt)))
     .limit(1);
+  if (matchedEmp) return { id: matchedEmp.id, fullName: adm.fullName };
 
-  if (!emp) {
-    throw new AppError('FORBIDDEN', 'Akun petugas gudang tidak aktif.', 403);
+  const [fallbackEmp] = await db
+    .select({ id: employees.id })
+    .from(employees)
+    .where(and(eq(employees.isActive, true), isNull(employees.deletedAt)))
+    .limit(1);
+  if (!fallbackEmp) {
+    throw new AppError('SERVER_ERROR', 'Tidak ada referensi petugas aktif untuk mencatat laporan FEFO.', 500);
   }
+  return { id: fallbackEmp.id, fullName: `${adm.fullName} (Admin)` };
+}
+
+export async function submitConditionReport(
+  reportId: string,
+  actorId: string,
+  rawInput: SubmitConditionReportInput,
+  actorRole: 'employee' | 'admin' = 'employee',
+) {
+  const input = SubmitConditionReportSchema.parse(rawInput);
+  const emp = await resolveFefoFieldActor(actorId, actorRole);
 
   const [report] = await db
     .select()
@@ -688,20 +732,12 @@ export async function decideConditionReport(
 
 export async function executeConditionReport(
   reportId: string,
-  employeeId: string,
+  actorId: string,
   rawInput: ExecuteConditionReportInput,
+  actorRole: 'employee' | 'admin' = 'employee',
 ) {
   const input = ExecuteConditionReportSchema.parse(rawInput);
-
-  const [emp] = await db
-    .select({ id: employees.id, fullName: employees.fullName })
-    .from(employees)
-    .where(and(eq(employees.id, employeeId), eq(employees.isActive, true), isNull(employees.deletedAt)))
-    .limit(1);
-
-  if (!emp) {
-    throw new AppError('FORBIDDEN', 'Petugas gudang tidak aktif.', 403);
-  }
+  const emp = await resolveFefoFieldActor(actorId, actorRole);
 
   return await db.transaction(async (tx) => {
     const [report] = await tx

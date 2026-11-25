@@ -131,6 +131,8 @@ const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: 'daily', label: 'Hari Ini' },
   { key: 'weekly', label: 'Minggu Ini' },
   { key: 'monthly', label: 'Bulan Ini' },
+  { key: 'august', label: 'Agustus' },
+  { key: 'september', label: 'September' },
   { key: 'october', label: 'Oktober' },
   { key: 'november', label: 'November' },
   { key: 'all', label: 'Semua' },
@@ -477,7 +479,11 @@ export default function LaporanPage() {
       return;
     }
 
-    const truncated = res.headers.get('X-Export-Truncated') === '1';
+    const truncatedHeader = res.headers.get('X-Export-Truncated')?.trim() ?? '';
+    const truncated =
+      truncatedHeader !== '' &&
+      truncatedHeader !== '0' &&
+      truncatedHeader.toLowerCase() !== 'false';
     const maxRows = res.headers.get('X-Export-Max-Rows') ?? '10.000';
     const disposition = res.headers.get('Content-Disposition') ?? '';
     const nameMatch = /filename="?([^";\r\n]+)"?/i.exec(disposition);

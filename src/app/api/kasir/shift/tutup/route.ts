@@ -15,7 +15,7 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, desc, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import { shifts, transactions, transactionPayments, shiftCashMovements, employees } from '@/lib/db/schema';
@@ -28,11 +28,12 @@ import {
   getUnsettledConsignmentsForToday,
   resolveSameSessionShiftContext,
 } from '@/lib/services/shiftShortageService';
+import { resolveActiveDrawerShift } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 
 const tutupShiftSchema = z.object({
-  actualCash: z.number().min(0, 'Saldo fisik kas tidak boleh negatif').max(50_000_000, 'Nilai terlalu besar').optional(),
+  actualCash: z.number({ message: 'Nominal uang fisik di laci wajib diisi (Blind Count).' }).min(0, 'Saldo fisik kas tidak boleh negatif').max(50_000_000, 'Nilai terlalu besar'),
   breakdown: z.record(z.string(), z.number()).optional(),
   notes: z.string().max(500).optional(),
   earlyCloseReason: z.enum(['NORMAL', 'KULIAH', 'IZIN_DOSEN']).optional().default('NORMAL'),
@@ -68,19 +69,18 @@ export async function PATCH(req: NextRequest): Promise<Response> {
 
   const { notes, actualCash, breakdown, earlyCloseReason } = parsed.data;
 
-  // 3. Cari shift aktif (milik kasir ini atau shift aktif toko bersama)
-  let activeShift = await db.query.shifts.findFirst({
-    where: and(eq(shifts.employeeId, employeeId), eq(shifts.status, 'ACTIVE')),
-    columns: { id: true, employeeId: true, clockIn: true, modalAwal: true, auditFlags: true },
+  // 3. Cari shift aktif terisolasi sesi & sandbox via resolveActiveDrawerShift (anti cross-session hijack)
+  const resolvedDrawer = await resolveActiveDrawerShift({
+    employeeId,
+    employeeName: payload.name,
+    host: req.headers.get('host'),
   });
-
-  if (!activeShift) {
-    activeShift = await db.query.shifts.findFirst({
-      where: and(eq(shifts.status, 'ACTIVE'), isNull(shifts.clockOut)),
-      orderBy: [desc(shifts.clockIn)],
-      columns: { id: true, employeeId: true, clockIn: true, modalAwal: true, auditFlags: true },
-    });
-  }
+  const activeShift = resolvedDrawer.activeShift
+    ? await db.query.shifts.findFirst({
+        where: and(eq(shifts.id, resolvedDrawer.activeShift.id), eq(shifts.status, 'ACTIVE')),
+        columns: { id: true, employeeId: true, clockIn: true, modalAwal: true, auditFlags: true },
+      })
+    : undefined;
 
   if (!activeShift) {
     return apiError(

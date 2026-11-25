@@ -11,6 +11,7 @@ import { db } from '@/lib/db/client';
 import { transactions, transactionPayments, qrisReconciliations } from '@/lib/db/schema';
 import type { ReconStatus } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { addDays } from '@/lib/finance/report';
 import { eq, and, gte, lt, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
@@ -18,32 +19,41 @@ export const runtime = 'nodejs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Hitung total QRIS sistem kasir untuk 1 tanggal (WIB) */
+/** Hitung total QRIS sistem kasir untuk 1 tanggal (WIB), termasuk transaksi legacy tanpa baris transaction_payments */
 async function getSystemQrisForDate(tanggal: string): Promise<number> {
-  const startWib  = new Date(`${tanggal}T00:00:00+07:00`);
-  const endWib    = new Date(`${tanggal}T23:59:59.999+07:00`);
+  const startWib = new Date(`${tanggal}T00:00:00+07:00`);
+  const endExclusive = new Date(`${addDays(tanggal, 1)}T00:00:00+07:00`);
 
-  // Ambil dari transaction_payments (split payment aware)
-  const [row] = await db
-    .select({
-      totalQris: sql<string>`COALESCE(
-        SUM(${transactionPayments.amount})
-        FILTER (WHERE ${transactions.status} = 'COMPLETED'
-          AND ${transactionPayments.paymentMethod} = 'QRIS'
-          AND ${transactions.isTest} = false),
-        0
-      )`,
-    })
-    .from(transactionPayments)
-    .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
-    .where(
-      and(
-        gte(transactions.createdAt, startWib),
-        lt(transactions.createdAt, endWib),
-      ),
-    );
+  const [[payRow], [legacyRow]] = await Promise.all([
+    db
+      .select({
+        totalQris: sql<string>`COALESCE(
+          SUM(${transactionPayments.amount})
+          FILTER (WHERE ${transactions.status} = 'COMPLETED'
+            AND ${transactionPayments.paymentMethod} = 'QRIS'
+            AND ${transactions.isTest} = false),
+          0
+        )`,
+      })
+      .from(transactionPayments)
+      .innerJoin(transactions, eq(transactionPayments.transactionId, transactions.id))
+      .where(and(gte(transactions.createdAt, startWib), lt(transactions.createdAt, endExclusive))),
+    db
+      .select({
+        totalQris: sql<string>`COALESCE(
+          SUM(${transactions.grossAmount})
+          FILTER (WHERE ${transactions.status} = 'COMPLETED'
+            AND ${transactions.paymentMethod} = 'QRIS'
+            AND ${transactions.isTest} = false
+            AND NOT EXISTS (SELECT 1 FROM transaction_payments tp WHERE tp.transaction_id = ${transactions.id})),
+          0
+        )`,
+      })
+      .from(transactions)
+      .where(and(gte(transactions.createdAt, startWib), lt(transactions.createdAt, endExclusive))),
+  ]);
 
-  return Number(row?.totalQris ?? 0);
+  return Number(payRow?.totalQris ?? 0) + Number(legacyRow?.totalQris ?? 0);
 }
 
 // ── GET: Daftar rekonsiliasi sebulan ────────────────────────────────────────
