@@ -17,6 +17,10 @@ import { evaluateShiftCashState } from '@/lib/services/shiftShortageService';
 import { resolveShiftSessionWithContext } from '@/lib/services/activeShiftService';
 import { computeAttendanceLateness } from '@/lib/services/attendanceLatenessService';
 import { getLateDisciplineFactor } from '@/lib/finance/report';
+import {
+  filterSweepablePerishableProducts,
+  isBatchProtectedForToday,
+} from '@/lib/services/perishableSweepService';
 
 const dbUrl = process.env.DATABASE_URL || '';
 if (!dbUrl) {
@@ -181,6 +185,28 @@ describe('1. Unit Tests — Idempotensi & Klasifikasi TCL', () => {
       resolveShiftSessionWithContext({ clockIn: new Date('2026-11-24T11:20:00+07:00') }),
       'Siang',
     );
+  });
+
+  it('sapu makanan harian melindungi stok chiller resmi (expiryDate >= todayWib) dan menyapu sisa kedaluwarsa', () => {
+    const todayWib = '2026-11-27';
+    assert.equal(isBatchProtectedForToday('2026-11-27', todayWib), true);
+    assert.equal(isBatchProtectedForToday('2026-11-28', todayWib), true);
+    assert.equal(isBatchProtectedForToday('2026-11-26', todayWib), false);
+    assert.equal(isBatchProtectedForToday(null, todayWib), false);
+
+    const candidates = [
+      { id: 'roti-chiller', stockQty: 2, unit: 'pcs', perishableType: 'KONSINYASI' },
+      { id: 'dimsum-expired', stockQty: 2, unit: 'pcs', perishableType: 'KONSINYASI' },
+      { id: 'klepon-nobatch', stockQty: 3, unit: 'pcs', perishableType: 'KONSINYASI' },
+    ];
+    const activeBatches = [
+      { productId: 'roti-chiller', currentQty: 2, expiryDate: '2026-11-27' },
+      { productId: 'dimsum-expired', currentQty: 2, expiryDate: '2026-11-26' },
+      { productId: 'klepon-nobatch', currentQty: 0, expiryDate: '2026-11-27' },
+    ];
+
+    const sweepIds = filterSweepablePerishableProducts(candidates, activeBatches, todayWib).map((c) => c.id);
+    assert.deepEqual(sweepIds, ['dimsum-expired', 'klepon-nobatch']);
   });
 });
 

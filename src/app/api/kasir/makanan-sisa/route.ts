@@ -5,12 +5,13 @@
 
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
-import { eq, and, isNull, or, ilike, gt, asc, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, isNull, or, ilike, gt, lt, asc, desc, sql, inArray } from 'drizzle-orm';
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db/client';
 import {
   products,
   categories,
+  consignmentEntries,
   stockAdjustments,
   admins,
   employees,
@@ -19,7 +20,7 @@ import {
   discountBarcodes,
 } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
-import { getTodayWib } from '@/lib/utils/helpers';
+import { getTodayWib, getOffsetDateWib } from '@/lib/utils/helpers';
 
 export const runtime = 'nodejs';
 
@@ -77,6 +78,35 @@ export async function GET(req: NextRequest) {
     return apiError('Akun karyawan tidak ditemukan atau telah dinonaktifkan', 403);
   }
 
+  const todayWib = getTodayWib();
+
+  // Sertakan juga produk yang punya batch HARIAN aktif (> 0) atau tercatat di Buku Titipan hari ini/terbuka,
+  // meskipun flag products.isPerishable belum sempat dicentang di master produk.
+  const [harianBatchRows, activeConsignRows] = await Promise.all([
+    db
+      .selectDistinct({ productId: stockBatches.productId })
+      .from(stockBatches)
+      .where(and(eq(stockBatches.expiryClass, 'HARIAN'), gt(stockBatches.currentQty, 0)))
+      .limit(300),
+    db
+      .selectDistinct({ productId: consignmentEntries.productId })
+      .from(consignmentEntries)
+      .where(
+        or(
+          eq(consignmentEntries.entryDate, todayWib),
+          inArray(consignmentEntries.status, ['OPEN', 'CARRYOVER']),
+        ),
+      )
+      .limit(300),
+  ]);
+
+  const extraProductIds = [
+    ...new Set([
+      ...harianBatchRows.map((r) => r.productId),
+      ...activeConsignRows.map((r) => r.productId),
+    ]),
+  ];
+
   const rows = await db
     .select({
       id: products.id,
@@ -99,6 +129,7 @@ export async function GET(req: NextRequest) {
           eq(products.isPerishable, true),
           ilike(categories.name, '%basah%'),
           ilike(categories.name, '%konsinyasi%'),
+          ...(extraProductIds.length > 0 ? [inArray(products.id, extraProductIds)] : []),
         ),
       ),
     )
@@ -157,6 +188,7 @@ export async function POST(req: NextRequest) {
   const wibShifted = new Date(nowWib.getTime() + 7 * 60 * 60 * 1000);
   const timeStr = `${String(wibShifted.getUTCHours()).padStart(2, '0')}:${String(wibShifted.getUTCMinutes()).padStart(2, '0')} WIB`;
   const todayCompact = getTodayWib(nowWib).replace(/-/g, '');
+  const tomorrowWib = getOffsetDateWib(1, nowWib);
 
   try {
     let adjustedCount = 0;
@@ -187,11 +219,10 @@ export async function POST(req: NextRequest) {
         const qtyBefore = existing.stockQty;
         const qtyAfter = item.disposition === 'SIMPAN' ? item.qtySisaFisik : 0;
         const qtyDiff = qtyAfter - qtyBefore;
+        const isChillerCarryover = item.disposition === 'SIMPAN' && qtyAfter > 0;
 
         // Update stok produk, batch FEFO, & sinkronisasi promo jika ada mutasi stok
         if (qtyDiff !== 0) {
-          adjustedCount += 1;
-
           // 1. Update master stok produk
           await tx
             .update(products)
@@ -328,10 +359,63 @@ export async function POST(req: NextRequest) {
               costPrice: existing.costPrice,
               initialQty: qtyDiff,
               currentQty: qtyDiff,
+              expiryDate: tomorrowWib,
               expiryClass: 'HARIAN',
               notes: `Sisa makanan simpan cut-off oleh ${emp.fullName} (${emp.nim}) (+${qtyDiff} pcs)`,
             });
           }
+        }
+
+        // Jika kasir memilih Simpan Chiller dengan sisa > 0, perpanjang expiryDate batch aktif ke besok WIB
+        // agar cron sapu tengah malam tidak menghapus stok yang resmi disimpan di chiller.
+        if (isChillerCarryover) {
+          await tx
+            .update(stockBatches)
+            .set({ expiryDate: tomorrowWib, updatedAt: nowWib })
+            .where(
+              and(
+                eq(stockBatches.productId, item.productId),
+                gt(stockBatches.currentQty, 0),
+                or(isNull(stockBatches.expiryDate), lt(stockBatches.expiryDate, tomorrowWib)),
+              ),
+            );
+
+          const [anyActiveBatch] = await tx
+            .select({ id: stockBatches.id })
+            .from(stockBatches)
+            .where(
+              and(
+                eq(stockBatches.productId, item.productId),
+                gt(stockBatches.currentQty, 0),
+              ),
+            )
+            .limit(1);
+
+          if (!anyActiveBatch) {
+            const batchCode = `CHILLER-${todayCompact}-${randomInt(1000, 10000)}`;
+            await tx.insert(stockBatches).values({
+              productId: item.productId,
+              batchCode,
+              costPrice: existing.costPrice,
+              initialQty: qtyAfter,
+              currentQty: qtyAfter,
+              expiryDate: tomorrowWib,
+              expiryClass: 'HARIAN',
+              notes: `Simpan Chiller cut-off oleh ${emp.fullName} (${emp.nim}) (${qtyAfter} pcs)`,
+            });
+          }
+
+          if (qtyDiff === 0) {
+            await tx
+              .update(products)
+              .set({ updatedAt: nowWib })
+              .where(eq(products.id, item.productId));
+          }
+        }
+
+        // Catat audit trail jika ada perubahan stok ATAU konfirmasi Simpan Chiller resmi (sisa > 0)
+        if (qtyDiff !== 0 || isChillerCarryover) {
+          adjustedCount += 1;
 
           const dispLabel = DISPOSITION_LABELS[item.disposition];
 
@@ -346,9 +430,10 @@ export async function POST(req: NextRequest) {
                 ? ` [Beban Konsumsi Toko: Rp ${lossCost.toLocaleString('id-ID')}]`
                 : ` [Nilai Susut Basi: Rp ${lossCost.toLocaleString('id-ID')}]`
               : '';
+          const chillerInfo = isChillerCarryover ? ` [Chiller berlaku s.d. ${tomorrowWib}]` : '';
 
           const cleanNotes = item.notes?.trim();
-          const reasonNote = `[SISA-MAKANAN ${timeStr} • Kasir: ${emp.fullName} (${emp.nim})] ${dispLabel} (Sisa fisik: ${item.qtySisaFisik} pcs). ${cleanNotes ? `Catatan: ${cleanNotes}` : ''}${lossInfo}`.trim();
+          const reasonNote = `[SISA-MAKANAN ${timeStr} • Kasir: ${emp.fullName} (${emp.nim})] ${dispLabel} (Sisa fisik: ${item.qtySisaFisik} pcs). ${cleanNotes ? `Catatan: ${cleanNotes}` : ''}${chillerInfo}${lossInfo}`.trim();
 
           await tx.insert(stockAdjustments).values({
             productId: item.productId,
@@ -366,7 +451,7 @@ export async function POST(req: NextRequest) {
     return apiOk({
       message:
         adjustedCount > 0
-          ? `Cut-off sisa ${items.length} produk (${adjustedCount} penyesuaian stok) berhasil disimpan secara atomik.`
+          ? `Cut-off sisa ${items.length} produk (${adjustedCount} catatan stok/chiller) berhasil disimpan secara atomik.`
           : `Laporan cut-off ${items.length} produk diterima (tidak ada perubahan stok).`,
       processedCount: adjustedCount,
     });

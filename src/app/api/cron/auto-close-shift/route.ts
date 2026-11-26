@@ -30,13 +30,10 @@ import {
   shifts,
   shiftSchedules,
   attendances,
-  products,
-  stockAdjustments,
-  admins,
-  stockBatches,
 } from '@/lib/db/schema';
-import { eq, and, isNull, desc, gt } from 'drizzle-orm';
+import { eq, and, isNull, desc } from 'drizzle-orm';
 import { expireDueOrders } from '@/features/order/pesanan.service';
+import { sweepExpiredPerishableProducts } from '@/lib/services/perishableSweepService';
 
 // Tipe literal enum hari dari skema DB
 type DayOfWeek = 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU';
@@ -294,79 +291,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     // =========================================================================
     // PASS 3: PERISHABLE DAILY FOOD MIDNIGHT SWEEP (Sapu Makanan Harian Jam 00:00 WIB)
-    // Makanan harian (is_perishable = true) memiliki batas konsumsi 1 hari.
-    // Jika kasir lupa lapor cut-off saat shift sore, cron tengah malam akan
-    // mereset stok ke 0 secara aman (ACID) & mencatat riwayat ke stock_adjustments.
+    // Makanan harian (is_perishable = true) yang sudah melewati hari jualnya
+    // di-reset aman ke 0 (ACID), sambil menghormati stok Simpan Chiller resmi
+    // yang expiryDate batch-nya berlaku untuk hari ini/besok (>= todayWib).
     // =========================================================================
     let sweptPerishableCount = 0;
     try {
-      const perishableList = await db
-        .select({
-          id: products.id,
-          name: products.name,
-          stockQty: products.stockQty,
-          unit: products.unit,
-          perishableType: products.perishableType,
-        })
-        .from(products)
-        .where(
-          and(
-            eq(products.isPerishable, true),
-            eq(products.isActive, true),
-            isNull(products.deletedAt),
-            gt(products.stockQty, 0),
-          ),
-        )
-        .limit(500);
-
-      if (perishableList.length > 0) {
-        // Cari admin aktif untuk audit record
-        const adminRow = await db.query.admins.findFirst({
-          where: eq(admins.isActive, true),
-          columns: { id: true },
-        });
-
-        const auditAdminId = adminRow?.id;
-
-        if (auditAdminId) {
-          await db.transaction(async (tx) => {
-            for (const item of perishableList) {
-              const qtyBefore = item.stockQty;
-              const qtyDiff = -qtyBefore;
-
-              // 1. Reset stok master produk ke 0
-              await tx
-                .update(products)
-                .set({ stockQty: 0, updatedAt: nowWib })
-                .where(eq(products.id, item.id));
-
-              // 2. Kosongkan seluruh batch aktif produk ini
-              await tx
-                .update(stockBatches)
-                .set({ currentQty: 0, updatedAt: nowWib })
-                .where(
-                  and(
-                    eq(stockBatches.productId, item.id),
-                    gt(stockBatches.currentQty, 0),
-                  ),
-                );
-
-              // 3. Catat ke stock_adjustments (audit trail)
-              await tx.insert(stockAdjustments).values({
-                productId: item.id,
-                qtyBefore,
-                qtyAfter: 0,
-                qtyDiff,
-                reason: `[AUTO-CRON-MIDNIGHT] Sapu otomatis sisa Makanan Harian (${item.perishableType || 'KONSINYASI'}). Sisa hari sebelumnya dibersihkan (${qtyBefore} ${item.unit}).`,
-                adjustedByAdminId: auditAdminId,
-                createdAt: nowWib,
-              });
-
-              sweptPerishableCount++;
-            }
-          });
-        }
-      }
+      sweptPerishableCount = await sweepExpiredPerishableProducts({
+        now: nowWib,
+        onlyUpdatedBeforeStartOfToday: false,
+        reasonMode: 'AUTO_CRON_MIDNIGHT',
+      });
     } catch {
       // PASS 3 gagal — tidak menghentikan respon cron
     }
