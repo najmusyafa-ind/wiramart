@@ -116,9 +116,7 @@ export default function LaporanMutasiStokSection() {
       setEndDate(todayStr);
       fetchReport(past7Str, todayStr);
     } else if (newPreset === 'month') {
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const firstDay = `${year}-${month}-01`;
+      const firstDay = `${todayStr.slice(0, 7)}-01`;
       setStartDate(firstDay);
       setEndDate(todayStr);
       fetchReport(firstDay, todayStr);
@@ -225,6 +223,12 @@ export default function LaporanMutasiStokSection() {
         const retN = Math.round(toSafeExcelNum(it.qtyReturned));
         const finalN = Math.round(toSafeExcelNum(it.finalStock));
 
+        const formulaExpected = initialN + inN - outN - destN - retN;
+        const finalCellVal: number | { formula: string; result: number } =
+          formulaExpected === finalN
+            ? { formula: `E${rowNum}+F${rowNum}-H${rowNum}-K${rowNum}-M${rowNum}`, result: finalN }
+            : finalN;
+
         const rowValues: (string | number | { formula: string; result: number })[] = [
           idx + 1,
           prodName,
@@ -239,7 +243,7 @@ export default function LaporanMutasiStokSection() {
           destN,
           lossN,
           retN,
-          { formula: `E${rowNum}+F${rowNum}-H${rowNum}-K${rowNum}-M${rowNum}`, result: finalN },
+          finalCellVal,
         ];
 
         const isZebra = idx % 2 === 1;

@@ -94,7 +94,7 @@ export async function GET(req: NextRequest) {
       })
       .from(stockBatches)
       .innerJoin(products, eq(stockBatches.productId, products.id))
-      .where(isNull(products.deletedAt));
+      .where(and(eq(products.isActive, true), isNull(products.deletedAt)));
 
     // 2. Query batch records dengan relasi produk
     const query = db
@@ -119,6 +119,7 @@ export async function GET(req: NextRequest) {
       .innerJoin(products, eq(stockBatches.productId, products.id))
       .where(
         and(
+          eq(products.isActive, true),
           isNull(products.deletedAt),
           productId ? eq(stockBatches.productId, productId) : undefined,
           expiryClassFilter ? eq(stockBatches.expiryClass, expiryClassFilter as ExpiryClass) : undefined,
@@ -187,20 +188,33 @@ export async function GET(req: NextRequest) {
 // ─────────────────────────────────────────────────────────────
 // POST: Input Penerimaan Barang / Batch Masuk Baru
 // ─────────────────────────────────────────────────────────────
-const CreateBatchSchema = z.object({
-  productId: z.string().uuid('Product ID tidak valid'),
-  batchCode: z.string().trim().max(50).optional(),
-  costPrice: z.number().nonnegative('HPP tidak boleh negatif'),
-  initialQty: z.number().int().positive('Jumlah masuk harus lebih dari 0'),
-  expiryDate: z
-    .string({ message: 'Tanggal kedaluwarsa (expiry date) wajib diisi untuk semua barang masuk' })
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD'),
-  expiryClass: z.enum(['HARIAN', 'PENDEK', 'PANJANG']).optional(),
-  supplierId: z.string().uuid('Supplier ID tidak valid').nullable().optional(),
-  supplierName: z.string().trim().max(100).optional(),
-  invoiceNumber: z.string().trim().max(100).optional(),
-  notes: z.string().trim().max(500).optional(),
-});
+const CreateBatchSchema = z
+  .object({
+    productId: z.string().uuid('Product ID tidak valid'),
+    batchCode: z.string().trim().max(50).optional(),
+    costPrice: z.number().nonnegative('HPP tidak boleh negatif'),
+    initialQty: z.number().int().positive('Jumlah masuk harus lebih dari 0'),
+    expiryDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD')
+      .nullable()
+      .optional(),
+    expiryClass: z.enum(['HARIAN', 'PENDEK', 'PANJANG']).optional(),
+    supplierId: z.string().uuid('Supplier ID tidak valid').nullable().optional(),
+    supplierName: z.string().trim().max(100).optional(),
+    invoiceNumber: z.string().trim().max(100).optional(),
+    notes: z.string().trim().max(500).optional(),
+  })
+  .superRefine((val, ctx) => {
+    const isLongShelf = val.expiryClass === 'PANJANG';
+    if (!isLongShelf && !val.expiryDate) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['expiryDate'],
+        message: 'Tanggal kedaluwarsa (expiry date) wajib diisi untuk produk HARIAN/PENDEK.',
+      });
+    }
+  });
 
 export async function POST(req: NextRequest) {
   const auth = await requireActiveManager(req);
@@ -233,18 +247,21 @@ export async function POST(req: NextRequest) {
   } = parsed.data;
 
   const todayStrNow = getTodayWib();
-  if (expiryDate < todayStrNow) {
+  const normalizedExpiryDate = expiryDate || null;
+  if (normalizedExpiryDate && normalizedExpiryDate < todayStrNow) {
     return apiError(
-      `Tanggal kedaluwarsa (${expiryDate}) sudah terlewat. Tidak dapat menerima barang kedaluwarsa.`,
+      `Tanggal kedaluwarsa (${normalizedExpiryDate}) sudah terlewat. Tidak dapat menerima barang kedaluwarsa.`,
       422,
     );
   }
-  const diffDaysExp = Math.ceil(
-    (new Date(`${expiryDate}T00:00:00Z`).getTime() - new Date(`${todayStrNow}T00:00:00Z`).getTime()) /
-      (1000 * 60 * 60 * 24),
-  );
-  const resolvedExpiryClass: ExpiryClass =
-    expiryClass ?? (diffDaysExp <= 2 ? 'HARIAN' : diffDaysExp <= 14 ? 'PENDEK' : 'PANJANG');
+  let resolvedExpiryClass: ExpiryClass = expiryClass ?? 'PANJANG';
+  if (!expiryClass && normalizedExpiryDate) {
+    const diffDaysExp = Math.ceil(
+      (new Date(`${normalizedExpiryDate}T00:00:00Z`).getTime() - new Date(`${todayStrNow}T00:00:00Z`).getTime()) /
+        (1000 * 60 * 60 * 24),
+    );
+    resolvedExpiryClass = diffDaysExp <= 2 ? 'HARIAN' : diffDaysExp <= 14 ? 'PENDEK' : 'PANJANG';
+  }
 
   const now = new Date();
   const batchCode =
@@ -261,16 +278,16 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await db.transaction(async (tx) => {
-      // 1. Kunci & verifikasi produk ada & tidak dihapus
+      // 1. Kunci & verifikasi produk ada, aktif, & tidak dihapus
       const [product] = await tx
         .select()
         .from(products)
-        .where(and(eq(products.id, productId), isNull(products.deletedAt)))
+        .where(and(eq(products.id, productId), eq(products.isActive, true), isNull(products.deletedAt)))
         .for('update')
         .limit(1);
 
       if (!product) {
-        throw new Error('PROD_NOT_FOUND: Produk tidak ditemukan atau telah dihapus.');
+        throw new Error('PROD_NOT_FOUND: Produk tidak ditemukan, nonaktif, atau telah dihapus.');
       }
 
       // 2. Resolve supplier 3NF & simpan batch baru ke stock_batches
@@ -290,7 +307,7 @@ export async function POST(req: NextRequest) {
           costPrice: costPrice.toString(),
           initialQty,
           currentQty: initialQty,
-          expiryDate,
+          expiryDate: normalizedExpiryDate,
           expiryClass: resolvedExpiryClass,
           notes: combinedNotes,
         })

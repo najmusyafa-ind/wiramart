@@ -34,9 +34,14 @@ export async function POST(req: NextRequest, context: Context) {
 
   try {
     let priceOverrides = undefined;
-    const contentLength = req.headers.get('content-length');
-    if (contentLength && Number(contentLength) > 0) {
-      const rawBody = await req.json().catch(() => null);
+    const rawText = await req.text().catch(() => '');
+    if (rawText.trim().length > 0) {
+      let rawBody: unknown = null;
+      try {
+        rawBody = JSON.parse(rawText);
+      } catch {
+        rawBody = null;
+      }
       if (rawBody && typeof rawBody === 'object') {
         const parsed = ApprovePriceOverrideSchema.parse(rawBody);
         priceOverrides = parsed.priceOverrides;

@@ -22,7 +22,12 @@ import {
   computeAttendanceLateness,
   shouldSkipAutoAlphaForScheduleUpdate,
 } from '@/lib/services/attendanceLatenessService';
-import { getLateDisciplineFactor } from '@/lib/finance/report';
+import {
+  getLateDisciplineFactor,
+  computeAttendanceDisciplineScore,
+  classifyShiftDrawerAudit,
+} from '@/lib/finance/report';
+import { isWithinDuplicateRestockWindow } from '@/lib/services/warehouseService';
 import {
   filterSweepablePerishableProducts,
   isBatchProtectedForToday,
@@ -467,5 +472,79 @@ describe('3. Public Schema v4.4, RLS Security, Index & Delivery Buckets (Read-On
       Math.round(Number(rawPay?.pay_cash ?? 0)),
       'cashSales dari evaluateShiftCashState tidak boleh terhitung ganda 2x',
     );
+  });
+
+  it('Opsi 1 invariants: anti restok ganda 30 detik, skor disiplin alpha != 100%, & auto-close laci belum hitung = PERLU AUDIT', () => {
+    // 1. Guard double-restock 30 detik (insiden Klepon +5 dalam 15 detik)
+    const t0 = new Date('2026-11-27T08:02:51+07:00');
+    const t15s = new Date('2026-11-27T08:03:06+07:00');
+    const t35s = new Date('2026-11-27T08:03:26+07:00');
+    assert.equal(isWithinDuplicateRestockWindow({ lastCreatedAt: t0, now: t15s }), true);
+    assert.equal(isWithinDuplicateRestockWindow({ lastCreatedAt: t0, now: t35s }), false);
+    assert.equal(isWithinDuplicateRestockWindow({ lastCreatedAt: t15s, now: t0 }), false);
+
+    // 2. Skor disiplin TIDAK_HADIR (Alpha): tidak boleh pernah 100% / SANGAT_DISIPLIN
+    const allAlpha = computeAttendanceDisciplineScore({
+      hadir: 0,
+      telat: 0,
+      pengganti: 0,
+      ijin: 0,
+      tidakHadir: 3,
+      disciplineScoreSum: 0,
+    });
+    assert.equal(allAlpha.persenKehadiran, 0);
+    assert.equal(allAlpha.skorDisiplin, 0);
+    assert.equal(allAlpha.statusDisiplin, 'PERLU_PERHATIAN');
+
+    const mixedAlpha = computeAttendanceDisciplineScore({
+      hadir: 3,
+      telat: 0,
+      pengganti: 0,
+      ijin: 0,
+      tidakHadir: 1,
+      disciplineScoreSum: 300,
+    });
+    assert.equal(mixedAlpha.persenKehadiran, 75);
+    assert.equal(mixedAlpha.skorDisiplin, 75);
+    assert.equal(mixedAlpha.statusDisiplin, 'CUKUP');
+
+    const withOfficialLeave = computeAttendanceDisciplineScore({
+      hadir: 3,
+      telat: 0,
+      pengganti: 0,
+      ijin: 1,
+      tidakHadir: 0,
+      disciplineScoreSum: 300,
+    });
+    assert.equal(withOfficialLeave.persenKehadiran, 75);
+    assert.equal(withOfficialLeave.skorDisiplin, 100);
+    assert.equal(withOfficialLeave.statusDisiplin, 'SANGAT_DISIPLIN');
+
+    // 3. Klasifikasi audit laci shift auto-close tanpa hitung fisik (actualCash === null)
+    const autoClosedUncounted = classifyShiftDrawerAudit({
+      status: 'CLOSED',
+      actualCash: null,
+      expectedCash: 250_000,
+    });
+    assert.equal(autoClosedUncounted.statusLaci, 'UNCOUNTED');
+    assert.equal(autoClosedUncounted.discrepancyTier, 'KUNING');
+    assert.equal(autoClosedUncounted.harianAuditLabel, 'PERLU AUDIT');
+
+    const balanced = classifyShiftDrawerAudit({
+      status: 'CLOSED',
+      actualCash: 249_500,
+      expectedCash: 250_000,
+    });
+    assert.equal(balanced.statusLaci, 'BALANCED');
+    assert.equal(balanced.discrepancyTier, 'HIJAU');
+
+    const majorShortage = classifyShiftDrawerAudit({
+      status: 'CLOSED',
+      actualCash: 220_000,
+      expectedCash: 250_000,
+    });
+    assert.equal(majorShortage.statusLaci, 'SHORTAGE');
+    assert.equal(majorShortage.discrepancyTier, 'MERAH');
+    assert.equal(majorShortage.harianAuditLabel, 'KURANG');
   });
 });

@@ -798,3 +798,133 @@ export async function getFinancialReport(range: ReportRange): Promise<FinancialR
 
   return { summary, daily, checks };
 }
+
+// ─────────────────────────────────────────────────────────────
+// Helper Murni: Skor Disiplin Absensi & Klasifikasi Audit Laci
+// ─────────────────────────────────────────────────────────────
+
+export type AttendanceDisciplineTier =
+  | 'SANGAT_DISIPLIN'
+  | 'DISIPLIN'
+  | 'CUKUP'
+  | 'PERLU_PERHATIAN';
+
+/**
+ * Hitung persentase kehadiran & skor disiplin mahasiswa (SSOT).
+ * - `TIDAK_HADIR` (Alpha) masuk ke pembagi skor disiplin bernilai 0 agar mahasiswa
+ *   yang alpha tidak pernah mendapatkan skor 100% / SANGAT_DISIPLIN.
+ * - `IJIN` tidak memotong skor disiplin apabila memiliki izin resmi, namun menurunkan
+ *   `persenKehadiran` dari total shift.
+ */
+export function computeAttendanceDisciplineScore(params: {
+  hadir: number;
+  telat: number;
+  pengganti: number;
+  ijin: number;
+  tidakHadir: number;
+  disciplineScoreSum: number;
+}): {
+  totalShift: number;
+  validCount: number;
+  persenKehadiran: number;
+  skorDisiplin: number;
+  statusDisiplin: AttendanceDisciplineTier;
+} {
+  const hadir = Math.max(0, Math.floor(params.hadir));
+  const telat = Math.max(0, Math.floor(params.telat));
+  const pengganti = Math.max(0, Math.floor(params.pengganti));
+  const ijin = Math.max(0, Math.floor(params.ijin));
+  const tidakHadir = Math.max(0, Math.floor(params.tidakHadir));
+
+  const validCount = hadir + telat + pengganti;
+  const totalShift = validCount + ijin + tidakHadir;
+  const persenKehadiran = totalShift > 0 ? Math.round((validCount / totalShift) * 100) : 0;
+
+  const scoredCount = validCount + tidakHadir;
+  const skorDisiplin =
+    scoredCount > 0 ? Math.round(params.disciplineScoreSum / scoredCount) : 100;
+
+  let statusDisiplin: AttendanceDisciplineTier = 'SANGAT_DISIPLIN';
+  if (skorDisiplin >= 95) statusDisiplin = 'SANGAT_DISIPLIN';
+  else if (skorDisiplin >= 80) statusDisiplin = 'DISIPLIN';
+  else if (skorDisiplin >= 65) statusDisiplin = 'CUKUP';
+  else statusDisiplin = 'PERLU_PERHATIAN';
+
+  return { totalShift, validCount, persenKehadiran, skorDisiplin, statusDisiplin };
+}
+
+export type ShiftDrawerStatusLaci =
+  | 'RUNNING'
+  | 'BALANCED'
+  | 'SHORTAGE'
+  | 'OVERAGE'
+  | 'UNCOUNTED';
+
+export type ShiftDrawerTier = 'HIJAU' | 'KUNING' | 'MERAH' | 'OVERAGE';
+
+/**
+ * Klasifikasi audit laci shift (SSOT):
+ * Shift `CLOSED` tanpa hitungan fisik (`actualCash === null`, mis. auto-close sistem)
+ * WAJIB ditandai `UNCOUNTED` / `KUNING` ("PERLU AUDIT"), bukan `BALANCED` / `HIJAU`.
+ */
+export function classifyShiftDrawerAudit(params: {
+  status: string;
+  actualCash: number | null;
+  expectedCash: number;
+  toleranceRp?: number;
+}): {
+  discrepancy: number | null;
+  statusLaci: ShiftDrawerStatusLaci;
+  discrepancyTier: ShiftDrawerTier;
+  harianAuditLabel: 'BERJALAN' | 'PERLU AUDIT' | 'SESUAI' | 'KURANG' | 'LEBIH';
+} {
+  const tolerance = params.toleranceRp ?? 2000;
+  const discrepancy =
+    params.actualCash !== null ? params.actualCash - params.expectedCash : null;
+
+  if (params.status !== 'CLOSED') {
+    return {
+      discrepancy,
+      statusLaci: 'RUNNING',
+      discrepancyTier: 'HIJAU',
+      harianAuditLabel: 'BERJALAN',
+    };
+  }
+
+  if (discrepancy === null) {
+    return {
+      discrepancy: null,
+      statusLaci: 'UNCOUNTED',
+      discrepancyTier: 'KUNING',
+      harianAuditLabel: 'PERLU AUDIT',
+    };
+  }
+
+  const harianAuditLabel =
+    Math.abs(discrepancy) < 1 ? 'SESUAI' : discrepancy < 0 ? 'KURANG' : 'LEBIH';
+
+  if (Math.abs(discrepancy) <= tolerance) {
+    return {
+      discrepancy,
+      statusLaci: 'BALANCED',
+      discrepancyTier: 'HIJAU',
+      harianAuditLabel,
+    };
+  }
+
+  if (discrepancy < 0) {
+    return {
+      discrepancy,
+      statusLaci: 'SHORTAGE',
+      discrepancyTier: discrepancy < -20000 ? 'MERAH' : 'KUNING',
+      harianAuditLabel,
+    };
+  }
+
+  return {
+    discrepancy,
+    statusLaci: 'OVERAGE',
+    discrepancyTier: 'OVERAGE',
+    harianAuditLabel,
+  };
+}

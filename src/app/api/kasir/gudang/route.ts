@@ -142,6 +142,7 @@ const restockSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal kedaluwarsa harus YYYY-MM-DD'),
   batchCode: z.string().max(50).optional().nullable(),
   notes: z.string().max(255).optional().nullable(),
+  confirmDuplicate: z.boolean().optional().default(false),
 });
 
 export async function POST(req: NextRequest) {
@@ -209,6 +210,7 @@ export async function POST(req: NextRequest) {
       batchCode: parsed.data.batchCode,
       notes: parsed.data.notes,
       employeeId: payload.sub,
+      confirmDuplicate: parsed.data.confirmDuplicate,
     });
 
     const bonusText =

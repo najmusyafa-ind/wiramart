@@ -38,8 +38,23 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
-import { getTodayWib, getOffsetDateWib } from '@/lib/utils/helpers';
+import { AppError, getTodayWib, getOffsetDateWib } from '@/lib/utils/helpers';
 import { getLowStockThreshold } from '@/lib/services/operationalSettingsService';
+
+export const DUPLICATE_RESTOCK_WINDOW_MS = 30_000;
+
+/**
+ * Pure helper: deteksi potensi klik dobel restock identik (produk & total qty sama dalam 30 detik).
+ */
+export function isWithinDuplicateRestockWindow(params: {
+  lastCreatedAt: Date;
+  now: Date;
+  windowMs?: number;
+}): boolean {
+  const windowMs = params.windowMs ?? DUPLICATE_RESTOCK_WINDOW_MS;
+  const elapsed = params.now.getTime() - params.lastCreatedAt.getTime();
+  return elapsed >= 0 && elapsed <= windowMs;
+}
 
 function deriveExpiryClass(expiryDateStr: string): ExpiryClass {
   const todayStr = getTodayWib();
@@ -89,6 +104,7 @@ export interface RestockInputDto {
   batchCode?: string | null;
   notes?: string | null;
   employeeId: string;
+  confirmDuplicate?: boolean;
 }
 
 export interface RestockResultDto {
@@ -638,6 +654,38 @@ export async function restockProductByWarehouse(
 
     if (!lockedProduct || !lockedProduct.isActive || lockedProduct.deletedAt) {
       throw new Error('Produk tidak ditemukan, nonaktif, atau telah dihapus.');
+    }
+
+    // Guard anti-dobel submit 30 detik (mencegah klik ganda / stale cache seperti kasus Klepon +5 dobel)
+    if (!input.confirmDuplicate) {
+      const recentWindowStart = new Date(nowWib.getTime() - DUPLICATE_RESTOCK_WINDOW_MS);
+      const [recentIdentical] = await tx
+        .select({ id: stockBatches.id, createdAt: stockBatches.createdAt })
+        .from(stockBatches)
+        .where(
+          and(
+            eq(stockBatches.productId, productId),
+            eq(stockBatches.initialQty, totalAdded),
+            gte(stockBatches.createdAt, recentWindowStart),
+          ),
+        )
+        .orderBy(desc(stockBatches.createdAt))
+        .limit(1);
+
+      if (
+        recentIdentical &&
+        isWithinDuplicateRestockWindow({ lastCreatedAt: new Date(recentIdentical.createdAt), now: nowWib })
+      ) {
+        const secsAgo = Math.max(
+          1,
+          Math.round((nowWib.getTime() - new Date(recentIdentical.createdAt).getTime()) / 1000),
+        );
+        throw new AppError(
+          'DUPLICATE_RESTOCK',
+          `Restock identik (+${totalAdded} ${lockedProduct.unit} ${lockedProduct.name}) baru saja dicatat ${secsAgo} detik lalu.`,
+          409,
+        );
+      }
     }
 
     productName = lockedProduct.name;

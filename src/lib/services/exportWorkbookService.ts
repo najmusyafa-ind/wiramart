@@ -1020,10 +1020,12 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
       const sales = shiftSalesMap.get(s.id) ?? { cash: 0, qris: 0, txCount: 0 };
       const mv = shiftCashMoveMap.get(s.id) ?? { cashIn: 0, cashOut: 0 };
       const modal = s.modalAwal !== null && s.modalAwal !== undefined ? toNum(s.modalAwal) : 100_000;
-      const actual = s.actualCash !== null ? toNum(s.actualCash) : 0;
+      const actualVal = s.actualCash !== null ? toNum(s.actualCash) : null;
       const expectedCash = modal + sales.cash + mv.cashIn - mv.cashOut;
-      const diff = s.actualCash !== null ? actual - expectedCash : 0;
-      const flagText = [s.auditFlags, s.notes].filter(Boolean).join(' | ');
+      const diffVal = actualVal !== null ? actualVal - expectedCash : null;
+      const uncountedNote =
+        s.status === 'CLOSED' && actualVal === null ? 'Auto-Close (Belum Hitung Fisik)' : null;
+      const flagText = [s.auditFlags, uncountedNote, s.notes].filter(Boolean).join(' | ');
       writeRowValues(wsShift, shr, [
         s.kasirName,
         s.kasirNim,
@@ -1035,8 +1037,8 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
         sales.cash,
         mv.cashIn,
         mv.cashOut,
-        actual,
-        diff,
+        actualVal !== null ? actualVal : '-',
+        diffVal !== null ? diffVal : '-',
         flagText,
       ]);
       shr += 1;
@@ -1081,23 +1083,41 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
 
   const txIds = txList.map((t) => t.id);
   const splitPayMap = new Map<string, { cash: number; qris: number }>();
+  const txVerifiedMap = new Map<string, { hpp: number; profit: number }>();
   if (txIds.length > 0) {
     // Query chunked safely if > 2.000 IDs agar tidak melewati batas bind parameter PG
     for (let i = 0; i < txIds.length; i += 2000) {
       const chunk = txIds.slice(i, i + 2000);
-      const pRows = await db
-        .select({
-          transactionId: transactionPayments.transactionId,
-          paymentMethod: transactionPayments.paymentMethod,
-          amount: transactionPayments.amount,
-        })
-        .from(transactionPayments)
-        .where(inArray(transactionPayments.transactionId, chunk));
+      const [pRows, viRows] = await Promise.all([
+        db
+          .select({
+            transactionId: transactionPayments.transactionId,
+            paymentMethod: transactionPayments.paymentMethod,
+            amount: transactionPayments.amount,
+          })
+          .from(transactionPayments)
+          .where(inArray(transactionPayments.transactionId, chunk)),
+        db
+          .select({
+            transactionId: transactionItems.transactionId,
+            verifiedHpp: sql<string>`COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalCost} ELSE 0 END), 0)`,
+            verifiedProfit: sql<string>`COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN (${transactionItems.subtotalSell} - ${transactionItems.subtotalCost}) ELSE 0 END), 0)`,
+          })
+          .from(transactionItems)
+          .where(inArray(transactionItems.transactionId, chunk))
+          .groupBy(transactionItems.transactionId),
+      ]);
       for (const p of pRows) {
         const cur = splitPayMap.get(p.transactionId) ?? { cash: 0, qris: 0 };
         if (p.paymentMethod === 'CASH') cur.cash += toNum(p.amount);
         if (p.paymentMethod === 'QRIS') cur.qris += toNum(p.amount);
         splitPayMap.set(p.transactionId, cur);
+      }
+      for (const vi of viRows) {
+        txVerifiedMap.set(vi.transactionId, {
+          hpp: toNum(vi.verifiedHpp),
+          profit: toNum(vi.verifiedProfit),
+        });
       }
     }
   }
@@ -1106,14 +1126,14 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
   addBannerBlock(
     wsTx,
     'RINCIAN TRANSAKSI PENJUALAN (NON-TESTING)',
-    `Periode: ${range.label} | Total baris diunduh: ${txList.length.toLocaleString('id-ID')} (Maks ${EXPORT_MAX_ROWS.toLocaleString('id-ID')}) | Baris TOTAL hanya menghitung status COMPLETED`,
+    `Periode: ${range.label} | Total baris diunduh: ${txList.length.toLocaleString('id-ID')} (Maks ${EXPORT_MAX_ROWS.toLocaleString('id-ID')}) | Baris TOTAL hanya menghitung status COMPLETED & item ber-HPP > 0`,
     13,
   );
   setWidths(wsTx, [22, 20, 24, 14, 11, 12, 16, 15, 15, 16, 16, 15, 28]);
   setHeaderRow(
     wsTx,
     4,
-    ['Invoice', 'Tanggal (WIB)', 'Kasir', 'NIM', 'Metode', 'Status', 'Omzet (Rp)', 'Cash Tagihan (Rp)', 'QRIS Tagihan (Rp)', 'HPP Sistem (Rp)', 'Laba Sistem (Rp)', 'Kembalian (Rp)', 'Alasan Void'],
+    ['Invoice', 'Tanggal (WIB)', 'Kasir', 'NIM', 'Metode', 'Status', 'Omzet (Rp)', 'Cash Tagihan (Rp)', 'QRIS Tagihan (Rp)', 'HPP Verified (Rp)', 'Laba Verified (Rp)', 'Kembalian (Rp)', 'Alasan Void'],
   );
 
   let txr = 5;
@@ -1125,6 +1145,9 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
       const split = splitPayMap.get(t.id);
       const cashPart = split ? split.cash : t.paymentMethod === 'CASH' ? toNum(t.grossAmount) : 0;
       const qrisPart = split ? split.qris : t.paymentMethod === 'QRIS' ? toNum(t.grossAmount) : 0;
+      const verified = txVerifiedMap.get(t.id);
+      const txHpp = verified ? verified.hpp : toNum(t.totalHpp);
+      const txProfit = verified ? verified.profit : toNum(t.grossProfit);
       writeRowValues(wsTx, txr, [
         t.invoiceNumber,
         fmtWibDateTime(t.createdAt),
@@ -1135,8 +1158,8 @@ export async function buildSalesReportWorkbook(range: ReportRange): Promise<Expo
         toNum(t.grossAmount),
         cashPart,
         qrisPart,
-        toNum(t.totalHpp),
-        toNum(t.grossProfit),
+        txHpp,
+        txProfit,
         toNum(t.changeAmount),
         t.voidReason ?? '',
       ]);
@@ -1281,6 +1304,7 @@ export async function buildBackupWorkbook(params: {
 
     const rows = await db
       .select({
+        id: transactions.id,
         invoiceNumber: transactions.invoiceNumber,
         createdAt: transactions.createdAt,
         kasir: employees.fullName,
@@ -1301,12 +1325,34 @@ export async function buildBackupWorkbook(params: {
 
     if (rows.length >= EXPORT_MAX_ROWS) truncatedSheets.push('Transaksi');
 
+    const backupVerifiedMap = new Map<string, { hpp: number; profit: number }>();
+    const backupTxIds = rows.map((r) => r.id);
+    for (let i = 0; i < backupTxIds.length; i += 2000) {
+      const chunk = backupTxIds.slice(i, i + 2000);
+      const viRows = await db
+        .select({
+          transactionId: transactionItems.transactionId,
+          verifiedHpp: sql<string>`COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalCost} ELSE 0 END), 0)`,
+          verifiedProfit: sql<string>`COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN (${transactionItems.subtotalSell} - ${transactionItems.subtotalCost}) ELSE 0 END), 0)`,
+        })
+        .from(transactionItems)
+        .where(inArray(transactionItems.transactionId, chunk))
+        .groupBy(transactionItems.transactionId);
+      for (const vi of viRows) {
+        backupVerifiedMap.set(vi.transactionId, {
+          hpp: toNum(vi.verifiedHpp),
+          profit: toNum(vi.verifiedProfit),
+        });
+      }
+    }
+
     let rIdx = 5;
     if (rows.length === 0) {
       writeRowValues(ws, rIdx, ['Tidak ada transaksi pada periode ini', '-', '-', '-', '-', 0, 0, 0, 0, 0, '-']);
       rIdx += 1;
     } else {
       for (const r of rows) {
+        const verified = backupVerifiedMap.get(r.id);
         writeRowValues(ws, rIdx, [
           r.invoiceNumber,
           fmtWibDateTime(r.createdAt),
@@ -1314,8 +1360,8 @@ export async function buildBackupWorkbook(params: {
           r.paymentMethod,
           r.status,
           toNum(r.grossAmount),
-          toNum(r.totalHpp),
-          toNum(r.grossProfit),
+          verified ? verified.hpp : toNum(r.totalHpp),
+          verified ? verified.profit : toNum(r.grossProfit),
           toNum(r.cashReceived),
           toNum(r.changeAmount),
           r.voidReason ?? '',
@@ -1378,8 +1424,11 @@ export async function buildBackupWorkbook(params: {
       ir += 1;
     } else {
       for (const r of itemRows) {
+        const unitCost = toNum(r.costPriceSnapshot);
         const subSell = toNum(r.subtotalSell);
         const subCost = toNum(r.subtotalCost);
+        const verifiedSubCost = unitCost > 0 ? subCost : 0;
+        const verifiedProfit = unitCost > 0 ? subSell - subCost : 0;
         writeRowValues(wsItems, ir, [
           r.invoiceNumber,
           fmtWibDateTime(r.createdAt),
@@ -1387,10 +1436,10 @@ export async function buildBackupWorkbook(params: {
           r.status,
           r.qty,
           toNum(r.sellingPriceSnapshot),
-          toNum(r.costPriceSnapshot),
+          unitCost,
           subSell,
-          subCost,
-          subSell - subCost,
+          verifiedSubCost,
+          verifiedProfit,
         ]);
         ir += 1;
       }

@@ -12,13 +12,38 @@
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq, and, gte, lte, desc, sql } from 'drizzle-orm';
+import { eq, and, gte, lte, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { attendances, shiftSchedules, employees, auditLogs } from '@/lib/db/schema';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
-import { getLateDisciplineFactor } from '@/lib/finance/report';
+import {
+  getLateDisciplineFactor,
+  computeAttendanceDisciplineScore,
+} from '@/lib/finance/report';
 
 export const runtime = 'nodejs';
+
+const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+const YM_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+const HM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isValidYmd(val: string): boolean {
+  if (!YMD_RE.test(val)) return false;
+  const [y, m, d] = val.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.toISOString().slice(0, 10) === val;
+}
+
+class AttendanceBatchError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AttendanceBatchError';
+  }
+}
 
 /** Akun testing/dosen/admin yang tidak dimasukkan dalam rekap performa mahasiswa */
 function isExcludedAccount(name?: string | null, nim?: string | null): boolean {
@@ -52,12 +77,31 @@ export async function GET(req: NextRequest): Promise<Response> {
   }
 
   const { searchParams } = new URL(req.url);
-  const periodParam     = searchParams.get('period');
-  const dateParam       = searchParams.get('date');
-  const employeeIdParam = searchParams.get('employeeId');
-  const startDateParam  = searchParams.get('startDate');
-  const endDateParam    = searchParams.get('endDate');
-  const monthParam      = searchParams.get('month'); // 'YYYY-MM'
+  const periodParam     = searchParams.get('period')?.trim() || null;
+  const dateParam       = searchParams.get('date')?.trim() || null;
+  const employeeIdParam = searchParams.get('employeeId')?.trim() || null;
+  const startDateParam  = searchParams.get('startDate')?.trim() || null;
+  const endDateParam    = searchParams.get('endDate')?.trim() || null;
+  const monthParam      = searchParams.get('month')?.trim() || null; // 'YYYY-MM'
+
+  if (employeeIdParam && !UUID_RE.test(employeeIdParam)) {
+    return apiError('Parameter employeeId tidak valid.', 400);
+  }
+  if (monthParam && !YM_RE.test(monthParam)) {
+    return apiError('Format bulan tidak valid (harus YYYY-MM).', 400);
+  }
+  if (dateParam && !isValidYmd(dateParam)) {
+    return apiError('Format tanggal tidak valid (harus YYYY-MM-DD).', 400);
+  }
+  if (startDateParam && !isValidYmd(startDateParam)) {
+    return apiError('Format tanggal awal tidak valid (harus YYYY-MM-DD).', 400);
+  }
+  if (endDateParam && !isValidYmd(endDateParam)) {
+    return apiError('Format tanggal akhir tidak valid (harus YYYY-MM-DD).', 400);
+  }
+  if (startDateParam && endDateParam && startDateParam > endDateParam) {
+    return apiError('Tanggal awal tidak boleh melebihi tanggal akhir.', 400);
+  }
 
   const todayWib = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
 
@@ -153,7 +197,15 @@ export async function GET(req: NextRequest): Promise<Response> {
     where: and(...conditions),
     with: {
       employee: {
-        columns: { id: true, fullName: true, nim: true, programStudi: true, jabatan: true },
+        columns: {
+          id: true,
+          fullName: true,
+          nim: true,
+          programStudi: true,
+          jabatan: true,
+          isActive: true,
+          deletedAt: true,
+        },
       },
       schedule: {
         columns: { dayOfWeek: true, slotStart: true, slotEnd: true, coordinatorName: true },
@@ -182,7 +234,10 @@ export async function GET(req: NextRequest): Promise<Response> {
     statusDisiplin: 'SANGAT_DISIPLIN' | 'DISIPLIN' | 'CUKUP' | 'PERLU_PERHATIAN';
   };
 
-  const empMap = new Map<string, EmpSummary & { disciplineScoreSum: number }>();
+  const empMap = new Map<
+    string,
+    EmpSummary & { disciplineScoreSum: number; isActive: boolean }
+  >();
 
   let totalHadir = 0;
   let totalTelat = 0;
@@ -191,7 +246,14 @@ export async function GET(req: NextRequest): Promise<Response> {
   let totalTidakHadir = 0;
   let totalPengganti = 0;
 
+  const visibleRecords: typeof records = [];
+
   for (const r of records) {
+    const emp = r.employee;
+    if (!emp || emp.deletedAt || isExcludedAccount(emp.fullName, emp.nim)) continue;
+
+    visibleRecords.push(r);
+
     if (r.status === 'HADIR') totalHadir += 1;
     else if (r.status === 'TELAT') {
       totalTelat += 1;
@@ -199,9 +261,6 @@ export async function GET(req: NextRequest): Promise<Response> {
     } else if (r.status === 'IJIN') totalIjin += 1;
     else if (r.status === 'TIDAK_HADIR') totalTidakHadir += 1;
     else if (r.status === 'PENGGANTI') totalPengganti += 1;
-
-    const emp = r.employee;
-    if (!emp || isExcludedAccount(emp.fullName, emp.nim)) continue;
 
     if (!empMap.has(emp.id)) {
       empMap.set(emp.id, {
@@ -221,6 +280,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         skorDisiplin: 100,
         statusDisiplin: 'SANGAT_DISIPLIN',
         disciplineScoreSum: 0,
+        isActive: emp.isActive,
       });
     }
 
@@ -246,39 +306,37 @@ export async function GET(req: NextRequest): Promise<Response> {
     }
   }
 
-  const summaryByEmployee: EmpSummary[] = Array.from(empMap.values()).map((e) => {
-    const validCount = e.hadir + e.telat + e.pengganti;
-    const persenKehadiran = e.totalShift > 0
-      ? Math.round((validCount / e.totalShift) * 100)
-      : 0;
-    const skorDisiplin = validCount > 0
-      ? Math.round(e.disciplineScoreSum / validCount)
-      : 100;
+  const summaryByEmployee: EmpSummary[] = Array.from(empMap.values())
+    .filter((e) => e.isActive || e.hadir + e.telat + e.pengganti > 0)
+    .map((e) => {
+      const computed = computeAttendanceDisciplineScore({
+        hadir: e.hadir,
+        telat: e.telat,
+        pengganti: e.pengganti,
+        ijin: e.ijin,
+        tidakHadir: e.tidakHadir,
+        disciplineScoreSum: e.disciplineScoreSum,
+      });
 
-    let statusDisiplin: EmpSummary['statusDisiplin'] = 'SANGAT_DISIPLIN';
-    if (skorDisiplin >= 95) statusDisiplin = 'SANGAT_DISIPLIN';
-    else if (skorDisiplin >= 80) statusDisiplin = 'DISIPLIN';
-    else if (skorDisiplin >= 65) statusDisiplin = 'CUKUP';
-    else statusDisiplin = 'PERLU_PERHATIAN';
-
-    return {
-      employeeId: e.employeeId,
-      fullName: e.fullName,
-      nim: e.nim,
-      programStudi: e.programStudi,
-      jabatan: e.jabatan,
-      totalShift: e.totalShift,
-      hadir: e.hadir,
-      telat: e.telat,
-      totalLateMinutes: e.totalLateMinutes,
-      ijin: e.ijin,
-      tidakHadir: e.tidakHadir,
-      pengganti: e.pengganti,
-      persenKehadiran,
-      skorDisiplin,
-      statusDisiplin,
-    };
-  }).sort((a, b) => b.skorDisiplin - a.skorDisiplin || b.totalShift - a.totalShift || a.fullName.localeCompare(b.fullName));
+      return {
+        employeeId: e.employeeId,
+        fullName: e.fullName,
+        nim: e.nim,
+        programStudi: e.programStudi,
+        jabatan: e.jabatan,
+        totalShift: computed.totalShift,
+        hadir: e.hadir,
+        telat: e.telat,
+        totalLateMinutes: e.totalLateMinutes,
+        ijin: e.ijin,
+        tidakHadir: e.tidakHadir,
+        pengganti: e.pengganti,
+        persenKehadiran: computed.persenKehadiran,
+        skorDisiplin: computed.skorDisiplin,
+        statusDisiplin: computed.statusDisiplin,
+      };
+    })
+    .sort((a, b) => b.skorDisiplin - a.skorDisiplin || b.totalShift - a.totalShift || a.fullName.localeCompare(b.fullName));
 
   const totalEmployees = summaryByEmployee.length;
   const avgKehadiran = totalEmployees > 0
@@ -289,10 +347,10 @@ export async function GET(req: NextRequest): Promise<Response> {
     : 100;
 
   return apiOk({
-    records,
+    records: visibleRecords,
     summaryByEmployee,
     summary: {
-      totalRecords: records.length,
+      totalRecords: visibleRecords.length,
       hadir: totalHadir,
       telat: totalTelat,
       totalLateMinutes,
@@ -318,13 +376,13 @@ const singleManualAttendanceSchema = z.object({
   scheduleId:     z.string().uuid('Schedule ID tidak valid'),
   attendanceDate: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD'),
+    .refine(isValidYmd, 'Tanggal absensi tidak valid (harus tanggal kalender YYYY-MM-DD)'),
   status: z.enum(['HADIR', 'TELAT', 'PENGGANTI', 'IJIN', 'TIDAK_HADIR'], {
     message: 'Status kehadiran tidak valid',
   }),
   lateMinutes: z.number().int().min(0).max(480).optional().default(0),
   roleTask:    z.string().trim().max(50).optional(),
-  clockInTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  clockInTime: z.string().regex(HM_RE, 'Format jam masuk tidak valid (HH:MM)').optional(),
   notes:       z.string().max(500).trim().optional(),
 });
 
@@ -347,89 +405,127 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   if (isBulk) {
     const parsed = bulkManualAttendanceSchema.safeParse(body);
-    if (!parsed.success) return apiError(parsed.error.format(), 422);
+    if (!parsed.success) {
+      return apiError(parsed.error.issues[0]?.message ?? 'Data absensi massal tidak valid.', 422);
+    }
     entriesToSave = parsed.data.entries;
   } else {
     const parsed = singleManualAttendanceSchema.safeParse(body);
-    if (!parsed.success) return apiError(parsed.error.format(), 422);
+    if (!parsed.success) {
+      return apiError(parsed.error.issues[0]?.message ?? 'Data absensi tidak valid.', 422);
+    }
     entriesToSave = [parsed.data];
   }
 
-  const savedIds: string[] = [];
+  let savedIds: string[];
+  try {
+    savedIds = await db.transaction(async (tx) => {
+      const ids: string[] = [];
 
-  for (const item of entriesToSave) {
-    const [emp, sched] = await Promise.all([
-      db.query.employees.findFirst({ where: eq(employees.id, item.employeeId), columns: { id: true, fullName: true } }),
-      db.query.shiftSchedules.findFirst({ where: eq(shiftSchedules.id, item.scheduleId), columns: { id: true, dayOfWeek: true, slotStart: true } }),
-    ]);
+      for (const item of entriesToSave) {
+        const [emp, sched] = await Promise.all([
+          tx.query.employees.findFirst({
+            where: and(eq(employees.id, item.employeeId), isNull(employees.deletedAt)),
+            columns: { id: true, fullName: true, isActive: true },
+          }),
+          tx.query.shiftSchedules.findFirst({
+            where: eq(shiftSchedules.id, item.scheduleId),
+            columns: { id: true, dayOfWeek: true, slotStart: true },
+          }),
+        ]);
 
-    if (!emp)   return apiError(`Karyawan ${item.employeeId} tidak ditemukan.`, 404);
-    if (!sched) return apiError(`Jadwal ${item.scheduleId} tidak ditemukan.`, 404);
+        if (!emp) {
+          throw new AttendanceBatchError(404, `Karyawan ${item.employeeId} tidak ditemukan.`);
+        }
+        if (!sched) {
+          throw new AttendanceBatchError(404, `Jadwal ${item.scheduleId} tidak ditemukan.`);
+        }
 
-    const effLate = item.status === 'TELAT' ? item.lateMinutes : 0;
-    const roleLabel = item.roleTask?.trim() || 'Kasir';
-    const noteText = item.notes?.trim()
-      ? (item.status === 'HADIR' || item.status === 'TELAT' || item.status === 'PENGGANTI'
-          ? `Peran: ${roleLabel} | ${item.notes.trim()}`
-          : item.notes.trim())
-      : (item.status === 'HADIR' || item.status === 'TELAT' || item.status === 'PENGGANTI'
-          ? `Peran: ${roleLabel} | Crosscheck buku`
-          : null);
+        const isPresent =
+          item.status === 'HADIR' || item.status === 'TELAT' || item.status === 'PENGGANTI';
+        if (isPresent && !emp.isActive) {
+          throw new AttendanceBatchError(
+            422,
+            `Karyawan ${emp.fullName} sudah nonaktif dan tidak dapat dicatat hadir.`,
+          );
+        }
 
-    const clockInActual =
-      item.status === 'HADIR' || item.status === 'TELAT' || item.status === 'PENGGANTI'
-        ? new Date(`${item.attendanceDate}T${item.clockInTime ?? sched.slotStart}:00+07:00`)
-        : null;
+        const effLate = item.status === 'TELAT' ? item.lateMinutes : 0;
+        const roleLabel = isPresent ? (item.roleTask?.trim() || 'Kasir') : null;
+        const noteText = item.notes?.trim()
+          ? (isPresent
+              ? `Peran: ${roleLabel} | ${item.notes.trim()}`
+              : item.notes.trim())
+          : (isPresent
+              ? `Peran: ${roleLabel} | Crosscheck buku`
+              : null);
 
-    const [result] = await db
-      .insert(attendances)
-      .values({
-        employeeId:         item.employeeId,
-        scheduleId:         item.scheduleId,
-        attendanceDate:     item.attendanceDate,
-        status:             item.status,
-        clockInActual,
-        lateMinutes:        effLate,
-        roleTask:           roleLabel,
-        verificationSource: 'MANUAL_CROSSCHECK',
-        isSubstitute:       item.status === 'PENGGANTI',
-        notes:              noteText,
-        recordedByAdminId:  session.sub,
-      })
-      .onConflictDoUpdate({
-        target: [attendances.employeeId, attendances.scheduleId, attendances.attendanceDate],
-        set: {
-          status:             item.status,
-          clockInActual,
-          lateMinutes:        effLate,
-          roleTask:           roleLabel,
-          verificationSource: 'MANUAL_CROSSCHECK',
-          isSubstitute:       item.status === 'PENGGANTI',
-          notes:              noteText,
-          recordedByAdminId:  session.sub,
-          updatedAt:          new Date(),
-        },
-      })
-      .returning({ id: attendances.id });
+        const clockInActual = isPresent
+          ? new Date(`${item.attendanceDate}T${item.clockInTime ?? sched.slotStart}:00+07:00`)
+          : null;
 
-    if (result?.id) {
-      savedIds.push(result.id);
-      await db.insert(auditLogs).values({
-        tableName: 'attendances',
-        recordId: result.id,
-        action: 'UPDATE',
-        newValues: JSON.stringify({
-          source: 'MANUAL_CROSSCHECK',
-          employeeName: emp.fullName,
-          attendanceDate: item.attendanceDate,
-          status: item.status,
-          lateMinutes: effLate,
-          notes: noteText,
-        }),
-        actorType: 'ADMIN',
-        actorId: session.sub,
-      }).catch(() => {});
+        const [result] = await tx
+          .insert(attendances)
+          .values({
+            employeeId:         item.employeeId,
+            scheduleId:         item.scheduleId,
+            attendanceDate:     item.attendanceDate,
+            status:             item.status,
+            clockInActual,
+            clockOutActual:     null,
+            lateMinutes:        effLate,
+            roleTask:           roleLabel,
+            verificationSource: 'MANUAL_CROSSCHECK',
+            isSubstitute:       item.status === 'PENGGANTI',
+            notes:              noteText,
+            recordedByAdminId:  session.sub,
+          })
+          .onConflictDoUpdate({
+            target: [attendances.employeeId, attendances.scheduleId, attendances.attendanceDate],
+            set: {
+              status:             item.status,
+              clockInActual,
+              ...(isPresent ? {} : { clockOutActual: null }),
+              lateMinutes:        effLate,
+              roleTask:           roleLabel,
+              verificationSource: 'MANUAL_CROSSCHECK',
+              isSubstitute:       item.status === 'PENGGANTI',
+              notes:              noteText,
+              recordedByAdminId:  session.sub,
+              updatedAt:          new Date(),
+            },
+          })
+          .returning({ id: attendances.id });
+
+        if (result?.id) {
+          ids.push(result.id);
+          await tx.insert(auditLogs).values({
+            tableName: 'attendances',
+            recordId: result.id,
+            action: 'UPDATE',
+            newValues: JSON.stringify({
+              source: 'MANUAL_CROSSCHECK',
+              employeeName: emp.fullName,
+              attendanceDate: item.attendanceDate,
+              status: item.status,
+              lateMinutes: effLate,
+              roleTask: roleLabel,
+              notes: noteText,
+            }),
+            actorType: 'ADMIN',
+            actorId: session.sub,
+          });
+        }
+      }
+
+      return ids;
+    });
+  } catch (err) {
+    if (err instanceof AttendanceBatchError) {
+      return apiError(err.message, err.status);
     }
+    console.error('Error saving manual attendance:', err);
+    return apiError('Gagal menyimpan data absensi manual.', 500);
   }
 
   return apiOk(

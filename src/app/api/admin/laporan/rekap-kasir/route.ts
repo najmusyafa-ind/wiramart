@@ -31,6 +31,7 @@ import {
 import { eq, and, gte, lt, lte, inArray, isNull, isNotNull, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import {
+  classifyShiftDrawerAudit,
   InvalidRangeError,
   isPeriodKey,
   resolveReportRange,
@@ -216,10 +217,12 @@ export async function GET(req: NextRequest) {
     const personalAggList: PersonalTxAgg[] = [];
     const personalCashMap = new Map<string, number>();
     const personalQrisMap = new Map<string, number>();
+    const personalVerifiedHppMap = new Map<string, number>();
+    const personalVerifiedProfitMap = new Map<string, number>();
     const topItemByKasir = new Map<string, { name: string; qty: number }>();
 
     for (const idChunk of chunkArray(kasirIds)) {
-      const [chunkPersonalAgg, chunkSplitPays, chunkDirectPays, chunkTopItems] = await Promise.all([
+      const [chunkPersonalAgg, chunkSplitPays, chunkDirectPays, chunkTopItems, chunkVerifiedItems] = await Promise.all([
         db
           .select({
             employeeId: transactions.employeeId,
@@ -295,6 +298,24 @@ export async function GET(req: NextRequest) {
           )
           .groupBy(transactions.employeeId, transactionItems.productNameSnapshot)
           .orderBy(sql`COALESCE(SUM(${transactionItems.qty}), 0) DESC`),
+        db
+          .select({
+            employeeId: transactions.employeeId,
+            verifiedHpp: sql<string>`COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalCost} ELSE 0 END), 0)`,
+            verifiedProfit: sql<string>`COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN (${transactionItems.subtotalSell} - ${transactionItems.subtotalCost}) ELSE 0 END), 0)`,
+          })
+          .from(transactionItems)
+          .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
+          .where(
+            and(
+              inArray(transactions.employeeId, idChunk),
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.isTest, false),
+              gte(transactions.createdAt, rangeStart),
+              lt(transactions.createdAt, rangeEndExclusive),
+            ),
+          )
+          .groupBy(transactions.employeeId),
       ]);
 
       personalAggList.push(...chunkPersonalAgg);
@@ -323,6 +344,17 @@ export async function GET(req: NextRequest) {
         if (!cur || qty > cur.qty) {
           topItemByKasir.set(item.employeeId, { name: item.productName, qty });
         }
+      }
+
+      for (const vi of chunkVerifiedItems) {
+        personalVerifiedHppMap.set(
+          vi.employeeId,
+          (personalVerifiedHppMap.get(vi.employeeId) ?? 0) + (parseFloat(vi.verifiedHpp || '0') || 0),
+        );
+        personalVerifiedProfitMap.set(
+          vi.employeeId,
+          (personalVerifiedProfitMap.get(vi.employeeId) ?? 0) + (parseFloat(vi.verifiedProfit || '0') || 0),
+        );
       }
     }
 
@@ -366,14 +398,13 @@ export async function GET(req: NextRequest) {
 
     const hourlyKasirTrack = new Map<number, number>();
     for (const idChunk of chunkArray(kasirIds)) {
-      const [hourMainRows, hourSplitRows, hourDirectRows] = await Promise.all([
+      const [hourMainRows, hourSplitRows, hourDirectRows, hourVerifiedRows] = await Promise.all([
         db
           .select({
             hour: hourWibExpr,
             txCount: sql<number>`COUNT(CASE WHEN ${transactions.status} = 'COMPLETED' THEN 1 END)::int`,
             voidCount: sql<number>`COUNT(CASE WHEN ${transactions.status} = 'VOID' THEN 1 END)::int`,
             omzet: sql<string>`COALESCE(SUM(CASE WHEN ${transactions.status} = 'COMPLETED' THEN ${transactions.grossAmount} ELSE 0 END), 0)`,
-            hpp: sql<string>`COALESCE(SUM(CASE WHEN ${transactions.status} = 'COMPLETED' THEN ${transactions.totalHpp} ELSE 0 END), 0)`,
             kasirCount: sql<number>`COUNT(DISTINCT CASE WHEN ${transactions.status} = 'COMPLETED' THEN ${transactions.employeeId} END)::int`,
           })
           .from(transactions)
@@ -422,6 +453,24 @@ export async function GET(req: NextRequest) {
             ),
           )
           .groupBy(hourWibExpr, transactions.paymentMethod),
+        db
+          .select({
+            hour: hourWibExpr,
+            verifiedHpp: sql<string>`COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalCost} ELSE 0 END), 0)`,
+            verifiedProfit: sql<string>`COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN (${transactionItems.subtotalSell} - ${transactionItems.subtotalCost}) ELSE 0 END), 0)`,
+          })
+          .from(transactionItems)
+          .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
+          .where(
+            and(
+              inArray(transactions.employeeId, idChunk),
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.isTest, false),
+              gte(transactions.createdAt, rangeStart),
+              lt(transactions.createdAt, rangeEndExclusive),
+            ),
+          )
+          .groupBy(hourWibExpr),
       ]);
 
       for (const hr of hourMainRows) {
@@ -429,12 +478,15 @@ export async function GET(req: NextRequest) {
         b.txCount += Number(hr.txCount ?? 0);
         b.voidCount += Number(hr.voidCount ?? 0);
         const omzet = parseFloat(hr.omzet || '0') || 0;
-        const hpp = parseFloat(hr.hpp || '0') || 0;
         b.omzet += omzet;
-        b.hpp += hpp;
-        b.labaKotor += omzet - hpp;
         hourlyKasirTrack.set(b.hour, (hourlyKasirTrack.get(b.hour) ?? 0) + Number(hr.kasirCount ?? 0));
         b.activeKasirCount = hourlyKasirTrack.get(b.hour) ?? 0;
+      }
+
+      for (const hv of hourVerifiedRows) {
+        const b = ensureHour(Number(hv.hour ?? 0));
+        b.hpp += parseFloat(hv.verifiedHpp || '0') || 0;
+        b.labaKotor += parseFloat(hv.verifiedProfit || '0') || 0;
       }
 
       for (const sr of hourSplitRows) {
@@ -608,20 +660,29 @@ export async function GET(req: NextRequest) {
     };
 
     const txByShift = new Map<string, ShiftTxAgg>();
+    const shiftVerifiedHppMap = new Map<string, number>();
+    const shiftVerifiedProfitMap = new Map<string, number>();
     const cashOutMap = new Map<string, number>();
     const cashInMap = new Map<string, number>();
     const cashSalesMap = new Map<string, number>();
     const shiftAllParticipantsMap = new Map<string, Set<string>>();
 
     for (const idChunk of chunkArray(shiftIds)) {
-      const [chunkTxAgg, chunkMovements, chunkSplitCash, chunkDirectCash, chunkEmpInShift] = await Promise.all([
+      const [
+        chunkTxAgg,
+        chunkMovements,
+        chunkSplitCash,
+        chunkDirectCash,
+        chunkEmpInShift,
+        chunkShiftVerifiedItems,
+      ] = await Promise.all([
         db
           .select({
             shiftId: transactions.shiftId,
             totalOmzet: sql<string>`COALESCE(SUM(CASE WHEN ${transactions.status} = 'COMPLETED' AND ${transactions.isTest} = false THEN ${transactions.grossAmount} ELSE 0 END), 0)`,
             totalHpp: sql<string>`COALESCE(SUM(CASE WHEN ${transactions.status} = 'COMPLETED' AND ${transactions.isTest} = false THEN ${transactions.totalHpp} ELSE 0 END), 0)`,
             txCount: sql<number>`COUNT(CASE WHEN ${transactions.status} = 'COMPLETED' AND ${transactions.isTest} = false THEN 1 END)::int`,
-            voidCount: sql<number>`COUNT(CASE WHEN ${transactions.status} = 'VOID' THEN 1 END)::int`,
+            voidCount: sql<number>`COUNT(CASE WHEN ${transactions.status} = 'VOID' AND ${transactions.isTest} = false THEN 1 END)::int`,
             txCountCash: sql<number>`COUNT(CASE WHEN ${transactions.status} = 'COMPLETED' AND ${transactions.isTest} = false AND ${transactions.paymentMethod} = 'CASH' THEN 1 END)::int`,
             txCountQris: sql<number>`COUNT(CASE WHEN ${transactions.status} = 'COMPLETED' AND ${transactions.isTest} = false AND ${transactions.paymentMethod} = 'QRIS' THEN 1 END)::int`,
           })
@@ -674,9 +735,29 @@ export async function GET(req: NextRequest) {
           .from(transactions)
           .innerJoin(employees, eq(transactions.employeeId, employees.id))
           .where(and(inArray(transactions.shiftId, idChunk), eq(transactions.isTest, false))),
+        db
+          .select({
+            shiftId: transactions.shiftId,
+            verifiedHpp: sql<string>`COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN ${transactionItems.subtotalCost} ELSE 0 END), 0)`,
+            verifiedProfit: sql<string>`COALESCE(SUM(CASE WHEN ${transactionItems.costPriceSnapshot} > 0 THEN (${transactionItems.subtotalSell} - ${transactionItems.subtotalCost}) ELSE 0 END), 0)`,
+          })
+          .from(transactionItems)
+          .innerJoin(transactions, eq(transactionItems.transactionId, transactions.id))
+          .where(
+            and(
+              inArray(transactions.shiftId, idChunk),
+              eq(transactions.status, 'COMPLETED'),
+              eq(transactions.isTest, false),
+            ),
+          )
+          .groupBy(transactions.shiftId),
       ]);
 
       for (const t of chunkTxAgg) txByShift.set(t.shiftId, t);
+      for (const sv of chunkShiftVerifiedItems) {
+        shiftVerifiedHppMap.set(sv.shiftId, parseFloat(sv.verifiedHpp || '0') || 0);
+        shiftVerifiedProfitMap.set(sv.shiftId, parseFloat(sv.verifiedProfit || '0') || 0);
+      }
       for (const m of chunkMovements) {
         const val = parseFloat(m.total || '0') || 0;
         if (m.movementType === 'CASH_OUT') cashOutMap.set(m.shiftId, val);
@@ -710,28 +791,17 @@ export async function GET(req: NextRequest) {
       const actualCash = Number.isFinite(parsedActual) ? parsedActual : null;
 
       const omzet = tx ? parseFloat(tx.totalOmzet) : 0;
-      const hpp = tx ? parseFloat(tx.totalHpp) : 0;
+      const hpp = shiftVerifiedHppMap.get(s.id) ?? 0;
+      const labaKotor = shiftVerifiedProfitMap.get(s.id) ?? 0;
       const cashSales = cashSalesMap.get(s.id) ?? 0;
       const cashOut = cashOutMap.get(s.id) ?? 0;
       const cashIn = cashInMap.get(s.id) ?? 0;
       const expectedCash = modalAwal + cashSales - cashOut + cashIn;
-      const discrepancy = actualCash !== null ? actualCash - expectedCash : null;
-
-      let statusLaci: 'RUNNING' | 'BALANCED' | 'SHORTAGE' | 'OVERAGE' = 'RUNNING';
-      let discrepancyTier: 'HIJAU' | 'KUNING' | 'MERAH' | 'OVERAGE' = 'HIJAU';
-
-      if (s.status === 'CLOSED') {
-        if (discrepancy === null || Math.abs(discrepancy) <= 2000) {
-          statusLaci = 'BALANCED';
-          discrepancyTier = 'HIJAU';
-        } else if (discrepancy < 0) {
-          statusLaci = 'SHORTAGE';
-          discrepancyTier = discrepancy < -20000 ? 'MERAH' : 'KUNING';
-        } else {
-          statusLaci = 'OVERAGE';
-          discrepancyTier = 'OVERAGE';
-        }
-      }
+      const { discrepancy, statusLaci, discrepancyTier } = classifyShiftDrawerAudit({
+        status: s.status,
+        actualCash,
+        expectedCash,
+      });
 
       const durMins = s.clockOut
         ? Math.round((new Date(s.clockOut).getTime() - new Date(s.clockIn).getTime()) / 60000)
@@ -765,7 +835,7 @@ export async function GET(req: NextRequest) {
         rawModalWarning: hasModalWarning,
         omzet,
         hpp,
-        labaKotor: omzet - hpp,
+        labaKotor,
         txCount: Number(tx?.txCount ?? 0),
         voidCount: Number(tx?.voidCount ?? 0),
         txCountCash: Number(tx?.txCountCash ?? 0),
@@ -795,8 +865,8 @@ export async function GET(req: NextRequest) {
       .map((k) => {
         const p = personalAggByEmp.get(k.id);
         const totalOmzet = p ? Math.round(parseFloat(p.totalOmzet || '0') || 0) : 0;
-        const totalHpp = p ? Math.round(parseFloat(p.totalHpp || '0') || 0) : 0;
-        const totalLabaKotor = totalOmzet - totalHpp;
+        const totalHpp = Math.round(personalVerifiedHppMap.get(k.id) ?? 0);
+        const totalLabaKotor = Math.round(personalVerifiedProfitMap.get(k.id) ?? 0);
         const totalTxCount = p ? Number(p.txCount ?? 0) : 0;
         const totalVoidCount = p ? Number(p.voidCount ?? 0) : 0;
         const totalTxCash = p ? Number(p.txCountCash ?? 0) : 0;

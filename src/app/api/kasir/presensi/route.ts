@@ -93,6 +93,18 @@ export async function POST(request: Request): Promise<Response> {
         );
       }
 
+      const isPresentStatus =
+        existing.status === 'HADIR' ||
+        existing.status === 'TELAT' ||
+        existing.status === 'PENGGANTI';
+      if (!isPresentStatus || !existing.clockInActual) {
+        return apiError(
+          `Catatan absensi Anda tercatat ${existing.status} tanpa jam masuk, sehingga tidak dapat melakukan presensi pulang.`,
+          'NOT_CLOCKED_IN',
+          422,
+        );
+      }
+
       if (existing.clockOutActual) {
         const jamOut = new Date(existing.clockOutActual).toLocaleTimeString('en-GB', {
           timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
@@ -188,6 +200,9 @@ export async function POST(request: Request): Promise<Response> {
             and(
               eq(attendances.attendanceDate, tanggalHari),
               inArray(attendances.scheduleId, siblingScheduleIds),
+              inArray(attendances.status, ['HADIR', 'TELAT', 'PENGGANTI']),
+              eq(employees.isActive, true),
+              isNull(employees.deletedAt),
               ne(attendances.employeeId, employeeId),
               sql`(${attendances.roleTask} = ${roleTask} OR ${attendances.notes} ILIKE ${`%Peran: ${roleTask}%`})`,
             )

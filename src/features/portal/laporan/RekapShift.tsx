@@ -1114,8 +1114,11 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
       );
       const gtPoolGaji = Math.round(toSafeExcelNum(data.grandTotal.poolGaji));
       const gtKasToko = Math.round(toSafeExcelNum(data.grandTotal.labaBersihToko ?? gtPoolGaji));
+      const gtShortage = Math.round(toSafeExcelNum(data.grandTotal.totalShortageDeduction ?? 0));
       const gtDistributed = Math.round(toSafeExcelNum(data.grandTotal.totalDistributed ?? gtPoolGaji));
-      const gtSisaPool = Math.round(toSafeExcelNum(data.grandTotal.sisaPool ?? gtPoolGaji - gtDistributed));
+      const gtSisaPool = Math.round(
+        toSafeExcelNum(data.grandTotal.sisaPool ?? Math.max(0, gtPoolGaji - gtShortage - gtDistributed)),
+      );
 
       const summaryRows: {
         pos: string;
@@ -1130,9 +1133,10 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
         { pos: 'Beban Operasional Toko', val: gtBiayaOp, fmt: EXCEL_FMT.RUPIAH, desc: 'Biaya utilitas & operasional toko pada periode laporan' },
         { pos: 'Laba Bersih Operasional', val: { formula: 'MAX(0,B7-B8)', result: gtLabaOp }, fmt: EXCEL_FMT.RUPIAH, desc: 'Laba Kotor dikurangi Beban Operasional Toko', highlight: true },
         { pos: 'Alokasi Hak Mahasiswa (50%)', val: gtPoolGaji, fmt: EXCEL_FMT.RUPIAH, desc: 'Plafon total upah bagi hasil seluruh personel shift', highlight: true },
-        { pos: 'Alokasi Kas Toko (50%)', val: gtKasToko, fmt: EXCEL_FMT.RUPIAH, desc: 'Bagian kas bersih toko untuk pengembangan unit usaha', highlight: true },
-        { pos: 'Total Upah Terdistribusi', val: gtDistributed, fmt: EXCEL_FMT.RUPIAH, desc: 'Total upah bersih yang disalurkan kepada seluruh anggota' },
-        { pos: 'Sisa Saldo Pool (Selisih)', val: { formula: 'B10-B12', result: gtSisaPool }, fmt: EXCEL_FMT.RUPIAH, desc: 'Metode Hamilton menjamin selisih pembulatan Rp 0 (zero-leakage)' },
+        { pos: 'Alokasi Kas Toko (50%)', val: gtKasToko, fmt: EXCEL_FMT.RUPIAH, desc: 'Bagian kas bersih toko (termasuk potongan tekor laci bila ada)', highlight: true },
+        { pos: 'Potongan Tekor Laci (Kembali ke Kas Toko)', val: gtShortage, fmt: EXCEL_FMT.RUPIAH, desc: 'Total potongan tekor laci terkonfirmasi yang dikembalikan ke Kas Toko' },
+        { pos: 'Total Upah Terdistribusi', val: gtDistributed, fmt: EXCEL_FMT.RUPIAH, desc: 'Total upah bersih yang disalurkan kepada seluruh kelompok shift' },
+        { pos: 'Sisa Saldo Pool (Selisih)', val: { formula: 'B10-B12-B13', result: gtSisaPool }, fmt: EXCEL_FMT.RUPIAH, desc: 'Hak Mahasiswa dikurangi Potongan Tekor & Upah Terdistribusi (Hamilton zero-leakage)' },
       ];
 
       summaryRows.forEach((item, idx) => {
@@ -1159,7 +1163,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
         r.height = calcWrapRowHeight([{ text: item.desc, width: cols1[2].width }], 21, 14);
       });
 
-      const noteStartRow = 16;
+      const noteStartRow = 17;
       ws1.mergeCells(`A${noteStartRow}:C${noteStartRow}`);
       const noteTitle = ws1.getCell(`A${noteStartRow}`);
       noteTitle.value = 'PEDOMAN & FORMULA SISTEM PENGGAJIAN PER SHIFT WIRAMART';
@@ -1393,9 +1397,17 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
         ws3.getColumn(i + 1).width = c.width;
       });
 
+      const allowedShiftIds = new Set<string>();
+      for (const g of filteredGroups) {
+        for (const sess of g.sessions) {
+          if (sess.shiftId) allowedShiftIds.add(sess.shiftId);
+        }
+      }
+      const exportedShifts = data.shifts.filter((s) => allowedShiftIds.has(s.shiftId));
+
       styleBannerBlock(ws3, {
         title: 'JURNAL LOG PERTEMUAN, AUDIT KAS & UPAH PER SHIFT — WIRAMART UNPERBA',
-        subtitle: `${subtitlePeriod} • Total Pertemuan Shift: ${data.shifts.length} Shift`,
+        subtitle: `${subtitlePeriod} • Total Pertemuan Shift: ${exportedShifts.length} Shift (Selaras Filter Sheet 2)`,
         endCol: cols3.length,
         titleRow: 1,
         subtitleRow: 2,
@@ -1420,7 +1432,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
       let sum3Shortage = 0;
       let sum3Upah = 0;
 
-      data.shifts.forEach((s, idx) => {
+      exportedShifts.forEach((s, idx) => {
         const inTime = s.clockIn
           ? new Date(s.clockIn).toLocaleTimeString('id-ID', {
               hour: '2-digit',
@@ -1511,8 +1523,8 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
         );
       });
 
-      if (data.shifts.length > 0) {
-        const end3 = 5 + data.shifts.length - 1;
+      if (exportedShifts.length > 0) {
+        const end3 = 5 + exportedShifts.length - 1;
         const tot3Num = end3 + 1;
         const r3Total = ws3.getRow(tot3Num);
         r3Total.height = 25;
@@ -1532,7 +1544,7 @@ export default function RekapShift({ dateFrom: propDateFrom, dateTo: propDateTo,
           if (cIdx === 1) {
             cell.value = 'TOTAL KESELURUHAN';
           } else if (cIdx === 4) {
-            cell.value = `${data.shifts.length} Pertemuan Shift`;
+            cell.value = `${exportedShifts.length} Pertemuan Shift`;
           } else if (cIdx in sumMap3) {
             cell.value = { formula: `SUM(${colChar}5:${colChar}${end3})`, result: sumMap3[cIdx] };
           } else if (cIdx !== 2 && cIdx !== 3) {

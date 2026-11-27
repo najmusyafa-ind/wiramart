@@ -142,11 +142,7 @@ export function computeExpiryClass(expiryDateStr: string | null | undefined): Ex
 // ── HELPER: Generate Nomor Bukti Penerimaan Barang ─────────────
 
 async function generateReceiveNumber(): Promise<string> {
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  const datePrefix = `GUD-${yyyy}${mm}${dd}`;
+  const datePrefix = `GUD-${getTodayWib().replace(/-/g, '')}`;
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const randomSuffix = String(Math.floor(1000 + Math.random() * 9000));
@@ -196,7 +192,7 @@ async function resolveCreatorEmployeeId(
       const [matchedEmp] = await db
         .select({ id: employees.id })
         .from(employees)
-        .where(and(eq(employees.nim, adm.nidn), isNull(employees.deletedAt)))
+        .where(and(eq(employees.nim, adm.nidn), eq(employees.isActive, true), isNull(employees.deletedAt)))
         .limit(1);
 
       if (matchedEmp) {
@@ -573,7 +569,7 @@ export async function updateStockReceiveDraft(
           })
         : existing.supplierId;
 
-    await tx
+    const [updatedDraft] = await tx
       .update(stockReceiveDrafts)
       .set({
         supplierId: resolvedSupplierId,
@@ -587,7 +583,18 @@ export async function updateStockReceiveDraft(
         submittedAt: input.autoSubmit ? new Date() : existing.submittedAt,
         updatedAt: new Date(),
       })
-      .where(eq(stockReceiveDrafts.id, draftId));
+      .where(
+        and(
+          eq(stockReceiveDrafts.id, draftId),
+          inArray(stockReceiveDrafts.status, ['DRAFT', 'REVISED']),
+          isNull(stockReceiveDrafts.deletedAt),
+        ),
+      )
+      .returning({ id: stockReceiveDrafts.id });
+
+    if (!updatedDraft) {
+      throw new AppError('CONFLICT', 'Status draft sudah berubah sebelum disimpan. Muat ulang halaman.', 409);
+    }
 
     // Re-insert items
     await tx.delete(stockReceiveItems).where(eq(stockReceiveItems.draftId, draftId));
@@ -1119,8 +1126,22 @@ export async function reviseStockReceiveDraft(
       rejectedByAdminId: reviewer.id,
       updatedAt: new Date(),
     })
-    .where(eq(stockReceiveDrafts.id, draftId))
+    .where(
+      and(
+        eq(stockReceiveDrafts.id, draftId),
+        eq(stockReceiveDrafts.status, 'SUBMITTED'),
+        isNull(stockReceiveDrafts.deletedAt),
+      ),
+    )
     .returning();
+
+  if (!revised) {
+    throw new AppError(
+      'CONFLICT',
+      'Draft sudah diproses atau disetujui sebelumnya dan tidak dapat direvisi lagi.',
+      409,
+    );
+  }
 
   return revised;
 }
@@ -1171,8 +1192,22 @@ export async function rejectStockReceiveDraft(
         rejectedAt: now,
         updatedAt: now,
       })
-      .where(eq(stockReceiveDrafts.id, draftId))
+      .where(
+        and(
+          eq(stockReceiveDrafts.id, draftId),
+          eq(stockReceiveDrafts.status, 'SUBMITTED'),
+          isNull(stockReceiveDrafts.deletedAt),
+        ),
+      )
       .returning();
+
+    if (!rejRow) {
+      throw new AppError(
+        'CONFLICT',
+        'Draft sudah diproses atau disetujui sebelumnya dan tidak dapat ditolak.',
+        409,
+      );
+    }
 
     // Jika draft yang ditolak memuat usulan produk baru (isActive=false, stockQty=0), soft-delete agar nama & barcode bebas kembali
     const items = await tx

@@ -1245,8 +1245,8 @@ export async function GET(req: NextRequest): Promise<Response> {
       });
 
     // Rumus 50% Kehadiran Tim / 50% Laba Shift (Pembagian Utuh Per Shift) + potongan tekor terkunci kembali ke Kas Toko
-    const totalDistributed = Math.max(0, poolShiftMahasiswa - totalShortageDeduction);
-    const sisaPool = 0;
+    const totalDistributed = builtShifts.reduce((acc, s) => acc + s.gajiBersih, 0);
+    const sisaPool = Math.max(0, poolShiftMahasiswa - totalShortageDeduction - totalDistributed);
     const labaBersihToko = fs.labaBersih + totalShortageDeduction;
 
     return apiOk({

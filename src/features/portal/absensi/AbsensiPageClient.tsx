@@ -1288,7 +1288,14 @@ export default function AbsensiPage() {
   }, [periodMode, selectedDate, selectedMonth, rangeStart, rangeEnd, applyAttendanceResult]);
 
   const shiftDate = (days: number) => {
-    const d = new Date(`${selectedDate}T12:00:00Z`);
+    const baseDate = /^\d{4}-\d{2}-\d{2}$/.test(selectedDate) ? selectedDate : today;
+    const d = new Date(`${baseDate}T12:00:00Z`);
+    if (Number.isNaN(d.getTime())) {
+      startFilterTransition(() => {
+        setSelectedDate(today);
+      });
+      return;
+    }
     d.setUTCDate(d.getUTCDate() + days);
     startFilterTransition(() => {
       setSelectedDate(d.toISOString().slice(0, 10));
@@ -1360,6 +1367,7 @@ export default function AbsensiPage() {
         { header: 'Program Studi', width: 22, align: 'left' as const },
         { header: 'Total Shift', width: 12, align: 'right' as const, fmt: EXCEL_FMT.INT },
         { header: 'Hadir Tepat', width: 14, align: 'right' as const, fmt: EXCEL_FMT.INT },
+        { header: 'Pengganti (Badal)', width: 16, align: 'right' as const, fmt: EXCEL_FMT.INT },
         { header: 'Terlambat (Kali)', width: 16, align: 'right' as const, fmt: EXCEL_FMT.INT },
         { header: 'Total Telat (Mnt)', width: 16, align: 'right' as const, fmt: EXCEL_FMT.INT },
         { header: 'Izin / Alpa', width: 14, align: 'right' as const, fmt: EXCEL_FMT.INT },
@@ -1392,6 +1400,7 @@ export default function AbsensiPage() {
 
       let sumShift = 0;
       let sumHadir = 0;
+      let sumPengganti = 0;
       let sumTelat = 0;
       let sumLateMins = 0;
       let sumAlpa = 0;
@@ -1402,6 +1411,7 @@ export default function AbsensiPage() {
         const row = ws1.getRow(5 + idx);
         const shiftN = Math.round(toSafeExcelNum(e.totalShift));
         const hadirN = Math.round(toSafeExcelNum(e.hadir));
+        const penggantiN = Math.round(toSafeExcelNum(e.pengganti));
         const telatN = Math.round(toSafeExcelNum(e.telat));
         const lateMinsN = Math.round(toSafeExcelNum(e.totalLateMinutes));
         const alpaN = Math.round(toSafeExcelNum(e.ijin + e.tidakHadir));
@@ -1410,6 +1420,7 @@ export default function AbsensiPage() {
 
         sumShift += shiftN;
         sumHadir += hadirN;
+        sumPengganti += penggantiN;
         sumTelat += telatN;
         sumLateMins += lateMinsN;
         sumAlpa += alpaN;
@@ -1421,7 +1432,7 @@ export default function AbsensiPage() {
         const prodiTxt = sanitizeExcelText(e.programStudi) || '—';
 
         const rowValues: (string | number)[] = [
-          idx + 1, nameTxt, nimTxt, prodiTxt, shiftN, hadirN, telatN, lateMinsN, alpaN, pctHadirN, skorN,
+          idx + 1, nameTxt, nimTxt, prodiTxt, shiftN, hadirN, penggantiN, telatN, lateMinsN, alpaN, pctHadirN, skorN,
         ];
         rowValues.forEach((val, cIdx) => {
           const cell = row.getCell(cIdx + 1);
@@ -1447,14 +1458,21 @@ export default function AbsensiPage() {
         tot1.height = 24;
         const avgHadir = Number((sumPctHadir / summaryByEmployee.length).toFixed(1));
         const avgSkor = Number((sumSkor / summaryByEmployee.length).toFixed(1));
-        const sumMap1: Record<number, number> = { 4: sumShift, 5: sumHadir, 6: sumTelat, 7: sumLateMins, 8: sumAlpa };
+        const sumMap1: Record<number, number> = {
+          4: sumShift,
+          5: sumHadir,
+          6: sumPengganti,
+          7: sumTelat,
+          8: sumLateMins,
+          9: sumAlpa,
+        };
         cols1.forEach((c, cIdx) => {
           const cell = tot1.getCell(cIdx + 1);
           const colChar = colLetter(cIdx + 1);
           if (cIdx === 1) cell.value = `TOTAL / RATA-RATA (${summaryByEmployee.length} Personel)`;
           else if (cIdx in sumMap1) cell.value = { formula: `SUM(${colChar}5:${colChar}${end1})`, result: sumMap1[cIdx] };
-          else if (cIdx === 9) cell.value = { formula: `AVERAGE(${colChar}5:${colChar}${end1})`, result: avgHadir };
-          else if (cIdx === 10) cell.value = { formula: `AVERAGE(${colChar}5:${colChar}${end1})`, result: avgSkor };
+          else if (cIdx === 10) cell.value = { formula: `AVERAGE(${colChar}5:${colChar}${end1})`, result: avgHadir };
+          else if (cIdx === 11) cell.value = { formula: `AVERAGE(${colChar}5:${colChar}${end1})`, result: avgSkor };
           else cell.value = '';
           cell.font = EXCEL_FONT.BOLD;
           cell.fill = EXCEL_FILL.TOTAL;
@@ -1703,24 +1721,26 @@ export default function AbsensiPage() {
                 <strong>Rumus Bagi Hasil 50:50 (Per Shift):</strong> 50% Kehadiran Tim · 50% Laba Shift · Pembagian utuh per kelompok shift (tidak dipecah per nama) · Shift Pagi 07:30 (batas 08:00), Siang 11:30 (batas 12:00) · Toleransi 30 menit; lewat batas -3% per blok 5 menit, maks 50%.
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setActiveTab('bagi_hasil')}
-              className="btn btn-sm btn-secondary"
-              style={{
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                color: '#166534',
-                borderColor: '#bbf7d0',
-                backgroundColor: '#ffffff',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              Buka Bagi Hasil <ArrowRight size={13} />
-            </button>
+            {isManager && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('bagi_hasil')}
+                className="btn btn-sm btn-secondary"
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: '#166534',
+                  borderColor: '#bbf7d0',
+                  backgroundColor: '#ffffff',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Buka Bagi Hasil <ArrowRight size={13} />
+              </button>
+            )}
           </div>
 
           {/* ── Filter Toolbar ─────────────────────────────────────── */}
@@ -2104,7 +2124,7 @@ export default function AbsensiPage() {
                         <th style={{ textAlign: 'center' }}>Ijin / Alpa</th>
                         <th style={{ textAlign: 'center' }}>Hadir</th>
                         <th style={{ textAlign: 'center' }}>Disiplin</th>
-                        <th style={{ textAlign: 'center' }}>Bagi Hasil</th>
+                        {isManager && <th style={{ textAlign: 'center' }}>Bagi Hasil</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -2160,28 +2180,30 @@ export default function AbsensiPage() {
                                 <TrendingUp size={11} /> {e.skorDisiplin}%
                               </span>
                             </td>
-                            <td style={{ textAlign: 'center' }}>
-                              <button
-                                type="button"
-                                onClick={() => setActiveTab('bagi_hasil')}
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  padding: '4px 8px',
-                                  borderRadius: '6px',
-                                  border: '1px solid #166534',
-                                  backgroundColor: '#f0fdf4',
-                                  color: '#166534',
-                                  fontSize: '0.72rem',
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                <span>Gaji</span>
-                                <ArrowRight size={11} />
-                              </button>
-                            </td>
+                            {isManager && (
+                              <td style={{ textAlign: 'center' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveTab('bagi_hasil')}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    border: '1px solid #166534',
+                                    backgroundColor: '#f0fdf4',
+                                    color: '#166534',
+                                    fontSize: '0.72rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <span>Gaji</span>
+                                  <ArrowRight size={11} />
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         );
                       })}

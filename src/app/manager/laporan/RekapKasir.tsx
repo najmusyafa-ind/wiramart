@@ -1104,7 +1104,7 @@ export default function RekapKasir() {
                         <td style={{ textAlign: 'right', color: '#16a34a', fontVariantNumeric: 'tabular-nums' }}>{rp(T.cash)}</td>
                         <td style={{ textAlign: 'right', color: '#7c3aed', fontVariantNumeric: 'tabular-nums' }}>{rp(T.qris)}</td>
                         <td style={{ textAlign: 'right', color: '#0369a1', fontVariantNumeric: 'tabular-nums' }}>
-                          {visible.length > 0 ? rp(T.omzet / visible.length) : '—'}
+                          {T.shift > 0 ? rp(T.omzet / T.shift) : '—'}
                         </td>
                         <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{rp(T.laba)}</td>
                         <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{T.trx.toLocaleString('id-ID')}</td>
@@ -1505,7 +1505,11 @@ function ShiftModal({ kasir, shifts, onClose }: { kasir: KasirSummary; shifts: S
                             border: `1px solid ${ts.border}`,
                           }}
                         >
-                          {s.status === 'ACTIVE' ? 'Aktif' : s.statusLaci}
+                          {s.status === 'ACTIVE'
+                            ? 'Aktif'
+                            : s.statusLaci === 'UNCOUNTED'
+                              ? 'Belum Hitung'
+                              : s.statusLaci}
                         </span>
                       </td>
                     </tr>

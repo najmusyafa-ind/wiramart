@@ -27,6 +27,7 @@ type ShiftPersonnel = {
     clockInTime?: string | null;
     clockOutTime?: string | null;
     lateMinutes?: number;
+    roleTask?: string | null;
     notes?: string | null;
   };
 };
@@ -162,6 +163,7 @@ export default function KasirLoginPage() {
   const [selectedShiftGroup, setSelectedShiftGroup] = useState<ShiftGroup | null>(null);
   const [selectedRole, setSelectedRole] = useState<RoleOption>('Kasir');
   const [submittingPresensi, setSubmittingPresensi] = useState(false);
+  const [clockingOutKey, setClockingOutKey] = useState<string | null>(null);
 
   // Modal Absen Pengganti (Badal lintas hari / shift tambahan)
   const [showBadalModal, setShowBadalModal] = useState(false);
@@ -181,11 +183,17 @@ export default function KasirLoginPage() {
 
     for (const person of selectedShiftGroup.personnel) {
       if (person.attendance.isAttended && person.employeeId !== selectedPerson?.employeeId) {
+        const roleTask = person.attendance.roleTask ?? '';
         const notes = person.attendance.notes ?? '';
-        if (notes.includes('Peran: Kasir')) {
+        if (roleTask === 'Kasir' || notes.includes('Peran: Kasir')) {
           kasirOccupant = person.fullName ?? 'Rekan Kasir';
         }
-        if (notes.includes('Peran: Admin Shift') || notes.includes('Peran: Ketua Admin')) {
+        if (
+          roleTask === 'Admin Shift' ||
+          roleTask === 'Ketua Admin' ||
+          notes.includes('Peran: Admin Shift') ||
+          notes.includes('Peran: Ketua Admin')
+        ) {
           adminOccupant = person.fullName ?? 'Rekan Admin Shift';
         }
       }
@@ -317,13 +325,20 @@ export default function KasirLoginPage() {
         }),
       });
 
-      const json = await res.json() as { success: boolean; message?: string; error?: string };
+      const json = (await res.json()) as {
+        success: boolean;
+        data?: { message?: string };
+        message?: string;
+        error?: string;
+      };
       if (!res.ok || !json.success) {
         setPresensiError(json.error ?? 'Gagal mencatat presensi.');
         return;
       }
 
-      setPresensiSuccessMsg(json.message ?? `Presensi berhasil! Selamat bertugas sebagai ${selectedRole}.`);
+      setPresensiSuccessMsg(
+        json.data?.message ?? json.message ?? `Presensi berhasil! Selamat bertugas sebagai ${selectedRole}.`,
+      );
       
       // Khusus Petugas Gudang: Langsung arahkan ke Portal Keamanan Gudang (NIM + PIN)
       if (selectedRole === 'Gudang') {
@@ -414,9 +429,12 @@ export default function KasirLoginPage() {
   // Handle Presensi Pulang (Clock-Out)
   async function handleClockOut(p: ShiftPersonnel) {
     if (!p.employeeId) return;
+    const rowKey = `${p.scheduleId}_${p.employeeId}`;
+    if (clockingOutKey === rowKey) return;
     const confirmOut = window.confirm(`Konfirmasi presensi pulang untuk ${p.fullName}?`);
     if (!confirmOut) return;
 
+    setClockingOutKey(rowKey);
     setPresensiError(null);
     setPresensiSuccessMsg(null);
     try {
@@ -429,15 +447,24 @@ export default function KasirLoginPage() {
           scheduleId: p.scheduleId,
         }),
       });
-      const json = await res.json() as { success: boolean; message?: string; error?: string };
+      const json = (await res.json()) as {
+        success: boolean;
+        data?: { message?: string };
+        message?: string;
+        error?: string;
+      };
       if (!res.ok || !json.success) {
         setPresensiError(json.error ?? 'Gagal mencatat presensi pulang.');
         return;
       }
-      setPresensiSuccessMsg(json.message ?? `Presensi pulang berhasil dicatat untuk ${p.fullName}.`);
+      setPresensiSuccessMsg(
+        json.data?.message ?? json.message ?? `Presensi pulang berhasil dicatat untuk ${p.fullName}.`,
+      );
       await loadPresensi();
     } catch {
       setPresensiError('Gagal menghubungi server.');
+    } finally {
+      setClockingOutKey(null);
     }
   }
 
@@ -1040,17 +1067,30 @@ export default function KasirLoginPage() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {s.personnel.map((p) => {
                           const isAttended = p.attendance.isAttended;
+                          const isAbsentMarked =
+                            !isAttended &&
+                            (p.attendance.status === 'IJIN' || p.attendance.status === 'TIDAK_HADIR');
+                          const rowKey = `${p.scheduleId}_${p.employeeId ?? p.orderInSlot}`;
+                          const isClockingOut = clockingOutKey === `${p.scheduleId}_${p.employeeId ?? ''}`;
                           return (
                             <div
-                              key={p.scheduleId}
+                              key={rowKey}
                               style={{
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
                                 padding: '8px 10px',
                                 borderRadius: 'var(--radius-md)',
-                                backgroundColor: isAttended ? 'rgba(34, 197, 94, 0.08)' : 'white',
-                                border: isAttended ? '1px solid rgba(34, 197, 94, 0.35)' : '1px solid var(--color-border)',
+                                backgroundColor: isAttended
+                                  ? 'rgba(34, 197, 94, 0.08)'
+                                  : isAbsentMarked
+                                    ? 'rgba(245, 158, 11, 0.07)'
+                                    : 'white',
+                                border: isAttended
+                                  ? '1px solid rgba(34, 197, 94, 0.35)'
+                                  : isAbsentMarked
+                                    ? '1px solid rgba(245, 158, 11, 0.35)'
+                                    : '1px solid var(--color-border)',
                               }}
                             >
                               <div>
@@ -1084,7 +1124,7 @@ export default function KasirLoginPage() {
                                         borderRadius: 999,
                                       }}
                                     >
-                                      Selesai ({p.attendance.clockInTime} – {p.attendance.clockOutTime})
+                                      Selesai ({p.attendance.clockInTime ?? '—'} – {p.attendance.clockOutTime ?? '—'})
                                     </span>
                                   ) : (
                                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -1102,11 +1142,14 @@ export default function KasirLoginPage() {
                                         }}
                                       >
                                         <CheckCircle2 size={12} />
-                                        {p.attendance.status === 'TELAT' ? `Telat (${p.attendance.clockInTime})` : `Hadir (${p.attendance.clockInTime})`}
+                                        {p.attendance.status === 'TELAT'
+                                          ? `Telat (${p.attendance.clockInTime ?? '—'})`
+                                          : `Hadir (${p.attendance.clockInTime ?? '—'})`}
                                       </span>
                                       <button
                                         type="button"
                                         onClick={() => handleClockOut(p)}
+                                        disabled={isClockingOut}
                                         className="btn btn-secondary"
                                         style={{
                                           padding: '2px 8px',
@@ -1116,11 +1159,27 @@ export default function KasirLoginPage() {
                                         }}
                                         title="Presensi Pulang (Clock-Out)"
                                       >
-                                        Pulang
+                                        {isClockingOut ? '...' : 'Pulang'}
                                       </button>
                                     </div>
                                   )}
                                 </div>
+                              ) : isAbsentMarked ? (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    fontSize: 11,
+                                    fontWeight: 'bold',
+                                    color: p.attendance.status === 'TIDAK_HADIR' ? '#b91c1c' : '#1d4ed8',
+                                    backgroundColor: p.attendance.status === 'TIDAK_HADIR' ? '#fee2e2' : '#dbeafe',
+                                    padding: '3px 8px',
+                                    borderRadius: 999,
+                                  }}
+                                >
+                                  {p.attendance.status === 'TIDAK_HADIR' ? 'Tidak Hadir' : 'Izin'}
+                                </span>
                               ) : (
                                 <button
                                   type="button"
@@ -1133,9 +1192,17 @@ export default function KasirLoginPage() {
                                     let isAdminTaken = false;
                                     for (const other of s.personnel) {
                                       if (other.attendance.isAttended && other.employeeId !== p.employeeId) {
+                                        const rt = other.attendance.roleTask ?? '';
                                         const n = other.attendance.notes ?? '';
-                                        if (n.includes('Peran: Kasir')) isKasirTaken = true;
-                                        if (n.includes('Peran: Admin Shift') || n.includes('Peran: Ketua Admin')) isAdminTaken = true;
+                                        if (rt === 'Kasir' || n.includes('Peran: Kasir')) isKasirTaken = true;
+                                        if (
+                                          rt === 'Admin Shift' ||
+                                          rt === 'Ketua Admin' ||
+                                          n.includes('Peran: Admin Shift') ||
+                                          n.includes('Peran: Ketua Admin')
+                                        ) {
+                                          isAdminTaken = true;
+                                        }
                                       }
                                     }
 

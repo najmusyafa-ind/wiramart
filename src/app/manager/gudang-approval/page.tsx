@@ -677,9 +677,11 @@ export default function GudangApprovalPage() {
         throw new Error(json.error ?? 'Gagal memproses keputusan.');
       }
 
-      if (json.data?.discountBarcode) {
+      const generatedBarcode =
+        json.data?.data?.discountBarcode ?? json.data?.discountBarcode ?? null;
+      if (generatedBarcode) {
         setCreatedBarcodeToast(
-          `Diskon ${approvedDiscountPct}% disetujui. Barcode diskon diterbitkan: ${json.data.discountBarcode}`,
+          `Diskon ${approvedDiscountPct}% disetujui. Barcode diskon diterbitkan: ${generatedBarcode}`,
         );
       } else {
         setSuccessToast(`Keputusan ${formatDecisionLabel(fefoDecision)} berhasil ditetapkan untuk produk ${selectedFefo.productName}.`);

@@ -5,7 +5,7 @@
 // STANDAR: Mobile-First Ergonomics, Zero-Trust Validation, Clean HSL System
 // =============================================================
 
-import { useState, useEffect, useId } from 'react';
+import { useState, useEffect, useId, useRef } from 'react';
 import {
   Truck,
   Plus,
@@ -242,6 +242,7 @@ export default function PenerimaanBarangSection({
   const [tableSearch, setTableSearch] = useState('');
   const [loading, setLoading] = useState<boolean>(() => !penerimaanMemCache.has(initialKey));
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const actionInFlightRef = useRef(false);
 
   // State Modal Preview Foto Nota
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
@@ -745,6 +746,7 @@ export default function PenerimaanBarangSection({
         if (!res.ok || !json.success) throw new Error(json.error ?? 'Gagal menyimpan nota penerimaan');
       }
 
+      penerimaanMemCache.clear();
       setIsFormOpen(false);
       fetchDrafts(statusFilter);
       if (onDraftApproved) onDraftApproved();
@@ -757,9 +759,11 @@ export default function PenerimaanBarangSection({
 
   // ── Ajukan Draft Langsung dari List / Modal Detail ────────────
   async function handleDirectSubmit(draftId: string) {
+    if (actionInFlightRef.current) return;
     if (!confirm('Ajukan penerimaan barang ini? Jika lolos Auto-Checklist, stok akan otomatis masuk setelah jeda 5 menit.')) {
       return;
     }
+    actionInFlightRef.current = true;
     try {
       const res = await fetch(`/api/gudang/penerimaan/${draftId}/submit`, { method: 'POST' });
       const json = await res.json();
@@ -775,18 +779,23 @@ export default function PenerimaanBarangSection({
       } else {
         alert('Penerimaan barang berhasil diajukan.');
       }
+      penerimaanMemCache.clear();
       setViewingDraftId(null);
       fetchDrafts(statusFilter);
     } catch {
       alert('Gagal menghubungi server.');
+    } finally {
+      actionInFlightRef.current = false;
     }
   }
 
   // ── Tarik Kembali Draft Saat Jeda 5 Menit ────────────────────
   async function handlePullBackDraft(draftId: string) {
+    if (actionInFlightRef.current) return;
     if (!confirm('Tarik kembali pengajuan ini ke status Draft untuk diperbaiki?')) {
       return;
     }
+    actionInFlightRef.current = true;
     try {
       const res = await fetch(`/api/gudang/penerimaan/${draftId}/tarik`, { method: 'POST' });
       const json = await res.json();
@@ -795,9 +804,12 @@ export default function PenerimaanBarangSection({
         return;
       }
       alert(json.data?.message ?? 'Draft berhasil ditarik kembali.');
+      penerimaanMemCache.clear();
       fetchDrafts(statusFilter);
     } catch {
       alert('Gagal menghubungi server.');
+    } finally {
+      actionInFlightRef.current = false;
     }
   }
 

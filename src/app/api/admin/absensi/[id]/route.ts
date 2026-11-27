@@ -48,6 +48,11 @@ export async function PATCH(
 
   const existing = await db.query.attendances.findFirst({
     where: eq(attendances.id, id),
+    with: {
+      schedule: {
+        columns: { slotStart: true },
+      },
+    },
   });
 
   if (!existing) {
@@ -55,12 +60,22 @@ export async function PATCH(
   }
 
   const nextStatus = parsed.data.status ?? existing.status;
+  const isPresentStatus =
+    nextStatus === 'HADIR' || nextStatus === 'TELAT' || nextStatus === 'PENGGANTI';
   const nextLate =
-    nextStatus === 'HADIR' || nextStatus === 'PENGGANTI' || nextStatus === 'IJIN' || nextStatus === 'TIDAK_HADIR'
-      ? 0
-      : (parsed.data.lateMinutes ?? existing.lateMinutes);
-  const nextRole = parsed.data.roleTask ?? existing.roleTask ?? null;
+    nextStatus === 'TELAT'
+      ? (parsed.data.lateMinutes ?? existing.lateMinutes)
+      : 0;
+  const nextRole = isPresentStatus
+    ? (parsed.data.roleTask ?? existing.roleTask ?? 'Kasir')
+    : null;
   const nextNotes = parsed.data.notes !== undefined ? parsed.data.notes : existing.notes;
+  const nextIsSubstitute = nextStatus === 'PENGGANTI';
+  const fallbackSlotStart = existing.schedule?.slotStart ?? '07:30';
+  const nextClockIn = isPresentStatus
+    ? (existing.clockInActual ?? new Date(`${existing.attendanceDate}T${fallbackSlotStart}:00+07:00`))
+    : null;
+  const nextClockOut = isPresentStatus ? existing.clockOutActual : null;
 
   const [updated] = await db
     .update(attendances)
@@ -69,7 +84,9 @@ export async function PATCH(
       lateMinutes: nextLate,
       roleTask: nextRole,
       notes: nextNotes,
-      isSubstitute: nextStatus === 'PENGGANTI' ? true : existing.isSubstitute,
+      isSubstitute: nextIsSubstitute,
+      clockInActual: nextClockIn,
+      clockOutActual: nextClockOut,
       verificationSource: 'MANUAL_CROSSCHECK',
       recordedByAdminId: session.sub,
       updatedAt: new Date(),
@@ -87,12 +104,18 @@ export async function PATCH(
         status: existing.status,
         lateMinutes: existing.lateMinutes,
         roleTask: existing.roleTask,
+        isSubstitute: existing.isSubstitute,
+        clockInActual: existing.clockInActual,
+        clockOutActual: existing.clockOutActual,
         notes: existing.notes,
       }),
       newValues: JSON.stringify({
         status: nextStatus,
         lateMinutes: nextLate,
         roleTask: nextRole,
+        isSubstitute: nextIsSubstitute,
+        clockInActual: nextClockIn,
+        clockOutActual: nextClockOut,
         notes: nextNotes,
       }),
       actorType: 'ADMIN',

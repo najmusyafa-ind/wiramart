@@ -15,7 +15,7 @@
 import { and, gte, isNotNull, lt } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { shifts } from '@/lib/db/schema';
-import { getWibMinutes } from '@/lib/services/activeShiftService';
+import { getWibMinutes, normalizeSessionType } from '@/lib/services/activeShiftService';
 import { getOperationalSettings } from '@/lib/services/operationalSettingsService';
 
 export type AttendanceComputedStatus = 'HADIR' | 'TELAT' | 'PENGGANTI';
@@ -110,20 +110,28 @@ export async function resolveAttendanceLateness(params: {
   const morningShiftClockOutMinutes: number[] = [];
   if (!params.isSubstitute && jadwalMenitTotal >= 11 * 60) {
     const startOfDayWib = new Date(`${params.attendanceDate}T00:00:00+07:00`);
-    const noonWib = new Date(`${params.attendanceDate}T11:15:00+07:00`);
-    const morningShifts = await db
-      .select({ clockOut: shifts.clockOut })
+    const dayShifts = await db
+      .select({
+        clockIn: shifts.clockIn,
+        clockOut: shifts.clockOut,
+        sessionType: shifts.sessionType,
+      })
       .from(shifts)
       .where(
         and(
           gte(shifts.clockIn, startOfDayWib),
-          lt(shifts.clockIn, noonWib),
+          lt(shifts.clockIn, params.nowWib),
           isNotNull(shifts.clockOut),
         ),
       );
 
-    for (const ms of morningShifts) {
+    for (const ms of dayShifts) {
       if (!ms.clockOut) continue;
+      const explicitSession = normalizeSessionType(ms.sessionType);
+      const isMorningShift = explicitSession
+        ? explicitSession === 'Pagi'
+        : getWibMinutes(new Date(ms.clockIn)) < 11 * 60 + 15;
+      if (!isMorningShift) continue;
       morningShiftClockOutMinutes.push(getWibMinutes(new Date(ms.clockOut)));
     }
   }

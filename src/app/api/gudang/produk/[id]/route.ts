@@ -590,6 +590,26 @@ export async function PATCH(req: NextRequest, ctx: Context) {
         expiryChangeNotes.push(
           `#${primaryBatch.batchCode}: ${primaryBatch.expiryDate ?? 'kosong'} -> ${data.expiryDate ?? 'kosong'}`,
         );
+      } else if (!primaryBatch && updated.stockQty > 0 && data.expiryDate) {
+        // Produk lama yang memiliki stok > 0 tetapi belum memiliki baris stock_batches sama sekali:
+        // buat batch baseline agar "Isi Exp" benar-benar tersimpan dan terpantau FEFO.
+        const newCode = `EXP-${todayStr.replace(/-/g, '')}-${randomInt(1000, 10000)}`;
+        const [insertedBatch] = await tx
+          .insert(stockBatches)
+          .values({
+            productId: id,
+            batchCode: newCode,
+            costPrice: updateValues.costPrice ?? existing.costPrice,
+            initialQty: updated.stockQty,
+            currentQty: updated.stockQty,
+            expiryDate: data.expiryDate,
+            expiryClass: deriveExpiryClass(data.expiryDate, todayStr),
+            receivedAt: now,
+            notes: `Isi tanggal kedaluwarsa oleh ${auth.actorLabel}`,
+          })
+          .returning({ id: stockBatches.id });
+        if (insertedBatch) touchedBatchIds.push(insertedBatch.id);
+        expiryChangeNotes.push(`#${newCode}: kosong -> ${data.expiryDate}`);
       }
     }
 

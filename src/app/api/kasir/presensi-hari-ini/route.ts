@@ -22,6 +22,12 @@ const HARI_MAP: Record<string, 'MINGGU' | 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' 
   Sabtu:  'SABTU',
 };
 
+const PRESENT_ATTENDANCE_STATUSES = new Set(['HADIR', 'TELAT', 'PENGGANTI']);
+
+function isPresentAttendanceStatus(status?: string | null): boolean {
+  return Boolean(status && PRESENT_ATTENDANCE_STATUSES.has(status));
+}
+
 export async function GET(): Promise<Response> {
   try {
     const nowWib = new Date();
@@ -98,7 +104,13 @@ export async function GET(): Promise<Response> {
       .from(attendances)
       .innerJoin(employees, eq(attendances.employeeId, employees.id))
       .leftJoin(shiftSchedules, eq(attendances.scheduleId, shiftSchedules.id))
-      .where(eq(attendances.attendanceDate, tanggalHari));
+      .where(
+        and(
+          eq(attendances.attendanceDate, tanggalHari),
+          eq(employees.isActive, true),
+          isNull(employees.deletedAt),
+        ),
+      );
 
     const attendanceMap = new Map<string, typeof attendancesToday[0]>();
     for (const att of attendancesToday) {
@@ -185,7 +197,7 @@ export async function GET(): Promise<Response> {
           hasPin:          Boolean(s.hasPin),
           isSubstitute:    Boolean(att?.isSubstitute),
           attendance: {
-            isAttended:   Boolean(att),
+            isAttended:   Boolean(att && isPresentAttendanceStatus(att.status)),
             isClockedOut: Boolean(att?.clockOutActual),
             status:       att?.status,
             clockInTime:  clockInStr,
@@ -200,6 +212,7 @@ export async function GET(): Promise<Response> {
 
     // Tambahkan personel Pengganti (Badal) yang hadir hari ini meski tidak ada di jadwal rutin hari ini
     for (const att of attendancesToday) {
+      if (!isPresentAttendanceStatus(att.status)) continue;
       if (!att.schedSlotStart || !att.schedSlotEnd) continue;
       const key = `${att.schedSlotStart} - ${att.schedSlotEnd}`;
       const group = grouped.get(key);
@@ -228,7 +241,7 @@ export async function GET(): Promise<Response> {
         hasPin:         Boolean(att.empHasPin),
         isSubstitute:   true,
         attendance: {
-          isAttended:   true,
+          isAttended:   isPresentAttendanceStatus(att.status),
           isClockedOut: Boolean(att.clockOutActual),
           status:       att.status,
           clockInTime:  clockInStr,

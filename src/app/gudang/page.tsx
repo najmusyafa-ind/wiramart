@@ -212,6 +212,12 @@ export default function GudangPortalPage() {
   const [submittingNewProd, setSubmittingNewProd] = useState(false);
   const [newProdError, setNewProdError] = useState<string | null>(null);
   const [newProdSuccessMsg, setNewProdSuccessMsg] = useState<string | null>(null);
+  const restockInFlightRef = useRef(false);
+  const newProdInFlightRef = useRef(false);
+  const editInFlightRef = useRef(false);
+  const deleteInFlightRef = useRef(false);
+  const restockCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const newProdCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // State Filter & Pencarian
   const [search, setSearch] = useState('');
@@ -563,7 +569,7 @@ export default function GudangPortalPage() {
 
   async function handleEditProductSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!editingProduct || !canMutateStock) return;
+    if (!editingProduct || !canMutateStock || editInFlightRef.current) return;
     setEditError(null);
     if (!editName.trim() || editName.trim().length < 2) {
       setEditError('Nama produk minimal 2 karakter.');
@@ -592,6 +598,7 @@ export default function GudangPortalPage() {
       payloadBody.expiryDate = editSingleExpiryDate.trim();
     }
 
+    editInFlightRef.current = true;
     setSubmittingEdit(true);
     try {
       const res = await fetch(`/api/gudang/produk/${editingProduct.id}`, {
@@ -604,21 +611,24 @@ export default function GudangPortalPage() {
         setEditError(json.error ?? 'Gagal menyimpan perubahan produk.');
         return;
       }
+      warehouseDataMemCache.clear();
       setEditingProduct(null);
       await loadData();
     } catch {
       setEditError('Koneksi terputus saat memperbarui produk.');
     } finally {
+      editInFlightRef.current = false;
       setSubmittingEdit(false);
     }
   }
 
   async function handleDeleteProduct(prod: WarehouseProduct) {
-    if (!canMutateStock) return;
+    if (!canMutateStock || deleteInFlightRef.current) return;
     const confirmed = window.confirm(
       `Hapus produk "${prod.name}" dari katalog aktif Kasir & Gudang? (Soft-delete, histori transaksi tetap aman.)`,
     );
     if (!confirmed) return;
+    deleteInFlightRef.current = true;
     try {
       const res = await fetch(`/api/gudang/produk/${prod.id}`, { method: 'DELETE' });
       const json = (await res.json()) as { success: boolean; error?: string };
@@ -626,14 +636,21 @@ export default function GudangPortalPage() {
         alert(json.error ?? 'Gagal menghapus produk.');
         return;
       }
+      warehouseDataMemCache.clear();
       await loadData();
     } catch {
       alert('Koneksi terputus saat menghapus produk.');
+    } finally {
+      deleteInFlightRef.current = false;
     }
   }
 
   function openNewProductModal() {
     if (!canMutateStock) return;
+    if (newProdCloseTimerRef.current) {
+      clearTimeout(newProdCloseTimerRef.current);
+      newProdCloseTimerRef.current = null;
+    }
     setNewProdName('');
     setNewProdCategoryId(categoriesList[0]?.id ?? '');
     setNewProdBarcode('');
@@ -653,7 +670,7 @@ export default function GudangPortalPage() {
 
   async function handleProposeNewProductSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canMutateStock) return;
+    if (!canMutateStock || newProdInFlightRef.current) return;
     setNewProdError(null);
 
     const todayStr = getTodayWibStr();
@@ -684,6 +701,7 @@ export default function GudangPortalPage() {
       return;
     }
 
+    newProdInFlightRef.current = true;
     setSubmittingNewProd(true);
     try {
       const res = await fetch('/api/gudang/produk-baru', {
@@ -714,26 +732,30 @@ export default function GudangPortalPage() {
         return;
       }
 
+      warehouseDataMemCache.clear();
       setNewProdSuccessMsg(
         json.data?.message ??
           `Usulan produk baru "${newProdName.trim()}" berhasil dikirim ke Approval Manager! Produk akan aktif di Kasir setelah di-ACC Manager.`,
       );
       await loadData();
-      setTimeout(() => {
+      if (newProdCloseTimerRef.current) clearTimeout(newProdCloseTimerRef.current);
+      newProdCloseTimerRef.current = setTimeout(() => {
         setShowNewProductModal(false);
         setNewProdSuccessMsg(null);
+        newProdCloseTimerRef.current = null;
       }, 2200);
     } catch {
       setNewProdError('Koneksi terputus saat mengajukan produk baru.');
     } finally {
+      newProdInFlightRef.current = false;
       setSubmittingNewProd(false);
     }
   }
 
-  // ── Submit Restock Mutasi Stok (2-Layer Approval untuk Petugas Gudang) ──
+  // ── Submit Restock Mutasi Stok (Anti-Dobel Submit & Cache Invalidation Penuh) ──
   async function handleRestockSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canMutateStock || !selectedProduct || restockQty <= 0) return;
+    if (!canMutateStock || !selectedProduct || restockQty <= 0 || restockInFlightRef.current) return;
 
     const todayStr = getTodayWibStr();
     if (!expiryDate) {
@@ -745,24 +767,33 @@ export default function GudangPortalPage() {
       return;
     }
 
+    if (restockCloseTimerRef.current) {
+      clearTimeout(restockCloseTimerRef.current);
+      restockCloseTimerRef.current = null;
+    }
+
+    restockInFlightRef.current = true;
     setSubmittingRestock(true);
     setErrorMsg(null);
 
     try {
-      const res = await fetch('/api/kasir/gudang', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId: selectedProduct.id,
-          qtyAdd: Number(restockQty),
-          bonusQty: Math.max(0, Math.floor(Number(restockBonusQty || 0))),
-          expiryDate,
-          batchCode: batchCode.trim() ? batchCode.trim() : null,
-          notes: notes.trim() ? notes.trim() : null,
-        }),
-      });
+      const sendRestock = async (confirmDuplicate: boolean) =>
+        fetch('/api/kasir/gudang', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productId: selectedProduct.id,
+            qtyAdd: Number(restockQty),
+            bonusQty: Math.max(0, Math.floor(Number(restockBonusQty || 0))),
+            expiryDate,
+            batchCode: batchCode.trim() ? batchCode.trim() : null,
+            notes: notes.trim() ? notes.trim() : null,
+            confirmDuplicate,
+          }),
+        });
 
-      const json = (await res.json()) as {
+      let res = await sendRestock(false);
+      let json = (await res.json()) as {
         success: boolean;
         data?: {
           mode?: 'SUBMITTED_FOR_APPROVAL' | 'APPROVED_DIRECT';
@@ -775,10 +806,21 @@ export default function GudangPortalPage() {
         error?: string;
       };
 
+      if (res.status === 409) {
+        const proceed = window.confirm(
+          `${json.error ?? 'Restock identik baru saja dicatat.'}\n\nApakah Anda benar-benar ingin menambahkan stok ini lagi?`,
+        );
+        if (!proceed) return;
+        res = await sendRestock(true);
+        json = (await res.json()) as typeof json;
+      }
+
       if (!res.ok || !json.success) {
         alert(json.error ?? 'Gagal mencatat restock.');
         return;
       }
+
+      warehouseDataMemCache.clear();
 
       if (json.data?.mode === 'SUBMITTED_FOR_APPROVAL') {
         setRestockSuccessMsg(
@@ -797,13 +839,15 @@ export default function GudangPortalPage() {
       await loadData();
 
       // Tutup modal setelah delay singkat agar user melihat feedback
-      setTimeout(() => {
+      restockCloseTimerRef.current = setTimeout(() => {
         setSelectedProduct(null);
         setRestockSuccessMsg(null);
+        restockCloseTimerRef.current = null;
       }, 2000);
     } catch {
       alert('Koneksi terputus saat menyimpan restock.');
     } finally {
+      restockInFlightRef.current = false;
       setSubmittingRestock(false);
     }
   }

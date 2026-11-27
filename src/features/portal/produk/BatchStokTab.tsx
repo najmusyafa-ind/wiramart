@@ -759,7 +759,9 @@ function PenerimaanBarangModal({
     const prod = productList.find((p) => p.id === prodId);
     if (prod) {
       setCostPrice(prod.costPrice ? parseFloat(prod.costPrice).toString() : '0');
-      const nowStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const nowStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' })
+        .format(new Date())
+        .replace(/-/g, '');
       setBatchCode(`BATCH-${nowStr}-${Math.floor(100 + Math.random() * 900)}`);
     }
   }

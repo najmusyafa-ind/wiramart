@@ -22,6 +22,7 @@ import {
   transactionPayments,
 } from '@/lib/db/schema';
 import { AppError } from '@/lib/utils/helpers';
+import { resolveShiftSessionsBatch } from '@/lib/services/activeShiftService';
 
 // ─────────────────────────────────────────────────────────────
 // 1. Zod Validation Schemas
@@ -204,14 +205,10 @@ function fmtHourRangeWib(hour: number): string {
   return `${h}:00 - ${h}:59 WIB`;
 }
 
-function getShiftNameFromDate(clockIn: Date): string {
-  const hourWib = getWibHour(clockIn);
-  const minuteWib = parseInt(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jakarta', minute: 'numeric' }).format(clockIn),
-    10,
-  );
-  const isPagi = hourWib < 11 || (hourWib === 11 && minuteWib < 30);
-  return isPagi ? 'Shift 1 (Pagi 07:30 - 11:30)' : 'Shift 2 (Siang 11:30 - 15:00)';
+function formatShiftSessionLabel(sesi: 'Pagi' | 'Siang'): string {
+  return sesi === 'Pagi'
+    ? 'Shift 1 (Pagi 07:30 - 11:30)'
+    : 'Shift 2 (Siang 11:30 - 15:00)';
 }
 
 function chunkArray<T>(items: readonly T[], size = SQL_IN_CHUNK_SIZE): T[][] {
@@ -360,6 +357,8 @@ export async function getCashierDailyRecap(
     clockIn: Date;
     clockOut: Date | null;
     status: string;
+    sessionType: string | null;
+    actualCash: string | null;
     modalAwal: string | null;
     ownerName: string;
   }> = [];
@@ -372,6 +371,8 @@ export async function getCashierDailyRecap(
         clockIn: shifts.clockIn,
         clockOut: shifts.clockOut,
         status: shifts.status,
+        sessionType: shifts.sessionType,
+        actualCash: shifts.actualCash,
         modalAwal: shifts.modalAwal,
         ownerName: employees.fullName,
       })
@@ -383,6 +384,8 @@ export async function getCashierDailyRecap(
 
   myShiftsRows.sort((a, b) => new Date(b.clockIn).getTime() - new Date(a.clockIn).getTime());
 
+  const sessionByShiftId = await resolveShiftSessionsBatch(myShiftsRows);
+
   const shiftsSaya: CashierShiftInfoDTO[] = myShiftsRows.map((s) => {
     const parsedModal = s.modalAwal !== null && s.modalAwal !== undefined && s.modalAwal !== ''
       ? parseFloat(s.modalAwal)
@@ -391,9 +394,10 @@ export async function getCashierDailyRecap(
       ? Math.round(parsedModal)
       : 100_000;
     const isSharedDrawer = s.employeeId !== employeeId;
+    const resolvedSesi = sessionByShiftId.get(s.id) ?? 'Pagi';
     return {
       id: s.id,
-      shiftName: getShiftNameFromDate(new Date(s.clockIn)),
+      shiftName: formatShiftSessionLabel(resolvedSesi),
       clockIn: s.clockIn.toISOString(),
       clockOut: s.clockOut ? s.clockOut.toISOString() : null,
       status: s.status as 'ACTIVE' | 'CLOSED',

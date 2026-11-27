@@ -14,6 +14,7 @@ import { transactions, transactionItems, employees, shifts, transactionPayments,
 import { eq, and, gte, lt, inArray, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
 import {
+  classifyShiftDrawerAudit,
   getFinancialReport,
   resolveReportRange,
   summarizeDailyByMonth,
@@ -307,26 +308,11 @@ export async function GET(req: NextRequest) {
         const cashOut = shiftCashOutMap.get(sh.shiftId) ?? 0;
         const cashIn = shiftCashInMap.get(sh.shiftId) ?? 0;
         const expectedCash = modalAwal + cashSales - cashOut + cashIn;
-        const discrepancy = actualCash !== null ? actualCash - expectedCash : null;
-
-        let statusLaci: 'RUNNING' | 'BALANCED' | 'SHORTAGE' | 'OVERAGE' = 'RUNNING';
-        let discrepancyTier: 'HIJAU' | 'KUNING' | 'MERAH' | 'OVERAGE' = 'HIJAU';
-
-        if (sh.status === 'CLOSED') {
-          if (discrepancy === null) {
-            statusLaci = 'BALANCED';
-            discrepancyTier = 'HIJAU';
-          } else if (Math.abs(discrepancy) <= 2000) {
-            statusLaci = 'BALANCED';
-            discrepancyTier = 'HIJAU';
-          } else if (discrepancy < 0) {
-            statusLaci = 'SHORTAGE';
-            discrepancyTier = discrepancy < -20000 ? 'MERAH' : 'KUNING';
-          } else {
-            statusLaci = 'OVERAGE';
-            discrepancyTier = 'OVERAGE';
-          }
-        }
+        const { discrepancy, statusLaci, discrepancyTier } = classifyShiftDrawerAudit({
+          status: sh.status,
+          actualCash,
+          expectedCash,
+        });
 
         const parsedSerah = sh.serahTerimaDiff !== null && sh.serahTerimaDiff !== undefined && sh.serahTerimaDiff !== ''
           ? parseFloat(sh.serahTerimaDiff)

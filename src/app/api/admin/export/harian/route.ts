@@ -18,6 +18,7 @@ import {
 import { requireManager } from '@/lib/utils/auth';
 import { AppError } from '@/lib/utils/helpers';
 import {
+  classifyShiftDrawerAudit,
   getFinancialReport,
   InvalidRangeError,
   isPeriodKey,
@@ -498,6 +499,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       let totActual = 0;
       let hasClosedShift = false;
       let hasActiveShift = false;
+      let uncountedClosedCount = 0;
 
       shiftList.forEach((sh, idx) => {
         const parsedModal =
@@ -523,12 +525,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         totCashOut += cashOut;
         totCashIn += cashIn;
         totExpected += expectedCash;
+        let hasUncountedClosedShift = false;
         if (actualCash !== null) {
           totActual += actualCash;
           totExpectedClosed += expectedCash;
           hasClosedShift = true;
+        } else if (sh.status === 'CLOSED') {
+          hasUncountedClosedShift = true;
         } else {
           hasActiveShift = true;
+        }
+        if (hasUncountedClosedShift) {
+          uncountedClosedCount++;
         }
 
         const shiftBadge =
@@ -539,6 +547,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         const clockInDate = fmtWibDateCompact(sh.clockIn);
         const clockInTime = fmtWibTimeCompact(sh.clockIn);
         const clockOutText = sh.clockOut ? fmtWibTimeCompact(sh.clockOut) : 'Berjalan';
+        const drawerAudit = classifyShiftDrawerAudit({
+          status: sh.status,
+          actualCash,
+          expectedCash,
+        });
 
         const row = ws.getRow(curRow);
         row.getCell(2).value = shiftBadge;
@@ -552,19 +565,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           formula: `E${curRow}+F${curRow}-G${curRow}+H${curRow}`,
           result: expectedCash,
         };
-        row.getCell(10).value = actualCash !== null ? actualCash : 'Belum Ditutup';
+        row.getCell(10).value =
+          actualCash !== null
+            ? actualCash
+            : sh.status === 'CLOSED'
+              ? 'Auto-Close (Belum Hitung)'
+              : 'Belum Ditutup';
         row.getCell(11).value =
           discrepancy !== null
             ? { formula: `J${curRow}-I${curRow}`, result: discrepancy }
             : '—';
-
-        let auditText = 'BERJALAN';
-        if (sh.status === 'CLOSED') {
-          if (discrepancy === null || Math.abs(discrepancy) < 1) auditText = 'SESUAI';
-          else if (discrepancy < 0) auditText = 'KURANG';
-          else auditText = 'LEBIH';
-        }
-        row.getCell(12).value = auditText;
+        row.getCell(12).value = drawerAudit.harianAuditLabel;
 
         for (let c = 2; c <= 12; c++) {
           const cell = row.getCell(c);
@@ -597,11 +608,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       const shiftEndRow = curRow - 1;
       const totDiscrepancy = hasClosedShift ? totActual - totExpectedClosed : null;
+      const hasUncountedClosed = uncountedClosedCount > 0;
       const totRow = ws.getRow(curRow);
       totRow.height = 24;
       totRow.getCell(2).value = `TOTAL (${shiftList.length} Shift)`;
-      totRow.getCell(3).value =
-        hasActiveShift && hasClosedShift
+      totRow.getCell(3).value = hasUncountedClosed
+        ? `Mencakup ${uncountedClosedCount} shift auto-close belum hitung fisik`
+        : hasActiveShift && hasClosedShift
           ? 'Mencakup shift berjalan (selisih dihitung dari shift tutup)'
           : 'Semua Sesi Shift';
       totRow.getCell(4).value =
@@ -613,20 +626,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       totRow.getCell(9).value = { formula: `SUM(I${shiftStartRow}:I${shiftEndRow})`, result: totExpected };
       totRow.getCell(10).value = hasClosedShift
         ? { formula: `SUM(J${shiftStartRow}:J${shiftEndRow})`, result: totActual }
-        : 'Belum Ditutup';
+        : hasUncountedClosed
+          ? 'Belum Dihitung'
+          : 'Belum Ditutup';
       totRow.getCell(11).value =
         totDiscrepancy !== null
           ? { formula: `SUM(K${shiftStartRow}:K${shiftEndRow})`, result: totDiscrepancy }
           : '—';
-      totRow.getCell(12).value = !hasClosedShift
-        ? 'BELUM DITUTUP'
-        : hasActiveShift
-          ? 'SEBAGIAN BERJALAN'
-          : Math.abs(totDiscrepancy ?? 0) < 1
-            ? 'SESUAI'
-            : (totDiscrepancy ?? 0) < 0
-              ? 'KURANG'
-              : 'LEBIH';
+      totRow.getCell(12).value = hasUncountedClosed
+        ? 'PERLU AUDIT'
+        : !hasClosedShift
+          ? 'BELUM DITUTUP'
+          : hasActiveShift
+            ? 'SEBAGIAN BERJALAN'
+            : Math.abs(totDiscrepancy ?? 0) < 1
+              ? 'SESUAI'
+              : (totDiscrepancy ?? 0) < 0
+                ? 'KURANG'
+                : 'LEBIH';
 
       for (let c = 2; c <= 12; c++) {
         const cell = totRow.getCell(c);

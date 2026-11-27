@@ -250,7 +250,7 @@ export async function scanAndGenerateFEFOAlerts(): Promise<{
       updatedAlerts++;
     } else if (
       isAlreadyExpired &&
-      existingReport.status === 'APPROVED' &&
+      (existingReport.status === 'APPROVED' || existingReport.status === 'EXECUTED') &&
       (existingReport.managerDecision === 'DISCOUNT' || existingReport.managerDecision === 'DISPLAY_FRONT')
     ) {
       // Jika sebelumnya disetujui DISKON/DISPLAY_FRONT tetapi kini SUDAH EXPIRED dan masih ada stok -> cabut diskon & wajib tarik/musnahkan
