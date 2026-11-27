@@ -6,7 +6,7 @@
 // =============================================================
 
 import { NextRequest } from 'next/server';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { shiftSchedules, employees } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/utils/auth';
@@ -43,7 +43,14 @@ export async function GET(_req: NextRequest): Promise<Response> {
         employeeProdi:   employees.programStudi,
       })
       .from(shiftSchedules)
-      .leftJoin(employees, eq(shiftSchedules.employeeId, employees.id))
+      .leftJoin(
+        employees,
+        and(
+          eq(shiftSchedules.employeeId, employees.id),
+          eq(employees.isActive, true),
+          isNull(employees.deletedAt),
+        ),
+      )
       .where(
         and(
           eq(shiftSchedules.dayOfWeek, dayOfWeek),
@@ -90,12 +97,13 @@ export async function GET(_req: NextRequest): Promise<Response> {
 
       // Hanya tambah jika bukan baris koordinator (orderInSlot == 99)
       if (row.orderInSlot !== 99) {
+        const isActiveEmp = Boolean(row.employeeId && row.employeeName);
         slot.karyawan.push({
-          id:     row.employeeId,
-          nama:   row.employeeName ?? null,
-          nim:    row.employeeNim ?? null,
-          prodi:  row.employeeProdi ?? null,
-          onDuty: isCurrentSlot,
+          id:     isActiveEmp ? row.employeeId : null,
+          nama:   isActiveEmp ? row.employeeName : null,
+          nim:    isActiveEmp ? row.employeeNim : null,
+          prodi:  isActiveEmp ? row.employeeProdi : null,
+          onDuty: isActiveEmp && isCurrentSlot,
         });
       }
     }

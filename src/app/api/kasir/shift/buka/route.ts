@@ -17,10 +17,10 @@ import { z } from 'zod';
 import { NextRequest } from 'next/server';
 import { eq, and, desc, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
-import { shifts, employees } from '@/lib/db/schema';
+import { shifts, employees, SHIFT_SESSION_TYPES } from '@/lib/db/schema';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
-import { isCrossSessionPersistedShift } from '@/lib/services/activeShiftService';
+import { isCrossSessionPersistedShift, suggestOpeningSessionType } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,6 +28,7 @@ export const revalidate = 0;
 
 const bukaShiftSchema = z.object({
   modalAwal: z.number().min(0, 'Modal awal tidak boleh negatif').max(10_000_000, 'Nilai terlalu besar'),
+  sessionType: z.enum(SHIFT_SESSION_TYPES).optional(),
   breakdown: z.record(z.string(), z.number()).optional(),
   pinKetuaShift: z.string().min(1, 'PIN tidak boleh kosong').max(20).optional(),
   pin: z.string().min(1, 'PIN tidak boleh kosong').max(20).optional(),
@@ -95,7 +96,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     );
   }
 
-  const { modalAwal, breakdown } = parsed.data;
+  const { modalAwal, sessionType: requestedSessionType, breakdown } = parsed.data;
 
   const host = req.headers.get('host') || '';
   const isLocalhost =
@@ -126,8 +127,10 @@ export async function PATCH(req: NextRequest): Promise<Response> {
           {
             employeeId: existingStoreShift.employeeId,
             clockIn: new Date(existingStoreShift.clockIn),
+            sessionType: existingStoreShift.sessionType,
           },
           now,
+          requestedSessionType,
         ));
 
       if (shiftAge > TWELVE_HOURS) {
@@ -216,6 +219,10 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     }
   }
 
+  // 4b. Tentukan session_type eksplisit ('PAGI' | 'SIANG') — mengikuti pilihan kasir atau saran SSOT
+  const resolvedSessionType =
+    requestedSessionType ?? (await suggestOpeningSessionType({ employeeId, now })).suggestedSession;
+
   // 5. Buat shift aktif baru secara atomik dengan modal awal yang valid (Cacat 2 Opsi A)
   let activeShiftId: string;
   if (shiftToFill) {
@@ -224,6 +231,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
       .update(shifts)
       .set({
         modalAwal: finalModalAwal.toString(),
+        sessionType: resolvedSessionType,
         cashBreakdownOpen: breakdown ?? null,
         serahTerimaDiff: serahTerimaDiff !== null ? serahTerimaDiff.toString() : null,
         auditFlags,
@@ -252,6 +260,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
         .values({
           employeeId,
           status: 'ACTIVE',
+          sessionType: resolvedSessionType,
           modalAwal: finalModalAwal.toString(),
           cashBreakdownOpen: breakdown ?? null,
           serahTerimaDiff: serahTerimaDiff !== null ? serahTerimaDiff.toString() : null,
@@ -282,8 +291,9 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   }
 
   return apiOk({
-    message: `Shift dibuka. Modal awal Rp ${finalModalAwal.toLocaleString('id-ID')} tercatat.`,
+    message: `Shift ${resolvedSessionType === 'SIANG' ? 'Siang' : 'Pagi'} dibuka. Modal awal Rp ${finalModalAwal.toLocaleString('id-ID')} tercatat.`,
     shiftId: activeShiftId,
+    sessionType: resolvedSessionType,
     modalAwal: finalModalAwal,
     serahTerimaDiff,
     auditFlags,

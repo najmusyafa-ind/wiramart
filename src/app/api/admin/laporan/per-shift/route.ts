@@ -26,6 +26,7 @@ import {
 } from '@/lib/db/schema';
 import { and, asc, desc, eq, gte, lte, lt, inArray, isNull, sql } from 'drizzle-orm';
 import { verifyJwt, apiOk, apiError } from '@/lib/utils/auth';
+import { resolveShiftSessionsBatch } from '@/lib/services/activeShiftService';
 import {
   resolveReportRange,
   getFinancialReport,
@@ -232,6 +233,7 @@ export async function GET(req: NextRequest): Promise<Response> {
         shortageAmount: shifts.shortageAmount,
         shortageOverrideReason: shifts.shortageOverrideReason,
         notes: shifts.notes,
+        sessionType: shifts.sessionType,
         employeeId: shifts.employeeId,
         kasirName: employees.fullName,
         kasirNim: employees.nim,
@@ -492,71 +494,8 @@ export async function GET(req: NextRequest): Promise<Response> {
       }
     }
 
-    const empScheduleMap = new Map<string, { dayOfWeek: string; slotStart: string }[]>();
-    for (const sr of scheduleRows) {
-      const list = empScheduleMap.get(sr.employeeId) ?? [];
-      list.push({ dayOfWeek: sr.dayOfWeek, slotStart: sr.slotStart });
-      empScheduleMap.set(sr.employeeId, list);
-    }
-
-    const sesiByShift = new Map<string, 'Pagi' | 'Siang'>();
-    const shiftIdsByDate = new Map<string, string[]>();
-    const HARI_TO_ENUM: Record<number, string> = {
-      0: 'MINGGU', 1: 'SENIN', 2: 'SELASA', 3: 'RABU', 4: 'KAMIS', 5: 'JUMAT', 6: 'SABTU',
-    };
-
-    for (const s of shiftRows) {
-      const key = wibDateOf(s.clockIn);
-      const list = shiftIdsByDate.get(key) ?? [];
-      list.push(s.id);
-      shiftIdsByDate.set(key, list);
-
-      const dayOfWeekNum = wibDayOfWeek(key);
-      const dayEnum = HARI_TO_ENUM[dayOfWeekNum] ?? '';
-
-      // Penentuan Sesi Shift (mendukung jadwal Pagi & Siang penuh Senin-Jumat termasuk Kamis Pagi):
-      // 1. Jam buka >= 11:00 WIB -> Siang
-      // 2. Jam buka 10:30-10:59 WIB, sudah ada shift lebih pagi di hari yang sama, dan tutup >= 14:00 WIB -> Siang
-      //    (menangani oper sesi siang yang dibuka < 11:00 oleh akun kasir pagi, mis. 2 Nov 10:47-15:04)
-      // 3. Jam buka 09:45-10:59 WIB -> ikuti jadwal resmi kasir pada hari tsb jika ada
-      // 4. Selain itu -> Pagi (07:30-11:30)
-      const inParts = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'Asia/Jakarta',
-        hour: 'numeric',
-        minute: 'numeric',
-        hour12: false,
-      }).formatToParts(s.clockIn);
-      const inHour = parseInt(inParts.find((p) => p.type === 'hour')?.value ?? '8', 10);
-      const inMinute = parseInt(inParts.find((p) => p.type === 'minute')?.value ?? '0', 10);
-      const clockMinutes = inHour * 60 + inMinute;
-      const hasEarlierShiftSameDay = list.length > 1;
-      const closedAfternoonLate = s.clockOut
-        ? parseInt(
-          new Intl.DateTimeFormat('en-US', {
-            timeZone: 'Asia/Jakarta',
-            hour: 'numeric',
-            hour12: false,
-          }).format(s.clockOut),
-          10,
-        ) >= 14
-        : false;
-
-      let sesi: 'Pagi' | 'Siang';
-      if (clockMinutes >= 11 * 60) {
-        sesi = 'Siang';
-      } else if (clockMinutes >= 10 * 60 + 30 && hasEarlierShiftSameDay && closedAfternoonLate) {
-        sesi = 'Siang';
-      } else if (clockMinutes >= 9 * 60 + 45) {
-        const empScheds = empScheduleMap.get(s.employeeId) ?? [];
-        const matchSched = empScheds.find((sch) => sch.dayOfWeek === dayEnum);
-        const schedHour = matchSched ? parseInt(matchSched.slotStart.split(':')[0] ?? '8', 10) : 8;
-        sesi = schedHour >= 11 ? 'Siang' : 'Pagi';
-      } else {
-        sesi = 'Pagi';
-      }
-
-      sesiByShift.set(s.id, sesi);
-    }
+    // Penentuan Sesi Shift seragam via SSOT (`shifts.session_type` -> jadwal/konteks WIB)
+    const sesiByShift = await resolveShiftSessionsBatch(shiftRows);
 
     // ─────────────────────────────────────────────────────────────
     // 2c. Konsolidasi Sub-Shift POS dalam (Tanggal, Sesi) yang sama

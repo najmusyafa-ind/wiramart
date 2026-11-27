@@ -5,7 +5,7 @@
 // =============================================================
 
 import { z } from 'zod';
-import { eq, and, ne, inArray, sql } from 'drizzle-orm';
+import { eq, and, ne, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import { shiftSchedules, employees, attendances } from '@/lib/db/schema';
 import { apiOk, apiError } from '@/lib/utils/helpers';
@@ -43,9 +43,13 @@ export async function POST(request: Request): Promise<Response> {
   const roleTask = parsed.data.roleTask ?? 'Kasir';
 
   try {
-    // 1. Verifikasi Karyawan
+    // 1. Verifikasi Karyawan (wajib aktif & belum soft-delete)
     const employee = await db.query.employees.findFirst({
-      where: and(eq(employees.id, employeeId), eq(employees.isActive, true)),
+      where: and(
+        eq(employees.id, employeeId),
+        eq(employees.isActive, true),
+        isNull(employees.deletedAt),
+      ),
       columns: { id: true, fullName: true, nim: true, jabatan: true },
     });
 

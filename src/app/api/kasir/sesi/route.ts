@@ -10,7 +10,7 @@ import { employees, qrisSettings, shifts } from '@/lib/db/schema';
 import { eq, and, isNull, isNotNull, desc, sql } from 'drizzle-orm';
 import { verifyJwt } from '@/lib/utils/auth';
 import { apiOk, apiError } from '@/lib/utils/helpers';
-import { resolveActiveDrawerShift } from '@/lib/services/activeShiftService';
+import { resolveActiveDrawerShift, suggestOpeningSessionType } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
       return errRes;
     }
 
-    const [resolution, [lastClosedRow]] = await Promise.all([
+    const [resolution, [lastClosedRow], openingSuggestion] = await Promise.all([
       resolveActiveDrawerShift({
         employeeId: employee.id,
         employeeName: employee.fullName,
@@ -88,6 +88,7 @@ export async function GET(req: NextRequest) {
         )
         .orderBy(desc(shifts.clockOut))
         .limit(1),
+      suggestOpeningSessionType({ employeeId: employee.id }),
     ]);
 
     const lastClosedShift =
@@ -113,9 +114,11 @@ export async function GET(req: NextRequest) {
             id: resolution.activeShift.id,
             clockIn: resolution.activeShift.clockIn,
             modalAwal: resolution.activeShift.modalAwal,
+            sessionType: resolution.activeShift.sessionType,
             isPeerShared: resolution.activeShift.isPeerShared,
           }
         : null,
+      suggestedSessionType: openingSuggestion.suggestedSession,
       lastClosedShift,
       // Shift aktif dari kasir lain (handover signal jika shift lama belum ditutup)
       otherActiveShifts: resolution.otherActiveShifts.map((s) => ({

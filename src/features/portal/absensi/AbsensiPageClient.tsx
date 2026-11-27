@@ -219,8 +219,9 @@ function ManualInputModal({
     fetch('/api/admin/karyawan')
       .then((r) => r.json())
       .then((j) => {
-        const list = (j.data ?? []) as { id: string; fullName: string; nim: string; jabatan?: string }[];
-        setEmployees(list.sort((a, b) => a.fullName.localeCompare(b.fullName)));
+        const list = (j.data ?? []) as { id: string; fullName: string; nim: string; jabatan?: string; isActive?: boolean }[];
+        const activeOnly = list.filter((e) => e.isActive !== false);
+        setEmployees(activeOnly.sort((a, b) => a.fullName.localeCompare(b.fullName)));
       })
       .catch(() => {});
 

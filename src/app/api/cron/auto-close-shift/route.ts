@@ -30,10 +30,12 @@ import {
   shifts,
   shiftSchedules,
   attendances,
+  employees,
 } from '@/lib/db/schema';
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import { expireDueOrders } from '@/features/order/pesanan.service';
 import { sweepExpiredPerishableProducts } from '@/lib/services/perishableSweepService';
+import { shouldSkipAutoAlphaForScheduleUpdate } from '@/lib/services/attendanceLatenessService';
 
 // Tipe literal enum hari dari skema DB
 type DayOfWeek = 'SENIN' | 'SELASA' | 'RABU' | 'KAMIS' | 'JUMAT' | 'SABTU' | 'MINGGU';
@@ -221,14 +223,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         const hariRef = getDayOfWeekWib(refDate);
         const tanggalRef = getTanggalWib(refDate);
 
-        // Ambil semua jadwal aktif hari referensi
+        // Ambil semua jadwal aktif hari referensi khusus karyawan yang masih aktif (anti TIDAK_HADIR karyawan keluar)
         const jadwalHariRef = await db
           .select({
             scheduleId: shiftSchedules.id,
             employeeId: shiftSchedules.employeeId,
             slotEnd: shiftSchedules.slotEnd,
+            createdAt: shiftSchedules.createdAt,
+            updatedAt: shiftSchedules.updatedAt,
           })
           .from(shiftSchedules)
+          .innerJoin(
+            employees,
+            and(
+              eq(shiftSchedules.employeeId, employees.id),
+              eq(employees.isActive, true),
+              isNull(employees.deletedAt),
+            ),
+          )
           .where(and(
             eq(shiftSchedules.dayOfWeek, hariRef as DayOfWeek),
             eq(shiftSchedules.isActive, true),
@@ -243,6 +255,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             // Hanya proses jika slotEnd + buffer sudah benar-benar lewat
             const slotEndEpoch = slotEndToEpoch(tanggalRef, jadwal.slotEnd);
             if (nowEpoch < slotEndEpoch + BUFFER_ABSEN_MS) continue;
+
+            // Penjaga jadwal baru: jika jadwal baru dibuat/diubah SETELAH jam slot berakhir,
+            // jangan beri TIDAK_HADIR (Alpha) surut untuk tanggal tersebut.
+            if (
+              shouldSkipAutoAlphaForScheduleUpdate({
+                slotEndEpoch,
+                createdAt: jadwal.createdAt,
+                updatedAt: jadwal.updatedAt,
+              })
+            ) {
+              continue;
+            }
 
             // Cek apakah sudah ada attendance record untuk tanggal referensi ini
             const existingAttendance = await db.query.attendances.findFirst({

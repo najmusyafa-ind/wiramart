@@ -60,12 +60,21 @@ type SplitPaymentDetail = {
 
 type SessionInfo = {
   employee: { id: string; fullName: string; jabatan: string; nim: string; hasPin?: boolean };
-  shift: { id: string; clockIn: string; modalAwal: string | null; isPeerShared?: boolean } | null;
+  shift: {
+    id: string;
+    clockIn: string;
+    modalAwal: string | null;
+    sessionType?: 'PAGI' | 'SIANG' | null;
+    isPeerShared?: boolean;
+  } | null;
+  suggestedSessionType?: 'PAGI' | 'SIANG';
   lastClosedShift?: { actualCash: number; clockOut: string | null; kasirName: string } | null;
   qris: { qrImageUrl: string | null; bankName: string | null; accountName: string | null; isActive: boolean } | null;
   store: { name: string; address: string; phone: string };
   otherActiveShifts: { kasirName: string; kasirNim: string; clockIn: string; shiftId: string }[];
 };
+
+const AUTO_LOGOUT_STORAGE_KEY = 'pos_auto_logout_emp_id';
 
 const POS_PIN_DIGIT_REGEX = /^\d{6,8}$/;
 function sanitizePosPinInput(value: string): string {
@@ -209,6 +218,7 @@ function ProductCard({
 // Jika ada kasir lain yang masih aktif → tampilkan warning handover.
 function BukaShiftOverlay({
   kasirName,
+  suggestedSessionType,
   otherActiveShifts,
   lastClosedShift,
   onSuccess,
@@ -217,6 +227,7 @@ function BukaShiftOverlay({
   onLogout,
 }: {
   kasirName: string;
+  suggestedSessionType?: 'PAGI' | 'SIANG';
   otherActiveShifts: SessionInfo['otherActiveShifts'];
   lastClosedShift?: SessionInfo['lastClosedShift'];
   onSuccess: (modalAwal: number, shiftId?: string) => void;
@@ -226,6 +237,9 @@ function BukaShiftOverlay({
 }) {
   // Default modal awal paten dari owner: Rp 100.000
   const [modalInput, setModalInput] = useState('100000');
+  const [sessionType, setSessionType] = useState<'PAGI' | 'SIANG'>(
+    suggestedSessionType ?? (getHourWib() >= 11 ? 'SIANG' : 'PAGI'),
+  );
   const [breakdown, setBreakdown]   = useState<DenominasiMap>({});
   const [inputMode, setInputMode]   = useState<'QUICK' | 'CALCULATOR'>('QUICK');
   const [loading, setLoading]       = useState(false);
@@ -259,6 +273,7 @@ function BukaShiftOverlay({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           modalAwal: nominal,
+          sessionType,
           breakdown: Object.keys(breakdown).length > 0 ? breakdown : undefined,
         }),
       });
@@ -442,8 +457,61 @@ function BukaShiftOverlay({
                   Buka Shift
                 </h2>
                 <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>
-                  Halo, <strong>{kasirName}</strong>! Masukkan uang di laci kasir.
+                  Sedang login sebagai: <strong style={{ color: 'var(--color-text)' }}>{kasirName}</strong>
                 </p>
+                {onLogout && (
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    style={{
+                      marginTop: 4,
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--color-primary)',
+                      fontSize: '0.74rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      padding: '2px 6px',
+                    }}
+                  >
+                    Bukan {kasirName.split(' ')[0]}? Ganti Akun Kasir
+                  </button>
+                )}
+              </div>
+
+              {/* Pemilih Sesi Shift Eksplisit (SSOT Anti Salah Tebak Pagi/Siang) */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--color-text-muted)' }}>
+                  Pilih Sesi Shift:
+                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  {(['PAGI', 'SIANG'] as const).map((opt) => {
+                    const active = sessionType === opt;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setSessionType(opt)}
+                        aria-pressed={active}
+                        style={{
+                          minHeight: 42,
+                          padding: '6px 10px',
+                          borderRadius: 'var(--radius-md)',
+                          border: active ? '2px solid var(--color-primary)' : '1px solid var(--color-border)',
+                          background: active ? 'var(--color-primary-light)' : 'var(--color-surface)',
+                          color: active ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          transition: 'border-color 150ms cubic-bezier(0.16, 1, 0.3, 1), background-color 150ms cubic-bezier(0.16, 1, 0.3, 1)',
+                        }}
+                      >
+                        {opt === 'PAGI' ? 'Shift Pagi (07:30)' : 'Shift Siang (11:30)'}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Badge handover jika tadi dikonfirmasi */}
@@ -1768,6 +1836,12 @@ export default function PosPage() {
   const [unknownBarcodePrompt, setUnknownBarcodePrompt] = useState<string | null>(null);
   const posCamRef = useRef<HTMLVideoElement>(null);
   const posScanInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tutupResultRef = useRef(tutupResult);
+  const handoverCopiedRef = useRef(handoverCopied);
+  useEffect(() => {
+    tutupResultRef.current = tutupResult;
+    handoverCopiedRef.current = handoverCopied;
+  }, [tutupResult, handoverCopied]);
 
 
   const applySessionResult = useCallback(
@@ -1782,6 +1856,26 @@ export default function PosPage() {
         return null;
       }
       if (result.status === 'ok') {
+        try {
+          const flaggedEmpId = window.localStorage.getItem(AUTO_LOGOUT_STORAGE_KEY);
+          if (flaggedEmpId) {
+            if (result.data.shift !== null || flaggedEmpId !== result.data.employee.id) {
+              window.localStorage.removeItem(AUTO_LOGOUT_STORAGE_KEY);
+            } else if (tutupResultRef.current === null || handoverCopiedRef.current) {
+              window.localStorage.removeItem(AUTO_LOGOUT_STORAGE_KEY);
+              void fetch('/api/auth/logout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role: 'employee' }),
+              }).finally(() => {
+                router.replace('/kasir/login');
+              });
+              return null;
+            }
+          }
+        } catch {
+          // Abaikan error localStorage di private mode
+        }
         setSession(result.data);
         return result.data;
       }
@@ -2454,6 +2548,11 @@ export default function PosPage() {
   }
 
   async function handleLogout() {
+    try {
+      window.localStorage.removeItem(AUTO_LOGOUT_STORAGE_KEY);
+    } catch {
+      // Abaikan error localStorage di private mode
+    }
     // role: 'employee' agar hanya cookie sk_kasir yang dihapus
     // — tidak mengganggu sesi admin yang aktif di tab lain
     await fetch('/api/auth/logout', {
@@ -2554,6 +2653,13 @@ export default function PosPage() {
 
   function applyGraceUpdateToTutupResult(graceUpdate?: GraceRecalcResult | null) {
     if (!graceUpdate) return;
+    if (graceUpdate.status !== 'PENDING_GRACE' && session?.employee?.id) {
+      try {
+        window.localStorage.setItem(AUTO_LOGOUT_STORAGE_KEY, session.employee.id);
+      } catch {
+        // Abaikan error localStorage
+      }
+    }
     setTutupResult((prev) => {
       if (!prev?.autoChecklist) return prev;
       return {
@@ -2640,6 +2746,15 @@ export default function PosPage() {
         return;
       }
       setTutupResult(json.data ?? null);
+      // Auto-logout guard: jika shift tutup bersih (bukan PENDING_GRACE), tandai agar reload/keluar
+      // langsung mengeluarkan sesi sk_kasir dan mencegah akun shift pagi terbawa ke shift siang.
+      if (json.data?.autoChecklist?.status !== 'PENDING_GRACE' && session?.employee?.id) {
+        try {
+          window.localStorage.setItem(AUTO_LOGOUT_STORAGE_KEY, session.employee.id);
+        } catch {
+          // Abaikan error localStorage
+        }
+      }
       setHandoverCopied(false);
       setShowRecountBox(false);
       setRecountError(null);
@@ -2731,6 +2846,7 @@ export default function PosPage() {
       {isShiftModalOpen && (
         <BukaShiftOverlay
           kasirName={kasirName}
+          suggestedSessionType={session?.suggestedSessionType}
           otherActiveShifts={session?.otherActiveShifts ?? []}
           lastClosedShift={session?.lastClosedShift ?? null}
           onSuccess={handleBukaShiftSuccess}

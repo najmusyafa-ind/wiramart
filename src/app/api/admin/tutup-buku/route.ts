@@ -25,6 +25,7 @@ import {
 import { requireManager } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 import { getFinancialReport, resolveReportRange } from '@/lib/finance/report';
+import { resolveShiftSessionsBatch } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 
@@ -79,6 +80,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       .select({
         id: shifts.id,
         status: shifts.status,
+        sessionType: shifts.sessionType,
         clockIn: shifts.clockIn,
         clockOut: shifts.clockOut,
         modalAwal: shifts.modalAwal,
@@ -160,6 +162,8 @@ export async function GET(req: NextRequest): Promise<Response> {
       }
     }
 
+    const sesiByShift = await resolveShiftSessionsBatch(dayShifts);
+
     const shiftDetailsList: ShiftDetailReport[] = [];
     let totalCashDiscrepancy = 0;
 
@@ -186,18 +190,8 @@ export async function GET(req: NextRequest): Promise<Response> {
         totalCashDiscrepancy += selisih;
       }
 
-      // Deteksi penamaan Shift berdasarkan jam clockIn (WIB)
-      // Pagi: < 11:30 WIB | Siang: >= 11:30 WIB
-      const clockInDate = new Date(sh.clockIn);
-      const hourWib = parseInt(
-        new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jakarta', hour: 'numeric', hour12: false }).format(clockInDate),
-        10,
-      );
-      const minuteWib = parseInt(
-        new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jakarta', minute: 'numeric' }).format(clockInDate),
-        10,
-      );
-      const isPagi = hourWib < 11 || (hourWib === 11 && minuteWib < 30);
+      // Resolusi sesi shift seragam via SSOT (`shifts.session_type` -> jadwal/konteks WIB)
+      const isPagi = (sesiByShift.get(sh.id) ?? 'Pagi') === 'Pagi';
       const shiftName = isPagi ? 'Shift 1 (Pagi)' : 'Shift 2 (Siang)';
 
       shiftDetailsList.push({

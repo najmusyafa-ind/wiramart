@@ -41,6 +41,7 @@ import {
   isExcludedTestAccount,
   sanitizeExcelText,
 } from '@/lib/services/exportWorkbookService';
+import { resolveShiftSessionsBatch } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 
@@ -62,19 +63,6 @@ function fmtWibTimeCompact(d: Date): string {
     minute: '2-digit',
     hour12: false,
   }).format(d);
-}
-
-// Label sesi shift operasional toko berdasarkan waktu buka (07:00-11:30 vs 11:30-15:00 WIB)
-function getShiftLabel(clockIn: Date): string {
-  const timeStr = new Date(clockIn).toLocaleTimeString('en-GB', {
-    timeZone: 'Asia/Jakarta',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-  const [h, m] = timeStr.split(':').map(Number);
-  const totalM = (h ?? 0) * 60 + (m ?? 0);
-  return totalM < 690 ? 'Shift 1 (Pagi)' : 'Shift 2 (Siang)';
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -100,6 +88,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const rawShiftList = await db
       .select({
         shiftId: shifts.id,
+        employeeId: shifts.employeeId,
+        sessionType: shifts.sessionType,
         clockIn: shifts.clockIn,
         clockOut: shifts.clockOut,
         status: shifts.status,
@@ -119,6 +109,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const shiftList = rawShiftList
       .slice(0, EXPORT_MAX_ROWS)
       .filter((sh) => !isExcludedTestAccount(sh.kasirName, sh.kasirNim));
+
+    const sesiByShift = await resolveShiftSessionsBatch(
+      shiftList.map((sh) => ({
+        id: sh.shiftId,
+        employeeId: sh.employeeId,
+        clockIn: sh.clockIn,
+        clockOut: sh.clockOut,
+        sessionType: sh.sessionType,
+        status: sh.status,
+        actualCash: sh.actualCash,
+      })),
+    );
 
     const shiftIds = shiftList.map((x) => x.shiftId);
     const shiftCashOutMap = new Map<string, number>();
@@ -529,7 +531,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           hasActiveShift = true;
         }
 
-        const shiftBadge = getShiftLabel(sh.clockIn);
+        const shiftBadge =
+          (sesiByShift.get(sh.shiftId) ?? 'Pagi') === 'Pagi'
+            ? 'Shift 1 (Pagi)'
+            : 'Shift 2 (Siang)';
         const kasirLabel = sanitizeExcelText(`${sh.kasirName} (${sh.kasirNim})`);
         const clockInDate = fmtWibDateCompact(sh.clockIn);
         const clockInTime = fmtWibTimeCompact(sh.clockIn);

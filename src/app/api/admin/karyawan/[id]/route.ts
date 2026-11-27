@@ -50,7 +50,7 @@ export async function PATCH(req: NextRequest, ctx: Context) {
 
     // Pastikan karyawan exist & belum dihapus
     const [existing] = await db
-      .select({ id: employees.id, pinHash: employees.pinHash })
+      .select({ id: employees.id, nim: employees.nim, fullName: employees.fullName, pinHash: employees.pinHash, isActive: employees.isActive })
       .from(employees)
       .where(and(eq(employees.id, id), isNull(employees.deletedAt)))
       .limit(1);
@@ -179,6 +179,41 @@ export async function PATCH(req: NextRequest, ctx: Context) {
 
           syncedCount += 1;
         }
+      }
+
+      // Jika karyawan dinonaktifkan (isActive: false), bersihkan slot jadwal, tutup shift aktif,
+      // dan nonaktifkan akun ADMIN_SHIFT terkait agar tidak nyangkut di Kiosk/Cron/Absensi.
+      if (parsed.data.isActive === false) {
+        await tx
+          .update(shifts)
+          .set({ clockOut: now, status: 'CLOSED' })
+          .where(and(eq(shifts.employeeId, id), eq(shifts.status, 'ACTIVE')));
+
+        await tx
+          .update(shiftSchedules)
+          .set({ employeeId: null, updatedAt: now })
+          .where(eq(shiftSchedules.employeeId, id));
+
+        await tx
+          .update(admins)
+          .set({ isActive: false, updatedAt: now })
+          .where(
+            and(
+              eq(admins.nidn, existing.nim),
+              eq(admins.role, 'ADMIN_SHIFT'),
+              isNull(admins.deletedAt),
+            ),
+          );
+
+        await tx.insert(auditLogs).values({
+          tableName: 'employees',
+          recordId: id,
+          action: 'UPDATE',
+          oldValues: JSON.stringify({ isActive: existing.isActive, fullName: existing.fullName }),
+          newValues: JSON.stringify({ isActive: false, clearedSchedulesAndAdminShift: true }),
+          actorType: 'ADMIN',
+          actorId: manager.sub,
+        });
       }
 
       // CISO Guard: Catat audit logs jika ada manipulasi PIN

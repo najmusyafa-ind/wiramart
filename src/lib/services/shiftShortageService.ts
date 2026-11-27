@@ -50,6 +50,7 @@ export async function resolveSameSessionShiftContext(targetShift: {
   employeeId?: string;
   clockIn: Date;
   modalAwal: string | null;
+  sessionType?: string | null;
 }): Promise<{ shiftIds: string[]; effectiveModalAwal: number }> {
   const targetClockIn = new Date(targetShift.clockIn);
   const dateWib = getWibDateStr(targetClockIn);
@@ -57,6 +58,7 @@ export async function resolveSameSessionShiftContext(targetShift: {
     ? await resolvePersistedShiftSession({
         employeeId: targetShift.employeeId,
         clockIn: targetClockIn,
+        sessionType: targetShift.sessionType,
       })
     : getWibSessionOfDate(targetClockIn);
   const dayStartUtc = new Date(`${dateWib}T00:00:00+07:00`);
@@ -66,9 +68,11 @@ export async function resolveSameSessionShiftContext(targetShift: {
       id: shifts.id,
       employeeId: shifts.employeeId,
       clockIn: shifts.clockIn,
+      clockOut: shifts.clockOut,
       modalAwal: shifts.modalAwal,
       status: shifts.status,
       actualCash: shifts.actualCash,
+      sessionType: shifts.sessionType,
     })
     .from(shifts)
     .where(
@@ -92,6 +96,8 @@ export async function resolveSameSessionShiftContext(targetShift: {
           : await resolvePersistedShiftSession({
               employeeId: row.employeeId,
               clockIn: new Date(row.clockIn),
+              clockOut: row.clockOut ? new Date(row.clockOut) : null,
+              sessionType: row.sessionType,
             }),
     })),
   );
@@ -105,9 +111,11 @@ export async function resolveSameSessionShiftContext(targetShift: {
       id: targetShift.id,
       employeeId: targetShift.employeeId ?? '',
       clockIn: targetClockIn,
+      clockOut: null,
       modalAwal: targetShift.modalAwal,
       status: 'ACTIVE',
       actualCash: null,
+      sessionType: (targetShift.sessionType as 'PAGI' | 'SIANG' | null | undefined) ?? null,
     });
   }
 
@@ -144,6 +152,7 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
       clockIn: true,
       modalAwal: true,
       actualCash: true,
+      sessionType: true,
     },
   });
 
@@ -155,6 +164,7 @@ export async function evaluateShiftCashState(shiftId: string): Promise<ShiftCash
     employeeId: shiftRow.employeeId,
     clockIn: new Date(shiftRow.clockIn),
     modalAwal: shiftRow.modalAwal,
+    sessionType: shiftRow.sessionType,
   });
 
   const [[paySummary], [directSummary], movements, [openCons]] = await Promise.all([

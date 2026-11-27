@@ -173,6 +173,9 @@ export type NewEmployee = typeof employees.$inferInsert;
 // Clock-in: saat login. Clock-out: saat logout.
 // =============================================================
 
+export const SHIFT_SESSION_TYPES = ['PAGI', 'SIANG'] as const;
+export type ShiftSessionType = (typeof SHIFT_SESSION_TYPES)[number];
+
 export const shifts = pgTable(
   'shifts',
   {
@@ -183,6 +186,8 @@ export const shifts = pgTable(
     clockIn: timestamp('clock_in', { withTimezone: true }).notNull().defaultNow(),
     clockOut: timestamp('clock_out', { withTimezone: true }),
     status: shiftStatusEnum('status').notNull().default('ACTIVE'),
+    // Sesi eksplisit shift ('PAGI' | 'SIANG') — SSOT anti salah tebak jam buka awal/tutup awal
+    sessionType: varchar('session_type', { length: 10 }).$type<ShiftSessionType>(),
     // Modal awal — jumlah uang di laci saat kasir buka shift (wajib diisi)
     modalAwal: decimal('modal_awal', { precision: 15, scale: 2 }),
     // Saldo kas fisik hasil blind count kasir saat tutup shift (nullable hingga shift ditutup)

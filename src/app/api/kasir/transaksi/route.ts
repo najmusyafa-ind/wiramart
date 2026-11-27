@@ -377,7 +377,12 @@ export async function POST(req: NextRequest) {
     } else {
       // 2. Cek shift aktif toko yang dibuka oleh rekan shift (<12 jam)
       const [teamShift] = await db
-        .select({ id: shifts.id, employeeId: shifts.employeeId, clockIn: shifts.clockIn })
+        .select({
+          id: shifts.id,
+          employeeId: shifts.employeeId,
+          clockIn: shifts.clockIn,
+          sessionType: shifts.sessionType,
+        })
         .from(shifts)
         .where(
           and(
@@ -395,7 +400,11 @@ export async function POST(req: NextRequest) {
         // Ambang batas adopsi shift rekan: maks 4.5 jam DAN tidak boleh lintas sesi Pagi->Siang
         const FOUR_AND_HALF_HOURS = 4.5 * 60 * 60 * 1000;
         const isCrossSession = await isCrossSessionPersistedShift(
-          { employeeId: teamShift.employeeId, clockIn: shiftClockIn },
+          {
+            employeeId: teamShift.employeeId,
+            clockIn: shiftClockIn,
+            sessionType: teamShift.sessionType,
+          },
           now,
         );
         if (shiftAge <= FOUR_AND_HALF_HOURS && !isCrossSession) {

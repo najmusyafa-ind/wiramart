@@ -22,6 +22,7 @@ import {
   computePersonnelWeight,
   type PeriodKey,
 } from '@/lib/finance/report';
+import { resolveShiftSessionsBatch } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 
@@ -98,6 +99,9 @@ export async function GET(req: NextRequest): Promise<Response> {
         id: shifts.id,
         clockIn: shifts.clockIn,
         clockOut: shifts.clockOut,
+        status: shifts.status,
+        actualCash: shifts.actualCash,
+        sessionType: shifts.sessionType,
         employeeId: shifts.employeeId,
         kasirName: employees.fullName,
         kasirNim: employees.nim,
@@ -147,29 +151,7 @@ export async function GET(req: NextRequest): Promise<Response> {
 
     const wibDateOf = (d: Date): string =>
       new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
-    const wibMinutesOf = (d: Date): number => {
-      const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'Asia/Jakarta',
-        hour: 'numeric',
-        minute: 'numeric',
-        hour12: false,
-      }).formatToParts(d);
-      const h = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10) % 24;
-      const m = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
-      return h * 60 + m;
-    };
-    const sesiOfShift = (
-      clockIn: Date,
-      clockOut: Date | null,
-      hasEarlierSameDay: boolean,
-    ): 'Pagi' | 'Siang' => {
-      const inMin = wibMinutesOf(clockIn);
-      if (inMin >= 11 * 60) return 'Siang';
-      if (inMin >= 10 * 60 + 30 && hasEarlierSameDay && clockOut && wibMinutesOf(clockOut) >= 14 * 60) {
-        return 'Siang';
-      }
-      return 'Pagi';
-    };
+    const sesiByShift = await resolveShiftSessionsBatch(shiftRows);
 
     // 2. Ambil absensi yang hadir (HADIR, TELAT, PENGGANTI) pada rentang ini
     const attList = await db.query.attendances.findMany({
@@ -268,10 +250,10 @@ export async function GET(req: NextRequest): Promise<Response> {
         attendees: typeof rawAttendees;
       }>();
 
-      shiftsOnDate.forEach((s, idx) => {
+      shiftsOnDate.forEach((s) => {
         shiftPoolMap.set(s.id, {
           shift: s,
-          sesi: sesiOfShift(s.clockIn, s.clockOut, idx > 0),
+          sesi: sesiByShift.get(s.id) ?? 'Pagi',
           pool: 0,
           attendees: [],
         });

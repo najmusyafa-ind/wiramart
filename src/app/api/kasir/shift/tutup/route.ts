@@ -78,7 +78,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   const activeShift = resolvedDrawer.activeShift
     ? await db.query.shifts.findFirst({
         where: and(eq(shifts.id, resolvedDrawer.activeShift.id), eq(shifts.status, 'ACTIVE')),
-        columns: { id: true, employeeId: true, clockIn: true, modalAwal: true, auditFlags: true },
+        columns: { id: true, employeeId: true, clockIn: true, modalAwal: true, auditFlags: true, sessionType: true },
       })
     : undefined;
 
@@ -97,6 +97,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     employeeId: activeShift.employeeId,
     clockIn: new Date(activeShift.clockIn),
     modalAwal: activeShift.modalAwal,
+    sessionType: activeShift.sessionType,
   });
 
   // 5. Hitung jumlah transaksi completed lintas sub-shift sesi ini

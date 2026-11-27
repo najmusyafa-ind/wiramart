@@ -24,7 +24,7 @@ import {
 } from '@/lib/db/schema';
 import { apiError, apiOk, verifyJwt } from '@/lib/utils/auth';
 import { getOffsetDateWib, getTodayWib } from '@/lib/utils/helpers';
-import { resolveShiftSessionWithContext } from '@/lib/services/activeShiftService';
+import { resolveShiftSessionsBatch } from '@/lib/services/activeShiftService';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -86,6 +86,7 @@ export async function GET(req: NextRequest): Promise<Response> {
       clockIn: Date;
       clockOut: Date | null;
       status: string;
+      sessionType: string | null;
       modalAwal: string | null;
       actualCash: string | null;
       notes: string | null;
@@ -100,6 +101,7 @@ export async function GET(req: NextRequest): Promise<Response> {
           clockIn: shifts.clockIn,
           clockOut: shifts.clockOut,
           status: shifts.status,
+          sessionType: shifts.sessionType,
           modalAwal: shifts.modalAwal,
           actualCash: shifts.actualCash,
           notes: shifts.notes,
@@ -165,6 +167,7 @@ export async function GET(req: NextRequest): Promise<Response> {
             clockIn: shifts.clockIn,
             clockOut: shifts.clockOut,
             status: shifts.status,
+            sessionType: shifts.sessionType,
             modalAwal: shifts.modalAwal,
             actualCash: shifts.actualCash,
             notes: shifts.notes,
@@ -301,21 +304,11 @@ export async function GET(req: NextRequest): Promise<Response> {
     const fmtDateWib = (d: Date) =>
       new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(d);
 
+    const sesiByShift = await resolveShiftSessionsBatch(shiftRows);
     const shiftLabelById = new Map<string, string>();
     const formattedShifts = shiftRows.map((s) => {
       const dateWib = fmtDateWib(s.clockIn);
-      const hasClosedMorningEarlierSameDay = shiftRows.some(
-        (other) =>
-          other.id !== s.id &&
-          other.status === 'CLOSED' &&
-          other.clockIn.getTime() < s.clockIn.getTime() &&
-          fmtDateWib(other.clockIn) === dateWib &&
-          resolveShiftSessionWithContext({ clockIn: other.clockIn }) === 'Pagi',
-      );
-      const sessionType = resolveShiftSessionWithContext({
-        clockIn: s.clockIn,
-        hasClosedMorningShiftEarlier: hasClosedMorningEarlierSameDay,
-      });
+      const sessionType = sesiByShift.get(s.id) ?? 'Pagi';
       const sessionLabel = sessionType === 'Siang' ? 'Shift Siang' : 'Shift Pagi';
       shiftLabelById.set(s.id, sessionLabel);
 

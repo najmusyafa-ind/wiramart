@@ -14,8 +14,14 @@ import { createHash } from 'node:crypto';
 import { db } from '@/lib/db/client';
 import { sql } from 'drizzle-orm';
 import { evaluateShiftCashState } from '@/lib/services/shiftShortageService';
-import { resolveShiftSessionWithContext } from '@/lib/services/activeShiftService';
-import { computeAttendanceLateness } from '@/lib/services/attendanceLatenessService';
+import {
+  resolveShiftSessionWithContext,
+  isCrossSessionPersistedShift,
+} from '@/lib/services/activeShiftService';
+import {
+  computeAttendanceLateness,
+  shouldSkipAutoAlphaForScheduleUpdate,
+} from '@/lib/services/attendanceLatenessService';
 import { getLateDisciplineFactor } from '@/lib/finance/report';
 import {
   filterSweepablePerishableProducts,
@@ -184,6 +190,109 @@ describe('1. Unit Tests — Idempotensi & Klasifikasi TCL', () => {
     assert.equal(
       resolveShiftSessionWithContext({ clockIn: new Date('2026-11-24T11:20:00+07:00') }),
       'Siang',
+    );
+    // Kolom eksplisit sessionType ('PAGI' | 'SIANG') selalu menjadi SSOT utama
+    assert.equal(
+      resolveShiftSessionWithContext({
+        clockIn: new Date('2026-11-25T10:18:46+07:00'),
+        sessionType: 'SIANG',
+      }),
+      'Siang',
+    );
+    assert.equal(
+      resolveShiftSessionWithContext({
+        clockIn: new Date('2026-11-25T11:25:00+07:00'),
+        sessionType: 'PAGI',
+      }),
+      'Pagi',
+    );
+    // Oper shift 2 Nov (10:47–15:04, ada shift pagi lebih awal & tutup >= 14:00) -> Siang
+    assert.equal(
+      resolveShiftSessionWithContext({
+        clockIn: new Date('2026-11-02T10:47:47+07:00'),
+        clockOut: new Date('2026-11-02T15:04:55+07:00'),
+        ownerScheduledSlotStart: '07:30',
+        hasClosedMorningShiftEarlier: true,
+      }),
+      'Siang',
+    );
+  });
+
+  it('isCrossSessionPersistedShift tidak menutup paksa Shift Siang buka awal (< 11:15 WIB) saat rekan siang masuk', async () => {
+    // Shift Siang dibuka awal 10:45 WIB -> rekan siang login 10:55 WIB (sebelum 11:15) -> BUKAN lintas sesi
+    assert.equal(
+      await isCrossSessionPersistedShift(
+        {
+          employeeId: 'emp-a',
+          clockIn: new Date('2026-11-27T10:45:00+07:00'),
+          sessionType: 'SIANG',
+        },
+        new Date('2026-11-27T10:55:00+07:00'),
+      ),
+      false,
+    );
+    // Shift Siang dibuka awal 10:45 WIB -> rekan siang login 12:10 WIB -> BUKAN lintas sesi
+    assert.equal(
+      await isCrossSessionPersistedShift(
+        {
+          employeeId: 'emp-a',
+          clockIn: new Date('2026-11-27T10:45:00+07:00'),
+          sessionType: 'SIANG',
+        },
+        new Date('2026-11-27T12:10:00+07:00'),
+      ),
+      false,
+    );
+    // Shift Pagi buka 07:45 WIB lupa tutup -> kasir siang login 11:20 WIB -> LINTAS SESI
+    assert.equal(
+      await isCrossSessionPersistedShift(
+        {
+          employeeId: 'emp-a',
+          clockIn: new Date('2026-11-27T07:45:00+07:00'),
+          sessionType: 'PAGI',
+        },
+        new Date('2026-11-27T11:20:00+07:00'),
+      ),
+      true,
+    );
+    // Shift Pagi buka 07:45 WIB lupa tutup -> kasir siang buka awal eksplisit 'SIANG' jam 11:00 -> LINTAS SESI
+    assert.equal(
+      await isCrossSessionPersistedShift(
+        {
+          employeeId: 'emp-a',
+          clockIn: new Date('2026-11-27T07:45:00+07:00'),
+          sessionType: 'PAGI',
+        },
+        new Date('2026-11-27T11:00:00+07:00'),
+        'SIANG',
+      ),
+      true,
+    );
+  });
+
+  it('penjaga cron PASS 2 mencegah jadwal baru yang diinput malam hari memberi TIDAK_HADIR surut', () => {
+    const slotEnd19Nov = new Date('2026-11-19T11:30:00+07:00').getTime();
+    const slotEnd26Nov = new Date('2026-11-26T11:30:00+07:00').getTime();
+    const updated19NovEvening = new Date('2026-11-19T20:28:46+07:00');
+    const created19NovEvening = new Date('2026-11-19T20:28:46+07:00');
+
+    // Jadwal Kamis Pagi baru dimasukkan 19 Nov 20:28 WIB -> WAJIB di-skip untuk 19 Nov
+    assert.equal(
+      shouldSkipAutoAlphaForScheduleUpdate({
+        slotEndEpoch: slotEnd19Nov,
+        createdAt: created19NovEvening,
+        updatedAt: updated19NovEvening,
+      }),
+      true,
+    );
+    // Untuk minggu berikutnya (26 Nov 11:30 WIB), jadwal sudah berlaku sebelumnya -> TIDAK di-skip
+    assert.equal(
+      shouldSkipAutoAlphaForScheduleUpdate({
+        slotEndEpoch: slotEnd26Nov,
+        createdAt: created19NovEvening,
+        updatedAt: updated19NovEvening,
+      }),
+      false,
     );
   });
 

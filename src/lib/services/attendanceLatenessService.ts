@@ -136,3 +136,20 @@ export async function resolveAttendanceLateness(params: {
     isSubstitute: params.isSubstitute,
   });
 }
+
+/**
+ * Penjaga Cron PASS 2 (Auto-Alpha):
+ * Mencegah jadwal yang baru dibuat/diubah SETELAH jam shift berakhir (mis. diinput malam hari)
+ * otomatis memberi status TIDAK_HADIR (Alpha) surut untuk hari yang sama.
+ */
+export function shouldSkipAutoAlphaForScheduleUpdate(params: {
+  slotEndEpoch: number;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+}): boolean {
+  const createdMs = params.createdAt ? new Date(params.createdAt).getTime() : NaN;
+  const updatedMs = params.updatedAt ? new Date(params.updatedAt).getTime() : NaN;
+  if (Number.isFinite(createdMs) && createdMs > params.slotEndEpoch) return true;
+  if (Number.isFinite(updatedMs) && updatedMs > params.slotEndEpoch) return true;
+  return false;
+}

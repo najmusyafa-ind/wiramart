@@ -532,6 +532,11 @@ export default function KasirLoginPage() {
         return;
       }
 
+      try {
+        window.localStorage.removeItem('pos_auto_logout_emp_id');
+      } catch {
+        // Abaikan error localStorage di private mode
+      }
       router.push(json.data.redirect ?? '/kasir/pos');
       router.refresh();
     } catch {
