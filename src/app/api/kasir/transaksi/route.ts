@@ -665,6 +665,18 @@ export async function POST(req: NextRequest) {
 
     const runTransaction = (invoiceNumber: string) =>
       db.transaction(async (tx) => {
+        // Step 0: Kunci baris shift (FOR UPDATE) agar transaksi tidak nyelip ke shift yang baru ditutup/di-reset
+        const [lockedShift] = await tx
+          .select({ id: shifts.id, status: shifts.status })
+          .from(shifts)
+          .where(eq(shifts.id, activeShiftId))
+          .for('update')
+          .limit(1);
+
+        if (!lockedShift || lockedShift.status !== 'ACTIVE') {
+          throw new Error('SHIFT_CLOSED');
+        }
+
         // Step 1: Insert transaksi (merebut kunci idempotensi bila ada)
         const [newTransaction] = await tx
           .insert(transactions)
@@ -1120,6 +1132,12 @@ export async function POST(req: NextRequest) {
     // Handle race condition: stok berubah di antara pre-check dan tx
     const message = (err as { message?: unknown }).message;
     if (typeof message === 'string') {
+      if (message.startsWith('SHIFT_CLOSED')) {
+        return apiError(
+          'Shift kasir sudah ditutup atau di-reset saat transaksi diproses. Muat ulang halaman untuk membuka shift baru.',
+          409,
+        );
+      }
       if (message.startsWith('DISCOUNT_DEPLETED')) {
         return apiError(
           'Kuota barcode diskon darurat untuk item ini sudah habis terpakai oleh transaksi lain.',

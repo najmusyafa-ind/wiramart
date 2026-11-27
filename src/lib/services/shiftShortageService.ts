@@ -290,6 +290,8 @@ export async function recalculateGraceShiftShortage(shiftId: string): Promise<{
     }
   } else if (shiftRow.shortageStatus === 'AUTO_LOCKED') {
     nextStatus = 'AUTO_LOCKED';
+  } else if (shiftRow.shortageStatus === 'NONE' || shiftRow.shortageStatus === 'AUTO_VERIFIED') {
+    nextStatus = 'AUDIT_WARNING';
   }
 
   await db

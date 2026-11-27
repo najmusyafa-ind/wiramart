@@ -11,7 +11,7 @@
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { eq, and, gte, lt, sql, asc, inArray } from 'drizzle-orm';
+import { eq, and, gt, gte, lt, sql, asc, inArray } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   dailyClosings,
@@ -26,6 +26,7 @@ import { requireManager } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError } from '@/lib/utils/helpers';
 import { getFinancialReport, resolveReportRange } from '@/lib/finance/report';
 import { resolveShiftSessionsBatch } from '@/lib/services/activeShiftService';
+import { finalizeExpiredGraceShifts } from '@/lib/services/shiftShortageService';
 
 export const runtime = 'nodejs';
 
@@ -298,6 +299,27 @@ export async function POST(req: NextRequest): Promise<Response> {
         `Masih ada ${activeShifts.length} shift kasir yang AKTIF pada tanggal ${closingDate}. Pastikan semua kasir sudah tutup shift terlebih dahulu sebelum Tutup Buku.`,
         'ACTIVE_SHIFTS_REMAIN',
         400,
+      );
+    }
+
+    // 1b. Finalisasi jeda 5 menit yang sudah kedaluwarsa, lalu blokir jika masih ada shift dalam masa jeda koreksi aktif
+    await finalizeExpiredGraceShifts();
+    const graceShifts = await db
+      .select({ id: shifts.id })
+      .from(shifts)
+      .where(
+        and(
+          gte(shifts.clockIn, range.start),
+          lt(shifts.clockIn, range.endExclusive),
+          eq(shifts.shortageStatus, 'PENDING_GRACE'),
+          gt(shifts.shortageGraceUntil, new Date()),
+        ),
+      );
+    if (graceShifts.length > 0) {
+      return apiError(
+        `Masih ada ${graceShifts.length} shift dalam masa jeda koreksi 5 menit pada tanggal ${closingDate}. Tunggu jeda koreksi selesai sebelum mengunci Tutup Buku.`,
+        'GRACE_SHIFTS_REMAIN',
+        409,
       );
     }
 

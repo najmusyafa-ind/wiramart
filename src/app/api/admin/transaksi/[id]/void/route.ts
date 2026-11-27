@@ -28,6 +28,7 @@ import { eq, and, sql, desc, inArray, gte, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/client';
 import {
   admins,
+  shifts,
   transactions,
   transactionItems,
   products,
@@ -37,6 +38,7 @@ import {
 } from '@/lib/db/schema';
 import { requireAdmin } from '@/lib/utils/auth';
 import { apiOk, apiError, AppError, getTodayWib } from '@/lib/utils/helpers';
+import { recalculateGraceShiftShortage } from '@/lib/services/shiftShortageService';
 
 export const runtime = 'nodejs';
 
@@ -117,6 +119,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
         status:        true,
         createdAt:     true,
         employeeId:    true,
+        shiftId:       true,
       },
     });
 
@@ -361,6 +364,20 @@ export async function POST(req: NextRequest, { params }: Params): Promise<Respon
         actorId:    session.sub,
       });
     });
+
+    // Step 4: Jika transaksi milik shift yang sudah CLOSED (dengan hitung fisik),
+    // hitung ulang shortageAmount & status laci agar audit laci tetap sinkron.
+    if (trx.shiftId) {
+      const closedShift = await db.query.shifts.findFirst({
+        where: eq(shifts.id, trx.shiftId),
+        columns: { id: true, status: true, actualCash: true },
+      });
+      if (closedShift && closedShift.status === 'CLOSED' && closedShift.actualCash !== null) {
+        await recalculateGraceShiftShortage(closedShift.id).catch((e) => {
+          console.error('[void] Gagal sinkron ulang selisih laci shift:', e);
+        });
+      }
+    }
 
     return apiOk({
       transactionId,

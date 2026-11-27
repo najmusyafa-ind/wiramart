@@ -19,6 +19,7 @@ declare class BarcodeDetector {
 }
 
 import { useState, useEffect, useCallback, useRef, useId } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
   Plus, Search, Package, X, Loader2, ChevronLeft,
@@ -334,43 +335,28 @@ function ProdukModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isEdit) {
+      onClose();
+      return;
+    }
     setErr('');
     if (!form.name.trim()) { setErr('Nama produk wajib diisi.'); return; }
     if (!form.categoryId) { setErr('Pilih kategori.'); return; }
     setSaving(true);
     try {
-      if (!isEdit) {
-        const res = await fetch('/api/kasir/produk/usulkan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: form.name.trim(),
-            categoryId: form.categoryId,
-            barcode: form.barcode?.trim() || null,
-            unit: form.unit || 'pcs',
-          }),
-        });
-        const json = await res.json();
-        if (!res.ok) { setErr(json.error ?? 'Gagal mengirim usulan produk.'); setSaving(false); return; }
-        onSaved('Usulan produk berhasil dikirim ke Gudang / Admin.');
-        return;
-      }
-
-      const payload = {
-        ...form,
-        barcode: form.barcode?.trim() || null,
-        expectedStockQty: editData!.stockQty,
-      };
-
-      const res = await fetch(`/api/admin/produk/${editData!.id}`, {
-        method: 'PATCH',
+      const res = await fetch('/api/kasir/produk/usulkan', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          name: form.name.trim(),
+          categoryId: form.categoryId,
+          barcode: form.barcode?.trim() || null,
+          unit: form.unit || 'pcs',
+        }),
       });
       const json = await res.json();
-      if (!res.ok) { setErr(json.error ?? 'Gagal mengupdate produk.'); setSaving(false); return; }
-
-      onSaved('Produk berhasil diperbarui!');
+      if (!res.ok) { setErr(json.error ?? 'Gagal mengirim usulan produk.'); setSaving(false); return; }
+      onSaved('Usulan produk berhasil dikirim ke Gudang / Admin.');
     } catch {
       setErr('Terjadi kesalahan jaringan. Coba lagi.');
     } finally {
@@ -460,7 +446,7 @@ function ProdukModal({
                 border: '1px solid var(--color-border)', flexShrink: 0,
               }}>
                 {preview
-                  ? <img src={preview} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ? <Image src={preview} alt="preview" width={72} height={72} unoptimized style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   : <Package size={26} color="var(--color-text-muted)" />}
               </div>
               <div style={{ minWidth: 0 }}>
@@ -814,7 +800,7 @@ export default function KasirProdukPage() {
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 {p.photoUrl
-                  ? <img src={p.photoUrl} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ? <Image src={p.photoUrl} alt={p.name} width={60} height={60} unoptimized style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   : <Package size={26} color="var(--color-text-muted)" />}
               </div>
               {/* Info */}

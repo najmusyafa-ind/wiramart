@@ -146,26 +146,9 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     // =========================================================
-    // AKSI 2: CLOCK_IN (Presensi Masuk)
+    // AKSI 2: CLOCK_IN (Presensi Masuk) — ATOMIC + ADVISORY LOCK
     // =========================================================
-    // Cek apakah sudah pernah presensi di jadwal dan tanggal ini
-    const existing = await db.query.attendances.findFirst({
-      where: and(
-        eq(attendances.employeeId, employeeId),
-        eq(attendances.scheduleId, scheduleId),
-        eq(attendances.attendanceDate, tanggalHari),
-      ),
-    });
-
-    if (existing) {
-      return apiError(
-        `Anda sudah melakukan presensi hari ini (${existing.status}).`,
-        'ALREADY_ATTENDED',
-        409,
-      );
-    }
-
-    // Hitung keterlambatan Opsi A (setelah batas toleransi + pelindung serah terima Shift Siang)
+    // Hitung keterlambatan Opsi A di luar lock transaksi
     const { status, lateMinutes } = await resolveAttendanceLateness({
       nowWib,
       attendanceDate: tanggalHari,
@@ -173,76 +156,115 @@ export async function POST(request: Request): Promise<Response> {
       isSubstitute,
     });
 
-    // ── ATURAN KUOTA PERAN SHIFT ──
-    // Admin Shift & Kasir: Maksimal 1 orang per shift (laci & otorisasi tunggal).
-    // Gudang & CS Pelayan: Fleksibel / Boleh > 1 orang.
-    if (roleTask === 'Kasir' || roleTask === 'Admin Shift') {
-      const siblingSchedules = await db.query.shiftSchedules.findMany({
-        where: and(
-          eq(shiftSchedules.dayOfWeek, schedule.dayOfWeek),
-          eq(shiftSchedules.slotStart, schedule.slotStart),
-          eq(shiftSchedules.slotEnd, schedule.slotEnd),
-          eq(shiftSchedules.isActive, true),
-        ),
-        columns: { id: true },
-      });
-      const siblingScheduleIds = siblingSchedules.map((s) => s.id);
-
-      if (siblingScheduleIds.length > 0) {
-        const existingRoleAtt = await db
-          .select({
-            id: attendances.id,
-            employeeName: employees.fullName,
-          })
-          .from(attendances)
-          .innerJoin(employees, eq(attendances.employeeId, employees.id))
-          .where(
-            and(
-              eq(attendances.attendanceDate, tanggalHari),
-              inArray(attendances.scheduleId, siblingScheduleIds),
-              inArray(attendances.status, ['HADIR', 'TELAT', 'PENGGANTI']),
-              eq(employees.isActive, true),
-              isNull(employees.deletedAt),
-              ne(attendances.employeeId, employeeId),
-              sql`(${attendances.roleTask} = ${roleTask} OR ${attendances.notes} ILIKE ${`%Peran: ${roleTask}%`})`,
-            )
-          )
-          .limit(1);
-
-        if (existingRoleAtt.length > 0) {
-          const occName = existingRoleAtt[0]?.employeeName ?? 'rekan shift lain';
-          return apiError(
-            `Peran ${roleTask} pada shift ini sudah diisi oleh ${occName}. Silakan pilih tugas Gudang atau CS Pelayan.`,
-            'ROLE_LIMIT_REACHED',
-            422,
-          );
-        }
-      }
-    }
-
     const cleanNotes = notes?.trim();
     const subTag = isSubstitute ? ' | Pengganti' : '';
     const fullNotes = `Peran: ${roleTask}${subTag}${cleanNotes ? ` | ${cleanNotes}` : ''}`;
 
-    // Simpan record absensi masuk (tanpa menimpa permanen employees.jabatan)
-    const [saved] = await db
-      .insert(attendances)
-      .values({
-        employeeId,
-        scheduleId,
-        attendanceDate:     tanggalHari,
-        status,
-        clockInActual:      nowWib,
-        lateMinutes,
-        roleTask,
-        verificationSource: isSubstitute ? 'BADAL_KIOSK' : 'KIOSK',
-        isSubstitute,
-        notes:              fullNotes,
-      })
-      .returning({ id: attendances.id });
+    type PresensiConflict = { kind: 'CONFLICT'; status: number; code: string; message: string };
+    type PresensiInserted = { kind: 'OK'; id: string };
+
+    const txResult = await db.transaction(async (tx): Promise<PresensiConflict | PresensiInserted> => {
+      // Kunci duplikasi presensi untuk kombinasi karyawan + jadwal + tanggal
+      const empLockKey = `presensi:emp:${employeeId}:${scheduleId}:${tanggalHari}`;
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${empLockKey}))`);
+
+      // Kunci kuota peran tunggal (Kasir / Admin Shift) agar 2 klik serentak tidak saling lolos
+      if (roleTask === 'Kasir' || roleTask === 'Admin Shift') {
+        const roleLockKey = `presensi:role:${tanggalHari}:${schedule.dayOfWeek}:${schedule.slotStart}:${schedule.slotEnd}:${roleTask}`;
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${roleLockKey}))`);
+      }
+
+      const existing = await tx.query.attendances.findFirst({
+        where: and(
+          eq(attendances.employeeId, employeeId),
+          eq(attendances.scheduleId, scheduleId),
+          eq(attendances.attendanceDate, tanggalHari),
+        ),
+      });
+
+      if (existing) {
+        return {
+          kind: 'CONFLICT',
+          status: 409,
+          code: 'ALREADY_ATTENDED',
+          message: `Anda sudah melakukan presensi hari ini (${existing.status}).`,
+        };
+      }
+
+      // ── ATURAN KUOTA PERAN SHIFT ──
+      // Admin Shift & Kasir: Maksimal 1 orang per shift (laci & otorisasi tunggal).
+      // Gudang & CS Pelayan: Fleksibel / Boleh > 1 orang.
+      if (roleTask === 'Kasir' || roleTask === 'Admin Shift') {
+        const siblingSchedules = await tx.query.shiftSchedules.findMany({
+          where: and(
+            eq(shiftSchedules.dayOfWeek, schedule.dayOfWeek),
+            eq(shiftSchedules.slotStart, schedule.slotStart),
+            eq(shiftSchedules.slotEnd, schedule.slotEnd),
+            eq(shiftSchedules.isActive, true),
+          ),
+          columns: { id: true },
+        });
+        const siblingScheduleIds = siblingSchedules.map((s) => s.id);
+
+        if (siblingScheduleIds.length > 0) {
+          const existingRoleAtt = await tx
+            .select({
+              id: attendances.id,
+              employeeName: employees.fullName,
+            })
+            .from(attendances)
+            .innerJoin(employees, eq(attendances.employeeId, employees.id))
+            .where(
+              and(
+                eq(attendances.attendanceDate, tanggalHari),
+                inArray(attendances.scheduleId, siblingScheduleIds),
+                inArray(attendances.status, ['HADIR', 'TELAT', 'PENGGANTI']),
+                eq(employees.isActive, true),
+                isNull(employees.deletedAt),
+                ne(attendances.employeeId, employeeId),
+                sql`(${attendances.roleTask} = ${roleTask} OR ${attendances.notes} ILIKE ${`%Peran: ${roleTask}%`})`,
+              )
+            )
+            .limit(1);
+
+          if (existingRoleAtt.length > 0) {
+            const occName = existingRoleAtt[0]?.employeeName ?? 'rekan shift lain';
+            return {
+              kind: 'CONFLICT',
+              status: 422,
+              code: 'ROLE_LIMIT_REACHED',
+              message: `Peran ${roleTask} pada shift ini sudah diisi oleh ${occName}. Silakan pilih tugas Gudang atau CS Pelayan.`,
+            };
+          }
+        }
+      }
+
+      // Simpan record absensi masuk (tanpa menimpa permanen employees.jabatan)
+      const [saved] = await tx
+        .insert(attendances)
+        .values({
+          employeeId,
+          scheduleId,
+          attendanceDate:     tanggalHari,
+          status,
+          clockInActual:      nowWib,
+          lateMinutes,
+          roleTask,
+          verificationSource: isSubstitute ? 'BADAL_KIOSK' : 'KIOSK',
+          isSubstitute,
+          notes:              fullNotes,
+        })
+        .returning({ id: attendances.id });
+
+      return { kind: 'OK', id: saved.id };
+    });
+
+    if (txResult.kind === 'CONFLICT') {
+      return apiError(txResult.message, txResult.code, txResult.status);
+    }
 
     return apiOk({
-      id: saved.id,
+      id: txResult.id,
       fullName: employee.fullName,
       nim: employee.nim,
       roleTask,

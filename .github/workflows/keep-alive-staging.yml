@@ -1,0 +1,24 @@
+name: Keep Staging Supabase Awake
+
+on:
+  schedule:
+    # Jalan otomatis tiap hari pukul 08:00 WIB (01:00 UTC)
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping-staging-health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Staging /api/health
+        env:
+          STAGING_HEALTH_URL: ${{ vars.STAGING_HEALTH_URL }}
+        run: |
+          if [ -z "$STAGING_HEALTH_URL" ]; then
+            echo "STAGING_HEALTH_URL belum diatur di GitHub Repository Variables (Settings -> Secrets and variables -> Actions -> Variables)."
+            exit 0
+          fi
+          echo "Mengirim keep-alive ping ke $STAGING_HEALTH_URL ..."
+          curl --fail --silent --show-error --max-time 30 "$STAGING_HEALTH_URL"
+          echo ""
+          echo "Keep-alive selesai."

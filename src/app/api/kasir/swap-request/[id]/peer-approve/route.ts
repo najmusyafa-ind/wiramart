@@ -102,19 +102,31 @@ export async function POST(req: NextRequest, ctx: Context): Promise<Response> {
         throw new Error('SWAP_ALREADY_PROCESSED');
       }
 
-      const [lockedFrom] = await tx
+      // Lock ordering deterministik berdasarkan UUID agar 2 tukar shift silang tidak deadlock
+      const [firstSchedId, secondSchedId] =
+        lockedSwap.fromScheduleId <= lockedSwap.toScheduleId
+          ? [lockedSwap.fromScheduleId, lockedSwap.toScheduleId]
+          : [lockedSwap.toScheduleId, lockedSwap.fromScheduleId];
+
+      const [firstLocked] = await tx
         .select({ id: shiftSchedules.id, employeeId: shiftSchedules.employeeId, orderInSlot: shiftSchedules.orderInSlot })
         .from(shiftSchedules)
-        .where(eq(shiftSchedules.id, lockedSwap.fromScheduleId))
+        .where(eq(shiftSchedules.id, firstSchedId))
         .for('update')
         .limit(1);
 
-      const [lockedTo] = await tx
-        .select({ id: shiftSchedules.id, employeeId: shiftSchedules.employeeId, orderInSlot: shiftSchedules.orderInSlot })
-        .from(shiftSchedules)
-        .where(eq(shiftSchedules.id, lockedSwap.toScheduleId))
-        .for('update')
-        .limit(1);
+      const [secondLocked] =
+        secondSchedId !== firstSchedId
+          ? await tx
+              .select({ id: shiftSchedules.id, employeeId: shiftSchedules.employeeId, orderInSlot: shiftSchedules.orderInSlot })
+              .from(shiftSchedules)
+              .where(eq(shiftSchedules.id, secondSchedId))
+              .for('update')
+              .limit(1)
+          : [firstLocked];
+
+      const lockedFrom = lockedSwap.fromScheduleId === firstSchedId ? firstLocked : secondLocked;
+      const lockedTo = lockedSwap.toScheduleId === firstSchedId ? firstLocked : secondLocked;
 
       if (
         !lockedFrom ||

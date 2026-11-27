@@ -692,7 +692,7 @@ export default function AdminShiftDashboard({
               </div>
             </div>
             <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.5 }}>
-              Kelola katalog produk, tambah/restok/edit barang bersama Gudang, serta pantau batch mendekati kedaluwarsa (keputusan diskon &amp; keuangan khusus Manager).
+              Kelola katalog produk, tambah/restok/edit barang bersama Gudang, serta tangani persetujuan barang masuk &amp; keputusan batch FEFO bersama Manager.
             </p>
             {summary.criticalBatches > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: 'var(--color-error)', fontWeight: 600 }}>
@@ -702,6 +702,9 @@ export default function AdminShiftDashboard({
             <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'auto', flexWrap: 'wrap' }}>
               <Link href="/admin/produk" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-primary)', textDecoration: 'none' }}>
                 Daftar Produk <ChevronRight size={14} aria-hidden="true" />
+              </Link>
+              <Link href="/admin/gudang-approval" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-primary)', textDecoration: 'none' }}>
+                Persetujuan &amp; FEFO <ChevronRight size={14} aria-hidden="true" />
               </Link>
               <Link href="/gudang" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textDecoration: 'none' }}>
                 <Truck size={13} aria-hidden="true" /> Monitor Gudang

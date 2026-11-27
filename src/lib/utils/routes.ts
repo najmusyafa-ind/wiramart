@@ -23,7 +23,6 @@ export const ADMIN_DASHBOARD_PATH = '/admin/dashboard';
 
 /** Daftar path sub-halaman khusus Manager (tidak boleh diakses ADMIN_SHIFT). */
 export const MANAGER_ONLY_SEGMENTS = [
-  'gudang-approval',
   'restock',
   'laporan',
   'qris',
